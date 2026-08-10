@@ -1,0 +1,1016 @@
+<div id="northwind-claimant-journey">
+  <div class="nw-preview-bar" aria-label="Preview controls">
+    <div class="nw-device-switch" role="group" aria-label="Preview device">
+      <button type="button" class="nw-preview-button is-selected" data-view="desktop" aria-pressed="true"><i data-lucide="monitor" aria-hidden="true"></i>Desktop</button>
+      <button type="button" class="nw-preview-button" data-view="mobile" aria-pressed="false"><i data-lucide="smartphone" aria-hidden="true"></i>Mobile</button>
+    </div>
+    <button type="button" class="nw-restart" data-action="restart"><i data-lucide="rotate-ccw" aria-hidden="true"></i>Restart demo</button>
+  </div>
+
+  <section class="nw-device" aria-label="Northwind claimant reporting journey demo">
+    <div class="nw-app"></div>
+  </section>
+</div>
+
+<style>
+#northwind-claimant-journey {
+  color-scheme: light;
+  width: 100%;
+  color: #20312d;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#northwind-claimant-journey * { box-sizing: border-box; letter-spacing: 0; }
+#northwind-claimant-journey button,
+#northwind-claimant-journey input,
+#northwind-claimant-journey textarea { font: inherit; }
+#northwind-claimant-journey button { cursor: pointer; }
+#northwind-claimant-journey button:focus-visible,
+#northwind-claimant-journey input:focus-visible,
+#northwind-claimant-journey textarea:focus-visible { outline: 3px solid rgba(45, 137, 112, .24); outline-offset: 2px; }
+.nw-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.nw-device-switch { display: inline-flex; padding: 3px; border: 1px solid #d0dfda; border-radius: 7px; background: #eef6f2; }
+.nw-preview-button,
+.nw-restart { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border-radius: 5px; color: #53645e; background: transparent; }
+.nw-preview-button { padding: 0 12px; border: 0; }
+.nw-preview-button.is-selected { color: #1d4f42; background: #ffffff; box-shadow: 0 1px 4px rgba(30, 73, 62, .10); }
+.nw-restart { padding: 0 11px; border: 1px solid #c9d9d3; background: #ffffff; }
+.nw-device { width: 100%; overflow: hidden; border: 1px solid #cbddd6; border-radius: 8px; background: #f6fbf8; box-shadow: 0 18px 46px rgba(36, 84, 71, .11); transition: max-width .22s ease; }
+.nw-device.is-mobile { max-width: 390px; margin: 0 auto; }
+.nw-app { min-height: 690px; background: #f6fbf8; }
+.nw-product-header { min-height: 60px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid #dce9e4; background: #ffffff; }
+.nw-brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; }
+.nw-brand-mark { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 6px; color: #ffffff; background: #2c806a; }
+.nw-save-state { display: inline-flex; align-items: center; gap: 7px; color: #687872; font-size: 12px; }
+.nw-save-dot { width: 7px; height: 7px; border-radius: 50%; background: #46a185; }
+.nw-header-actions { justify-self: end; display: flex; gap: 8px; }
+.nw-human-help,
+.nw-icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; border: 1px solid #bfd4cd; border-radius: 6px; color: #245848; background: #ffffff; }
+.nw-human-help { padding: 0 12px; }
+.nw-icon-button { width: 40px; padding: 0; }
+.nw-status-strip { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 24px; min-height: 76px; padding: 12px 20px; border-bottom: 1px solid #d7e8e1; background: #e8f6f0; }
+.nw-status-strip.is-waiting { background: #fbf7e8; border-color: #eadfbd; }
+.nw-status-strip.is-handoff { background: #edf6f4; }
+.nw-label { display: block; margin-bottom: 3px; color: #687872; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.nw-status-strip strong { display: block; font-size: 16px; font-weight: 600; }
+.nw-next-block { padding-left: 20px; border-left: 1px solid #c4ddd4; }
+.nw-next-copy { color: #334c45; font-size: 14px; }
+.nw-summary-trigger { display: none; align-items: center; gap: 7px; min-height: 40px; padding: 0 10px; border: 1px solid #aecfc3; border-radius: 6px; color: #235e4e; background: #f8fcfa; }
+.nw-entry { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .65fr); min-height: 628px; }
+.nw-entry-main { display: flex; flex-direction: column; justify-content: center; padding: 54px clamp(28px, 6vw, 80px); }
+.nw-eyebrow { margin: 0 0 10px; color: #2c806a; font-size: 13px; font-weight: 600; }
+.nw-entry h1 { max-width: 650px; margin: 0; font-size: 34px; line-height: 1.2; font-weight: 600; }
+.nw-entry-intro { max-width: 620px; margin: 14px 0 24px; color: #5c6e67; font-size: 16px; line-height: 1.55; }
+.nw-report-box { max-width: 680px; padding: 18px; border: 1px solid #bdd7ce; border-radius: 8px; background: #ffffff; box-shadow: 0 8px 24px rgba(38, 91, 75, .07); }
+.nw-report-box label { display: block; margin-bottom: 9px; font-size: 13px; font-weight: 600; }
+.nw-report-text { width: 100%; min-height: 116px; resize: vertical; padding: 12px 13px; border: 1px solid #c7d9d3; border-radius: 6px; color: #20312d; background: #fbfefc; font-size: 16px; line-height: 1.5; }
+.nw-report-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.nw-attach-action { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; padding: 0 10px; border: 0; color: #2c6a58; background: transparent; }
+.nw-primary,
+.nw-secondary,
+.nw-quiet { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 15px; border-radius: 6px; }
+.nw-primary { border: 1px solid #2c806a; color: #ffffff; background: #2c806a; }
+.nw-primary:hover { background: #246f5c; }
+.nw-primary:disabled { border-color: #9fbab1; background: #9fbab1; cursor: not-allowed; }
+.nw-secondary { border: 1px solid #b8cdc6; color: #284f43; background: #ffffff; }
+.nw-quiet { border: 0; color: #2d6a59; background: transparent; }
+.nw-entry-side { padding: 42px 30px; border-left: 1px solid #dbe8e3; background: #edf8f3; }
+.nw-entry-side h2 { margin: 0 0 18px; font-size: 18px; }
+.nw-benefit { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 15px 0; border-top: 1px solid #d1e6de; }
+.nw-benefit:first-of-type { border-top: 0; }
+.nw-benefit-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: #2b7b66; background: #d8eee6; }
+.nw-benefit strong { display: block; margin-bottom: 3px; font-size: 13px; }
+.nw-benefit p { margin: 0; color: #63746d; font-size: 12px; line-height: 1.45; }
+.nw-resume { margin-top: 22px; padding-top: 20px; border-top: 1px solid #cfe2db; }
+.nw-resume p { margin: 0 0 9px; color: #65766f; font-size: 12px; }
+.nw-resume button { width: 100%; justify-content: space-between; }
+.nw-workspace { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, .78fr); min-height: 552px; }
+.nw-main-panel { padding: 24px clamp(20px, 4vw, 56px); background: #fbfefc; }
+.nw-thread-time { margin-bottom: 18px; color: #7a8a84; font-size: 12px; text-align: center; }
+.nw-message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 11px; max-width: 700px; margin-bottom: 18px; }
+.nw-agent-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: #26735f; background: #dff2ea; }
+.nw-message strong { font-size: 13px; }
+.nw-message p { margin: 5px 0; font-size: 15px; line-height: 1.55; }
+.nw-link-action { padding: 0; border: 0; color: #2d705e; background: transparent; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.nw-task { max-width: 700px; padding: 18px; border: 1px solid #b9d4ca; border-radius: 8px; background: #ffffff; box-shadow: 0 6px 18px rgba(37, 88, 73, .06); }
+.nw-task-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; color: #687a73; font-size: 12px; }
+.nw-task-type { color: #2a775f; font-weight: 600; }
+.nw-task h2 { margin: 0; font-size: 20px; line-height: 1.35; }
+.nw-task-note { margin: 7px 0 17px; color: #63736d; font-size: 13px; line-height: 1.45; }
+.nw-choice-row { display: flex; flex-wrap: wrap; gap: 9px; }
+.nw-answer { min-height: 44px; padding: 0 14px; border: 1px solid #b6ccc4; border-radius: 6px; color: #284f43; background: #ffffff; }
+.nw-answer.is-primary { border-color: #2c806a; color: #ffffff; background: #2c806a; }
+.nw-inline-compose { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; max-width: 700px; margin-top: 14px; }
+.nw-inline-compose input { width: 100%; min-height: 42px; padding: 0 12px; border: 1px solid #c6d8d2; border-radius: 6px; color: #20312d; background: #ffffff; font-size: 16px; }
+.nw-send { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #2c806a; border-radius: 6px; color: #ffffff; background: #2c806a; }
+.nw-summary-panel { padding: 21px; border-left: 1px solid #dae8e3; background: #eef8f4; }
+.nw-summary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding-bottom: 15px; }
+.nw-summary-head h2 { margin: 0; font-size: 19px; }
+.nw-summary-close { display: none; width: 38px; height: 38px; border: 0; color: #31564b; background: transparent; }
+.nw-summary-section { padding: 15px 0; border-top: 1px solid #d4e5df; }
+.nw-summary-section-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; font-size: 13px; font-weight: 600; }
+.nw-summary-section-title button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; color: #2d705e; background: transparent; font-size: 12px; }
+.nw-summary-section p { margin: 0 0 8px; font-size: 13px; line-height: 1.45; }
+.nw-state-ok,
+.nw-state-pending { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.nw-state-ok { color: #2b765f; }
+.nw-state-pending { color: #8a681f; }
+.nw-summary-note { display: flex; gap: 8px; padding-top: 15px; border-top: 1px solid #d4e5df; color: #60726b; font-size: 12px; line-height: 1.45; }
+.nw-page { min-height: 628px; }
+.nw-content-page { padding: 34px clamp(22px, 7vw, 92px) 44px; }
+.nw-back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 24px; padding: 0; border: 0; color: #346b5c; background: transparent; }
+.nw-content-head { max-width: 720px; margin-bottom: 26px; }
+.nw-content-head h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.25; }
+.nw-content-head p { margin: 0; color: #61736c; font-size: 15px; line-height: 1.55; }
+.nw-evidence-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(250px, .65fr); gap: 32px; }
+.nw-upload-zone { padding: 34px 20px; border: 1px dashed #9fc8ba; border-radius: 8px; background: #f8fcfa; text-align: center; }
+.nw-upload-zone-icon { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 auto 12px; border-radius: 7px; color: #2b7a65; background: #dff2ea; }
+.nw-upload-zone h2 { margin: 0 0 6px; font-size: 17px; }
+.nw-upload-zone p { margin: 0 0 16px; color: #687972; font-size: 13px; }
+.nw-file-list { margin-top: 14px; border-top: 1px solid #d6e5e0; }
+.nw-file-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 2px; border-bottom: 1px solid #d6e5e0; }
+.nw-file-name { display: flex; align-items: center; gap: 10px; }
+.nw-file-name span { display: grid; gap: 2px; }
+.nw-file-name strong { font-size: 13px; }
+.nw-file-name small { color: #71817b; font-size: 11px; }
+.nw-file-ready { display: inline-flex; align-items: center; gap: 5px; color: #2b765f; font-size: 11px; }
+.nw-evidence-aside { padding-left: 24px; border-left: 1px solid #d8e7e2; }
+.nw-evidence-aside h2 { margin: 0 0 12px; font-size: 16px; }
+.nw-evidence-aside p { margin: 0 0 16px; color: #61736c; font-size: 13px; line-height: 1.5; }
+.nw-page-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.nw-callout { display: flex; gap: 13px; max-width: 760px; padding: 17px; border: 1px solid #dfd2a9; border-radius: 7px; background: #fffaf0; }
+.nw-callout-icon { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; color: #8c681f; background: #f3e7c8; }
+.nw-callout strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.nw-callout p { margin: 0; color: #6f654d; font-size: 13px; line-height: 1.5; }
+.nw-review-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(250px, .6fr); gap: 34px; }
+.nw-review-group { border-top: 1px solid #d4e3de; }
+.nw-review-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 18px; align-items: start; padding: 17px 0; border-bottom: 1px solid #d4e3de; }
+.nw-review-row > strong { font-size: 13px; }
+.nw-review-value { font-size: 14px; line-height: 1.5; }
+.nw-review-value small { display: block; margin-top: 4px; color: #71817b; font-size: 11px; }
+.nw-edit { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; color: #2d705e; background: transparent; font-size: 12px; }
+.nw-review-aside { padding-left: 24px; border-left: 1px solid #d8e7e2; }
+.nw-review-aside h2 { margin: 0 0 12px; font-size: 16px; }
+.nw-review-aside ul { margin: 0; padding: 0; list-style: none; }
+.nw-review-aside li { display: flex; gap: 8px; padding: 9px 0; color: #50635c; font-size: 13px; line-height: 1.45; }
+.nw-review-aside li svg { flex: 0 0 auto; color: #2f7d68; }
+.nw-declaration { display: flex; align-items: flex-start; gap: 10px; max-width: 760px; margin-top: 24px; padding: 15px 0; border-top: 1px solid #d5e4df; border-bottom: 1px solid #d5e4df; }
+.nw-declaration input { width: 18px; height: 18px; margin-top: 2px; accent-color: #2c806a; }
+.nw-declaration label { font-size: 13px; line-height: 1.5; }
+.nw-result { display: grid; place-items: center; min-height: 628px; padding: 40px 24px; text-align: center; }
+.nw-result-inner { width: min(100%, 660px); }
+.nw-result-icon { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 18px; border-radius: 8px; color: #ffffff; background: #2c806a; }
+.nw-result-icon.is-handoff { background: #477a6e; }
+.nw-result h1 { margin: 0 0 9px; font-size: 29px; }
+.nw-result-intro { margin: 0 auto 24px; color: #61736c; font-size: 15px; line-height: 1.55; }
+.nw-claim-reference { display: inline-grid; gap: 4px; margin-bottom: 24px; padding: 12px 24px; border: 1px solid #bcd7cd; border-radius: 7px; background: #eef9f4; }
+.nw-claim-reference span { color: #667971; font-size: 11px; text-transform: uppercase; }
+.nw-claim-reference strong { font-size: 22px; }
+.nw-timeline { max-width: 540px; margin: 0 auto 24px; text-align: left; }
+.nw-timeline-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-top: 1px solid #d7e6e1; }
+.nw-timeline-row:first-child { border-top: 0; }
+.nw-timeline-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: #2b775f; background: #dff2ea; }
+.nw-timeline-row strong { display: block; margin-bottom: 2px; font-size: 13px; }
+.nw-timeline-row p { margin: 0; color: #687972; font-size: 12px; line-height: 1.45; }
+.nw-result-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
+.nw-handoff-list { max-width: 720px; margin: 20px 0 0; border-top: 1px solid #d5e4df; }
+.nw-handoff-row { display: flex; align-items: flex-start; gap: 10px; padding: 14px 0; border-bottom: 1px solid #d5e4df; }
+.nw-handoff-row svg { flex: 0 0 auto; color: #2f7d68; }
+.nw-handoff-row strong { display: block; margin-bottom: 3px; font-size: 13px; }
+.nw-handoff-row p { margin: 0; color: #61736c; font-size: 12px; line-height: 1.45; }
+.nw-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 20px; background: rgba(29, 54, 47, .22); }
+.nw-dialog { width: min(100%, 520px); padding: 20px; border: 1px solid #bfd3cc; border-radius: 8px; background: #ffffff; box-shadow: 0 20px 60px rgba(27, 72, 59, .18); }
+.nw-dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.nw-dialog-head h2 { margin: 0; font-size: 20px; }
+.nw-dialog-close { display: grid; place-items: center; width: 38px; height: 38px; border: 0; color: #456057; background: transparent; }
+.nw-dialog p { color: #5c6f68; font-size: 14px; line-height: 1.55; }
+.nw-dialog label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.nw-dialog textarea { width: 100%; min-height: 110px; resize: vertical; padding: 11px 12px; border: 1px solid #c5d8d1; border-radius: 6px; color: #20312d; background: #fbfefc; font-size: 16px; line-height: 1.5; }
+.nw-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.nw-device.has-overlay { position: relative; }
+.nw-message-list { display: grid; gap: 17px; max-width: 700px; margin-bottom: 18px; }
+.nw-message-list .nw-message { margin-bottom: 0; }
+.nw-user-message { justify-self: end; max-width: min(88%, 560px); padding: 11px 13px; border: 1px solid #b8d8cd; border-radius: 8px 8px 2px 8px; color: #21483d; background: #e3f4ed; font-size: 14px; line-height: 1.5; }
+.nw-message-meta { display: block; margin-top: 5px; color: #70817a; font-size: 10px; text-align: right; }
+.nw-agent-message-body { min-width: 0; }
+.nw-agent-message-body p { overflow-wrap: anywhere; }
+.nw-typing { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 10px; border: 1px solid #d1e4dd; border-radius: 7px; background: #ffffff; }
+.nw-typing span { width: 6px; height: 6px; border-radius: 50%; background: #65a994; animation: nw-pulse 1.1s ease-in-out infinite; }
+.nw-typing span:nth-child(2) { animation-delay: .15s; }
+.nw-typing span:nth-child(3) { animation-delay: .3s; }
+.nw-composer-help { max-width: 700px; margin: 7px 0 0; color: #71817b; font-size: 11px; }
+.nw-urgent-page { min-height: 628px; padding: 34px clamp(22px, 7vw, 92px) 44px; background: #fff9f7; }
+.nw-urgent-panel { max-width: 760px; padding: 22px; border: 1px solid #e4b8ae; border-radius: 8px; background: #fff2ef; }
+.nw-urgent-heading { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; align-items: start; }
+.nw-urgent-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 7px; color: #a14032; background: #f8d9d3; }
+.nw-urgent-heading h1 { margin: 0 0 7px; font-size: 25px; line-height: 1.25; }
+.nw-urgent-heading p { margin: 0; color: #72534d; font-size: 14px; line-height: 1.55; }
+.nw-urgent-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #ebc8c0; }
+.nw-danger-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 15px; border: 1px solid #a74738; border-radius: 6px; color: #ffffff; background: #a74738; }
+.nw-system-event { display: flex; align-items: center; gap: 8px; max-width: 700px; padding: 9px 0; border-top: 1px solid #d8e7e2; border-bottom: 1px solid #d8e7e2; color: #60726b; font-size: 12px; }
+@keyframes nw-pulse { 0%, 100% { opacity: .35; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
+.nw-device.is-mobile .nw-app { min-height: 720px; }
+.nw-device.is-mobile .nw-product-header { grid-template-columns: 1fr auto; padding: 0 13px; }
+.nw-device.is-mobile .nw-save-state { display: none; }
+.nw-device.is-mobile .nw-human-help { width: 40px; padding: 0; }
+.nw-device.is-mobile .nw-human-help span { display: none; }
+.nw-device.is-mobile .nw-status-strip { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px 14px; }
+.nw-device.is-mobile .nw-next-block { grid-column: 1 / -1; padding: 9px 0 0; border-top: 1px solid #c4ddd4; border-left: 0; }
+.nw-device.is-mobile .nw-summary-trigger { display: inline-flex; }
+.nw-device.is-mobile .nw-entry { display: block; min-height: 660px; }
+.nw-device.is-mobile .nw-entry-main { justify-content: flex-start; padding: 28px 15px 24px; }
+.nw-device.is-mobile .nw-entry h1 { font-size: 26px; }
+.nw-device.is-mobile .nw-entry-intro { margin: 11px 0 19px; font-size: 14px; }
+.nw-device.is-mobile .nw-report-box { padding: 14px; }
+.nw-device.is-mobile .nw-report-actions { display: grid; }
+.nw-device.is-mobile .nw-report-actions .nw-primary { width: 100%; }
+.nw-device.is-mobile .nw-entry-side { padding: 24px 16px; border-top: 1px solid #dbe8e3; border-left: 0; }
+.nw-device.is-mobile .nw-workspace { display: block; min-height: 580px; }
+.nw-device.is-mobile .nw-main-panel { padding: 18px 14px 26px; }
+.nw-device.is-mobile .nw-summary-panel { display: none; }
+.nw-device.is-mobile .nw-message { grid-template-columns: 28px minmax(0, 1fr); gap: 9px; }
+.nw-device.is-mobile .nw-agent-avatar { width: 28px; height: 28px; }
+.nw-device.is-mobile .nw-task { padding: 15px; }
+.nw-device.is-mobile .nw-task h2 { font-size: 18px; }
+.nw-device.is-mobile .nw-choice-row { display: grid; }
+.nw-device.is-mobile .nw-answer { width: 100%; min-height: 46px; }
+.nw-device.is-mobile.is-summary-open .nw-main-panel { display: none; }
+.nw-device.is-mobile.is-summary-open .nw-summary-panel { display: block; min-height: 580px; border-left: 0; }
+.nw-device.is-mobile.is-summary-open .nw-summary-close { display: grid; place-items: center; }
+.nw-device.is-mobile .nw-content-page { padding: 24px 15px 34px; }
+.nw-device.is-mobile .nw-content-head h1 { font-size: 24px; }
+.nw-device.is-mobile .nw-evidence-layout,
+.nw-device.is-mobile .nw-review-layout { display: block; }
+.nw-device.is-mobile .nw-evidence-aside,
+.nw-device.is-mobile .nw-review-aside { margin-top: 26px; padding: 22px 0 0; border-top: 1px solid #d8e7e2; border-left: 0; }
+.nw-device.is-mobile .nw-review-row { grid-template-columns: 1fr auto; gap: 7px 12px; }
+.nw-device.is-mobile .nw-review-row > strong { grid-column: 1 / -1; }
+.nw-device.is-mobile .nw-page-actions { display: grid; }
+.nw-device.is-mobile .nw-page-actions button { width: 100%; }
+.nw-device.is-mobile .nw-result { min-height: 660px; padding: 34px 15px; }
+.nw-device.is-mobile .nw-result h1 { font-size: 25px; }
+.nw-device.is-mobile .nw-user-message { max-width: 92%; }
+.nw-device.is-mobile .nw-urgent-page { min-height: 660px; padding: 25px 15px 34px; }
+.nw-device.is-mobile .nw-urgent-heading { grid-template-columns: 36px minmax(0, 1fr); }
+.nw-device.is-mobile .nw-urgent-icon { width: 36px; height: 36px; }
+.nw-device.is-mobile .nw-urgent-heading h1 { font-size: 22px; }
+.nw-device.is-mobile .nw-urgent-actions { display: grid; }
+.nw-device.is-mobile .nw-urgent-actions button { width: 100%; }
+.nw-device.is-mobile .nw-overlay { align-items: end; padding: 0; }
+.nw-device.is-mobile .nw-dialog { border-right: 0; border-bottom: 0; border-left: 0; border-radius: 8px 8px 0 0; }
+@media (max-width: 560px) {
+  .nw-preview-bar { align-items: stretch; flex-direction: column; }
+  .nw-restart { align-self: flex-start; }
+  .nw-device:not(.is-mobile) { max-width: 390px; margin: 0 auto; }
+}
+@media (prefers-reduced-motion: reduce) { .nw-device { transition: none; } .nw-typing span { animation: none; opacity: .7; } }
+</style>
+
+<script>
+(function () {
+  const root = document.getElementById('northwind-claimant-journey');
+  const device = root.querySelector('.nw-device');
+  const app = root.querySelector('.nw-app');
+  const viewButtons = Array.from(root.querySelectorAll('[data-view]'));
+  const state = {
+    page: 'entry',
+    previousPage: 'entry',
+    mobile: false,
+    overlay: null,
+    incident: 'I was rear-ended while waiting at a red light on Queen Street. No one was injured, but the rear bumper was damaged.',
+    claimType: 'motor',
+    injuryStatus: 'none',
+    vehicleSafe: null,
+    evidenceUploaded: false,
+    evidencePending: false,
+    declaration: false,
+    currentStep: 'intake',
+    messages: [],
+    isTyping: false,
+    coverageReview: false,
+    professionalReview: false,
+    assessorRequired: false,
+    handoffReason: 'customer_request',
+    files: [],
+    staffUpdated: false,
+    imageExtractionConfirmed: false
+  };
+
+  function icon(name) {
+    return '<i data-lucide="' + name + '" aria-hidden="true"></i>';
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function header(showSaved) {
+    return '<header class="nw-product-header">' +
+      '<div class="nw-brand"><span class="nw-brand-mark">N</span><span>Northwind</span></div>' +
+      (showSaved ? '<div class="nw-save-state"><span class="nw-save-dot"></span>Changes saved</div>' : '<div></div>') +
+      '<div class="nw-header-actions"><button type="button" class="nw-human-help" data-action="human-help">' + icon('headphones') + '<span>Human help</span></button></div>' +
+    '</header>';
+  }
+
+  function statusStrip(status, next, tone) {
+    return '<div class="nw-status-strip ' + (tone || '') + '">' +
+      '<div><span class="nw-label">Current status</span><strong>' + status + '</strong></div>' +
+      '<div class="nw-next-block"><span class="nw-label">Next step</span><span class="nw-next-copy">' + next + '</span></div>' +
+      '<button type="button" class="nw-summary-trigger" data-action="open-summary">' + icon('clipboard-list') + 'Claim summary</button>' +
+    '</div>';
+  }
+
+  function summaryPanel() {
+    const vehicleText = state.vehicleSafe === true ? 'The vehicle is still safe to drive.' : state.vehicleSafe === false ? 'The vehicle may not be safe to drive.' : 'Waiting for claimant confirmation.';
+    const vehicleState = state.vehicleSafe === null
+      ? '<span class="nw-state-pending">' + icon('clock-3') + 'Needs confirmation</span>'
+      : '<span class="nw-state-ok">' + icon('check') + 'Confirmed</span>';
+    const evidenceText = state.evidenceUploaded ? state.files.length + ' evidence item(s) added.' : state.evidencePending ? 'The police report is not available yet and can be added later.' : 'No evidence added yet.';
+    const evidenceState = state.evidenceUploaded
+      ? '<span class="nw-state-ok">' + icon('check') + 'Saved</span>'
+      : '<span class="nw-state-pending">' + icon('clock-3') + (state.evidencePending ? 'Awaiting evidence' : 'Optional') + '</span>';
+    return '<aside class="nw-summary-panel" aria-label="Claim summary">' +
+      '<div class="nw-summary-head"><div><span class="nw-label">Information structured by the agent</span><h2>Claim summary</h2></div><button type="button" class="nw-summary-close" data-action="close-summary" aria-label="Close summary">' + icon('x') + '</button></div>' +
+      '<div class="nw-summary-section"><div class="nw-summary-section-title"><span>What happened</span><button type="button" data-action="edit-incident">' + icon('pencil') + 'Edit</button></div><p>' + escapeHtml(state.incident) + '</p><span class="nw-state-ok">' + icon('check') + 'Recorded</span></div>' +
+      '<div class="nw-summary-section"><div class="nw-summary-section-title"><span>Personal safety</span></div><p>' + (state.injuryStatus === 'none' ? 'No one is currently reported injured.' : state.injuryStatus === 'urgent' ? 'An injury or continuing danger has been reported.' : 'Waiting for claimant confirmation.') + '</p><span class="' + (state.injuryStatus === 'unknown' ? 'nw-state-pending' : 'nw-state-ok') + '">' + icon(state.injuryStatus === 'unknown' ? 'clock-3' : 'check') + (state.injuryStatus === 'unknown' ? 'Needs confirmation' : 'Recorded') + '</span></div>' +
+      '<div class="nw-summary-section"><div class="nw-summary-section-title"><span>Vehicle status</span><button type="button" data-go="conversation">' + icon('pencil') + 'Edit</button></div><p>' + vehicleText + '</p>' + vehicleState + '</div>' +
+      '<div class="nw-summary-section"><div class="nw-summary-section-title"><span>Evidence</span><button type="button" data-go="evidence">' + icon('folder-open') + 'View</button></div><p>' + evidenceText + '</p>' + evidenceState + '</div>' +
+      '<div class="nw-summary-note">' + icon('shield-check') + '<span>You can review and change everything before submission.</span></div>' +
+    '</aside>';
+  }
+
+  function entryPage() {
+    return header(false) +
+      '<main class="nw-entry nw-page">' +
+        '<section class="nw-entry-main">' +
+          '<p class="nw-eyebrow">Start a new claim report</p>' +
+          '<h1>First, tell us what happened in your own words</h1>' +
+          '<p class="nw-entry-intro">You do not need insurance terminology. We will structure what you provide and ask only what the next step requires.</p>' +
+          '<div class="nw-report-box">' +
+            '<label for="nw-incident-input">What happened</label>' +
+            '<textarea id="nw-incident-input" class="nw-report-text">' + escapeHtml(state.incident) + '</textarea>' +
+            '<div class="nw-report-actions">' +
+              '<button type="button" class="nw-attach-action" data-action="entry-photo">' + icon('image-plus') + 'Add scene photos</button>' +
+              '<button type="button" class="nw-primary" data-action="begin-report">Continue report' + icon('arrow-right') + '</button>' +
+            '</div>' +
+          '</div>' +
+        '</section>' +
+        '<aside class="nw-entry-side">' +
+          '<h2>You can stop at any time</h2>' +
+          '<div class="nw-benefit"><span class="nw-benefit-icon">' + icon('save') + '</span><div><strong>Automatic saving</strong><p>Confirmed information is kept, so you do not need to restart.</p></div></div>' +
+          '<div class="nw-benefit"><span class="nw-benefit-icon">' + icon('file-check-2') + '</span><div><strong>Progress what is ready</strong><p>Evidence that is not yet available can be added later.</p></div></div>' +
+          '<div class="nw-benefit"><span class="nw-benefit-icon">' + icon('users') + '</span><div><strong>Keep context during handoff</strong><p>Confirmed information transfers with the claim.</p></div></div>' +
+          '<div class="nw-resume"><p>Already have an unfinished report?</p><button type="button" class="nw-secondary" data-action="resume">Resume NW-2026-08142 ' + icon('arrow-right') + '</button></div>' +
+        '</aside>' +
+      '</main>';
+  }
+
+  function conversationStatus() {
+    const statusByStep = {
+      processing: ['Understanding your description', 'Structuring key facts and choosing the next question'],
+      safety: ['Checking personal safety', 'Confirming whether urgent support is needed'],
+      drivability: ['Checking vehicle status', 'Confirming whether the vehicle is safe to drive'],
+      evidence: ['Organising available evidence', 'Add evidence or record it for later'],
+      evidence_pending: ['The report can continue', 'Confirm how later evidence will be added'],
+      coverage_detail: ['Policy applicability needs review', 'Collecting context for a claims professional'],
+      professional_review: ['Preparing professional review', 'Confirm whether to transfer to a claims professional'],
+      assessor: ['The vehicle may need further support', 'Continue reporting or request human assistance'],
+      handoff_offer: ['Preparing human handoff', 'Confirm transfer of the current context'],
+      review_ready: ['Key facts are structured', 'Review and confirm the report']
+    };
+    return statusByStep[state.currentStep] || ['Continuing the report', 'Answer the current question'];
+  }
+
+  function conversationTask() {
+    if (state.isTyping) return '';
+    const tasks = {
+      safety: {
+        label: 'Personal safety',
+        question: 'Is anyone currently injured or still in danger?',
+        note: 'If there is an immediate danger, the normal claim-reporting flow will pause.',
+        actions: '<button type="button" class="nw-answer is-primary" data-message="No one is injured and there is no continuing danger.">No one is injured</button><button type="button" class="nw-answer" data-message="Someone is injured or there may still be danger at the scene.">Injury or continuing danger</button>'
+      },
+      drivability: {
+        label: 'Vehicle status',
+        question: 'Is your vehicle currently safe to drive?',
+        note: 'It is fine to be unsure. We will use your answer to choose an appropriate next step.',
+        actions: '<button type="button" class="nw-answer is-primary" data-message="The vehicle is still safe to drive.">Safe to drive</button><button type="button" class="nw-answer" data-message="I am not sure whether the vehicle is safe to drive.">Unsure or unsafe</button>'
+      },
+      evidence: {
+        label: 'Incident evidence',
+        question: 'Do you have scene photos or related documents now?',
+        note: 'You can continue without them. You will not be required to wait here.',
+        actions: '<button type="button" class="nw-answer is-primary" data-go="evidence">Add evidence now</button><button type="button" class="nw-answer" data-message="The police report has not been issued yet, so I cannot provide it now.">Evidence is not ready</button>'
+      },
+      evidence_pending: {
+        label: 'Evidence pending',
+        question: 'The claim can continue. What would you like to do next?',
+        note: 'You can return to this claim and upload the police report when it becomes available.',
+        actions: '<button type="button" class="nw-answer is-primary" data-go="review">Review current report</button><button type="button" class="nw-answer" data-go="evidence">Add other evidence</button>'
+      },
+      coverage_detail: {
+        label: 'Further review needed',
+        question: 'Who was driving the vehicle when the incident occurred?',
+        note: 'The agent will not make a final policy-applicability decision on its own.',
+        actions: '<button type="button" class="nw-answer" data-message="I was driving the vehicle.">I was driving</button><button type="button" class="nw-answer" data-message="A family member was driving, but I am not sure whether they are listed on the policy.">A family member</button>'
+      },
+      professional_review: {
+        label: 'Professional review',
+        question: 'The available information is organised. Transfer it for review now?',
+        note: 'The handoff includes confirmed facts, evidence, and the question requiring judgement.',
+        actions: '<button type="button" class="nw-answer is-primary" data-action="human-help">Transfer now</button><button type="button" class="nw-answer" data-message="I would like to add more information first.">Add information first</button>'
+      },
+      assessor: {
+        label: 'Vehicle assistance',
+        question: 'The vehicle may not be safe to drive. Do you need human help with the next step?',
+        note: 'The system will not claim that towing or assessment has been arranged without confirmation.',
+        actions: '<button type="button" class="nw-answer is-primary" data-action="human-help">I need human help</button><button type="button" class="nw-answer" data-message="I am in a safe place and would like to continue the report.">I am safe, continue reporting</button>'
+      },
+      handoff_offer: {
+        label: 'Human help',
+        question: 'Transfer the current claim and conversation context now?',
+        note: 'You will not need to repeat information that is already confirmed.',
+        actions: '<button type="button" class="nw-answer is-primary" data-action="human-help">Transfer now</button><button type="button" class="nw-answer" data-message="Continue the current step first.">Continue this step first</button>'
+      },
+      review_ready: {
+        label: 'Information structured',
+        question: 'The key facts are recorded and ready for pre-submission review.',
+        note: 'You can still change the incident, personal safety, vehicle status, and evidence.',
+        actions: '<button type="button" class="nw-answer is-primary" data-go="review">Review report</button><button type="button" class="nw-answer" data-go="evidence">Add more evidence</button>'
+      }
+    };
+    const task = tasks[state.currentStep];
+    if (!task) return '';
+    return '<section class="nw-task"><div class="nw-task-top"><span class="nw-task-type">' + task.label + '</span><button type="button" class="nw-link-action" data-action="why-asking">Why is this needed?</button></div><h2>' + task.question + '</h2><p class="nw-task-note">' + task.note + '</p><div class="nw-choice-row">' + task.actions + '</div></section>';
+  }
+
+  function conversationMessages() {
+    let html = '<div class="nw-message-list">';
+    state.messages.forEach((message) => {
+      if (message.role === 'user') {
+        html += '<div class="nw-user-message">' + escapeHtml(message.text) + '<span class="nw-message-meta">Sent</span></div>';
+      } else if (message.role === 'system') {
+        html += '<div class="nw-system-event">' + icon('save') + '<span>' + escapeHtml(message.text) + '</span></div>';
+      } else {
+        html += '<article class="nw-message"><div class="nw-agent-avatar">' + icon('sparkles') + '</div><div class="nw-agent-message-body"><strong>Northwind Claims Assistant</strong><p>' + escapeHtml(message.text) + '</p></div></article>';
+      }
+    });
+    if (state.isTyping) {
+      html += '<article class="nw-message"><div class="nw-agent-avatar">' + icon('sparkles') + '</div><div class="nw-agent-message-body"><strong>Northwind Claims Assistant</strong><div class="nw-typing" aria-label="Preparing a response"><span></span><span></span><span></span></div></div></article>';
+    }
+    return html + '</div>';
+  }
+
+  function conversationPage() {
+    const currentStatus = conversationStatus();
+    return header(true) + statusStrip(currentStatus[0], currentStatus[1], state.currentStep === 'evidence_pending' ? 'is-waiting' : '') +
+      '<div class="nw-workspace nw-page">' +
+        '<main class="nw-main-panel">' +
+          '<div class="nw-thread-time">Today, 10:42</div>' +
+          conversationMessages() + conversationTask() +
+          '<div class="nw-inline-compose"><label><span class="sr-only">Enter message</span><input id="nw-chat-input" type="text" autocomplete="off" placeholder="Add any relevant information..." ' + (state.isTyping ? 'disabled' : '') + '></label><button type="button" class="nw-send" data-action="send-message" aria-label="Send message" ' + (state.isTyping ? 'disabled' : '') + '>' + icon('arrow-up') + '</button></div><p class="nw-composer-help">Messages and key facts are saved to this claim.</p>' +
+        '</main>' + summaryPanel() +
+      '</div>';
+  }
+
+  function evidencePage() {
+    const files = state.files.length
+      ? '<div class="nw-file-list">' + state.files.map((file) => '<div class="nw-file-row"><div class="nw-file-name">' + icon(file.type === 'pdf' ? 'file-text' : 'image') + '<span><strong>' + escapeHtml(file.name) + '</strong><small>' + escapeHtml(file.label) + '</small></span></div><span class="nw-file-ready">' + icon('check') + 'Saved</span></div>').join('') + '</div>'
+      : '';
+    const extraction = state.evidenceUploaded
+      ? '<div class="nw-callout"><span class="nw-callout-icon">' + icon(state.imageExtractionConfirmed ? 'check' : 'scan-search') + '</span><div><strong>' + (state.imageExtractionConfirmed ? 'Image information confirmed by the claimant' : 'Suggestion extracted from the image') + '</strong><p>Visible damage to the rear bumper. ' + (state.imageExtractionConfirmed ? 'This information is now recorded in the claim summary.' : 'This remains a proposed extraction and will not silently become a confirmed fact.') + '</p>' + (state.imageExtractionConfirmed ? '' : '<div class="nw-page-actions"><button type="button" class="nw-primary" data-action="confirm-extraction">Confirm extraction</button><button type="button" class="nw-quiet" data-action="edit-incident">Edit description</button></div>') + '</div></div>'
+      : '';
+    return header(true) +
+      '<main class="nw-content-page nw-page">' +
+        '<button type="button" class="nw-back" data-go="conversation">' + icon('arrow-left') + 'Back to claim</button>' +
+        '<div class="nw-content-head"><span class="nw-label">Evidence</span><h1>Add available photos or documents</h1><p>You can continue without an item that is not currently available. We will record its status and remind you when it is needed.</p></div>' +
+        '<div class="nw-evidence-layout"><section><div class="nw-upload-zone"><span class="nw-upload-zone-icon">' + icon('upload-cloud') + '</span><h2>' + (state.evidenceUploaded ? 'Evidence added' : 'Upload images or PDFs') + '</h2><p>Selecting local files will show the same saved state as a production upload.</p><input id="nw-file-input" class="sr-only" type="file" accept="image/*,.pdf" multiple><button type="button" class="nw-primary" data-action="choose-files">' + icon('image-plus') + (state.evidenceUploaded ? 'Add more evidence' : 'Choose evidence') + '</button></div>' + files + extraction + '</section><aside class="nw-evidence-aside"><h2>No police report yet?</h2><p>You do not need to wait here while it is being prepared. The claim can progress, and you can return to add it later.</p><button type="button" class="nw-secondary" data-action="pending-evidence">Mark for later</button></aside></div>' +
+        '<div class="nw-page-actions"><button type="button" class="nw-primary" data-go="review">Review claim report' + icon('arrow-right') + '</button><button type="button" class="nw-quiet" data-go="review">Skip for now</button></div>' +
+      '</main>';
+  }
+
+  function pendingEvidencePage() {
+    return header(true) + statusStrip('The report can continue', 'Add the police report when it becomes available', 'is-waiting') +
+      '<main class="nw-content-page nw-page">' +
+        '<button type="button" class="nw-back" data-go="evidence">' + icon('arrow-left') + 'Back to evidence</button>' +
+        '<div class="nw-content-head"><span class="nw-label">Evidence status recorded</span><h1>The police report can be added later</h1><p>The claim will not stop because this future document is unavailable. We will preserve the upload route and remind you at the appropriate time.</p></div>' +
+        '<div class="nw-callout"><span class="nw-callout-icon">' + icon('calendar-clock') + '</span><div><strong>Current responsibility: claimant to add later</strong><p>When the police issue the formal report, return using claim number NW-2026-08142 and upload it here. Other eligible steps will continue.</p></div></div>' +
+        '<div class="nw-page-actions"><button type="button" class="nw-primary" data-go="review">Continue to review' + icon('arrow-right') + '</button><button type="button" class="nw-secondary" data-go="evidence">Add other evidence now</button></div>' +
+      '</main>';
+  }
+
+  function reviewPage() {
+    const evidenceValue = state.evidenceUploaded ? state.files.length + ' evidence item(s) saved' : state.evidencePending ? 'Police report to be added later' : 'No evidence currently uploaded';
+    return header(true) +
+      '<main class="nw-content-page nw-page">' +
+        '<button type="button" class="nw-back" data-go="evidence">' + icon('arrow-left') + 'Back to evidence</button>' +
+        '<div class="nw-content-head"><span class="nw-label">Pre-submission review</span><h1>Confirm the claim report</h1><p>Please review the information structured by the agent. Changes will not remove evidence or context you have already provided.</p></div>' +
+        '<div class="nw-review-layout"><section class="nw-review-group"><div class="nw-review-row"><strong>What happened</strong><div class="nw-review-value">' + escapeHtml(state.incident) + '<small>Source: your description</small></div><button type="button" class="nw-edit" data-action="edit-incident">' + icon('pencil') + 'Edit</button></div><div class="nw-review-row"><strong>Personal safety</strong><div class="nw-review-value">' + (state.injuryStatus === 'none' ? 'No one is currently reported injured.' : 'Urgent or professional support is required.') + '<small>Source: your confirmation</small></div><button type="button" class="nw-edit" data-go="conversation">' + icon('pencil') + 'Edit</button></div><div class="nw-review-row"><strong>Vehicle status</strong><div class="nw-review-value">' + (state.vehicleSafe === false ? 'The vehicle may not be safe to drive.' : state.vehicleSafe === true ? 'The vehicle is still safe to drive.' : 'Not yet confirmed.') + '<small>Source: your confirmation</small></div><button type="button" class="nw-edit" data-go="conversation">' + icon('pencil') + 'Edit</button></div><div class="nw-review-row"><strong>Evidence</strong><div class="nw-review-value">' + evidenceValue + '<small>Source: upload records and evidence status</small></div><button type="button" class="nw-edit" data-go="evidence">' + icon('folder-open') + 'View</button></div></section><aside class="nw-review-aside"><h2>What happens after submission</h2><ul><li>' + icon('file-plus-2') + '<span>The system creates a claim report and claim number.</span></li><li>' + icon('route') + '<span>The claim enters the appropriate work queue.</span></li><li>' + icon('message-square-text') + '<span>You will see the next step, responsible party, and expected update time.</span></li></ul></aside></div>' +
+        '<div class="nw-declaration"><input id="nw-declaration" type="checkbox" ' + (state.declaration ? 'checked' : '') + '><label for="nw-declaration">I have reviewed the information above and confirm that it accurately reflects what I currently know.</label></div>' +
+        '<div class="nw-page-actions"><button type="button" class="nw-primary" data-action="submit-claim" ' + (state.declaration ? '' : 'disabled') + '>Create claim report' + icon('arrow-right') + '</button><button type="button" class="nw-secondary" data-action="human-help">Ask a claims professional to review</button></div>' +
+      '</main>';
+  }
+
+  function successPage() {
+    const nextTitle = state.staffUpdated
+      ? (state.assessorRequired ? 'Vehicle assessment is awaiting claimant confirmation' : 'The claims team has completed its initial review')
+      : (state.professionalReview ? 'Next: professional review of the policy question' : state.assessorRequired ? 'Next: confirm vehicle-assistance arrangements' : 'Next: initial review by the claims team');
+    const nextCopy = state.staffUpdated
+      ? (state.assessorRequired ? 'Choose a suggested time or contact a claims professional through this claim.' : 'No new information needs your immediate attention.')
+      : 'Northwind is responsible and expects to update you within one business day.';
+    const pendingRow = state.evidencePending
+      ? '<div class="nw-timeline-row"><span class="nw-timeline-mark">' + icon('calendar-clock') + '</span><div><strong>Police report pending</strong><p>Return to this claim and upload it when it becomes available.</p></div></div>'
+      : '';
+    return header(true) +
+      '<main class="nw-result nw-page"><div class="nw-result-inner"><span class="nw-result-icon">' + icon('check') + '</span><h1>Claim report created</h1><p class="nw-result-intro">Your information is saved and has entered the next processing step. Evidence that is temporarily unavailable remains recorded, and you do not need to restart.</p><div class="nw-claim-reference"><span>Claim number</span><strong>NW-2026-08142</strong></div><div class="nw-timeline"><div class="nw-timeline-row"><span class="nw-timeline-mark">' + icon('check') + '</span><div><strong>Incident information recorded</strong><p>Confirmed by the claimant today at 10:48.</p></div></div><div class="nw-timeline-row"><span class="nw-timeline-mark">' + icon(state.staffUpdated ? 'badge-check' : 'route') + '</span><div><strong>' + nextTitle + '</strong><p>' + nextCopy + '</p></div></div>' + pendingRow + '</div><div class="nw-result-actions"><button type="button" class="nw-primary" data-go="evidence">Add evidence</button><button type="button" class="nw-secondary" data-action="open-summary">View full summary</button><button type="button" class="nw-quiet" data-action="refresh-status">' + icon('refresh-cw') + (state.staffUpdated ? 'Status updated' : 'Simulate staff update') + '</button></div></div></main>';
+  }
+
+  function handoffPage() {
+    const reasonByType = {
+      urgent: ['Urgent safety signal', 'The claimant reported an injury or danger at the scene, so the normal flow has paused.'],
+      coverage_review: ['Policy question requires professional judgement', 'The relevant facts are organised, but the agent will not make a coverage conclusion.'],
+      evidence_conflict: ['Evidence conflicts with the description', 'The conflict and its sources are preserved for professional review.'],
+      history_review: ['Relevant claim history requires professional review', 'The system recorded a supported review signal without making a fraud determination.'],
+      vehicle_assistance: ['The vehicle may not be safe to drive', 'A person must confirm towing, assessment, or other assistance.'],
+      customer_request: ['The claimant requested human help', 'Prior information and unresolved questions will transfer together.']
+    };
+    const reason = reasonByType[state.handoffReason] || reasonByType.customer_request;
+    return header(true) + statusStrip('Preparing transfer to a claims professional', 'Confirm the context to transfer', 'is-handoff') +
+      '<main class="nw-content-page nw-page"><button type="button" class="nw-back" data-action="go-back">' + icon('arrow-left') + 'Back to claim</button><div class="nw-content-head"><span class="nw-label">Human help</span><h1>You do not need to repeat what you have already provided</h1><p>The current claim summary, evidence status, and unresolved questions will transfer to a claims professional.</p></div><div class="nw-handoff-list"><div class="nw-handoff-row">' + icon('file-check-2') + '<div><strong>Confirmed incident summary</strong><p>Includes location, event, personal safety, and vehicle status.</p></div></div><div class="nw-handoff-row">' + icon('images') + '<div><strong>Available evidence and evidence status</strong><p>Includes uploaded items and evidence that is not yet generated or conflicts with the report.</p></div></div><div class="nw-handoff-row">' + icon('message-square-more') + '<div><strong>' + reason[0] + '</strong><p>' + reason[1] + '</p></div></div></div><div class="nw-page-actions"><button type="button" class="nw-primary" data-go="handoff-result">Transfer now</button><button type="button" class="nw-secondary" data-action="go-back">Continue this step first</button></div></main>';
+  }
+
+  function handoffResultPage() {
+    const urgent = state.handoffReason === 'urgent';
+    return header(true) + '<main class="nw-result nw-page"><div class="nw-result-inner"><span class="nw-result-icon is-handoff">' + icon(urgent ? 'siren' : 'users') + '</span><h1>' + (urgent ? 'Urgent claim transferred with priority' : 'Claim transferred to a claims professional') + '</h1><p class="nw-result-intro">The current summary, evidence, and unresolved questions transferred together. Staff will not need to recollect confirmed information.</p><div class="nw-claim-reference"><span>Claim number</span><strong>NW-2026-08142</strong></div><div class="nw-timeline"><div class="nw-timeline-row"><span class="nw-timeline-mark">' + icon('package-check') + '</span><div><strong>Handoff packet prepared</strong><p>The incident summary, evidence, priority, and requested action are recorded.</p></div></div><div class="nw-timeline-row"><span class="nw-timeline-mark">' + icon('clock-3') + '</span><div><strong>Waiting for a claims professional</strong><p>' + (urgent ? 'The claim is in a high-priority staff queue.' : 'A response is expected in this session within 20 minutes.') + '</p></div></div></div><div class="nw-result-actions"><button type="button" class="nw-secondary" data-action="open-summary">View handoff summary</button><button type="button" class="nw-quiet" data-action="restart">Return to start</button></div></div></main>';
+  }
+
+  function urgentPage() {
+    return header(true) +
+      '<main class="nw-urgent-page nw-page">' +
+        '<button type="button" class="nw-back" data-action="urgent-back">' + icon('arrow-left') + 'Go back and correct the information</button>' +
+        '<section class="nw-urgent-panel"><div class="nw-urgent-heading"><span class="nw-urgent-icon">' + icon('triangle-alert') + '</span><div><h1>Address personal safety and danger first</h1><p>You reported an injury or possible continuing danger. Contact local emergency services first and follow instructions from people at the scene. This system will not claim to have contacted emergency services for you and does not provide medical judgement.</p></div></div><div class="nw-urgent-actions"><a class="nw-danger-action" href="tel:111">' + icon('phone-call') + 'Call 111</a><button type="button" class="nw-secondary" data-action="urgent-safe">I am in a safe place</button><button type="button" class="nw-quiet" data-action="human-help">Transfer directly to a claims professional</button></div></section>' +
+      '</main>';
+  }
+
+  function includesAny(text, terms) {
+    return terms.some((term) => text.includes(term));
+  }
+
+  function inferClaimType(text) {
+    if (includesAny(text, ['motor', 'car', 'vehicle', 'drive', 'rear-ended'])) return 'motor';
+    if (includesAny(text, ['home', 'house', 'flood', 'leak', 'fire'])) return 'home';
+    return 'contents';
+  }
+
+  function addAgentMessage(text) {
+    state.messages.push({ role: 'agent', text: text });
+  }
+
+  function routeMockReply(message, stepBeforeReply, initial) {
+    const text = message.toLowerCase();
+    const noInjury = includesAny(text, ['no one is hurt', 'no one was hurt', 'nobody is hurt', 'not injured', 'no one is injured']);
+    const urgentSignal = !noInjury && includesAny(text, ['immediate danger', 'injured', 'bleeding', 'unconscious', 'trapped', 'on fire']);
+    const humanRequest = includesAny(text, ['human', 'person', 'staff member', 'call me', 'claims professional']);
+    const policyQuestion = includesAny(text, ['coverage', 'covered', 'policy wording', 'policy terms']);
+    const evidenceConflict = includesAny(text, ['conflict', 'does not match', 'inconsistent photo', 'time does not match']);
+    const historyReview = includesAny(text, ['previous claim', 'claim history', 'claimed before', 'multiple claims']);
+    const pendingEvidence = includesAny(text, ['not ready', 'police report is pending', 'police have not issued the report']);
+    const affirmativeDrive = includesAny(text, ['safe to drive', 'still drivable']);
+    const uncertainDrive = includesAny(text, ['unsafe to drive', 'not safe to drive', 'not sure if']);
+
+    if (urgentSignal) {
+      state.injuryStatus = 'urgent';
+      state.handoffReason = 'urgent';
+      state.messages.push({ role: 'system', text: 'An injury or continuing-danger signal was detected. The normal claim-reporting flow has paused.' });
+      state.page = 'urgent';
+      return;
+    }
+
+    if (humanRequest) {
+      state.handoffReason = 'customer_request';
+      state.resumeStep = stepBeforeReply === 'processing' ? 'safety' : stepBeforeReply;
+      state.currentStep = 'handoff_offer';
+      addAgentMessage('Yes. I will preserve the incident details, evidence, and unresolved questions you have provided. You can transfer now or continue the current step first.');
+      return;
+    }
+
+    if (policyQuestion) {
+      state.coverageReview = true;
+      state.currentStep = 'coverage_detail';
+      addAgentMessage('I can retrieve relevant policy content and organise the facts, but I will not make a coverage decision from incomplete evidence. First, confirm one background detail, then I will transfer the judgement question to a claims professional.');
+      return;
+    }
+
+    if (evidenceConflict) {
+      state.professionalReview = true;
+      state.handoffReason = 'evidence_conflict';
+      state.currentStep = 'professional_review';
+      addAgentMessage('I recorded the inconsistency between the evidence and description without overwriting confirmed facts. A claims professional needs to inspect the sources and decide this point.');
+      return;
+    }
+
+    if (historyReview) {
+      state.professionalReview = true;
+      state.handoffReason = 'history_review';
+      state.currentStep = 'professional_review';
+      addAgentMessage('I recorded the relevant claim history as context requiring professional review. This is a review signal, not a fraud conclusion, and it will not automatically block the current report.');
+      return;
+    }
+
+    if (pendingEvidence) {
+      state.evidencePending = true;
+      state.currentStep = 'evidence_pending';
+      addAgentMessage('A police report that is not yet available will not block steps that can safely continue. I recorded it for later and will preserve an upload route in this claim.');
+      return;
+    }
+
+    if (initial) {
+      state.claimType = inferClaimType(text);
+      state.injuryStatus = noInjury ? 'none' : 'unknown';
+      if (state.claimType === 'motor' && affirmativeDrive) state.vehicleSafe = true;
+      if (state.claimType === 'motor' && uncertainDrive) state.vehicleSafe = false;
+      if (state.injuryStatus === 'unknown') {
+        state.currentStep = 'safety';
+        addAgentMessage('I have started structuring your description. First, please confirm the most important point: is anyone currently injured or still in danger?');
+      } else if (state.claimType === 'motor' && state.vehicleSafe === null) {
+        state.currentStep = 'drivability';
+        addAgentMessage('I recorded the location, rear-end collision, rear-bumper damage, and that no one is currently injured. Next, please confirm whether the vehicle is safe to drive.');
+      } else if (state.vehicleSafe === false) {
+        state.assessorRequired = true;
+        state.currentStep = 'assessor';
+        addAgentMessage('I recorded that the vehicle may not be safe to drive. Do not move it solely to continue this report. You can request human help with the next step.');
+      } else {
+        state.currentStep = 'evidence';
+        addAgentMessage('The key incident information is recorded. You can now add available photos or documents and mark unavailable evidence for later.');
+      }
+      return;
+    }
+
+    if (stepBeforeReply === 'safety') {
+      if (noInjury || includesAny(text, ['safe', 'everyone is safe'])) {
+        state.injuryStatus = 'none';
+        state.currentStep = state.claimType === 'motor' ? 'drivability' : 'evidence';
+        addAgentMessage(state.claimType === 'motor' ? 'Thank you. I recorded that no one is currently injured. Is your vehicle safe to drive?' : 'Thank you. I recorded that no one is currently injured. You can now add available photos or documents.');
+      } else {
+        state.currentStep = 'safety';
+        addAgentMessage('I cannot yet confirm the personal-safety status. Please tell me directly: is anyone currently injured or still in danger?');
+      }
+      return;
+    }
+
+    if (stepBeforeReply === 'drivability') {
+      if (affirmativeDrive || includesAny(text, ['yes', 'drivable'])) {
+        state.vehicleSafe = true;
+        state.currentStep = 'evidence';
+        addAgentMessage('I recorded that the vehicle is still safe to drive. You can now add scene photos or related documents.');
+      } else if (uncertainDrive || includesAny(text, ['unsure', 'cannot', 'no'])) {
+        state.vehicleSafe = false;
+        state.assessorRequired = true;
+        state.currentStep = 'assessor';
+        addAgentMessage('I recorded that the vehicle may not be safe to drive. Do not risk moving it. I can preserve the current information and arrange a handoff, or you can continue the report from a safe place.');
+      } else {
+        state.currentStep = 'drivability';
+        addAgentMessage('I did not interpret that as a definite answer. You can reply "safe to drive", "not safe", or "unsure".');
+      }
+      return;
+    }
+
+    if (stepBeforeReply === 'coverage_detail') {
+      state.professionalReview = true;
+      state.handoffReason = 'coverage_review';
+      state.currentStep = 'professional_review';
+      addAgentMessage('I recorded the relationship between the driver and the policy and marked the policy question for review. The facts and supporting evidence will transfer to a claims professional; the agent will not make a coverage conclusion.');
+      return;
+    }
+
+    if (stepBeforeReply === 'assessor') {
+      if (includesAny(text, ['safe place', 'continue', 'finish first'])) {
+        state.currentStep = 'evidence';
+        addAgentMessage('Understood. I recorded that you are in a safe place and preserved the vehicle-safety concern. We can continue collecting available evidence.');
+      } else {
+        state.handoffReason = 'vehicle_assistance';
+        state.currentStep = 'handoff_offer';
+        addAgentMessage('I will transfer the vehicle status and reason you need help. I will not claim that towing or assessment is arranged before a person confirms it.');
+      }
+      return;
+    }
+
+    if (stepBeforeReply === 'handoff_offer') {
+      if (includesAny(text, ['continue', 'not yet', 'finish first'])) {
+        state.currentStep = state.resumeStep || 'evidence';
+        addAgentMessage('Understood. The human-help option remains available. We will continue the current reporting step.');
+      } else {
+        state.currentStep = 'handoff_offer';
+        addAgentMessage('You can select "Transfer now" or continue with the information you want to add.');
+      }
+      return;
+    }
+
+    if (stepBeforeReply === 'evidence' || stepBeforeReply === 'evidence_pending') {
+      state.currentStep = 'review_ready';
+      addAgentMessage('This information is recorded. The current content is sufficient for pre-submission review, and unavailable evidence remains a later action.');
+      return;
+    }
+
+    if (stepBeforeReply === 'professional_review') {
+      state.currentStep = 'professional_review';
+      addAgentMessage('The additional information is included in the professional-review summary. The claims professional will see confirmed facts, evidence, and the unresolved judgement question.');
+      return;
+    }
+
+    state.currentStep = 'review_ready';
+    addAgentMessage('This information is saved to the current claim. You can review the structured report or continue adding evidence.');
+  }
+
+  let replyToken = 0;
+
+  function sendMockMessage(message, initial) {
+    const text = String(message || '').trim();
+    if (!text || state.isTyping) return;
+    const stepBeforeReply = initial ? 'processing' : state.currentStep;
+    state.messages.push({ role: 'user', text: text });
+    state.currentStep = initial ? 'processing' : state.currentStep;
+    state.isTyping = true;
+    state.page = 'conversation';
+    const token = ++replyToken;
+    render();
+    setTimeout(() => {
+      if (token !== replyToken) return;
+      state.isTyping = false;
+      routeMockReply(text, stepBeforeReply, Boolean(initial));
+      render();
+    }, 650);
+  }
+
+  function overlay() {
+    if (!state.overlay) return '';
+    if (state.overlay === 'reason') {
+      const reasonByStep = {
+        safety: ['Why confirm personal safety first?', 'An injury or danger at the scene interrupts normal claim reporting and triggers a high-priority handoff. The system does not provide medical diagnosis.'],
+        drivability: ['Why ask about vehicle status?', 'Whether the vehicle is safe to drive affects the need for human help, towing, or assessment. This answer does not determine policy coverage.'],
+        evidence: ['Why ask about available evidence?', 'Available images or documents can reduce later repetition. Evidence that is not yet generated does not automatically block other safe steps.'],
+        coverage_detail: ['Why ask about the driver?', 'The relationship between the driver and policy may require professional judgement. The agent structures facts and evidence but does not decide coverage.'],
+        professional_review: ['Why is professional review needed?', 'Policy ambiguity, conflicting evidence, and other high-impact questions require judgement by an authorised professional.'],
+        assessor: ['Why ask whether support is needed?', 'When a vehicle may not be safe to drive, a person must confirm the next arrangement. The system will not pretend a service has been booked.']
+      };
+      const reason = reasonByStep[state.currentStep] || ['Why is this step needed?', 'This information affects the next action that can be taken safely. You can still change your answer or request human help.'];
+      return '<div class="nw-overlay" role="presentation"><section class="nw-dialog" role="dialog" aria-modal="true" aria-labelledby="nw-dialog-title"><div class="nw-dialog-head"><h2 id="nw-dialog-title">' + reason[0] + '</h2><button type="button" class="nw-dialog-close" data-action="close-overlay" aria-label="Close">' + icon('x') + '</button></div><p>' + reason[1] + '</p><div class="nw-dialog-actions"><button type="button" class="nw-primary" data-action="close-overlay">Understood</button></div></section></div>';
+    }
+    if (state.overlay === 'edit') {
+      return '<div class="nw-overlay" role="presentation"><section class="nw-dialog" role="dialog" aria-modal="true" aria-labelledby="nw-dialog-title"><div class="nw-dialog-head"><h2 id="nw-dialog-title">Edit incident description</h2><button type="button" class="nw-dialog-close" data-action="close-overlay" aria-label="Close">' + icon('x') + '</button></div><label for="nw-edit-incident">What happened</label><textarea id="nw-edit-incident">' + escapeHtml(state.incident) + '</textarea><div class="nw-dialog-actions"><button type="button" class="nw-secondary" data-action="close-overlay">Cancel</button><button type="button" class="nw-primary" data-action="save-incident">Save changes</button></div></section></div>';
+    }
+    if (state.overlay === 'entry-photo') {
+      return '<div class="nw-overlay" role="presentation"><section class="nw-dialog" role="dialog" aria-modal="true" aria-labelledby="nw-dialog-title"><div class="nw-dialog-head"><h2 id="nw-dialog-title">Scene photos ready to add</h2><button type="button" class="nw-dialog-close" data-action="close-overlay" aria-label="Close">' + icon('x') + '</button></div><p>The demo will add two photos of the vehicle rear bumper. You can still view, remove, or add evidence after continuing.</p><div class="nw-dialog-actions"><button type="button" class="nw-secondary" data-action="close-overlay">Add later</button><button type="button" class="nw-primary" data-action="confirm-entry-photo">Add two photos</button></div></section></div>';
+    }
+    if (state.overlay === 'summary') {
+      return '<div class="nw-overlay" role="presentation"><section class="nw-dialog" role="dialog" aria-modal="true" aria-labelledby="nw-dialog-title"><div class="nw-dialog-head"><h2 id="nw-dialog-title">Current claim summary</h2><button type="button" class="nw-dialog-close" data-action="close-overlay" aria-label="Close">' + icon('x') + '</button></div><p><strong>Incident: </strong>' + escapeHtml(state.incident) + '</p><p><strong>Vehicle: </strong>' + (state.vehicleSafe === false ? 'May not be safe to drive' : state.vehicleSafe === true ? 'Safe to drive' : 'Not yet confirmed') + '</p><p><strong>Evidence: </strong>' + (state.evidenceUploaded ? state.files.length + ' item(s) added' : state.evidencePending ? 'Police report to be added later' : 'None added yet') + '</p><div class="nw-dialog-actions"><button type="button" class="nw-primary" data-action="close-overlay">Close</button></div></section></div>';
+    }
+    return '';
+  }
+
+  function currentPage() {
+    if (state.page === 'entry') return entryPage();
+    if (state.page === 'conversation') return conversationPage();
+    if (state.page === 'evidence') return evidencePage();
+    if (state.page === 'pending-evidence') return pendingEvidencePage();
+    if (state.page === 'review') return reviewPage();
+    if (state.page === 'success') return successPage();
+    if (state.page === 'urgent') return urgentPage();
+    if (state.page === 'handoff') return handoffPage();
+    if (state.page === 'handoff-result') return handoffResultPage();
+    return entryPage();
+  }
+
+  function refreshIcons() {
+    if (globalThis.lucide) globalThis.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+  }
+
+  function render() {
+    device.classList.toggle('is-mobile', state.mobile);
+    device.classList.toggle('has-overlay', Boolean(state.overlay));
+    app.innerHTML = currentPage() + overlay();
+    refreshIcons();
+  }
+
+  function go(page) {
+    state.previousPage = state.page;
+    state.page = page;
+    state.overlay = null;
+    device.classList.remove('is-summary-open');
+    render();
+  }
+
+  function restart() {
+    replyToken += 1;
+    state.page = 'entry';
+    state.previousPage = 'entry';
+    state.overlay = null;
+    state.incident = 'I was rear-ended while waiting at a red light on Queen Street. No one was injured, but the rear bumper was damaged.';
+    state.claimType = 'motor';
+    state.injuryStatus = 'none';
+    state.vehicleSafe = null;
+    state.evidenceUploaded = false;
+    state.evidencePending = false;
+    state.declaration = false;
+    state.currentStep = 'intake';
+    state.messages = [];
+    state.isTyping = false;
+    state.coverageReview = false;
+    state.professionalReview = false;
+    state.assessorRequired = false;
+    state.handoffReason = 'customer_request';
+    state.resumeStep = null;
+    state.files = [];
+    state.staffUpdated = false;
+    state.imageExtractionConfirmed = false;
+    device.classList.remove('is-summary-open');
+    render();
+  }
+
+  viewButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      state.mobile = button.dataset.view === 'mobile';
+      viewButtons.forEach((item) => {
+        const selected = item === button;
+        item.classList.toggle('is-selected', selected);
+        item.setAttribute('aria-pressed', String(selected));
+      });
+      device.classList.remove('is-summary-open');
+      render();
+    });
+  });
+
+  root.addEventListener('change', (event) => {
+    if (event.target.id === 'nw-declaration') {
+      state.declaration = event.target.checked;
+      render();
+    }
+    if (event.target.id === 'nw-file-input') {
+      const selected = Array.from(event.target.files || []);
+      if (selected.length) {
+        state.files = state.files.concat(selected.map((file) => ({
+          name: file.name,
+          type: file.type === 'application/pdf' ? 'pdf' : 'image',
+          label: file.type === 'application/pdf' ? 'PDF document' : 'Scene image'
+        })));
+        state.evidenceUploaded = true;
+        state.evidencePending = false;
+        state.imageExtractionConfirmed = false;
+        render();
+      }
+    }
+  });
+
+  root.addEventListener('keydown', (event) => {
+    if (event.target.id === 'nw-chat-input' && event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendMockMessage(event.target.value, false);
+    }
+  });
+
+  root.addEventListener('click', (event) => {
+    const trigger = event.target.closest('button');
+    if (!trigger) return;
+    if (trigger.dataset.go) {
+      go(trigger.dataset.go);
+      return;
+    }
+    if (trigger.dataset.message) {
+      sendMockMessage(trigger.dataset.message, false);
+      return;
+    }
+    const action = trigger.dataset.action;
+    if (!action) return;
+    if (action === 'restart') restart();
+    if (action === 'begin-report') {
+      const input = root.querySelector('#nw-incident-input');
+      if (input && input.value.trim()) {
+        state.incident = input.value.trim();
+        sendMockMessage(input.value, true);
+      }
+    }
+    if (action === 'resume') {
+      state.incident = 'Ten days ago, I was rear-ended while waiting at a red light on Queen Street. No one was injured, and the vehicle was still drivable.';
+      state.claimType = 'motor';
+      state.injuryStatus = 'none';
+      state.vehicleSafe = true;
+      state.evidencePending = true;
+      state.currentStep = 'evidence_pending';
+      state.messages = [
+        { role: 'user', text: 'The police said the formal report will take a few more days.' },
+        { role: 'agent', text: 'A police report that is not yet available will not block steps that can safely continue. I recorded it for later.' },
+        { role: 'system', text: 'Session resumed after ten days: claim summary, pending work, and the previous commitment are loaded.' },
+        { role: 'agent', text: 'Welcome back. Your incident summary and two scene photos are still available. You only need to decide whether to review the current report now.' }
+      ];
+      state.files = [
+        { name: 'rear-damage-01.jpg', type: 'image', label: 'Scene image' },
+        { name: 'rear-damage-02.jpg', type: 'image', label: 'Scene image' }
+      ];
+      state.evidenceUploaded = true;
+      go('conversation');
+    }
+    if (action === 'vehicle-safe') {
+      sendMockMessage('The vehicle is still safe to drive.', false);
+    }
+    if (action === 'vehicle-unsafe') {
+      sendMockMessage('I am not sure whether the vehicle is safe to drive.', false);
+    }
+    if (action === 'send-message') {
+      const input = root.querySelector('#nw-chat-input');
+      if (input) sendMockMessage(input.value, false);
+    }
+    if (action === 'choose-files') {
+      const input = root.querySelector('#nw-file-input');
+      if (input) input.click();
+    }
+    if (action === 'upload-demo') {
+      state.evidenceUploaded = true;
+      state.evidencePending = false;
+      render();
+    }
+    if (action === 'confirm-extraction') {
+      state.imageExtractionConfirmed = true;
+      state.messages.push({ role: 'system', text: 'The claimant confirmed the image extraction: visible damage to the rear bumper.' });
+      render();
+    }
+    if (action === 'pending-evidence') {
+      state.evidencePending = true;
+      go('pending-evidence');
+    }
+    if (action === 'submit-claim' && state.declaration) go('success');
+    if (action === 'refresh-status') {
+      state.staffUpdated = true;
+      render();
+    }
+    if (action === 'human-help') {
+      state.previousPage = state.page;
+      go('handoff');
+    }
+    if (action === 'urgent-safe') {
+      state.injuryStatus = 'urgent';
+      state.handoffReason = 'urgent';
+      state.previousPage = 'urgent';
+      go('handoff');
+    }
+    if (action === 'urgent-back') {
+      state.injuryStatus = 'unknown';
+      state.currentStep = 'safety';
+      state.messages.push({ role: 'agent', text: 'Please correct the personal-safety information. Is anyone currently injured or still in danger?' });
+      go('conversation');
+    }
+    if (action === 'go-back') go(state.previousPage || 'conversation');
+    if (action === 'open-summary') {
+      if (state.mobile && state.page === 'conversation') {
+        device.classList.add('is-summary-open');
+        render();
+        device.classList.add('is-summary-open');
+      } else {
+        state.overlay = 'summary';
+        render();
+      }
+    }
+    if (action === 'close-summary') {
+      device.classList.remove('is-summary-open');
+      render();
+    }
+    if (action === 'why-asking') {
+      state.overlay = 'reason';
+      render();
+    }
+    if (action === 'edit-incident') {
+      state.overlay = 'edit';
+      render();
+    }
+    if (action === 'entry-photo') {
+      state.overlay = 'entry-photo';
+      render();
+    }
+    if (action === 'confirm-entry-photo') {
+      state.files = [
+        { name: 'rear-damage-01.jpg', type: 'image', label: 'Scene image' },
+        { name: 'rear-damage-02.jpg', type: 'image', label: 'Scene image' }
+      ];
+      state.evidenceUploaded = true;
+      state.imageExtractionConfirmed = false;
+      state.overlay = null;
+      render();
+    }
+    if (action === 'close-overlay') {
+      state.overlay = null;
+      render();
+    }
+    if (action === 'save-incident') {
+      const input = root.querySelector('#nw-edit-incident');
+      if (input && input.value.trim()) state.incident = input.value.trim();
+      state.overlay = null;
+      render();
+    }
+  });
+
+  render();
+})();
+</script>

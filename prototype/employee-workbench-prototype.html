@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aurora Claims · Operations Workbench</title>
+  <style>
+    :root { --navy:#102a43; --teal:#157f79; --bg:#f5f7fb; --line:#e2e8f0; --muted:#667085; --text:#172333; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input { font:inherit; }
+    .app { display:flex; min-height:100vh; }
+    .sidebar { width:236px; flex:none; padding:24px 14px; display:flex; flex-direction:column; background:var(--navy); color:#dce7f1; }
+    .brand { padding:0 12px 27px; color:#fff; font-size:19px; font-weight:800; }.brand span { color:#70e5d4; }
+    .nav-heading { padding:12px 12px 5px; color:#8da5ba; font-size:10px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; }
+    .nav { margin:0; padding:0; list-style:none; }.nav button { width:100%; margin:2px 0; padding:10px 12px; border:0; border-radius:7px; background:transparent; color:#c6d4e0; text-align:left; cursor:pointer; }
+    .nav button:hover,.nav button.active { background:#1d4d6d; color:#fff; }.nav-icon { display:inline-block; width:21px; color:#74d8cc; }.count { float:right; padding:1px 6px; border-radius:99px; background:#294e6b; font-size:10px; }
+    .help { margin-top:auto; padding:17px 12px 0; border-top:1px solid #29475f; color:#aac0d1; font-size:12px; }.help b { display:block; color:#fff; margin-bottom:3px; }
+    .profile { margin-top:14px; padding:10px; border-radius:8px; background:#173a56; }.avatar { display:inline-grid; width:27px; height:27px; margin-right:7px; place-items:center; border-radius:50%; background:#2fa49f; color:#fff; font-size:10px; font-weight:700; vertical-align:middle; }
+    .content { min-width:0; flex:1; }.topbar { height:64px; display:flex; align-items:center; padding:0 30px; border-bottom:1px solid var(--line); background:#fff; color:var(--muted); }.topbar small { margin-left:auto; }
+    main { padding:25px 30px; }.page-heading { display:flex; align-items:end; justify-content:space-between; margin-bottom:17px; }.page-heading h1 { margin:0; font-size:24px; letter-spacing:-.45px; }.page-heading p { margin:4px 0 0; color:var(--muted); }.page-heading small { color:var(--muted); }
+    .filters { display:flex; gap:9px; align-items:center; margin-bottom:16px; padding:12px 14px; border:1px solid var(--line); border-radius:11px; background:#fff; }.search { width:280px; padding:9px 11px; border:1px solid #d7e0e9; border-radius:7px; }.result-count { margin-left:auto; color:var(--muted); font-size:12px; }
+    .queue-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:16px; }.queue { padding:11px; border:1px solid var(--line); border-radius:10px; background:#fff; text-align:left; cursor:pointer; }.queue:hover,.queue.active { border-color:#1a968e; background:#f0fbfa; }.queue-title { color:#475467; font-size:12px; }.queue-count { margin:3px 0; font-size:22px; font-weight:750; }.queue-sub { color:#98a2b3; font-size:10px; }.urgent .queue-count { color:#c4320a; }
+    .workspace { display:grid; grid-template-columns:minmax(500px,1.12fr) minmax(400px,.88fr); gap:16px; }.panel { overflow:hidden; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.panel-title { padding:15px 16px; border-bottom:1px solid #edf0f4; font-weight:700; }.panel-title small { margin-left:7px; color:var(--muted); font-weight:400; }
+    table { width:100%; border-collapse:collapse; } th { padding:11px 14px; color:#98a2b3; font-size:10px; letter-spacing:.45px; text-align:left; text-transform:uppercase; } td { padding:13px 14px; border-top:1px solid #edf0f4; vertical-align:middle; } tbody tr { cursor:pointer; } tbody tr:hover { background:#f8fbfc; } tbody tr.selected { background:#effbfa; box-shadow:inset 3px 0 #169c95; }.case-id { font-weight:700; }.muted { margin-top:2px; color:var(--muted); font-size:12px; }
+    .badge { display:inline-flex; align-items:center; gap:4px; padding:3px 7px; border-radius:99px; font-size:11px; font-weight:650; }.dot { width:5px; height:5px; border-radius:50%; background:currentColor; }.amber { background:#fffaeb; color:#b54708; }.red { background:#fef3f2; color:#b42318; }.teal { background:#ecfdf9; color:#087b70; }.blue { background:#eff8ff; color:#175cd3; }.grey { background:#f2f4f7; color:#475467; }
+    .claim-head { padding:16px 17px 13px; border-bottom:1px solid #edf0f4; }.claim-head-top { display:flex; justify-content:space-between; gap:8px; }.claim-head h2 { margin:0; font-size:18px; }.claim-head p { margin:3px 0 0; color:var(--muted); font-size:12px; }.status-line { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }.tabs { display:flex; gap:18px; padding:0 17px; border-bottom:1px solid #edf0f4; }.tab { padding:11px 1px 9px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }.tab.active { border-color:var(--teal); color:var(--teal); font-weight:700; }.detail-body { padding:16px 17px; }.tab-content { display:none; }.tab-content.active { display:block; }
+    .tip { padding:10px 11px; border:1px solid #bfdbfe; border-radius:8px; background:#eff6ff; color:#1e4d89; font-size:12px; }.section { margin-top:16px; }.section h3 { margin:0 0 8px; color:var(--muted); font-size:11px; letter-spacing:.55px; text-transform:uppercase; }.action { padding:12px; border:1px solid #bce5df; border-radius:9px; background:#f3fcfb; }.action p { margin:4px 0 10px; color:#475467; font-size:12px; }.buttons { display:flex; flex-wrap:wrap; gap:8px; }.btn { padding:8px 10px; border:1px solid transparent; border-radius:7px; font-size:12px; font-weight:650; cursor:pointer; }.btn.primary { border-color:var(--teal); background:var(--teal); color:#fff; }.btn.secondary { border-color:#cfd8e1; background:#fff; color:#344054; }.btn.danger { border-color:#fecdca; background:#fff; color:#b42318; }
+    .field-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.field { padding:8px 9px; border:1px solid var(--line); border-radius:7px; }.field label { display:block; color:#98a2b3; font-size:10px; letter-spacing:.4px; text-transform:uppercase; }.field span { display:block; font-size:12px; font-weight:600; }.field small { color:var(--muted); font-size:10px; }.tag-list { display:flex; flex-wrap:wrap; gap:7px; }.tag { padding:7px 8px; border:1px solid var(--line); border-radius:6px; font-size:11px; }.tag strong,.tag small { display:block; }.tag small { color:var(--muted); font-size:10px; }.timeline { margin-left:5px; padding-left:13px; border-left:2px solid #d8e1e8; }.event { position:relative; padding:0 0 12px; font-size:12px; }.event::before { content:""; position:absolute; left:-18px; top:5px; width:7px; height:7px; border-radius:50%; background:#1d9b94; }.event small { display:block; color:var(--muted); }
+    .simple-view { display:none; }.simple-view.active { display:block; }.view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
+    @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
+    @media(max-width:720px) { .sidebar{display:none}.topbar,main{padding-left:16px;padding-right:16px}.queue-grid{grid-template-columns:repeat(2,1fr)}.filters{flex-wrap:wrap}.search{width:100%}.result-count{margin-left:0}th:nth-child(3),td:nth-child(3){display:none} }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">aurora<span>claims</span></div>
+      <div class="nav-heading">Work</div>
+      <ul class="nav">
+        <li><button class="active" data-view="workbench"><span class="nav-icon">▣</span>Claims Workbench <span class="count">28</span></button></li>
+        <li><button data-view="tasks"><span class="nav-icon">✓</span>My Tasks <span class="count">4</span></button></li>
+        <li><button data-view="urgent"><span class="nav-icon">!</span>Urgent Cases <span class="count">3</span></button></li>
+      </ul>
+      <div class="nav-heading">Help</div>
+      <ul class="nav"><li><button data-view="guide"><span class="nav-icon">?</span>New Starter Guide</button></li></ul>
+      <div class="help"><b>Need a hand?</b>Start with the recommended next step. You can ask for help at any point.<div class="profile"><span class="avatar">LZ</span>Lin Zhang<br><small style="margin-left:35px">Claims Professional</small></div></div>
+    </aside>
+    <div class="content">
+      <header class="topbar"><span id="breadcrumb">Claims Workbench / New and untriaged</span><small>Monday, 10 August</small></header>
+      <main>
+        <section id="workbenchView">
+          <div class="page-heading"><div><h1 id="workbenchHeading">Claims Workbench</h1><p id="workbenchDescription">Review new claims, make safe decisions, and keep customers informed.</p></div><small id="workbenchNote">You have 4 tasks due today</small></div>
+          <div class="filters"><input id="searchInput" class="search" placeholder="Search by claim number or customer"><span class="result-count"><b id="resultCount">5</b> claims shown</span></div>
+          <section class="queue-grid" id="queues"></section>
+          <div class="workspace">
+            <section class="panel"><div class="panel-title"><span id="queueTitle">New and untriaged</span><small>Most urgent work is shown first</small></div><table><thead><tr><th>Claim</th><th>Status</th><th>Priority</th><th>Next step</th></tr></thead><tbody id="claimRows"></tbody></table></section>
+            <aside class="panel" id="claimDetail"></aside>
+          </div>
+        </section>
+        <section class="simple-view" id="tasksView"></section>
+        <section class="simple-view" id="guideView"></section>
+      </main>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const claims = [
+      { id:'CLM-2026-00841', customer:'Wei Chen', type:'Vehicle collision', product:'Motor', status:'Professional review', priority:'High', due:'Today, 3:30 pm', next:'Review risk signal', queue:'review', tag:'FRAUD-LOC-02', action:'Review the risk signal', reason:'A past claim and this incident share a location. This is a review prompt, not a finding of fraud. Do not mention it to the customer.' },
+      { id:'CLM-2026-00842', customer:'Yuki Chen', type:'Burst pipe', product:'Home', status:'Evidence pending', priority:'Standard', due:'Tomorrow, 10:00 am', next:'Create claim', queue:'evidence', tag:'EVIDENCE-PENDING', action:'Create the claim', reason:'The police report is still being generated, but it is not required to safely create this claim.' },
+      { id:'CLM-2026-00837', customer:'Leo Li', type:'Rear-end collision', product:'Motor', status:'Handed over', priority:'Standard', due:'Today, 5:00 pm', next:'Accept handoff', queue:'new', tag:'HUMAN-REQUESTED', action:'Accept the handoff', reason:'The customer asked to speak with a person. The claim summary is ready so they do not need to repeat key details.' },
+      { id:'CLM-2026-00845', customer:'Nina Zhang', type:'Home break-in', product:'Contents', status:'Urgent handoff', priority:'Urgent', due:'Now', next:'Make safety call', queue:'urgent', tag:'URGENT-DANGER', action:'Make a safety call', reason:'A possible ongoing safety risk was reported. Check the customer is safe and follow the urgent handoff process.' },
+      { id:'CLM-2026-00831', customer:'Ming Zhao', type:'Broken window', product:'Home', status:'Ready to create', priority:'Low', due:'Today, 4:20 pm', next:'Create claim', queue:'ready', tag:'POLICY-CLEAR', action:'Create the claim', reason:'The form and cover check are complete. Create the claim and send the customer their claim number.' }
+    ];
+    const queues = [
+      { key:'urgent', title:'Urgent cases', sub:'Needs attention now' }, { key:'new', title:'New and untriaged', sub:'First review needed' },
+      { key:'review', title:'Professional review', sub:'Needs specialist judgement' }, { key:'evidence', title:'Waiting for evidence', sub:'May not block progress' },
+      { key:'ready', title:'Ready to create', sub:'Create the claim' }, { key:'all', title:'All open claims', sub:'Everything in progress' }
+    ];
+    let activeQueue = 'new';
+    let activeClaimId = claims[0].id;
+    let assignedToMe = false;
+
+    const byId = id => document.getElementById(id);
+    const activeClaim = () => claims.find(claim => claim.id === activeClaimId);
+    const statusClass = status => status.includes('Urgent') ? 'red' : status.includes('Evidence') ? 'blue' : status.includes('Ready') || status.includes('Handed') ? 'teal' : 'amber';
+    const priorityClass = priority => priority === 'Urgent' || priority === 'High' ? 'red' : priority === 'Low' ? 'grey' : 'amber';
+
+    function showToast(message) { const toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); window.setTimeout(() => toast.classList.remove('show'), 2600); }
+    function filteredClaims() { const search = byId('searchInput').value.trim().toLowerCase(); return claims.filter(claim => (activeQueue === 'all' || claim.queue === activeQueue) && `${claim.id} ${claim.customer}`.toLowerCase().includes(search)); }
+    function renderQueues() { byId('queues').innerHTML = queues.map(queue => { const count = queue.key === 'all' ? claims.length : claims.filter(claim => claim.queue === queue.key).length; return `<button class="queue ${queue.key === 'urgent' ? 'urgent' : ''} ${queue.key === activeQueue ? 'active' : ''}" data-queue="${queue.key}"><span class="queue-title">${queue.title}</span><strong class="queue-count">${count}</strong><span class="queue-sub">${queue.sub}</span></button>`; }).join(''); document.querySelectorAll('[data-queue]').forEach(button => button.addEventListener('click', () => { activeQueue = button.dataset.queue; renderWorkbench(); })); }
+    function renderRows() { const visible = filteredClaims(); byId('resultCount').textContent = visible.length; byId('claimRows').innerHTML = visible.map(claim => `<tr data-claim="${claim.id}" class="${claim.id === activeClaimId ? 'selected' : ''}"><td><div class="case-id">${claim.id}</div><div class="muted">${claim.customer} · ${claim.product}</div></td><td><span class="badge ${statusClass(claim.status)}"><i class="dot"></i>${claim.status}</span></td><td><span class="badge ${priorityClass(claim.priority)}">${claim.priority}</span></td><td>${claim.next}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No claims match this search.</td></tr>'; document.querySelectorAll('[data-claim]').forEach(row => row.addEventListener('click', () => { activeClaimId = row.dataset.claim; renderRows(); renderDetail(); })); }
+    function renderDetail() { const claim = activeClaim(); byId('claimDetail').innerHTML = `<div class="claim-head"><div class="claim-head-top"><div><h2>${claim.id}</h2><p>${claim.customer} · ${claim.type} · Session S-10182</p></div><span class="badge ${priorityClass(claim.priority)}">Due ${claim.due}</span></div><div class="status-line"><span class="badge ${statusClass(claim.status)}">${claim.status}</span><span class="badge teal">Cover confirmed</span><span class="badge blue">Photos received</span></div></div><div class="tabs"><button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="form">Claim form</button><button class="tab" data-tab="handoff">Handoff notes</button><button class="tab" data-tab="history">History</button></div><div class="detail-body"><div class="tab-content active" id="overview"><div class="tip"><b>What should I do?</b> Start with the recommended next step below.</div><div class="section"><h3>Recommended next step</h3><div class="action"><b>${claim.action}</b><p>${claim.reason}</p><div class="buttons"><button class="btn primary" data-action="complete">Complete action</button><button class="btn secondary" data-action="assign">${assignedToMe ? 'Assigned to Lin Zhang' : 'Assign to me'}</button></div></div></div><div class="section"><h3>Internal tags</h3><div class="tag-list"><div class="tag"><strong>${claim.tag} · review required</strong><small>Internal only · staff action needed</small></div><div class="tag"><strong>POLICY-CLEAR · confirmed</strong><small>Policy record P-2008</small></div></div></div></div><div class="tab-content" id="form"><div class="section"><h3>Confirmed claim details</h3><div class="field-grid"><div class="field"><label>Incident time</label><span>10 Aug 2026, 08:15</span><small>Confirmed by customer</small></div><div class="field"><label>Location</label><span>Newmarket, Auckland</span><small>Photo metadata + customer</small></div><div class="field"><label>Incident type</label><span>${claim.type}</span><small>Customer description</small></div><div class="field"><label>Injuries reported</label><span>None</span><small>Confirmed by customer</small></div></div></div></div><div class="tab-content" id="handoff"><div class="section"><h3>Everything the next person needs</h3><div class="field"><label>Confirmed summary</label><span>${claim.customer} reported a ${claim.type.toLowerCase()} in Newmarket. Key information has been confirmed.</span></div><div class="field" style="margin-top:8px"><label>Requested action</label><span>${claim.action}. Save the outcome and send the appropriate customer update.</span></div></div></div><div class="tab-content" id="history"><div class="section"><h3>Audit history</h3><div class="timeline"><div class="event">System selected next safe action<small>14:05 · Reason code: ${claim.tag}</small></div><div class="event">Cover check completed<small>14:03 · Policy P-2008</small></div><div class="event">Customer confirmed key details<small>13:58 · Session S-10182</small></div></div></div></div></div>`; document.querySelectorAll('[data-tab]').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab))); document.querySelector('[data-action="complete"]').addEventListener('click', completeAction); document.querySelector('[data-action="assign"]').addEventListener('click', assignToMe); }
+    function switchTab(tabName) { document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName)); document.querySelectorAll('.tab-content').forEach(panel => panel.classList.toggle('active', panel.id === tabName)); }
+    function completeAction() { const claim = activeClaim(); claim.status = 'Action recorded'; claim.next = 'Prepare customer update'; showToast(`Action saved for ${claim.id}`); renderWorkbench(); }
+    function assignToMe() { assignedToMe = true; showToast('This claim is now assigned to you'); renderDetail(); }
+    function renderWorkbench() { renderQueues(); renderRows(); renderDetail(); const title = queues.find(queue => queue.key === activeQueue).title; byId('queueTitle').textContent = title; }
+    function renderTasks() { byId('tasksView').innerHTML = `<div class="page-heading"><div><h1>My Tasks</h1><p>Your assigned work, ordered by due time.</p></div></div><div class="view-card">${claims.slice(0,4).map(claim => `<div class="task"><b>${claim.next} · ${claim.id}</b><small>Due ${claim.due} · ${claim.priority} priority</small><button class="btn secondary" data-open="${claim.id}" style="margin-top:7px">Open claim</button></div>`).join('')}</div>`; document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => openClaim(button.dataset.open))); }
+    function renderGuide() { byId('guideView').innerHTML = `<div class="page-heading"><div><h1>New Starter Guide</h1><p>Use this short checklist for every claim.</p></div></div><div class="view-card">${[['Read the recommended next step','It explains what is safe to do now and why.'],['Check the claim form and evidence','Use confirmed information. Do not ask the customer for the same answer twice.'],['Take the action or ask for help','For urgent cases or unclear cover, use the appropriate handoff.'],['Keep the customer informed','Explain what happens next without exposing internal-only signals.']].map((step,index) => `<div class="guide-step"><span class="step-number">${index + 1}</span><div><b>${step[0]}</b><br><small>${step[1]}</small></div></div>`).join('')}</div>`; }
+    function openClaim(id) { activeClaimId = id; activeQueue = 'all'; activateView('workbench'); }
+    function activateView(view) {
+      document.querySelectorAll('.nav button').forEach(button => button.classList.toggle('active', button.dataset.view === view));
+
+      const workbench = byId('workbenchView');
+      const tasks = byId('tasksView');
+      const guide = byId('guideView');
+      const isWorkbenchView = view === 'workbench' || view === 'urgent';
+
+      workbench.style.display = isWorkbenchView ? 'block' : 'none';
+      tasks.classList.toggle('active', view === 'tasks');
+      guide.classList.toggle('active', view === 'guide');
+
+      if (view === 'tasks') {
+        byId('breadcrumb').textContent = 'My Tasks';
+        renderTasks();
+        return;
+      }
+
+      if (view === 'guide') {
+        byId('breadcrumb').textContent = 'New Starter Guide';
+        renderGuide();
+        return;
+      }
+
+      if (view === 'urgent') {
+        activeQueue = 'urgent';
+        byId('breadcrumb').textContent = 'Urgent Cases';
+        byId('workbenchHeading').textContent = 'Urgent Cases';
+        byId('workbenchDescription').textContent = 'These claims may involve an immediate safety risk. Handle them first.';
+        byId('workbenchNote').textContent = '1 urgent case requires attention now';
+      } else {
+        byId('breadcrumb').textContent = 'Claims Workbench / New and untriaged';
+        byId('workbenchHeading').textContent = 'Claims Workbench';
+        byId('workbenchDescription').textContent = 'Review new claims, make safe decisions, and keep customers informed.';
+        byId('workbenchNote').textContent = 'You have 4 tasks due today';
+      }
+
+      renderWorkbench();
+    }
+    document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => activateView(button.dataset.view)));
+    byId('searchInput').addEventListener('input', renderRows);
+    renderWorkbench();
+  </script>
+</body>
+</html>
