@@ -211,14 +211,16 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 
 | Field | Allowed values | Visibility |
 |---|---|---|
-| `severity` | `fast_track`, `standard`, `complex` | Internal; customer wording is derived separately |
-| `coverage` | `clear`, `ambiguous`, `review_required` | Internal; relevant uncertainty is explained separately |
-| `evidence` | `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` | Shared when relevant |
+| `severity` | `unassessed`, `fast_track`, `standard`, `complex` | ... |
+| `coverage` | `not_assessed`, `clear`, `ambiguous`, `review_required` | ... |
+| `evidence` | `not_started`, `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` | ... |
 | `fraud_signal` | `none`, `review_required` | Internal only |
 | `customer_support` | `self_service`, `guided`, `human_requested`, `accessibility_required` | Shared when relevant |
 | `urgency` | `normal`, `urgent`, `immediate_safety_risk` | Shared, with internal routing detail excluded |
 | `workflow_state` | `collecting`, `ready_for_next`, `awaiting_evidence`, `professional_review`, `created` | Shared through role-appropriate wording |
 | `next_action` | `AgentAction` | Internal action; claimant receives `customer_next_step` |
+
+A newly created claim should initialise `severity = unassessed`, `coverage = not_assessed`, and `evidence = not_started`.
 
 ### Working Claim
 
@@ -260,6 +262,24 @@ The canonical backend record has these fields. API projections omit fields the c
 | `closed_at` | timestamp | No | Present only when closed |
 
 Complete messages remain in durable storage. `summary`, `unresolved_questions`, and selected recent message references form a bounded resume package; they do not replace the formal claim record.
+
+#### Session Lifecycle
+
+A session has one of three states:
+
+- `active`: currently accepting claimant messages;
+- `paused`: temporarily inactive while resumable context is retained;
+- `closed`: the interaction has ended and the session no longer accepts new messages.
+
+Session lifecycle transitions are server-controlled in Sprint 1.
+
+A session MAY move from `active` to `paused` after claimant inactivity or when the current interaction is interrupted.
+
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current claim state and bounded resume context. A previously paused session MAY be closed when the new session is created.
+
+Only one active claimant session per claim is permitted.
+
+Messages MUST NOT be accepted for a closed session.
 
 ### Message
 
@@ -655,7 +675,7 @@ Response `201` includes:
 }
 ```
 
-Only one active session per claimant and claim is permitted. Repeating the request with a different idempotency key returns the existing active session.
+Only one active claimant session per claim is permitted. If an active session already exists, the server MAY return that session instead of creating another one. If only paused sessions exist, the server creates a new active session using the claim's resumable context.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}`
 
