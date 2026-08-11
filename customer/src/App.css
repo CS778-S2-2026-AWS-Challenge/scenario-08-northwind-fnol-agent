@@ -8,8 +8,6 @@
   min-height: 66px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
   padding: 0 clamp(20px, 4vw, 48px);
   border-bottom: 1px solid #dce9e4;
   background: #ffffff;
@@ -37,28 +35,6 @@
   font-weight: 700;
 }
 
-.human-help,
-.primary-button,
-.secondary-button,
-.attach-action {
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 7px;
-  font: inherit;
-  cursor: pointer;
-}
-
-.human-help {
-  padding: 0 13px;
-  border: 1px solid #bfd4cd;
-  color: #245848;
-  background: #ffffff;
-  font-size: 13px;
-}
-
 .entry-page {
   min-height: calc(100svh - 66px);
   display: grid;
@@ -75,7 +51,8 @@
   width: min(100%, 720px);
 }
 
-.eyebrow {
+.eyebrow,
+.side-label {
   margin: 0 0 11px;
   color: #2c806a;
   font-size: 13px;
@@ -86,9 +63,9 @@
   max-width: 650px;
   margin: 0;
   color: #20312d;
-  font-size: clamp(31px, 3vw, 42px);
+  font-size: 40px;
   font-weight: 650;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   line-height: 1.18;
 }
 
@@ -104,7 +81,7 @@
   max-width: 680px;
   padding: 20px;
   border: 1px solid #bdd7ce;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 10px 28px rgba(38, 91, 75, 0.07);
 }
@@ -133,7 +110,7 @@
 }
 
 .report-text::placeholder {
-  color: #889891;
+  color: #75877f;
 }
 
 .report-text:focus {
@@ -175,29 +152,22 @@
 
 .report-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
+  justify-content: flex-end;
   margin-top: 13px;
 }
 
-.attach-action {
-  padding: 0 8px;
-  border: 0;
-  color: #2c6a58;
-  background: transparent;
-  font-size: 14px;
-}
-
 .primary-button {
-  min-width: 126px;
+  min-width: 138px;
+  min-height: 42px;
   padding: 0 16px;
   border: 1px solid #2c806a;
+  border-radius: 7px;
   color: #ffffff;
   background: #2c806a;
+  font: inherit;
   font-size: 14px;
   font-weight: 600;
+  cursor: pointer;
   transition: background 0.18s ease, border-color 0.18s ease;
 }
 
@@ -226,69 +196,37 @@
 }
 
 .entry-side h2 {
-  margin: 0 0 18px;
+  margin: 0 0 22px;
   color: #20312d;
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 650;
+  line-height: 1.3;
 }
 
-.benefit {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 11px;
-  padding: 17px 0;
-  border-top: 1px solid #d1e6de;
-}
-
-.benefit:first-of-type {
-  border-top: 0;
-}
-
-.benefit-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 7px;
-  color: #2b7b66;
-  background: #d8eee6;
-}
-
-.benefit strong {
-  display: block;
-  margin-bottom: 4px;
-  color: #28483f;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.benefit p {
+.detail-list {
   margin: 0;
-  color: #63746d;
-  font-size: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-list li {
+  position: relative;
+  padding: 16px 0 16px 28px;
+  border-top: 1px solid #d1e6de;
+  color: #4f6860;
+  font-size: 14px;
   line-height: 1.5;
 }
 
-.resume-claim {
-  margin-top: 24px;
-  padding-top: 22px;
-  border-top: 1px solid #cfe2db;
-}
-
-.resume-claim p {
-  margin: 0 0 10px;
-  color: #65766f;
-  font-size: 12px;
-}
-
-.secondary-button {
-  width: 100%;
-  justify-content: space-between;
-  padding: 0 13px;
-  border: 1px solid #b8cdc6;
-  color: #284f43;
-  background: #ffffff;
-  font-size: 13px;
+.detail-list li::before {
+  content: '';
+  position: absolute;
+  top: 23px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4b9a84;
 }
 
 button:focus-visible,
@@ -298,17 +236,12 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
-.icon {
-  flex: 0 0 auto;
-}
-
 @media (max-width: 840px) {
   .entry-page {
     display: block;
   }
 
   .entry-main {
-    min-height: auto;
     padding: 46px 24px 50px;
   }
 
@@ -329,26 +262,12 @@ textarea:focus-visible {
     padding: 0 15px;
   }
 
-  .human-help {
-    width: 40px;
-    padding: 0;
-  }
-
-  .human-help span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-
   .entry-main {
     padding: 31px 15px 34px;
   }
 
   .entry-main h1 {
-    font-size: 28px;
+    font-size: 30px;
   }
 
   .entry-intro {
@@ -360,13 +279,7 @@ textarea:focus-visible {
     padding: 15px;
   }
 
-  .report-actions {
-    align-items: stretch;
-    flex-direction: column-reverse;
-  }
-
-  .primary-button,
-  .attach-action {
+  .primary-button {
     width: 100%;
   }
 
