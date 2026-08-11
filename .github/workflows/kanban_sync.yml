@@ -13,6 +13,7 @@ on:
       - ready_for_review
       - converted_to_draft
       - reopened
+      - synchronize
       - closed
 
 permissions:
@@ -337,7 +338,7 @@ jobs:
             converted_to_draft)
               target_status="In progress"
               ;;
-            opened|reopened)
+            opened|reopened|synchronize)
               if [[ "$PR_DRAFT" == "true" ]]; then
                 target_status="In progress"
               else
