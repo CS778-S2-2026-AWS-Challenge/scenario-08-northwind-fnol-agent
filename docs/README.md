@@ -6,6 +6,7 @@ This directory contains engineering guidance, API information, and user-research
 
 - [Current API](api.md)
 - [Development Conventions](development-conventions.md)
+- [Repository layout, start commands, and verification](../README.md#repository-layout)
 
 ## User Research
 

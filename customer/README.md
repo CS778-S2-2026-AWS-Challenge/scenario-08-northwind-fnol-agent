@@ -1,16 +1,21 @@
-# React + Vite
+# Claimant Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This React and Vite application is the claimant-facing Northwind FNOL client.
 
-Currently, two official plugins are available:
+Install and start it from the repository root:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```powershell
+npm ci --prefix customer
+npm run dev --prefix customer
+```
 
-## React Compiler
+During local development, Vite proxies relative `/api` requests to the FastAPI backend at `http://127.0.0.1:8000`. Start the backend first using the command in the root `README.md`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Run claimant checks with:
 
-## Expanding the ESLint configuration
+```powershell
+npm run lint --prefix customer
+npm run build --prefix customer
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+API paths and shared field names must follow `docs/api.md`. Claimant code must never render or depend on internal-only signals.
