@@ -6,11 +6,17 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import Settings
+from backend.repositories.fixture import FixtureRepository
 
 
 @pytest.fixture
-def app() -> FastAPI:
-    return create_app(Settings())
+def repository() -> FixtureRepository:
+    return FixtureRepository()
+
+
+@pytest.fixture
+def app(repository: FixtureRepository) -> FastAPI:
+    return create_app(Settings(), repository)
 
 
 @pytest.fixture

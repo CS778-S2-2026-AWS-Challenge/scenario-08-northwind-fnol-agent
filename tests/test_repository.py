@@ -79,6 +79,9 @@ def test_fixture_repository_handles_missing_records_and_idempotency_conflicts() 
 
     repository.create_claim(claim, session)
     assert repository.get_active_session(claim.claim_id, claim.customer_id) is None
+    assert repository.list_sessions_for_claim(claim.claim_id, 'other_customer') == []
+    with pytest.raises(KeyError):
+        repository.save_session(session.model_copy(update={'customer_id': 'other_customer'}))
     record = IdempotencyRecord(
         actor_id=claim.customer_id,
         route='/api/v1/claims',

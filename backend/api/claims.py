@@ -1,21 +1,25 @@
+from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantSession,
+    ClaimListResponse,
     CreateClaimRequest,
     CreateClaimResponse,
     FormPatchRequest,
     FormPatchResponse,
     StartSessionRequest,
+    WorkflowState,
 )
 from backend.repositories.protocols import ClaimRepository
 from backend.services.claims import (
     get_claim,
     get_session,
+    list_claims,
     start_claim,
     start_session,
     update_form,
@@ -36,6 +40,25 @@ def create_claim(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> CreateClaimResponse:
     return start_claim(repository_for(request), principal, payload, idempotency_key)
+
+
+@router.get('', response_model=ClaimListResponse)
+def read_claims(
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    workflow_state: WorkflowState | None = Query(default=None),
+    updated_after: datetime | None = Query(default=None),
+) -> ClaimListResponse:
+    return list_claims(
+        repository_for(request),
+        principal,
+        limit=limit,
+        cursor=cursor,
+        workflow_state=workflow_state,
+        updated_after=updated_after,
+    )
 
 
 @router.get('/{claim_id}', response_model=ClaimantClaim)

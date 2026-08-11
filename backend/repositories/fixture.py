@@ -53,6 +53,9 @@ class FixtureRepository(PersistenceRepository):
         return deepcopy(session)
 
     def save_session(self, session: SessionRecord) -> None:
+        claim = self._claims.get(session.claim_id)
+        if claim is None or claim.customer_id != session.customer_id:
+            raise KeyError(session.claim_id)
         self._sessions[session.session_id] = deepcopy(session)
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
@@ -60,6 +63,20 @@ class FixtureRepository(PersistenceRepository):
         if claim is None or claim.active_session_id is None:
             return None
         return self.get_session(claim_id, claim.active_session_id, customer_id)
+
+    def list_sessions_for_claim(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[SessionRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        sessions = [
+            deepcopy(session)
+            for session in self._sessions.values()
+            if session.claim_id == claim_id and session.customer_id == customer_id
+        ]
+        return sorted(sessions, key=lambda session: session.started_at)
 
     def find_idempotency(
         self,

@@ -35,6 +35,9 @@ class ClaimRepository(Protocol):
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         raise NotImplementedError
 
+    def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
+        raise NotImplementedError
+
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
         raise NotImplementedError
 
@@ -52,6 +55,13 @@ class ClaimRepository(Protocol):
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         raise NotImplementedError
 
+    def list_sessions_for_claim(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[SessionRecord]:
+        raise NotImplementedError
+
     def find_idempotency(
         self,
         actor_id: str,
@@ -66,9 +76,6 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
-
-    def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
-        raise NotImplementedError
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError

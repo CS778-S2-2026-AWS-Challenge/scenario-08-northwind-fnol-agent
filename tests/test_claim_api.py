@@ -1,5 +1,10 @@
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 from httpx import Response
+
+from backend.domain.models import SessionRecord, SessionStatus
+from backend.repositories.fixture import FixtureRepository
 
 
 def create_claim(
@@ -251,3 +256,156 @@ def test_resumed_session_idempotency_replays_and_rejects_conflicting_payload(
     assert replay.json()['session_id'] == first.json()['session_id']
     assert conflict.status_code == 409
     assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+def test_claim_collection_filters_ownership_and_paginates_updated_claims(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    first = create_claim(client, auth_headers, key='list-1').json()['claim']
+    second = create_claim(client, auth_headers, key='list-2').json()['claim']
+    client.patch(
+        f'/api/v1/claims/{first["claim_id"]}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={'updates': [{'field_code': 'incident.description', 'value': 'Updated'}]},
+    )
+
+    owned_claim = repository.get_claim(second['claim_id'], 'cus_demo')
+    assert owned_claim is not None
+    updated_claim = repository.get_claim(first['claim_id'], 'cus_demo')
+    assert updated_claim is not None
+    repository.save_claim(
+        updated_claim.model_copy(
+            update={'updated_at': owned_claim.updated_at + timedelta(seconds=1)}
+        ),
+        expected_revision=updated_claim.revision,
+    )
+    other_claim = owned_claim.model_copy(
+        update={
+            'claim_id': 'clm_other',
+            'customer_id': 'cus_other',
+            'active_session_id': 'ses_other',
+        }
+    )
+    other_session = SessionRecord(
+        session_id='ses_other',
+        claim_id=other_claim.claim_id,
+        customer_id=other_claim.customer_id,
+        started_at=other_claim.created_at,
+        last_active_at=other_claim.created_at,
+    )
+    repository.create_claim(other_claim, other_session)
+
+    page_one = client.get(
+        '/api/v1/claims?limit=1&workflow_state=collecting',
+        headers=auth_headers,
+    )
+    cursor = page_one.json()['page']['next_cursor']
+    page_two = client.get(f'/api/v1/claims?limit=1&cursor={cursor}', headers=auth_headers)
+    updated_after = client.get(
+        '/api/v1/claims',
+        headers=auth_headers,
+        params={'updated_after': second['updated_at']},
+    )
+
+    assert page_one.status_code == 200
+    assert page_one.json()['items'][0]['claim_id'] == first['claim_id']
+    assert page_one.json()['items'][0]['revision'] == 2
+    assert page_one.json()['items'][0]['can_resume'] is True
+    assert 'customer_id' not in page_one.json()['items'][0]
+    assert 'fraud_signal' not in page_one.json()['items'][0]
+    assert cursor is not None
+    assert page_two.status_code == 200
+    assert page_two.json()['items'][0]['claim_id'] == second['claim_id']
+    assert page_two.json()['page']['next_cursor'] is None
+    assert updated_after.status_code == 200
+    assert [item['claim_id'] for item in updated_after.json()['items']] == [first['claim_id']]
+
+
+def test_claim_collection_rejects_invalid_filter_and_cursor(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    invalid_state = client.get(
+        '/api/v1/claims?workflow_state=invented',
+        headers=auth_headers,
+    )
+    invalid_cursor = client.get('/api/v1/claims?cursor=not-a-cursor', headers=auth_headers)
+    missing_timezone = client.get(
+        '/api/v1/claims?updated_after=2026-08-11T10:00:00',
+        headers=auth_headers,
+    )
+
+    assert invalid_state.status_code == 422
+    assert invalid_state.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert invalid_cursor.status_code == 422
+    assert invalid_cursor.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert missing_timezone.status_code == 422
+    assert missing_timezone.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert missing_timezone.json()['error']['details'][0]['field'] == 'updated_after'
+
+
+def test_claim_remains_readable_across_multiple_persisted_sessions(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='multiple-sessions').json()
+    claim_id = created['claim']['claim_id']
+    first_session_id = created['session']['session_id']
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert first_session is not None
+    assert claim is not None
+
+    paused_session = first_session.model_copy(
+        update={
+            'status': SessionStatus.PAUSED,
+            'summary': 'The claimant confirmed the first incident description.',
+        }
+    )
+    repository.save_session(paused_session)
+    second_session = SessionRecord(
+        session_id='ses_second',
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        context_revision=claim.revision,
+        started_at=first_session.started_at + timedelta(seconds=1),
+        last_active_at=first_session.last_active_at + timedelta(seconds=1),
+    )
+    repository.save_session(second_session)
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'active_session_id': second_session.session_id,
+                'revision': claim.revision + 1,
+                'updated_at': second_session.started_at,
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+
+    first_read = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{first_session_id}',
+        headers=auth_headers,
+    )
+    second_read = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{second_session.session_id}',
+        headers=auth_headers,
+    )
+    claim_read = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+
+    assert first_read.status_code == 200
+    assert first_read.json()['status'] == 'paused'
+    assert first_read.json()['resume']['summary'] == paused_session.summary
+    assert second_read.status_code == 200
+    assert second_read.json()['status'] == 'active'
+    assert claim_read.status_code == 200
+    assert claim_read.json()['revision'] == 2
+    assert [
+        session.session_id for session in repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    ] == [
+        first_session_id,
+        second_session.session_id,
+    ]

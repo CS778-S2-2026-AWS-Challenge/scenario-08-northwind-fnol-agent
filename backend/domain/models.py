@@ -295,6 +295,27 @@ class ClaimantClaim(ContractModel):
     updated_at: datetime
 
 
+class ClaimListItem(ContractModel):
+    claim_id: str
+    revision: int
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    external_claim: dict[str, Any] | None = None
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+    can_resume: bool
+
+
+class PageInfo(ContractModel):
+    next_cursor: str | None = None
+
+
+class ClaimListResponse(ContractModel):
+    items: list[ClaimListItem]
+    page: PageInfo
+
+
 class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str

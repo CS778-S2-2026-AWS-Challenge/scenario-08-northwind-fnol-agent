@@ -619,6 +619,10 @@ Returns only the authenticated claimant's reports. Each item contains `claim_id`
 
 Filters: `workflow_state`, `updated_after`, plus standard pagination.
 
+Response `200` uses the standard collection envelope. Each item contains
+`claim_id`, `revision`, `incident_type`, `workflow_state`, `external_claim`,
+`customer_next_step`, `created_at`, `updated_at`, and `can_resume`.
+
 ### `GET /api/v1/claims/{claim_id}`
 
 Response `200`:
