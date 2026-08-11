@@ -9,11 +9,12 @@ The analysis combines:
 - exploratory survey results;
 - three user personas: First-Time Claimant, Efficiency-Seeking Claimant, and Urgent or Complex Claimant;
 - existing FNOL process and field analysis;
+- secondary research into staff intake, operational workload, and multi-party handoff;
 - public customer reviews and complaints;
 - official and industry research;
 - research into AI-to-human handoff and context continuity.
 
-The percentages in this document are exploratory survey findings. They support early prioritisation but should not be interpreted as population estimates.
+The percentages in this document are exploratory claimant survey findings. They support early prioritisation but should not be interpreted as population estimates or evidence of employee experience. Employee-side findings are based on published process and operational evidence and remain subject to validation through staff research.
 
 ## Executive Finding
 
@@ -399,6 +400,111 @@ Evidence requests, delays, exclusions, and decisions are often presented as outc
 
 ---
 
+## Employee-Side Pain Points
+
+### Research boundary
+
+The following pain points supplement the claimant analysis with the needs of Claims Professionals and Claims Operations. They are limited to findings with comparatively strong secondary evidence: published insurer information requirements, reported operating volumes and surge conditions, and documented involvement of repairers, assessors, and other specialists.
+
+These findings show where work and coordination pressure can arise, but they do not directly measure employee frustration, handling time, or system usability. They should therefore be treated as evidence-informed operational pain points pending staff interviews, observation, or workflow data.
+
+## Prioritised Employee Pain Point Map
+
+| ID | Pain point | Employee stage | Primary internal users | Priority |
+|---|---|---|---|:---:|
+| **E1** | Intake requirements are information-intensive and vary substantially by claim type | Intake and completeness checking | Claims Professional; Claims Operations | **Critical** |
+| **E2** | High and event-driven claim volumes create workload and prioritisation pressure | Queue management and triage | Claims Operations; Claims Professional | **Critical** |
+| **E3** | Evidence and responsibility must be coordinated across staff, repairers, assessors, and specialists | Handoff and progression | Claims Professional; Claims Operations | **High** |
+
+---
+
+## E1. Information-Intensive and Claim-Specific Intake
+
+### Employee problem
+
+FNOL can require customer, policy, incident, date, location, damage, driver, third-party, witness, police, and supporting-document information. The required fields and evidence change substantially across vehicle, contents, property, business, travel, pet, and other claim types.
+
+### Supporting evidence
+
+- AA Insurance's published online-claim guidance requests policy and policyholder details, incident circumstances, damage or loss information, people involved, date and time, and potentially proof of ownership. Vehicle claims add driver and third-party details. [AA Insurance — How can I report a claim online?](https://www.aainsurance.co.nz/help/article/360020406712-How-can-I-report-a-claim-online)
+- Tower publishes different evidence requirements by claim type, including photos, receipts, police reports, repair reports, invoices, travel documents, income evidence, and veterinary records. [Tower — Claims](https://www.tower.co.nz/claims/)
+- AMI's motor-claim guidance includes other-driver, witness, incident, driver, licence, vehicle, medication or substance, and driveability information. [AMI — Information required following an accident](https://www.ami.co.nz/faqs/what-information-is-required-when-making-a-claim-following-an-accident)
+
+### Employee impact
+
+- Staff or supporting systems must identify which information applies to the specific event.
+- Missing or incorrectly routed information can create follow-up work before the claim can progress.
+- Evidence must be connected to the correct claim facts and assessed for completeness.
+- Static intake can either omit necessary information or collect unnecessary information that staff must review.
+
+### Root cause
+
+Insurance products and incident circumstances produce conditional information requirements, while customers naturally report events as narratives. The intake process must translate each narrative into the correct structured fields and evidence requirements.
+
+### Pain point statement
+
+> Claims Professionals need a structured and claim-specific intake because varying information and evidence requirements make completeness checking and initial routing operationally demanding.
+
+---
+
+## E2. High and Event-Driven Workload Pressure
+
+### Employee problem
+
+Claims operations handle large interaction and claim volumes, and severe-weather events can create sudden increases in demand. Digital submission reduces some customer effort but does not remove downstream completeness checking, exception handling, coordination, or communication work.
+
+### Supporting evidence
+
+- Published AA operational material reports high contact-centre and transaction volumes, together with significant peak-day demand. [AA — Publications](https://www.aa.co.nz/about/newsroom/aa-publications/)
+- Tower reports substantial digital claim adoption, straight-through processing, automated payments and notifications, while also reporting increased claim volumes during severe-weather events. This indicates that automation and operational surge pressure coexist. [Tower company analysis](https://www.nzx.com/companies/TWR/analysis)
+- Tower's published operating information describes the use of repair networks and third-party assessment capacity during large events, showing the need to scale beyond routine internal processing. [Tower company announcement](https://company-announcements.afr.com/asx/twr/cb12ebbe-0c3f-11f1-8789-7e28c6b9dd8d.pdf)
+
+### Employee impact
+
+- New and urgent claims may compete for limited staff attention during peak periods.
+- Manual effort that is small per claim can become material at high volume.
+- Staff need to distinguish cases ready to progress from those awaiting evidence, professional review, or urgent action.
+- Poor prioritisation can increase queue age, repeat customer contact, and service delays.
+
+### Root cause
+
+Claim demand is both high-volume and variable, while claims differ in urgency, completeness, complexity, and required authority. A simple arrival-order queue cannot consistently represent the safest or most useful next action.
+
+### Pain point statement
+
+> Claims Operations need clear prioritisation, state, ownership, and service timing because high and event-driven volumes make manual queue coordination difficult to scale.
+
+---
+
+## E3. Multi-Party Evidence and Handoff Coordination
+
+### Employee problem
+
+Claims can move between internal claims staff, repairers, assessors, brokers, engineers, builders, and other specialists. Progress depends on transferring the relevant facts, evidence, responsibility, and requested action to the next participant.
+
+### Supporting evidence
+
+- Tower reports that a substantial share of motor claims is handled through repair shops and its preferred repairer network, demonstrating that external providers are a normal part of claim progression. [Tower company analysis](https://www.nzx.com/companies/TWR/analysis)
+- Tower also describes third-party assessment capacity during severe-weather events, when coordination demands increase. [Tower company announcement](https://company-announcements.afr.com/asx/twr/cb12ebbe-0c3f-11f1-8789-7e28c6b9dd8d.pdf)
+- IFSO case studies show complex claims depending on engineering reports, builder quotations, policy interpretation, and additional review. These cases demonstrate the operational importance of connecting evidence and reasoning across participants. [IFSO — Case studies](https://www.ifso.nz/case-studies/)
+
+### Employee impact
+
+- The receiving party must understand what is confirmed, missing, conflicting, or pending.
+- Unclear ownership or requested action can delay the next processing step.
+- Evidence may require repeated review when its relationship to the incident or decision is not visible.
+- Staff may need to reconstruct context before applying judgement or progressing the claim.
+
+### Root cause
+
+Claim information is produced by multiple participants at different stages. A channel transfer or task assignment does not by itself guarantee that the complete claim context, evidence state, and responsibility move with it.
+
+### Pain point statement
+
+> Claims Professionals need a complete and traceable handoff because multi-party claims cannot progress efficiently when evidence state, ownership, and the requested next action are fragmented.
+
+---
+
 ## Pain Points by Persona
 
 | Pain point | First-Time Claimant | Efficiency-Seeking Claimant | Urgent or Complex Claimant |
@@ -457,6 +563,16 @@ The pain points suggest that future concepts should be evaluated against the fol
 
 These are evaluation criteria derived from pain points, not a commitment to a specific technical implementation.
 
+### Employee-side evaluation criteria
+
+- present one shared claim state rather than requiring staff to maintain a second status record;
+- show confirmed, missing, pending, conflicting, and low-confidence information separately;
+- preserve field provenance so staff can distinguish claimant statements, documents, system data, and AI-generated proposals;
+- support operational views for urgent, new or untriaged, awaiting-evidence, professional-review, and ready-to-progress cases;
+- make ownership, requested action, priority, and service timing visible;
+- package the incident summary, structured fields, evidence state, gaps, conflicts, and handoff reason for the receiving party;
+- write staff actions back to shared claim state and produce an appropriate claimant-facing update.
+
 ## Research Limitations
 
 - The survey sample was small and exploratory; percentages should not be treated as population estimates.
@@ -465,6 +581,9 @@ These are evaluation criteria derived from pain points, not a commitment to a sp
 - Public reviews are self-selected individual experiences and cannot measure issue frequency.
 - Official weather-event findings may not represent every routine claim type.
 - Agent-to-human context loss is supported as an industry risk, but its presence in a specific insurer must be confirmed through journey testing or interviews.
+- Employee-side pain points are derived from published process and operational evidence rather than direct staff interviews or observation.
+- Published operating volumes establish scale and variability but do not by themselves quantify employee effort, frustration, or usability problems.
+- Multi-party claim processes establish a coordination requirement but do not prove that a particular insurer loses information during handoff.
 - Further validation should include semi-structured interviews, usability testing, staff research, and direct testing of existing FNOL channels.
 
 ## Key Sources
@@ -476,10 +595,17 @@ These are evaluation criteria derived from pain points, not a commitment to a sp
 - [Salesforce — Customer Expectations](https://www.salesforce.com/small-business/what-are-customer-expectations/)
 - [Genesys — State of Customer Experience](https://www.genesys.com/resources/state-of-cx)
 - [Microsoft Learn — Bot-to-human handoff](https://learn.microsoft.com/en-us/azure/bot-service/bot-service-design-pattern-handoff-human?view=azure-bot-service-4.0)
+- [AA Insurance — How can I report a claim online?](https://www.aainsurance.co.nz/help/article/360020406712-How-can-I-report-a-claim-online)
+- [Tower — Claims](https://www.tower.co.nz/claims/)
+- [AMI — Information required following an accident](https://www.ami.co.nz/faqs/what-information-is-required-when-making-a-claim-following-an-accident)
+- [Tower — Company analysis](https://www.nzx.com/companies/TWR/analysis)
+- [IFSO — Case studies](https://www.ifso.nz/case-studies/)
 
 ## Summary
 
 > The most important FNOL pain is the loss of control created by unclear requirements, fragmented context, invisible progress, and uncertain human support.
 
 Users do not simply want a faster form. They want to know what to do, provide information once, understand what is happening, correct misunderstandings, and reach a responsible human when the situation requires judgement.
+
+Claims staff do not simply need more automation. They need complete and claim-specific intake, actionable prioritisation during routine and surge demand, and traceable evidence and responsibility across handoffs. These employee-side findings support the workbench and handoff requirements but still require validation through direct staff research.
 
