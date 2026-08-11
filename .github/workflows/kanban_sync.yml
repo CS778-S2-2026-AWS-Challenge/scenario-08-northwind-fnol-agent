@@ -1,0 +1,407 @@
+name: Kanban Sync
+
+on:
+  schedule:
+    # Poll every 15 minutes during a UTC window that covers Auckland work hours
+    # in both NZST and NZDT. The job applies the exact local-time guard.
+    - cron: "7,22,37,52 20-23 * * 0-4"
+    - cron: "7,22,37,52 0-6 * * 1-5"
+  workflow_dispatch:
+  pull_request_target:
+    types:
+      - opened
+      - ready_for_review
+      - converted_to_draft
+      - reopened
+      - closed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kanban-sync
+  cancel-in-progress: false
+
+env:
+  PROJECT_OWNER: CS778-S2-2026-AWS-Challenge
+  PROJECT_NUMBER: "12"
+  PROJECT_ID: PVT_kwDOEp1gU84BfaGk
+  TARGET_REPOSITORY: CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent
+  TRACKING_FIELD: Tracking
+  REPOSITORY_TRACKING_OPTION: Repository issue
+
+jobs:
+  promote-ready-drafts:
+    name: Promote ready repository drafts
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check Auckland work window
+        id: work-window
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run bypasses the scheduled work-window guard."
+            exit 0
+          fi
+
+          weekday=$(TZ=Pacific/Auckland date +%u)
+          local_time=$(TZ=Pacific/Auckland date +%H%M)
+          if (( weekday >= 1 && weekday <= 5 && 10#$local_time >= 1000 && 10#$local_time < 1800 )); then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled run is inside the Auckland work window."
+          else
+            echo "should-run=false" >> "$GITHUB_OUTPUT"
+            echo "Scheduled run is outside the Auckland work window."
+          fi
+
+      - name: Validate Project credential
+        if: steps.work-window.outputs.should-run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.KANBAN_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::Repository secret KANBAN_PROJECT_TOKEN is not configured."
+            exit 1
+          fi
+
+      - name: Convert eligible drafts to issues
+        if: steps.work-window.outputs.should-run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.KANBAN_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fields_file="$RUNNER_TEMP/project-fields.json"
+          items_file="$RUNNER_TEMP/project-items.json"
+
+          gh project field-list "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --format json > "$fields_file"
+
+          tracking_field_count=$(jq \
+            --arg field "$TRACKING_FIELD" \
+            '[.fields[] | select(.name == $field)] | length' \
+            "$fields_file")
+          if [[ "$tracking_field_count" -ne 1 ]]; then
+            echo "::error::Expected exactly one Project field named '$TRACKING_FIELD'."
+            exit 1
+          fi
+
+          for required_option in "$REPOSITORY_TRACKING_OPTION" "Delivery without repo"; do
+            if ! jq -e \
+              --arg field "$TRACKING_FIELD" \
+              --arg option "$required_option" \
+              '.fields[] | select(.name == $field) | .options[] | select(.name == $option)' \
+              "$fields_file" > /dev/null; then
+              echo "::error::Tracking option '$required_option' is missing."
+              exit 1
+            fi
+          done
+
+          gh project item-list "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --limit 1000 \
+            --format json > "$items_file"
+
+          repository_id=$(gh api graphql \
+            -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}' \
+            -f owner="${TARGET_REPOSITORY%%/*}" \
+            -f name="${TARGET_REPOSITORY#*/}" \
+            --jq '.data.repository.id')
+
+          mapfile -t candidate_ids < <(jq -r \
+            --arg tracking "$REPOSITORY_TRACKING_OPTION" \
+            '.items[]
+              | select(.content.type == "DraftIssue")
+              | select(.status == "Ready")
+              | select(.tracking == $tracking)
+              | .id' \
+            "$items_file")
+
+          converted=0
+          invalid=0
+          failed=0
+
+          echo "## Kanban sync" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          for item_id in "${candidate_ids[@]}"; do
+            item=$(jq -c --arg id "$item_id" '.items[] | select(.id == $id)' "$items_file")
+            title=$(jq -r '.title' <<< "$item")
+            body=$(jq -r '.content.body // ""' <<< "$item")
+            estimate=$(jq -r '.estimate // empty' <<< "$item")
+            size=$(jq -r '.size // empty' <<< "$item")
+            start_date=$(jq -r '."start date" // empty' <<< "$item")
+            target_date=$(jq -r '."target date" // empty' <<< "$item")
+            draft_issue_id=$(jq -r '.content.id' <<< "$item")
+            assignee_count=$(jq '.assignees // [] | length' <<< "$item")
+            expected_assignees=$(jq -c '.assignees // [] | sort' <<< "$item")
+            validation_errors=()
+
+            if (( assignee_count < 1 )); then
+              validation_errors+=("at least one Assignee")
+            fi
+            if [[ -z "$estimate" ]]; then
+              validation_errors+=("Estimate")
+            fi
+            if [[ -z "$size" ]]; then
+              validation_errors+=("Size")
+            fi
+            if [[ -z "$start_date" ]]; then
+              validation_errors+=("Start date")
+            fi
+            if [[ -z "$target_date" ]]; then
+              validation_errors+=("Target date")
+            fi
+            if ! grep -qE '^## Acceptance[[:space:]]*$' <<< "$body"; then
+              validation_errors+=("Acceptance section")
+            fi
+            if ! grep -qE '^## Dependencies[[:space:]]*$' <<< "$body"; then
+              validation_errors+=("Dependencies section")
+            fi
+
+            expected_size=""
+            case "$estimate" in
+              1) expected_size="XS" ;;
+              2) expected_size="S" ;;
+              3) expected_size="M" ;;
+              4) expected_size="L" ;;
+              5|6) expected_size="XL" ;;
+              "") ;;
+              *) validation_errors+=("supported Estimate from 1 to 6 hours") ;;
+            esac
+            if [[ -n "$expected_size" && "$size" != "$expected_size" ]]; then
+              validation_errors+=("Size $expected_size for Estimate ${estimate}h")
+            fi
+
+            dependency_section=$(awk '
+              /^## Dependencies[[:space:]]*$/ { found=1; next }
+              found && /^## / { exit }
+              found { print }
+            ' <<< "$body")
+            mapfile -t dependency_ids < <(
+              grep -oE '(AM|PM|D[0-9]+)-[A-Z][0-9]{2}' <<< "$dependency_section" \
+                | sort -u \
+                || true
+            )
+
+            if grep -qiE '(^|[[:space:]])through([[:space:]]|$)' <<< "$dependency_section"; then
+              validation_errors+=("explicit dependency IDs instead of a range")
+            fi
+            if (( ${#dependency_ids[@]} == 0 )) && \
+              ! grep -qiE '^[[:space:]]*-[[:space:]]*None\.?[[:space:]]*$' <<< "$dependency_section"; then
+              validation_errors+=("Dependencies entries or '- None'")
+            fi
+
+            for dependency_id in "${dependency_ids[@]}"; do
+              mapfile -t dependency_statuses < <(jq -r \
+                --arg dependency "$dependency_id" \
+                '.items[]
+                  | select(.title == $dependency or (.title | startswith($dependency + " ")))
+                  | .status // ""' \
+                "$items_file")
+
+              if (( ${#dependency_statuses[@]} != 1 )); then
+                validation_errors+=("one Project card for dependency $dependency_id")
+              elif [[ "${dependency_statuses[0]}" != "Done" ]]; then
+                validation_errors+=("dependency $dependency_id to be Done")
+              fi
+            done
+
+            if (( ${#validation_errors[@]} > 0 )); then
+              invalid=$((invalid + 1))
+              message=$(IFS=', '; echo "${validation_errors[*]}")
+              echo "::warning title=Draft not converted::$title needs $message."
+              printf -- '- Skipped `%s`: needs %s.\n' "$title" "$message" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            work_window_count=$(grep -cE '^## Planned work window[[:space:]]*$' <<< "$body" || true)
+            if (( work_window_count > 1 )); then
+              echo "::error title=Duplicate planned work window::$title has more than one Planned work window section."
+              printf -- '- Failed `%s`: duplicate Planned work window sections.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+              failed=$((failed + 1))
+              continue
+            elif (( work_window_count == 1 )); then
+              if ! grep -qE "^- Date: ${start_date}[[:space:]]*$" <<< "$body" || \
+                ! grep -qE '^- Time: 10:00-18:00 Pacific/Auckland[[:space:]]*$' <<< "$body"; then
+                echo "::error title=Invalid planned work window::$title does not match its Start date or agreed work hours."
+                printf -- '- Failed `%s`: Planned work window does not match Start date or work hours.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+                failed=$((failed + 1))
+                continue
+              fi
+            else
+              updated_body="${body%$'\n'}"
+              updated_body+=$'\n\n## Planned work window\n- Date: '
+              updated_body+="$start_date"
+              updated_body+=$'\n- Time: 10:00-18:00 Pacific/Auckland'
+              update_draft_mutation='mutation($draftIssueId:ID!,$body:String!){updateProjectV2DraftIssue(input:{draftIssueId:$draftIssueId,body:$body}){draftIssue{id}}}'
+              if ! gh api graphql \
+                -f query="$update_draft_mutation" \
+                -f draftIssueId="$draft_issue_id" \
+                -f body="$updated_body" \
+                --silent; then
+                failed=$((failed + 1))
+                echo "::error title=Draft body update failed::$title could not receive its Planned work window."
+                printf -- '- Failed `%s`: could not add the Planned work window.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
+            fi
+
+            mutation='mutation($itemId:ID!,$repositoryId:ID!){convertProjectV2DraftIssueItemToIssue(input:{itemId:$itemId,repositoryId:$repositoryId}){item{id content{... on Issue{number url}}}}}'
+            if ! result=$(gh api graphql \
+              -f query="$mutation" \
+              -f itemId="$item_id" \
+              -f repositoryId="$repository_id"); then
+              failed=$((failed + 1))
+              echo "::error title=Draft conversion failed::$title could not be converted."
+              printf -- '- Failed `%s`: GraphQL conversion failed.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            issue_number=$(jq -r '.data.convertProjectV2DraftIssueItemToIssue.item.content.number // empty' <<< "$result")
+            issue_url=$(jq -r '.data.convertProjectV2DraftIssueItemToIssue.item.content.url // empty' <<< "$result")
+            if [[ -z "$issue_number" || -z "$issue_url" ]]; then
+              failed=$((failed + 1))
+              echo "::error title=Draft conversion returned no issue::$title returned an incomplete response."
+              printf -- '- Failed `%s`: conversion returned no Issue.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            actual_assignees=$(gh issue view "$issue_number" \
+              --repo "$TARGET_REPOSITORY" \
+              --json assignees \
+              --jq '[.assignees[].login] | sort')
+            if [[ "$actual_assignees" != "$expected_assignees" ]]; then
+              failed=$((failed + 1))
+              echo "::error title=Assignee verification failed::Issue #$issue_number does not preserve the planned Assignees."
+              printf -- '- Failed [%s](%s): Assignees did not match the Draft.\n' "$title" "$issue_url" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            converted=$((converted + 1))
+            printf -- '- Converted [%s](%s) with %s Assignee(s).\n' "$title" "$issue_url" "$assignee_count" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Converted: $converted; invalid: $invalid; failed: $failed." >> "$GITHUB_STEP_SUMMARY"
+
+          if (( invalid > 0 || failed > 0 )); then
+            exit 1
+          fi
+
+  sync-pull-request-status:
+    name: Sync linked issue review status
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate Project credential
+        env:
+          GH_TOKEN: ${{ secrets.KANBAN_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::Repository secret KANBAN_PROJECT_TOKEN is not configured."
+            exit 1
+          fi
+
+      - name: Update linked Issue status
+        env:
+          GH_TOKEN: ${{ secrets.KANBAN_PROJECT_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$PR_ACTION" in
+            closed)
+              if [[ "$PR_MERGED" == "true" ]]; then
+                target_status="Done"
+              else
+                target_status="In progress"
+              fi
+              ;;
+            converted_to_draft)
+              target_status="In progress"
+              ;;
+            opened|reopened)
+              if [[ "$PR_DRAFT" == "true" ]]; then
+                target_status="In progress"
+              else
+                target_status="In review"
+              fi
+              ;;
+            ready_for_review)
+              target_status="In review"
+              ;;
+            *)
+              echo "No status rule for pull request action '$PR_ACTION'."
+              exit 0
+              ;;
+          esac
+
+          fields_file="$RUNNER_TEMP/project-fields.json"
+          gh project field-list "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" \
+            --format json > "$fields_file"
+          status_field_id=$(jq -r '.fields[] | select(.name == "Status") | .id' "$fields_file")
+          status_option_id=$(jq -r \
+            --arg status "$target_status" \
+            '.fields[] | select(.name == "Status") | .options[] | select(.name == $status) | .id' \
+            "$fields_file")
+          if [[ -z "$status_field_id" || -z "$status_option_id" ]]; then
+            echo "::error::Project Status field or '$target_status' option was not found."
+            exit 1
+          fi
+
+          query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:50){nodes{number url projectItems(first:20){nodes{id project{id}}}}}}}}'
+          pr_data=$(gh api graphql \
+            -f query="$query" \
+            -f owner="${TARGET_REPOSITORY%%/*}" \
+            -f name="${TARGET_REPOSITORY#*/}" \
+            -F number="$PR_NUMBER")
+
+          mapfile -t linked_items < <(jq -c \
+            --arg project "$PROJECT_ID" \
+            '.data.repository.pullRequest.closingIssuesReferences.nodes[]
+              | . as $issue
+              | .projectItems.nodes[]
+              | select(.project.id == $project)
+              | {itemId: .id, issueNumber: $issue.number, issueUrl: $issue.url}' \
+            <<< "$pr_data")
+
+          echo "## Pull request status sync" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if (( ${#linked_items[@]} == 0 )); then
+            echo "No closing Issue in Project 12 is linked to PR #$PR_NUMBER." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::PR #$PR_NUMBER has no closing Issue in Project 12. Use a closing keyword such as 'Closes #123'."
+            exit 0
+          fi
+
+          mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{singleSelectOptionId:$optionId}}){projectV2Item{id}}}'
+          for linked_item in "${linked_items[@]}"; do
+            item_id=$(jq -r '.itemId' <<< "$linked_item")
+            issue_number=$(jq -r '.issueNumber' <<< "$linked_item")
+            issue_url=$(jq -r '.issueUrl' <<< "$linked_item")
+            gh api graphql \
+              -f query="$mutation" \
+              -f projectId="$PROJECT_ID" \
+              -f itemId="$item_id" \
+              -f fieldId="$status_field_id" \
+              -f optionId="$status_option_id" \
+              --silent
+            printf -- '- Set [Issue #%s](%s) to `%s`.\n' "$issue_number" "$issue_url" "$target_status" >> "$GITHUB_STEP_SUMMARY"
+          done
