@@ -9,19 +9,30 @@ This document defines five evidence-informed personas for the First Notice of Lo
 
 The claimant personas were developed from an exploratory user survey, existing FNOL journeys and fields, public customer feedback, digital-claim research, and research into claim verification and fraud controls. The employee personas were developed from secondary research into published insurer intake requirements, operating volumes, surge conditions, and multi-party claim handoffs.
 
-The personas focus on behaviours, goals, needs, and claim situations. Demographic details such as age, occupation, and income are intentionally excluded because the evidence does not support them. Persona names are illustrative and are not demographic claims.
+The personas focus on behaviours, goals, needs, roles, and claim situations. Demographic details such as age, occupation, and income are intentionally excluded because the evidence does not support them. Role and situation labels are used instead of fictional personal names.
 
 All original survey values are preserved unchanged in **Appendix A — Claimant Survey Evidence**. Employee personas do not use claimant survey percentages and require direct staff validation.
+
+## Persona Standard
+
+This document applies the following professional persona conventions:
+
+- personas are evidence-informed archetypes, not fictional biographies or representations of individual participants;
+- each persona is identified by a role, experience state, or service situation rather than a personal name;
+- every persona uses the same structure: Snapshot, Context and Triggers, Goals, Behaviours, Jobs to Be Done, Pain Points, Needs, Desired Outcomes, Key Evidence, and Evidence Confidence;
+- observed or reported evidence is distinguished from research inference and desired product outcomes;
+- evidence confidence and required validation are stated explicitly;
+- claimant survey evidence and employee secondary research are kept separate.
 
 ## Persona Overview
 
 | Persona | Role or situation | Core problem | Primary outcome sought |
 |---|---|---|---|
-| **Nina — First-Time Claimant** | No previous claim experience | Does not know how to begin or what evidence matters | Complete FNOL correctly with clear guidance |
-| **Ethan — Efficiency-Seeking Claimant** | Previous claim experience | Rework, irrelevant questions, fragmented evidence requests, and unclear progress | Complete FNOL with minimal effort and receive proactive updates |
-| **Sarah — Urgent or Complex Claimant** | Urgent, complex, unusual, vulnerable, or disputed situation | Routine self-service cannot safely handle the case | Reach an authorised human with full context |
-| **Mia — Claims Professional** | Reviews, clarifies, and progresses individual claims | Intake can be incomplete, inconsistent, or difficult to reconstruct | Receive a complete, traceable, and actionable claim context |
-| **Jordan — Claims Operations Lead** | Manages queues, service flow, quality, and capacity | High and event-driven volumes make prioritisation and coordination difficult | Maintain safe, visible, and scalable claim operations |
+| **First-Time Claimant** | No previous claim experience | Does not know how to begin or what evidence matters | Complete FNOL correctly with clear guidance |
+| **Efficiency-Seeking Claimant** | Previous claim experience | Rework, irrelevant questions, fragmented evidence requests, and unclear progress | Complete FNOL with minimal effort and receive proactive updates |
+| **Urgent or Complex Claimant** | Urgent, complex, unusual, vulnerable, or disputed situation | Routine self-service cannot safely handle the case | Reach an authorised human with full context |
+| **Claims Professional** | Reviews, clarifies, and progresses individual claims | Intake can be incomplete, inconsistent, or difficult to reconstruct | Receive a complete, traceable, and actionable claim context |
+| **Claims Operations Lead** | Manages queues, service flow, quality, and capacity | High and event-driven volumes make prioritisation and coordination difficult | Maintain safe, visible, and scalable claim operations |
 
 The first two claimant personas are segmented by previous claim experience:
 
@@ -32,13 +43,13 @@ The third is a situational support mode that may apply to either experience segm
 
 ---
 
-## Persona 1: Nina — First-Time Claimant
+## Persona 1: First-Time Claimant
 
 ### Snapshot
 
 | Attribute | Description |
 |---|---|
-| **Persona type** | Claimant with no previous claim experience |
+| **Archetype type** | Experience-based claimant archetype |
 | **Survey segment** | 64.3% had never made an insurance claim |
 | **Typical situation** | A minor vehicle accident or another insured event has just occurred |
 | **Process familiarity** | Low; unfamiliar with the correct sequence, terminology, and evidence requirements |
@@ -105,13 +116,13 @@ The strongest signals are uncertainty about immediate action (77.8%), evidence c
 
 ---
 
-## Persona 2: Ethan — Efficiency-Seeking Claimant
+## Persona 2: Efficiency-Seeking Claimant
 
 ### Snapshot
 
 | Attribute | Description |
 |---|---|
-| **Persona type** | Claimant with previous claim experience |
+| **Archetype type** | Experience-based claimant archetype |
 | **Survey segment** | 35.7% had previously made an insurance claim |
 | **Typical situation** | Understands the basic idea of claiming but does not want another slow, fragmented process |
 | **Process familiarity** | Moderate; familiar with reporting and evidence but not every product or internal workflow |
@@ -180,13 +191,13 @@ Strong signals include evidence uncertainty (80%), unknown process duration (80%
 
 ---
 
-## Persona 3: Sarah — Urgent or Complex Claimant
+## Persona 3: Urgent or Complex Claimant
 
 ### Snapshot
 
 | Attribute | Description |
 |---|---|
-| **Persona type** | Situational support mode that may overlap with either claimant experience segment |
+| **Archetype type** | Situational claimant support archetype that may overlap with either experience segment |
 | **Typical situation** | Serious accident, injury, uninhabitable property, multi-party event, evidence conflict, or dispute |
 | **Process familiarity** | Variable; complexity may exceed self-service capability regardless of experience |
 | **Emotional state** | Highly stressed, vulnerable, and concerned about safety or major financial impact |
@@ -257,13 +268,13 @@ Human support is preferred after a serious or stressful incident (64.3%), for a 
 
 ---
 
-## Persona 4: Mia — Claims Professional
+## Persona 4: Claims Professional
 
 ### Snapshot
 
 | Attribute | Description |
 |---|---|
-| **Persona type** | Internal employee responsible for reviewing and progressing individual claims |
+| **Archetype type** | Role-based employee archetype responsible for reviewing and progressing individual claims |
 | **Typical situation** | Receives a new, incomplete, conflicting, urgent, or escalated FNOL |
 | **Process familiarity** | High, but dependent on the quality and traceability of incoming information |
 | **Emotional state** | Focused on accuracy and service; pressured when context must be reconstructed |
@@ -329,13 +340,13 @@ Published AA Insurance, Tower, and AMI claim guidance demonstrates substantial a
 
 ---
 
-## Persona 5: Jordan — Claims Operations Lead
+## Persona 5: Claims Operations Lead
 
 ### Snapshot
 
 | Attribute | Description |
 |---|---|
-| **Persona type** | Internal employee responsible for service flow, queues, capacity, quality, and governance |
+| **Archetype type** | Role-based employee archetype responsible for service flow, queues, capacity, quality, and governance |
 | **Typical situation** | Manages routine claim volumes and event-driven surges across teams and external providers |
 | **Process familiarity** | High; focused on portfolio-level state rather than one claim narrative |
 | **Emotional state** | Accountable for service quality and safety under changing demand |
@@ -403,7 +414,7 @@ Published AA and Tower material reports high interaction and claim volumes, peak
 
 ## Cross-Persona Comparison
 
-| Dimension | Nina | Ethan | Sarah | Mia | Jordan |
+| Dimension | First-Time Claimant | Efficiency-Seeking Claimant | Urgent or Complex Claimant | Claims Professional | Claims Operations Lead |
 |---|---|---|---|---|---|
 | **Primary focus** | Start correctly | Reduce rework | Reach responsible human support | Progress an individual claim | Manage service flow and capacity |
 | **Main uncertainty** | What to do and collect | Whether the process is complete and moving | Whether automation will recognise limits | Which facts are reliable and what action is required | Which work is urgent, ready, blocked, or unowned |
