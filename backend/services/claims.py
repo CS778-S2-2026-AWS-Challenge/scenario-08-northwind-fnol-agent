@@ -1,6 +1,8 @@
 import hashlib
 import json
 import re
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from binascii import Error as Base64Error
 from datetime import UTC, datetime
 
 from backend.core.auth import Principal
@@ -12,6 +14,8 @@ from backend.domain.models import (
     ActorType,
     ClaimantClaim,
     ClaimantSession,
+    ClaimListItem,
+    ClaimListResponse,
     ClaimState,
     CreateClaimRequest,
     CreateClaimResponse,
@@ -21,11 +25,13 @@ from backend.domain.models import (
     FormPatchResponse,
     FormSource,
     NeededFor,
+    PageInfo,
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
     StartSessionRequest,
     StructuredFormField,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.repositories.protocols import ClaimRepository, IdempotencyRecord, RevisionConflict
@@ -40,6 +46,33 @@ def now_utc() -> datetime:
 def request_fingerprint(payload: object) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def encode_cursor(offset: int) -> str:
+    return urlsafe_b64encode(str(offset).encode()).decode().rstrip('=')
+
+
+def decode_cursor(cursor: str | None) -> int:
+    if cursor is None:
+        return 0
+    try:
+        padded = cursor + '=' * (-len(cursor) % 4)
+        offset = int(urlsafe_b64decode(padded).decode())
+    except (Base64Error, UnicodeDecodeError, ValueError) as error:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The pagination cursor is invalid.',
+            details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
+        ) from error
+    if offset < 0:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The pagination cursor is invalid.',
+            details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
+        )
+    return offset
 
 
 def require_idempotency_key(key: str | None) -> str:
@@ -107,6 +140,20 @@ def _claimant_claim(claim: WorkingClaim) -> ClaimantClaim:
         customer_next_step=claim.customer_next_step,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
+    )
+
+
+def _claim_list_item(claim: WorkingClaim) -> ClaimListItem:
+    return ClaimListItem(
+        claim_id=claim.claim_id,
+        revision=claim.revision,
+        incident_type=claim.incident_type,
+        workflow_state=claim.claim_state.workflow_state,
+        external_claim=claim.external_claim,
+        customer_next_step=claim.customer_next_step,
+        created_at=claim.created_at,
+        updated_at=claim.updated_at,
+        can_resume=claim.customer_next_step.can_resume,
     )
 
 
@@ -209,6 +256,44 @@ def get_claim(repository: ClaimRepository, principal: Principal, claim_id: str) 
     if claim is None:
         raise _claim_not_found()
     return _claimant_claim(claim)
+
+
+def list_claims(
+    repository: ClaimRepository,
+    principal: Principal,
+    *,
+    limit: int,
+    cursor: str | None,
+    workflow_state: WorkflowState | None,
+    updated_after: datetime | None,
+) -> ClaimListResponse:
+    if updated_after is not None and updated_after.utcoffset() is None:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The updated_after filter must include a timezone offset.',
+            details=[
+                ErrorDetail(
+                    field='updated_after',
+                    reason='Use an ISO 8601 timestamp with a timezone offset.',
+                )
+            ],
+        )
+    claims = repository.list_claims_for_customer(principal.subject)
+    if workflow_state is not None:
+        claims = [claim for claim in claims if claim.claim_state.workflow_state == workflow_state]
+    if updated_after is not None:
+        claims = [claim for claim in claims if claim.updated_at > updated_after]
+    claims.sort(key=lambda claim: (claim.updated_at, claim.claim_id), reverse=True)
+
+    offset = decode_cursor(cursor)
+    page_claims = claims[offset : offset + limit]
+    next_offset = offset + len(page_claims)
+    next_cursor = encode_cursor(next_offset) if next_offset < len(claims) else None
+    return ClaimListResponse(
+        items=[_claim_list_item(claim) for claim in page_claims],
+        page=PageInfo(next_cursor=next_cursor),
+    )
 
 
 def start_session(
