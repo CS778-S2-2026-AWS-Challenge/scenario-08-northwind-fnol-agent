@@ -26,3 +26,66 @@ The service should:
 The project is in Sprint 1 and is building a full-path prototype. The prototype may use controlled scenarios and mock integrations, but each demonstrated path must change shared system state and remain traceable. Production integrations, security controls, and final business rules will be refined as Northwind data and AWS service availability are confirmed.
 
 Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+
+## Repository Layout
+
+| Path | Purpose |
+| --- | --- |
+| `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
+| `customer/` | React and Vite claimant experience |
+| `prototype/` | Static claimant and employee workbench demonstrators |
+| `tests/` | Backend unit, middleware, API, and fixture tests |
+| `SPEC/` | Current product requirements and acceptance scenarios |
+| `docs/` | API contract, engineering conventions, and research material |
+| `sprint/` | Time-bound sprint commitments and delivery flow |
+| `scripts/` | Repository-level development and verification commands |
+
+Backend packages have fixed responsibilities:
+
+- `backend/api/` validates and translates HTTP requests and responses.
+- `backend/core/` owns configuration and cross-cutting HTTP behaviour.
+- `backend/domain/` owns provider-independent claim state and business rules.
+- `backend/services/` coordinates domain rules and ports for application use cases.
+- `backend/repositories/` defines persistence protocols.
+- `backend/adapters/` implements replaceable external and provider integrations.
+
+Route handlers must not define private domain enums or access a provider SDK directly.
+
+## Local Development
+
+Use Python 3.12 and Node.js 22. On Windows, install dependencies from the repository root with:
+
+```powershell
+py -3.12 -m pip install -r backend/requirements-dev.txt
+npm ci --prefix customer
+```
+
+Start the backend:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In another terminal, start the claimant client:
+
+```powershell
+npm run dev --prefix customer
+```
+
+The Vite development server proxies `/api` requests to the local backend. The static employee workbench demonstrator is `prototype/employee-workbench-prototype.html` and does not require a server.
+
+Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
+
+## Verification
+
+Run the complete repository quality gate before requesting review:
+
+```powershell
+./scripts/check.ps1
+```
+
+After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run. The command checks backend formatting, linting, types, tests and coverage, then checks and builds the claimant client.
+
+## Contract Changes
+
+`docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.

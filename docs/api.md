@@ -1389,7 +1389,9 @@ Current implementation on 10 August 2026:
 
 | Existing route | Status | Migration |
 |---|---|---|
-| `GET /health` | Temporary process check | Retain temporarily; replace consumers with `/health/live` and `/health/ready`, then remove before `1.0.0` |
+| `GET /health` | Deprecated compatibility alias | Replace consumers with `/health/live`, then remove before `1.0.0` |
+| `GET /health/live` | Implemented process liveness check | Retain as the unauthenticated liveness endpoint |
+| `GET /health/ready` | Implemented foundation readiness check | Reports `degraded` and `not_configured` until persistence and integration adapters are introduced |
 | `POST /api/claims/message` | Temporary echo-style connectivity route | Replace with claim creation, session, and versioned message routes; do not extend this payload |
 
 The existing message route accepts only `message` and returns a fixed acknowledgement. It has no claim identity, session, persistence, form, evidence, decision, authorisation, or concurrency behaviour. New product code MUST NOT depend on it.
