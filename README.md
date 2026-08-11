@@ -89,3 +89,5 @@ After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a f
 ## Contract Changes
 
 `docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.
+
+The Day 3 claimant, Agent, API, fixture, and observable-state dependency map is [documented here](docs/day3-implementation-map.md). It is a planning contract, not a claim that full frontend-backend integration is complete.
