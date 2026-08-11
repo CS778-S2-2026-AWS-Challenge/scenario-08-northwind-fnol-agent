@@ -86,6 +86,36 @@ class ActorType(str, Enum):
     SYSTEM = 'system'
 
 
+class MessageVisibility(str, Enum):
+    CLAIMANT_VISIBLE = 'claimant_visible'
+    SHARED = 'shared'
+    INTERNAL_ONLY = 'internal_only'
+
+
+class EvidenceStatus(str, Enum):
+    RECEIVED = 'received'
+    UNOFFICIAL = 'unofficial'
+    INCOMPLETE = 'incomplete'
+    PENDING_GENERATION = 'pending_generation'
+    INCONSISTENT = 'inconsistent'
+
+
+class EvidenceFileStatus(str, Enum):
+    NOT_AVAILABLE = 'not_available'
+    AWAITING_UPLOAD = 'awaiting_upload'
+    UPLOADING = 'uploading'
+    UPLOADED = 'uploaded'
+    PROCESSING = 'processing'
+    READY = 'ready'
+    FAILED = 'failed'
+
+
+class EvidenceSource(str, Enum):
+    CLAIMANT = 'claimant'
+    STAFF = 'staff'
+    EXTERNAL_SYSTEM = 'external_system'
+
+
 class FormSource(str, Enum):
     CLAIMANT = 'claimant'
     IMAGE = 'image'
@@ -196,6 +226,39 @@ class SessionRecord(ContractModel):
     started_at: datetime
     last_active_at: datetime
     closed_at: datetime | None = None
+
+
+class MessageRecord(ContractModel):
+    """Durable message record; visibility is enforced before claimant projection."""
+
+    message_id: str
+    claim_id: str
+    session_id: str
+    client_message_id: str | None = None
+    actor: ActorType
+    visibility: MessageVisibility
+    content: dict[str, Any]
+    evidence_refs: list[str] = Field(default_factory=list)
+    in_reply_to: str | None = None
+    created_at: datetime
+
+
+class EvidenceRecord(ContractModel):
+    evidence_id: str
+    claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    source: EvidenceSource
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    claimant_note: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CreateClaimRequest(ContractModel):

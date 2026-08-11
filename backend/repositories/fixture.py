@@ -1,20 +1,22 @@
 from copy import deepcopy
 
-from backend.domain.models import SessionRecord, WorkingClaim
+from backend.domain.models import EvidenceRecord, MessageRecord, SessionRecord, WorkingClaim
 from backend.repositories.protocols import (
-    ClaimRepository,
     IdempotencyConflict,
     IdempotencyRecord,
+    PersistenceRepository,
     RevisionConflict,
 )
 
 
-class FixtureRepository(ClaimRepository):
+class FixtureRepository(PersistenceRepository):
     """In-memory repository used by the prototype and replaceable contract tests."""
 
     def __init__(self) -> None:
         self._claims: dict[str, WorkingClaim] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._messages: dict[str, MessageRecord] = {}
+        self._evidence: dict[str, EvidenceRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
     @property
@@ -73,3 +75,57 @@ class FixtureRepository(ClaimRepository):
         if existing is not None and existing.request_fingerprint != record.request_fingerprint:
             raise IdempotencyConflict(record.key)
         self._idempotency[lookup] = record
+
+    def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
+        claims = [
+            deepcopy(claim) for claim in self._claims.values() if claim.customer_id == customer_id
+        ]
+        return sorted(claims, key=lambda claim: claim.created_at)
+
+    def save_message(self, message: MessageRecord, customer_id: str) -> None:
+        if self.get_claim(message.claim_id, customer_id) is None:
+            raise KeyError(message.claim_id)
+        self._messages[message.message_id] = deepcopy(message)
+
+    def list_messages(
+        self,
+        claim_id: str,
+        session_id: str,
+        customer_id: str,
+    ) -> list[MessageRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        messages = [
+            deepcopy(message)
+            for message in self._messages.values()
+            if message.claim_id == claim_id and message.session_id == session_id
+        ]
+        return sorted(messages, key=lambda message: message.created_at)
+
+    def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
+        if self.get_claim(evidence.claim_id, customer_id) is None:
+            raise KeyError(evidence.claim_id)
+        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+
+    def get_evidence(
+        self,
+        claim_id: str,
+        evidence_id: str,
+        customer_id: str,
+    ) -> EvidenceRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        evidence = self._evidence.get(evidence_id)
+        if evidence is None or evidence.claim_id != claim_id:
+            return None
+        return deepcopy(evidence)
+
+    def list_evidence(self, claim_id: str, customer_id: str) -> list[EvidenceRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        evidence_records = [
+            deepcopy(evidence)
+            for evidence in self._evidence.values()
+            if evidence.claim_id == claim_id
+        ]
+        return sorted(evidence_records, key=lambda evidence: evidence.created_at)
