@@ -30,6 +30,7 @@ class Settings:
     cors_allow_origins: tuple[str, ...] = ('*',)
     cors_allow_credentials: bool = False
     expose_api_docs: bool = True
+    synthetic_claimant_token: str = 'synthetic-claimant'
 
     def __post_init__(self) -> None:
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
@@ -46,4 +47,8 @@ class Settings:
                 False,
             ),
             expose_api_docs=environment != 'production',
+            synthetic_claimant_token=os.getenv(
+                'NORTHWIND_SYNTHETIC_CLAIMANT_TOKEN',
+                'synthetic-claimant',
+            ),
         )
