@@ -28,6 +28,7 @@ from backend.domain.models import (
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
+    SessionStatus,
     StartSessionRequest,
     StructuredFormField,
     WorkflowState,
@@ -265,15 +266,39 @@ def start_session(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
+
     active_session = repository.get_active_session(claim_id, principal.subject)
-    if active_session is not None:
+    if active_session is not None and active_session.status is SessionStatus.ACTIVE:
         session = active_session
     else:
+        previous_sessions = repository.list_sessions_for_claim(
+            claim_id,
+            principal.subject,
+        )
+        resume_source = active_session
+        if resume_source is None and previous_sessions:
+            resume_source = max(
+                previous_sessions,
+                key=lambda item: (
+                    item.last_active_at,
+                    item.started_at,
+                    item.session_id,
+                ),
+            )
+
         timestamp = now_utc()
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
             customer_id=principal.subject,
+            summary=resume_source.summary if resume_source is not None else None,
+            unresolved_questions=(
+                list(resume_source.unresolved_questions) if resume_source is not None else []
+            ),
+            pending_items=list(resume_source.pending_items) if resume_source is not None else [],
+            prior_commitments=(
+                list(resume_source.prior_commitments) if resume_source is not None else []
+            ),
             context_revision=claim.revision,
             started_at=timestamp,
             last_active_at=timestamp,

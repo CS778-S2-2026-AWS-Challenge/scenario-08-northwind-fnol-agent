@@ -853,3 +853,55 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
         first_session_id,
         second_session.session_id,
     ]
+
+
+def test_resume_creates_new_session_with_saved_context(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='resume-context').json()
+    claim_id = created['claim']['claim_id']
+    first_session_id = created['session']['session_id']
+
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    assert first_session is not None
+
+    paused_session = first_session.model_copy(
+        update={
+            'status': SessionStatus.PAUSED,
+            'summary': 'The claimant confirmed a synthetic rear-end incident.',
+            'unresolved_questions': ['confirm:vehicle.drivable'],
+            'pending_items': ['police_report'],
+            'prior_commitments': [
+                'The claimant can provide the police report later without restarting.'
+            ],
+        }
+    )
+    repository.save_session(paused_session)
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'resume-context-1'},
+        json={'intent': 'resume'},
+    )
+
+    assert response.status_code == 201
+    resumed = response.json()
+
+    assert resumed['session_id'] != first_session_id
+    assert resumed['status'] == 'active'
+    assert resumed['resume']['summary'] == paused_session.summary
+    assert resumed['resume']['unresolved_questions'] == paused_session.unresolved_questions
+    assert resumed['resume']['pending_items'] == paused_session.pending_items
+    assert resumed['resume']['prior_commitments'] == paused_session.prior_commitments
+
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.active_session_id == resumed['session_id']
+
+    sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    assert [session.session_id for session in sessions] == [
+        first_session_id,
+        resumed['session_id'],
+    ]
