@@ -152,6 +152,19 @@ class ResponsibleParty(str, Enum):
     EXTERNAL_PARTY = 'external_party'
 
 
+class ClaimCreationStatus(str, Enum):
+    CREATED = 'created'
+    PENDING = 'pending'
+    FAILED = 'failed'
+
+
+class AssessorRoutingStatus(str, Enum):
+    ASSIGNED = 'assigned'
+    QUEUED = 'queued'
+    NOT_REQUIRED = 'not_required'
+    FAILED = 'failed'
+
+
 class ClaimState(ContractModel):
     severity: Severity = Severity.UNASSESSED
     coverage: Coverage = Coverage.NOT_ASSESSED
@@ -194,6 +207,25 @@ class EvidenceSummary(ContractModel):
     needs_attention: int = 0
 
 
+class ExternalClaimResult(ContractModel):
+    external_claim_id: str | None = None
+    claim_number: str | None = None
+    creation_status: ClaimCreationStatus
+    route: str
+    next_step: str
+    expected_by: datetime | None = None
+    created_at: datetime
+
+
+class AssessorRoutingResult(ContractModel):
+    routing_status: AssessorRoutingStatus
+    assessor_reference: str | None = None
+    queue_reference: str | None = None
+    next_step: str
+    expected_by: datetime | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -205,7 +237,11 @@ class WorkingClaim(ContractModel):
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
     route: str | None = None
     active_session_id: str | None = None
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
+    external_claim_source_revision: int | None = Field(default=None, ge=1)
+    external_claim_fingerprint: str | None = None
+    assessor_routing: AssessorRoutingResult | None = None
+    assessor_routing_fingerprint: str | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
@@ -307,6 +343,37 @@ class EvidenceRecord(ContractModel):
     updated_at: datetime
 
 
+class PendingEvidenceReference(ContractModel):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    kind: str = Field(min_length=1, max_length=100)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CreateExternalClaimRequest(ContractModel):
+    working_claim_id: str = Field(min_length=1, max_length=100)
+    claim_revision: int = Field(ge=1)
+    authorised_decision_id: str = Field(min_length=1, max_length=100)
+    confirmed_form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    pending_evidence: list[PendingEvidenceReference] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    route: str = Field(min_length=1, max_length=100)
+
+
+class AssessorLocation(ContractModel):
+    region: str = Field(min_length=1, max_length=100)
+
+
+class RouteAssessorRequest(ContractModel):
+    claim_id: str = Field(min_length=1, max_length=100)
+    external_claim_id: str = Field(min_length=1, max_length=100)
+    authorisation_ref: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    location: AssessorLocation
+
+
 class CreateClaimRequest(ContractModel):
     channel: Channel = Channel.WEB_AGENT
     locale: str = Field(default='en-NZ', min_length=2, max_length=35)
@@ -361,7 +428,7 @@ class ClaimantClaim(ContractModel):
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
     evidence_summary: EvidenceSummary
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
@@ -372,7 +439,7 @@ class ClaimListItem(ContractModel):
     revision: int
     incident_type: str | None = None
     workflow_state: WorkflowState
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
