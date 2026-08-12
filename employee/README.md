@@ -33,6 +33,6 @@ The page is hard-coded for the local prototype staff token.
 
 ## Notes
 
-- The page is read-only and illustrates stable workbench API integration.
+- The workbench data is read-only; the AI assistant and customer-chat replies are local prototype interactions until their respective live services are connected.
 - It shows internal-only fields such as `internal_flags`, `assigned_to`, and staff notes.
 - It does not expose claimant-only private data.

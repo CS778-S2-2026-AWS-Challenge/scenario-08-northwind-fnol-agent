@@ -45,6 +45,10 @@
     .customer-chat-message.user { align-self:flex-end; background:#157f79; color:#fff; }
     .customer-chat-input { display:flex; gap:10px; margin-top:14px; }
     .customer-chat-input textarea { flex:1; min-height:90px; border:1px solid var(--line); border-radius:14px; padding:12px; resize:none; }
+    /* Internal info collapse and auto-refresh styles */
+    #internalInfo.collapsed .field { display:none; }
+    #internalInfo .internal-controls { display:flex; gap:8px; align-items:center; margin-top:10px }
+    #internalInfo label[for="internalAutoRefreshCb"] { font-size:13px; color:var(--muted); }
     .view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
     
     /*员工AIchat窗口样式*/
@@ -141,11 +145,11 @@
 
   <script>
     const claims = [
-      { id:'CLM-2026-00841', customer:'Wei Chen', type:'Vehicle collision', product:'Motor', status:'Professional review', priority:'High', due:'Today, 3:30 pm', next:'Review risk signal', queue:'review', tag:'FRAUD-LOC-02', action:'Review the risk signal', reason:'A past claim and this incident share a location. This is a review prompt, not a finding of fraud. Do not mention it to the customer.' },
-      { id:'CLM-2026-00842', customer:'Yuki Chen', type:'Burst pipe', product:'Home', status:'Evidence pending', priority:'Standard', due:'Tomorrow, 10:00 am', next:'Create claim', queue:'evidence', tag:'EVIDENCE-PENDING', action:'Create the claim', reason:'The police report is still being generated, but it is not required to safely create this claim.' },
-      { id:'CLM-2026-00837', customer:'Leo Li', type:'Rear-end collision', product:'Motor', status:'Handed over', priority:'Standard', due:'Today, 5:00 pm', next:'Accept handoff', queue:'new', tag:'HUMAN-REQUESTED', action:'Accept the handoff', reason:'The customer asked to speak with a person. The claim summary is ready so they do not need to repeat key details.' },
-      { id:'CLM-2026-00845', customer:'Nina Zhang', type:'Home break-in', product:'Contents', status:'Urgent handoff', priority:'Urgent', due:'Now', next:'Make safety call', queue:'urgent', tag:'URGENT-DANGER', action:'Make a safety call', reason:'A possible ongoing safety risk was reported. Check the customer is safe and follow the urgent handoff process.' },
-      { id:'CLM-2026-00831', customer:'Ming Zhao', type:'Broken window', product:'Home', status:'Ready to create', priority:'Low', due:'Today, 4:20 pm', next:'Create claim', queue:'ready', tag:'POLICY-CLEAR', action:'Create the claim', reason:'The form and cover check are complete. Create the claim and send the customer their claim number.' }
+      { id:'CLM-2026-00841', customer:'Wei Chen', type:'Vehicle collision', product:'Motor', status:'Professional review', internalNotes:'Location matches past claim; escalate to specialist.', priority:'High', due:'Today, 3:30 pm', next:'Review risk signal', queue:'review', tag:'FRAUD-LOC-02', action:'Review the risk signal', reason:'A past claim and this incident share a location. This is a review prompt, not a finding of fraud. Do not mention it to the customer.' },
+      { id:'CLM-2026-00842', customer:'Yuki Chen', type:'Burst pipe', product:'Home', status:'Evidence pending', internalNotes:'Awaiting police report; do not progress claim until received.', priority:'Standard', due:'Tomorrow, 10:00 am', next:'Create claim', queue:'evidence', tag:'EVIDENCE-PENDING', action:'Create the claim', reason:'The police report is still being generated, but it is not required to safely create this claim.' },
+      { id:'CLM-2026-00837', customer:'Leo Li', type:'Rear-end collision', product:'Motor', status:'Handed over', internalNotes:'Customer requested human contact; handoff completed.', priority:'Standard', due:'Today, 5:00 pm', next:'Accept handoff', queue:'new', tag:'HUMAN-REQUESTED', action:'Accept the handoff', reason:'The customer asked to speak with a person. The claim summary is ready so they do not need to repeat key details.' },
+      { id:'CLM-2026-00845', customer:'Nina Zhang', type:'Home break-in', product:'Contents', status:'Urgent handoff', internalNotes:'Possible ongoing safety risk — follow urgent handoff protocol.', priority:'Urgent', due:'Now', next:'Make safety call', queue:'urgent', tag:'URGENT-DANGER', action:'Make a safety call', reason:'A possible ongoing safety risk was reported. Check the customer is safe and follow the urgent handoff process.' },
+      { id:'CLM-2026-00831', customer:'Ming Zhao', type:'Broken window', product:'Home', status:'Ready to create', internalNotes:'Form validated. Ready to create claim and notify customer.', priority:'Low', due:'Today, 4:20 pm', next:'Create claim', queue:'ready', tag:'POLICY-CLEAR', action:'Create the claim', reason:'The form and cover check are complete. Create the claim and send the customer their claim number.' }
     ];
     const queues = [
       { key:'urgent', title:'Urgent cases', sub:'Needs attention now' }, { key:'new', title:'New and untriaged', sub:'First review needed' },
@@ -162,16 +166,30 @@
     let customerChatMessages = {};
     /*使AI chat拖拽功能生效*/
     let chatDrag = { active:false, offsetX:0, offsetY:0 };
+    let internalAutoRefreshTimer = null;
+    const internalAutoRefreshInterval = 30000; // 30s default
 
     const byId = id => document.getElementById(id);
     const activeClaim = () => claims.find(claim => claim.id === activeClaimId);
     const statusClass = status => status.includes('Urgent') ? 'red' : status.includes('Evidence') ? 'blue' : status.includes('Ready') || status.includes('Handed') ? 'teal' : 'amber';
+    /*这个函数的作用是根据理赔单的状态字符串，返回一个更通用的状态标签，用于在界面上显示。
+    它将不同的状态映射为几个主要类别，如“Urgent”、“Awaiting evidence”、“Under review”、“Handed over”和“Ready to create”。
+    如果状态不匹配任何已知类别，则返回原始状态字符串。*/
+    function getSharedStatus(claim) {
+      const s = (claim.status || '').toLowerCase();
+      if (s.includes('urgent')) return 'Urgent';
+      if (s.includes('evidence')) return 'Awaiting evidence';
+      if (s.includes('professional') || s.includes('review')) return 'Under review';
+      if (s.includes('handed')) return 'Handed over';
+      if (s.includes('ready')) return 'Ready to create';
+      return claim.status || '';
+    }
     const priorityClass = priority => priority === 'Urgent' || priority === 'High' ? 'red' : priority === 'Low' ? 'grey' : 'amber';
 
     function showToast(message) { const toast = byId('toast'); toast.textContent = message; toast.classList.add('show'); window.setTimeout(() => toast.classList.remove('show'), 2600); }
     function filteredClaims() { const search = byId('searchInput').value.trim().toLowerCase(); return claims.filter(claim => (activeQueue === 'all' || claim.queue === activeQueue) && `${claim.id} ${claim.customer}`.toLowerCase().includes(search)); }
     function renderQueues() { byId('queues').innerHTML = queues.map(queue => { const count = queue.key === 'all' ? claims.length : claims.filter(claim => claim.queue === queue.key).length; return `<button class="queue ${queue.key === 'urgent' ? 'urgent' : ''} ${queue.key === activeQueue ? 'active' : ''}" data-queue="${queue.key}"><span class="queue-title">${queue.title}</span><strong class="queue-count">${count}</strong><span class="queue-sub">${queue.sub}</span></button>`; }).join(''); document.querySelectorAll('[data-queue]').forEach(button => button.addEventListener('click', () => { activeQueue = button.dataset.queue; renderWorkbench(); })); }
-    function renderRows() { const visible = filteredClaims(); byId('resultCount').textContent = visible.length; byId('claimRows').innerHTML = visible.map(claim => `<tr data-claim="${claim.id}" class="${claim.id === activeClaimId ? 'selected' : ''}"><td><div class="case-id">${claim.id}</div><div class="muted">${claim.customer} · ${claim.product}</div></td><td><span class="badge ${statusClass(claim.status)}"><i class="dot"></i>${claim.status}</span></td><td><span class="badge ${priorityClass(claim.priority)}">${claim.priority}</span></td><td>${claim.next}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No claims match this search.</td></tr>'; document.querySelectorAll('[data-claim]').forEach(row => row.addEventListener('click', () => { activeClaimId = row.dataset.claim; renderRows(); renderDetail(); })); }
+    function renderRows() { const visible = filteredClaims(); byId('resultCount').textContent = visible.length; byId('claimRows').innerHTML = visible.map(claim => { const shared = getSharedStatus(claim); return `<tr data-claim="${claim.id}" class="${claim.id === activeClaimId ? 'selected' : ''}"><td><div class="case-id">${claim.id}</div><div class="muted">${claim.customer} · ${claim.product}</div></td><td><span class="badge ${statusClass(shared)}"><i class="dot"></i>${shared}</span></td><td><span class="badge ${priorityClass(claim.priority)}">${claim.priority}</span></td><td>${claim.next}</td></tr>` }).join('') || '<tr><td colspan="4" class="muted">No claims match this search.</td></tr>'; document.querySelectorAll('[data-claim]').forEach(row => row.addEventListener('click', () => { activeClaimId = row.dataset.claim; renderRows(); renderDetail(); })); }
     
     /*这个函数的作用是生成并渲染当前选中案件的“右侧详情面板”。
     它通过获取当前选中的理赔单数据，将案件的头部状态、四大切换选项卡（Tab）以及对应的详细内容动态填入页面。*/
@@ -187,10 +205,10 @@
             <span class="badge ${priorityClass(claim.priority)}">Due ${claim.due}</span>
           </div>
           <div class="status-line">
-            <span class="badge ${statusClass(claim.status)}">${claim.status}</span>
+            <span class="badge ${statusClass(getSharedStatus(claim))}">${getSharedStatus(claim)}</span>
             <span class="badge teal">Cover confirmed</span>
             <span class="badge blue">Photos received</span>
-          </div>
+              </div>
         </div>
         <div class="tabs">
           <button class="tab active" data-tab="overview">Overview</button>
@@ -222,6 +240,41 @@
                 <div class="tag">
                   <strong>POLICY-CLEAR · confirmed</strong>
                   <small>Policy record P-2008</small>
+                </div>
+              </div>
+            </div>
+            <div class="section">
+              <h3>Internal information</h3>
+              <div id="internalInfo" data-claim="${claim.id}">
+                <div class="field">
+                  <label>Internal status</label>
+                  <span id="internalStatus">${claim.status}</span>
+                  <small>Staff only — do not include in customer updates</small>
+                </div>
+                <div class="field" style="margin-top:8px">
+                  <label>Assigned to</label>
+                  <span id="internalAssigned">${claim.assignedTo || 'Unassigned'}</span>
+                </div>
+                <div class="field" style="margin-top:8px">
+                  <label>Internal flags</label>
+                  <span id="internalFlags">${claim.internalFlags || '—'}</span>
+                </div>
+                <div class="field" style="margin-top:8px">
+                  <label>Last updated</label>
+                  <span id="internalUpdated">${claim.internalUpdated || '—'}</span>
+                </div>
+                <div class="field" style="margin-top:8px">
+                  <label>Internal notes</label>
+                  <div id="internalNotesView"><span id="internalNotesText">${claim.internalNotes || '—'}</span></div>
+                  <textarea id="internalNotesEdit" style="display:none;width:100%;min-height:80px;border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+                  <small>Context for staff (editable). Changes here affect staff view only.</small>
+                </div>
+                <div class="internal-controls" style="margin-top:10px">
+                  <button class="btn secondary" id="internalRefresh">Refresh internal info</button>
+                  <button class="btn" id="internalEdit">Edit notes</button>
+                  <button class="btn primary" id="internalSave" style="display:none">Save notes</button>
+                  <button class="btn" id="internalToggle">Collapse</button>
+                  <label for="internalAutoRefreshCb" style="margin-left:8px"><input id="internalAutoRefreshCb" type="checkbox" style="margin-right:6px">Auto-refresh</label>
                 </div>
               </div>
             </div>
@@ -288,6 +341,15 @@
 
       document.querySelectorAll('[data-tab]').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
       bindDetailEvents();
+      // initialize internal info UI and controls
+      renderInternalInfo(claim);
+      const refreshBtn = byId('internalRefresh'); if (refreshBtn) refreshBtn.addEventListener('click', refreshInternalInfo);
+      const editBtn = byId('internalEdit'); if (editBtn) editBtn.addEventListener('click', enableInternalEdit);
+      const saveBtn = byId('internalSave'); if (saveBtn) saveBtn.addEventListener('click', saveInternalNotes);
+      const toggleBtn = byId('internalToggle'); if (toggleBtn) toggleBtn.addEventListener('click', toggleInternalCollapse);
+      const autoCb = byId('internalAutoRefreshCb'); if (autoCb) autoCb.addEventListener('change', e => setInternalAutoRefresh(e.target.checked));
+      // default: auto-refresh off
+      setInternalAutoRefresh(false);
     }
     function switchTab(tabName) { document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName)); document.querySelectorAll('.tab-content').forEach(panel => panel.classList.toggle('active', panel.id === tabName)); }
     function completeAction() { const claim = activeClaim(); claim.status = 'Action recorded'; claim.next = 'Prepare customer update'; showToast(`Action saved for ${claim.id}`); renderWorkbench(); }
@@ -324,7 +386,10 @@
           </aside>
           <div class="customer-chat-box">
             <div class="chat-box-header">
-              <strong>Claim ${claim.id} · ${claim.customer}</strong>
+              <div>
+                <strong>Claim ${claim.id} · ${claim.customer}</strong>
+                <div class="muted" style="font-size:12px">Status: ${getSharedStatus(claim)}</div>
+              </div>
               <button class="btn secondary" id="customerChatBack">Back to workbench</button>
             </div>
             <div class="customer-chat-history" id="customerChatHistory">
@@ -343,6 +408,8 @@
       document.querySelectorAll('[data-customer-chat]').forEach(button => button.addEventListener('click', () => { activeCustomerChatId = button.dataset.customerChat; renderCustomerChat(); }));
       byId('customerChatSend').addEventListener('click', sendCustomerChatMessage); /*为发送按钮绑定点击事件，调用 sendCustomerChatMessage 函数发送消息。*/
       byId('customerChatBack').addEventListener('click', () => activateView('workbench')); /*为“返回工作台”按钮绑定点击事件，切换回工作台视图。*/
+        // expose a hook so internal info can be refreshed after switching views
+        if (typeof window.onCustomerChatRendered === 'function') window.onCustomerChatRendered(claim);
     }
 
     /*与客户聊天功能*/
@@ -369,6 +436,73 @@
         customerChatMessages[claimId].push({ role:'assistant', text:'Thanks for your message. This is a placeholder customer reply until the live chat service is connected.' });
         renderCustomerChat();
       }, 260);
+    }
+
+    // Internal info helpers: placeholders for API integration and editing
+    function renderInternalInfo(claim) {
+      const id = claim.id;
+      const el = byId('internalInfo');
+      if (!el) return;
+      el.dataset.claim = id;
+      const setText = (id, text) => { const e = byId(id); if (e) e.textContent = text || '—'; };
+      setText('internalStatus', claim.status);
+      setText('internalAssigned', claim.assignedTo || 'Unassigned');
+      setText('internalFlags', claim.internalFlags || '—');
+      setText('internalUpdated', claim.internalUpdated || '—');
+      setText('internalNotesText', claim.internalNotes || '—');
+      const edit = byId('internalNotesEdit'); if (edit) edit.value = claim.internalNotes || '';
+      byId('internalSave').style.display = 'none';
+      byId('internalNotesEdit').style.display = 'none';
+      byId('internalNotesView').style.display = 'block';
+    }
+
+    function fetchInternalInfoMock(claimId) {
+      // Placeholder - replace with real API call (fetch/axios) returning internal fields
+      return new Promise(resolve => setTimeout(() => resolve({ assignedTo:'Lin Zhang', internalFlags:'flag-1,flag-2', internalUpdated:new Date().toLocaleString() }), 350));
+    }
+
+    function refreshInternalInfo() {
+      const claim = activeClaim(); if (!claim) return;
+      fetchInternalInfoMock(claim.id).then(data => {
+        claim.assignedTo = data.assignedTo;
+        claim.internalFlags = data.internalFlags;
+        claim.internalUpdated = data.internalUpdated;
+        renderInternalInfo(claim);
+        showToast('Internal info refreshed');
+      });
+    }
+
+    function toggleInternalCollapse() {
+      const el = byId('internalInfo'); if (!el) return;
+      el.classList.toggle('collapsed');
+      byId('internalToggle').textContent = el.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+    }
+
+    function setInternalAutoRefresh(enabled) {
+      if (enabled) {
+        if (internalAutoRefreshTimer) clearInterval(internalAutoRefreshTimer);
+        internalAutoRefreshTimer = setInterval(refreshInternalInfo, internalAutoRefreshInterval);
+        showToast('Internal auto-refresh enabled');
+      } else {
+        if (internalAutoRefreshTimer) clearInterval(internalAutoRefreshTimer);
+        internalAutoRefreshTimer = null;
+        showToast('Internal auto-refresh disabled');
+      }
+    }
+
+    function enableInternalEdit() {
+      const edit = byId('internalNotesEdit'); const view = byId('internalNotesView'); const save = byId('internalSave');
+      if (!edit || !view || !save) return;
+      view.style.display = 'none'; edit.style.display = 'block'; save.style.display = 'inline-block';
+    }
+
+    function saveInternalNotes() {
+      const claim = activeClaim(); if (!claim) return;
+      const edit = byId('internalNotesEdit'); if (!edit) return;
+      claim.internalNotes = edit.value.trim();
+      renderInternalInfo(claim);
+      showToast('Internal notes saved (local)');
+      // TODO: call API to persist internal notes
     }
     
     /*AI聊天框的功能*/
