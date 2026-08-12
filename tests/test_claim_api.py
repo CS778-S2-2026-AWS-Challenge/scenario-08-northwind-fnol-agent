@@ -1,10 +1,46 @@
 from datetime import timedelta
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from backend.domain.models import SessionRecord, SessionStatus
+from backend.domain.models import MessageRecord, MessageVisibility, SessionRecord, SessionStatus
 from backend.repositories.fixture import FixtureRepository
+from backend.services.agent import AgentProposal, AgentTurnContext
+
+
+class HighImpactAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        from backend.domain.models import (
+            AgentAction,
+            CustomerNextStep,
+            FormStatus,
+            ProposedFormChange,
+            ResponsibleParty,
+            StateChange,
+        )
+
+        return AgentProposal(
+            action=AgentAction.CREATE_CLAIM,
+            reason_codes=['CLAIM_CREATION_AUTHORISED'],
+            customer_reason='A model proposed claim creation.',
+            customer_next_step=CustomerNextStep(
+                status='claim_creation_proposed',
+                summary='The claim is being created.',
+                responsible_party=ResponsibleParty.NORTHWIND,
+            ),
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.description',
+                    value=context.message_text,
+                    status=FormStatus.CONFIRMED,
+                )
+            ],
+            state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
+            proposed_signals=[],
+            required_tools=[{'tool': 'claim_creation', 'status': 'requested'}],
+            next_action_requirements=[],
+        )
 
 
 def create_claim(
@@ -17,6 +53,32 @@ def create_claim(
         '/api/v1/claims',
         headers=headers,
         json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+
+
+def submit_message(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    session_id: str,
+    *,
+    revision: int = 1,
+    key: str = 'message-1',
+    client_message_id: str = 'client-message-1',
+    text: str = 'A synthetic rear-end incident. Nobody was injured.',
+) -> Response:
+    return client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': key,
+            'If-Match': str(revision),
+        },
+        json={
+            'client_message_id': client_message_id,
+            'content': {'type': 'text', 'text': text},
+            'evidence_refs': [],
+        },
     )
 
 
@@ -256,6 +318,388 @@ def test_resumed_session_idempotency_replays_and_rejects_conflicting_payload(
     assert replay.json()['session_id'] == first.json()['session_id']
     assert conflict.status_code == 409
     assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+def test_message_turn_persists_messages_proposed_field_and_validated_action(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-turn').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    response = submit_message(client, auth_headers, claim_id, session_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['claim_revision'] == 2
+    assert body['claimant_message']['actor'] == 'claimant'
+    assert body['agent_message']['actor'] == 'agent'
+    assert body['agent_message']['in_reply_to'] == body['claimant_message']['message_id']
+    assert body['form_changes'][0]['field_code'] == 'incident.description'
+    assert body['form_changes'][0]['field']['status'] == 'proposed'
+    assert body['form_changes'][0]['field']['source_refs'] == [
+        body['claimant_message']['message_id']
+    ]
+    assert body['decision']['action'] == 'CONFIRM'
+    assert 'authority' not in body['decision']
+
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        body['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert decision is not None
+    assert decision.authority.outcome.value == 'authorised'
+    assert decision.reason_codes == ['MATERIAL_FACTS_PROPOSED']
+    assert claim is not None
+    assert claim.form['incident.description'].status.value == 'proposed'
+    assert claim.claim_state.next_action.value == 'CONFIRM'
+
+
+def test_high_impact_agent_proposal_is_recorded_but_not_executed(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    app.state.agent_turn_provider = HighImpactAgent()
+    created = create_claim(client, auth_headers, key='high-impact-turn').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    response = submit_message(client, auth_headers, claim_id, session_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['decision']['action'] == 'CREATE_CLAIM'
+    assert body['decision']['customer_next_step']['status'] == 'professional_review_required'
+    assert body['form_changes'][0]['field']['status'] == 'proposed'
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        body['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert decision is not None
+    assert decision.authority.outcome.value == 'review_required'
+    assert claim is not None
+    assert claim.claim_state.next_action.value == 'ASK'
+    assert claim.external_claim is None
+
+
+def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-dedup').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    first = submit_message(client, auth_headers, claim_id, session_id, key='turn-a')
+    idempotency_replay = submit_message(client, auth_headers, claim_id, session_id, key='turn-a')
+    client_id_replay = submit_message(client, auth_headers, claim_id, session_id, key='turn-b')
+    conflict = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=2,
+        key='turn-c',
+        text='Different content with the same client ID.',
+    )
+
+    assert first.status_code == 200
+    assert idempotency_replay.json() == first.json()
+    assert client_id_replay.json() == first.json()
+    assert conflict.status_code == 409
+    assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert len(repository.list_messages(claim_id, session_id, 'cus_demo')) == 2
+
+
+def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='confirm-field').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    message = submit_message(client, auth_headers, claim_id, session_id).json()
+    endpoint = f'/api/v1/claims/{claim_id}/form/confirmations'
+
+    confirmed = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-1',
+            'If-Match': str(message['claim_revision']),
+        },
+        json={'field_codes': ['incident.description']},
+    )
+    silent_overwrite = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(confirmed.json()['revision'])},
+        json={
+            'updates': [{'field_code': 'incident.description', 'value': 'A changed description.'}]
+        },
+    )
+    explicit_correction = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(confirmed.json()['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'A corrected synthetic description.',
+                    'correction_reason': 'The first description was incomplete.',
+                }
+            ]
+        },
+    )
+    replay = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-1',
+            'If-Match': str(message['claim_revision']),
+        },
+        json={'field_codes': ['incident.description']},
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()['revision'] == 3
+    assert confirmed.json()['confirmed_fields']['incident.description']['status'] == 'confirmed'
+    assert silent_overwrite.status_code == 409
+    assert explicit_correction.status_code == 200
+    assert explicit_correction.json()['revision'] == 4
+    corrected = explicit_correction.json()['updated_fields']['incident.description']
+    assert corrected['source'] == 'claimant'
+    assert corrected['updated_by']['actor_id'] == 'cus_demo'
+    assert replay.json() == confirmed.json()
+
+
+def test_message_reads_hide_internal_records_and_validate_session_state(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-read').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    turn = submit_message(client, auth_headers, claim_id, session_id).json()
+    claimant_record = repository.get_message(
+        claim_id,
+        session_id,
+        turn['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert claimant_record is not None
+    repository.save_message(
+        MessageRecord(
+            message_id='msg_internal',
+            claim_id=claim_id,
+            session_id=session_id,
+            actor='system',
+            visibility=MessageVisibility.INTERNAL_ONLY,
+            content={'type': 'status', 'text': 'Internal validation details.'},
+            created_at=claimant_record.created_at + timedelta(seconds=1),
+        ),
+        'cus_demo',
+    )
+
+    listed = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages?limit=1',
+        headers=auth_headers,
+    )
+    second_page = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=auth_headers,
+        params={'cursor': listed.json()['page']['next_cursor']},
+    )
+    missing_session = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/ses_missing/messages',
+        headers=auth_headers,
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()['items'][0]['actor'] == 'claimant'
+    assert second_page.status_code == 200
+    assert [item['actor'] for item in second_page.json()['items']] == ['agent']
+    assert missing_session.status_code == 404
+
+
+def test_message_turn_requires_headers_active_session_and_owned_evidence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-guards').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    endpoint = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    payload = {
+        'client_message_id': 'guard-message',
+        'content': {'type': 'text', 'text': 'A guarded synthetic message.'},
+        'evidence_refs': [],
+    }
+
+    missing_idempotency = client.post(
+        endpoint,
+        headers={**auth_headers, 'If-Match': '1'},
+        json=payload,
+    )
+    missing_revision = client.post(
+        endpoint,
+        headers={**auth_headers, 'Idempotency-Key': 'guard-missing-revision'},
+        json=payload,
+    )
+    unknown_evidence = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'guard-evidence',
+            'If-Match': '1',
+        },
+        json={**payload, 'evidence_refs': ['evd_missing']},
+    )
+    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert session is not None
+    repository.save_session(session.model_copy(update={'status': SessionStatus.CLOSED}))
+    closed_session = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'guard-closed',
+            'If-Match': '1',
+        },
+        json=payload,
+    )
+
+    assert missing_idempotency.status_code == 400
+    assert missing_revision.status_code == 409
+    assert unknown_evidence.status_code == 422
+    assert closed_session.status_code == 409
+    assert closed_session.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+
+
+def test_message_turn_rejects_a_non_current_session_and_cross_session_client_id(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-session-scope').json()
+    claim_id = created['claim']['claim_id']
+    first_session_id = created['session']['session_id']
+    first_turn = submit_message(client, auth_headers, claim_id, first_session_id)
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    assert claim is not None
+    assert first_session is not None
+    second_session = first_session.model_copy(
+        update={
+            'session_id': 'ses_second_active',
+            'context_revision': 2,
+            'started_at': first_session.started_at + timedelta(seconds=1),
+            'last_active_at': first_session.last_active_at + timedelta(seconds=1),
+        }
+    )
+    repository.save_session(second_session)
+
+    non_current = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        second_session.session_id,
+        revision=2,
+        key='non-current-session',
+        client_message_id='new-client-id',
+    )
+    repository.save_claim(
+        claim.model_copy(update={'active_session_id': second_session.session_id, 'revision': 2}),
+        expected_revision=claim.revision,
+    )
+    cross_session_replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        second_session.session_id,
+        revision=2,
+        key='cross-session-replay',
+    )
+
+    assert first_turn.status_code == 200
+    assert non_current.status_code == 409
+    assert non_current.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert cross_session_replay.status_code == 409
+    assert cross_session_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+def test_message_and_confirmation_requests_reject_empty_or_unconfirmable_input(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='invalid-message').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    message_endpoint = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+
+    empty_message = client.post(
+        message_endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'empty-message',
+            'If-Match': '1',
+        },
+        json={'client_message_id': 'empty', 'content': None, 'evidence_refs': []},
+    )
+    unknown_confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unknown-confirmation',
+            'If-Match': '1',
+        },
+        json={'field_codes': ['incident.description']},
+    )
+
+    assert empty_message.status_code == 422
+    assert unknown_confirmation.status_code == 422
+    assert unknown_confirmation.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+def test_message_list_time_filters_require_timezone_and_apply_strict_bounds(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='message-time').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    turn = submit_message(client, auth_headers, claim_id, session_id).json()
+    endpoint = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+
+    before = client.get(
+        endpoint,
+        headers=auth_headers,
+        params={'before': turn['claimant_message']['created_at']},
+    )
+    after = client.get(
+        endpoint,
+        headers=auth_headers,
+        params={'after': turn['agent_message']['created_at']},
+    )
+    missing_timezone = client.get(
+        f'{endpoint}?after=2026-08-12T10:00:00',
+        headers=auth_headers,
+    )
+
+    assert before.status_code == 200
+    assert before.json()['items'] == []
+    assert after.status_code == 200
+    assert after.json()['items'] == []
+    assert missing_timezone.status_code == 422
 
 
 def test_claim_collection_filters_ownership_and_paginates_updated_claims(

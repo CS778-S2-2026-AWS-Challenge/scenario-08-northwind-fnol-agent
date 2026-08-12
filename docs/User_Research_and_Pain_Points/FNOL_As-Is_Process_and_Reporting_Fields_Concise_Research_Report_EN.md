@@ -6,6 +6,16 @@ Based on the publicly available claim lodgement processes of State, Tower, NZI, 
 
 The report establishes a factual baseline for subsequent **persona development, pain-point research, and solution design**. Its main focus is the current practices of insurers. It also introduces one preliminary competitor weakness relevant to an FNOL Agent: **loss of context during an Agent-to-Human handoff**. This observation is supported by wider industry evidence. However, without direct testing or interview evidence, the report does not claim that State, Tower, NZI, or Westpac necessarily has this weakness, nor does it propose a specific solution.
 
+### Research Method and Evidence Boundary
+
+The report uses publicly available insurer claim pages, forms, guidance, and relevant industry material to compare observable process steps and reporting fields. It distinguishes three levels of statement:
+
+- **source fact:** directly stated or shown in a cited public source;
+- **cross-source pattern:** a process element observed across multiple reviewed sources;
+- **research hypothesis:** a plausible weakness or design question that still requires direct testing, interview evidence, or organisation-specific confirmation.
+
+The resulting field list is a research taxonomy, not a mandatory universal form. Required information varies by product, incident, policy, jurisdiction, channel, and processing stage. The report does not establish Northwind's internal workflow, data schema, decision authority, or production routing rules.
+
 For this report, the scope of FNOL is defined as:
 
 > **An incident or loss occurs → the customer contacts the insurer for the first time → initial information and evidence are submitted → a Claim is created → the case is initially classified and handed over for further processing.**
@@ -211,6 +221,8 @@ The following questions can be used in competitor testing, surveys, or interview
 ## 4. Role in Subsequent Research
 
 This report provides two common baselines for the next stage: an observable real-world FNOL process and a field framework for use in surveys, interviews, and documentary analysis.
+
+The baseline should be used to test completeness and continuity, not to reproduce every field at the first interaction. Information may be confirmed, proposed, disputed, missing, or expected later, and its relevance depends on the next safe action rather than on completing an exhaustive form immediately.
 
 ### Persona Development
 
