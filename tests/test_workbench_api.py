@@ -3,9 +3,15 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from backend.domain.models import (
+    AgentAction,
+    AgentAuthority,
+    AgentDecisionRecord,
+    AuthorityOutcome,
+    CustomerNextStep,
     FraudSignal,
     MessageRecord,
     MessageVisibility,
+    ResponsibleParty,
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -241,3 +247,115 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
         message['message_id'] != 'msg_internal_note' for message in claimant_messages['items']
     )
     assert 'provenance' not in claimant_evidence['items'][0]
+
+
+def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created_response = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'workbench-routing-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created_response.status_code == 201
+    created = created_response.json()
+    claim = created['claim']
+    session = created['session']
+    claim_id = claim['claim_id']
+    session_id = session['session_id']
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+
+    create_decision = AgentDecisionRecord(
+        decision_id='dec_workbench_create',
+        claim_id=claim_id,
+        session_id=session_id,
+        trigger_message_id='msg_workbench_create',
+        action=AgentAction.CREATE_CLAIM,
+        reason_codes=['CLAIM_CREATION_AUTHORISED'],
+        customer_reason='A controlled fixture authorised claim creation.',
+        customer_next_step=CustomerNextStep(
+            status='authorised',
+            summary='The claim can be created.',
+            responsible_party=ResponsibleParty.NORTHWIND,
+        ),
+        authority=AgentAuthority(
+            proposed_by='fixture_rule',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=stored.revision,
+        created_at=stored.updated_at,
+    )
+    repository.save_agent_decision(create_decision, stored.customer_id)
+    creation_response = client.post(
+        '/internal/v1/claims/create',
+        headers={'Authorization': 'Bearer synthetic-integration'},
+        json={
+            'working_claim_id': claim_id,
+            'claim_revision': stored.revision,
+            'authorised_decision_id': create_decision.decision_id,
+            'confirmed_form': {},
+            'evidence_refs': [],
+            'pending_evidence': [],
+            'route': 'standard_motor_intake',
+        },
+    )
+    assert creation_response.status_code == 201
+    creation = creation_response.json()
+
+    created_claim = repository.get_claim_internal(claim_id)
+    assert created_claim is not None
+    route_decision = AgentDecisionRecord(
+        decision_id='dec_workbench_assessor',
+        claim_id=claim_id,
+        session_id=session_id,
+        trigger_message_id='msg_workbench_assessor',
+        action=AgentAction.PROCEED,
+        reason_codes=['ASSESSOR_RULE_AUTHORISED'],
+        customer_reason='A controlled fixture authorised assessor routing.',
+        customer_next_step=created_claim.customer_next_step,
+        authority=AgentAuthority(
+            proposed_by='fixture_rule',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=created_claim.revision,
+        created_at=created_claim.updated_at,
+    )
+    repository.save_agent_decision(route_decision, created_claim.customer_id)
+    routing_response = client.post(
+        '/internal/v1/assessors/route',
+        headers={'Authorization': 'Bearer synthetic-integration'},
+        json={
+            'claim_id': claim_id,
+            'external_claim_id': creation['external_claim_id'],
+            'authorisation_ref': route_decision.decision_id,
+            'requested_action': 'vehicle_damage_assessment',
+            'location': {'region': 'Auckland'},
+        },
+    )
+    assert routing_response.status_code == 201
+    routing = routing_response.json()
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+    assert response.status_code == 200
+    detail = response.json()
+    final_claim = repository.get_claim_internal(claim_id)
+    assert final_claim is not None
+    assert detail['revision'] == final_claim.revision
+    assert detail['route'] == creation['route']
+    assert detail['claim_state']['workflow_state'] == 'created'
+    assert detail['external_claim'] == creation
+    assert detail['external_claim']['creation_status'] == 'created'
+    assert detail['external_claim']['next_step'] == 'Claims intake review'
+    assert detail['external_claim']['expected_by'] is not None
+    assert detail['assessor_routing'] == routing
+    assert detail['customer_next_step']['status'] == 'assessor_assigned'
+    assert detail['customer_next_step']['expected_by'] == routing['expected_by']

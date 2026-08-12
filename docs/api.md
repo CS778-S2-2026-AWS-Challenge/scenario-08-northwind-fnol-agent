@@ -49,6 +49,9 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 - Sprint 1 MAY use signed synthetic identities, but the server MUST still enforce role and claim ownership. A client-supplied `customer_id`, role, or staff identity MUST NOT grant access.
 - Claimant access MUST be restricted to claims linked to the authenticated claimant.
 - Internal routes MUST reject claimant credentials.
+- In the Sprint 1 fixture environment, internal integration routes use a separate
+  `NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN`. This synthetic token is not a production
+  identity design and is disabled outside development and test environments.
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
 Prototype scopes:
@@ -978,6 +981,7 @@ claimant routes:
   "staff_actions": [],
   "customer_updates": [],
   "external_claim": null,
+  "assessor_routing": null,
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
@@ -988,7 +992,9 @@ claimant routes:
 and context revisions. `messages` includes the complete persisted communication history,
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
-workbench. These fields are never added to claimant projections.
+workbench. `external_claim` and `assessor_routing` use the shared typed creation and routing
+results, including their status, next step, and expected timing. These fields are never added to
+claimant projections unless their claimant-safe contract explicitly includes them.
 
 The current repository has no separate persisted handoff, staff-action, or customer-update
 records. Their arrays therefore remain empty rather than synthesising a second lifecycle or
@@ -1305,6 +1311,10 @@ Response `201` or `200` for an idempotent replay:
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
 
+The request and response above are the provider-neutral boundary. AWS table names,
+partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
+remain inside a future adapter and are rejected if supplied as request fields.
+
 ### `POST /internal/v1/assessors/route`
 
 Request requires an authorised rule or staff decision:
@@ -1322,6 +1332,24 @@ Request requires an authorised rule or staff decision:
 ```
 
 Response returns `routing_status`, assessor or queue reference when assigned, claimant-visible next step, expected timing when known, and limitations. Assessor routing MUST NOT be triggered solely by `severity`.
+
+Response `201`, or `200` for an idempotent replay:
+
+```json
+{
+  "routing_status": "assigned",
+  "assessor_reference": "asr_fixture_01",
+  "queue_reference": "QUE-AUC-001",
+  "next_step": "An assessor will review the confirmed claim information.",
+  "expected_by": "2026-08-12T05:00:00Z",
+  "limitations": [
+    "Synthetic fixture routing; no production assessor was contacted."
+  ]
+}
+```
+
+The authorisation reference must resolve to an authorised decision containing
+`ASSESSOR_RULE_AUTHORISED`. A severity value by itself is not routing authority.
 
 ## Reason Codes
 

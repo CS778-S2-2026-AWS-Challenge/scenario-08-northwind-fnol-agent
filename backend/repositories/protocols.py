@@ -45,6 +45,10 @@ class ClaimRepository(Protocol):
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         raise NotImplementedError
 
+    def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
+        """Return the internal claim projection to an authorised service only."""
+        raise NotImplementedError
+
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         raise NotImplementedError
 
@@ -87,10 +91,6 @@ class ClaimRepository(Protocol):
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
 
-    def get_claim_for_staff(self, claim_id: str) -> WorkingClaim | None:
-        """Read the shared claim without claimant ownership filtering after staff auth."""
-        raise NotImplementedError
-
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
 
@@ -128,6 +128,14 @@ class PersistenceRepository(ClaimRepository, Protocol):
         decision_id: str,
         customer_id: str,
     ) -> AgentDecisionRecord | None:
+        raise NotImplementedError
+
+    def get_agent_decision_internal(
+        self,
+        claim_id: str,
+        decision_id: str,
+    ) -> AgentDecisionRecord | None:
+        """Return a decision for server-side authorisation validation."""
         raise NotImplementedError
 
     def find_agent_decision_for_trigger(

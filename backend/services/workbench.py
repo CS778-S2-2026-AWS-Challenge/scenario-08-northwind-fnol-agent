@@ -82,7 +82,7 @@ def get_workbench_claim_detail(
     if principal.actor_type != 'staff':
         raise _staff_access_required()
 
-    claim = repository.get_claim_for_staff(claim_id)
+    claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _claim_not_found()
 
@@ -117,6 +117,7 @@ def get_workbench_claim_detail(
         staff_actions=[],
         customer_updates=[],
         external_claim=claim.external_claim,
+        assessor_routing=claim.assessor_routing,
         customer_next_step=claim.customer_next_step,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
