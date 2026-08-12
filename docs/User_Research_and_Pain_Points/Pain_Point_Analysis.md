@@ -46,6 +46,28 @@ Pain points were prioritised using four factors:
 
 Priority levels are comparative research judgements, not statistically validated severity scores.
 
+### Evidence interpretation
+
+Evidence is interpreted according to both strength and relevance:
+
+| Evidence status | Interpretation in this analysis |
+|---|---|
+| **Repeated pattern** | Supported by multiple claimant responses or by more than one independent public source type; suitable for prioritising a user need, while not establishing population prevalence |
+| **Supported mechanism** | An authoritative or process source explains how or why a problem may occur; suitable for explaining a pain point, but not for estimating how often it occurs |
+| **Risk or hypothesis** | Based on an isolated complaint, indirect evidence, or team inference; retained as a question for validation rather than treated as an established user need |
+
+Survey percentages are reported exactly as collected. They describe this exploratory sample only. Public reviews illustrate individual experiences, while regulator, insurer, and industry sources provide process or conduct context. Evidence from one category is not silently treated as evidence from another.
+
+### Product-decision boundary
+
+This analysis identifies user problems and desirable outcomes; it does not determine production policy, coverage, fraud, severity, routing, or emergency-response rules. In particular:
+
+- a need for guidance does not justify unsupported policy advice;
+- a need for speed does not justify automatic approval or rejection;
+- an inconsistency may justify review but does not establish fraud;
+- human support must remain available where urgency, accessibility, distress, complexity, disagreement, or user preference requires it;
+- employee-side design implications remain provisional until validated with claims staff and operations users.
+
 ## Prioritised Pain Point Map
 
 | ID | Pain point | Journey stage | Primary personas | Priority |
@@ -608,4 +630,3 @@ These are evaluation criteria derived from pain points, not a commitment to a sp
 Users do not simply want a faster form. They want to know what to do, provide information once, understand what is happening, correct misunderstandings, and reach a responsible human when the situation requires judgement.
 
 Claims staff do not simply need more automation. They need complete and claim-specific intake, actionable prioritisation during routine and surge demand, and traceable evidence and responsibility across handoffs. These employee-side findings support the workbench and handoff requirements but still require validation through direct staff research.
-

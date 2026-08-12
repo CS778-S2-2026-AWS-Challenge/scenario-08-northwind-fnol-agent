@@ -24,6 +24,19 @@ This document applies the following professional persona conventions:
 - evidence confidence and required validation are stated explicitly;
 - claimant survey evidence and employee secondary research are kept separate.
 
+## Appropriate Use of the Personas
+
+These personas are decision aids for understanding different goals and support needs. They are not fixed customer types, eligibility categories, risk scores, or workflow routes.
+
+A person may move between the claimant modes during one claim. For example, an experienced claimant may become an Urgent or Complex Claimant when an injury, dispute, accessibility need, or unusual event occurs. The relevant experience should therefore respond to the person's current situation, confirmed facts, evidence state, comprehension, and support preference rather than permanently assigning a label.
+
+The employee personas describe responsibilities at two professional levels:
+
+- the **Claims Professional** focuses on individual-claim judgement, clarification, review, and progression;
+- the **Claims Operations Lead** focuses on queues, service flow, quality, capacity, governance, and operational visibility.
+
+The employee personas are supported by secondary process and operational evidence only. They should guide prototype hypotheses, but detailed workflow, terminology, permissions, and performance measures require validation with authorised staff.
+
 ## Persona Overview
 
 | Persona | Role or situation | Core problem | Primary outcome sought |
