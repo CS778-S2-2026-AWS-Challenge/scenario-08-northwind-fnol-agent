@@ -49,8 +49,8 @@ The employee personas are supported by secondary process and operational evidenc
 
 The first two claimant personas are segmented by previous claim experience:
 
-- **60.0%** had never made an insurance claim;
-- **40.0%** had previously made an insurance claim.
+- **69.0% (107/155)** had never made an insurance claim;
+- **31.0% (48/155)** had previously made an insurance claim.
 
 The third is a situational support mode that may apply to either experience segment. The employee personas are role-based and are not derived from claimant survey segmentation.
 
@@ -63,7 +63,7 @@ The third is a situational support mode that may apply to either experience segm
 | Attribute | Description |
 |---|---|
 | **Archetype type** | Experience-based claimant archetype |
-| **Survey segment** | 60.0% had never made an insurance claim |
+| **Survey segment** | 69.0% (107/155) had never made an insurance claim |
 | **Typical situation** | A minor vehicle accident or another insured event has just occurred |
 | **Process familiarity** | Low; unfamiliar with the correct sequence, terminology, and evidence requirements |
 | **Emotional state** | Anxious, uncertain, and concerned about making a mistake |
@@ -463,18 +463,18 @@ Published AA and Tower material reports high interaction and claim volumes, peak
 
 # Appendix A — Claimant Survey Evidence
 
-> **Data integrity note:** Results were recalculated on 12 August 2026 from the [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912). The sheet contained 21 submissions; one non-consenting submission was excluded, leaving n=20. Question wording is preserved in [`Insurance Claim Customer Experience Survey.pdf`](./Insurance%20Claim%20Customer%20Experience%20Survey.pdf). Percentages are exploratory and retain their numerator and denominator where practical.
+> **Data integrity note:** Results were recalculated on 13 August 2026 from the final repository export, [`Claimant_Survey_Final_Responses.csv`](./Claimant_Survey_Final_Responses.csv), collected through the linked [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912). The export contains 156 submissions; one non-consenting submission was excluded, leaving n=155 consenting respondents. A blank branch-dependent answer is treated as missing, not incorrect, and each percentage uses that question's actual answered denominator. Question wording is preserved in [`Insurance Claim Customer Experience Survey.pdf`](./Insurance%20Claim%20Customer%20Experience%20Survey.pdf). Results are exploratory rather than population estimates.
 
 ## A.1 Claim Experience and Process Confidence
 
 | Measure | Survey result |
 |---|---:|
-| Never made an insurance claim | 60.0% (12/20) |
-| Previously made an insurance claim | 40.0% (8/20) |
-| Moderate understanding of policies and the claim process (3/5) | 50.0% (10/20) |
-| Higher understanding (4/5) | 15.0% (3/20) |
-| Lower understanding (1–2/5) | 30.0% (6/20) |
-| Complete confidence (5/5) | 5.0% (1/20) |
+| Never made an insurance claim | 69.0% (107/155) |
+| Previously made an insurance claim | 31.0% (48/155) |
+| Moderate understanding of policies and the claim process (3/5) | 52.3% (81/155) |
+| Higher understanding (4/5) | 12.3% (19/155) |
+| Lower understanding (1–2/5) | 24.5% (38/155) |
+| Complete confidence (5/5) | 11.0% (17/155) |
 
 Most respondents did not report high confidence in understanding insurance policies and the claim process. Previous claim experience therefore does not necessarily mean that a user fully understands coverage, evidence requirements, or the insurer's internal workflow.
 
@@ -482,34 +482,33 @@ Most respondents did not report high confidence in understanding insurance polic
 
 | Priority when reporting a claim | Survey result |
 |---|---:|
-| Knowing exactly what information is required | 65.0% (13/20) |
-| Understanding whether the incident may be covered | 45.0% (9/20) |
-| Being able to provide photos or documents | 40.0% (8/20) |
-| Knowing what happens next | 40.0% (8/20) |
-| Being able to track claim progress | 45.0% (9/20) |
-| Completing the report quickly | 35.0% (7/20) |
+| Knowing exactly what information is required | 41.7% (25/60) |
+| Understanding whether the incident may be covered | 15.0% (9/60) |
+| Being able to provide photos or documents | 48.3% (29/60) |
+| Knowing what happens next or being able to track progress | 71.7% (43/60) |
+| Completing the report quickly | 40.0% (24/60) |
 
-Channel preferences were distributed across mobile apps (55.0%), phone and in-person service (45.0% each), and websites and chat or messaging (40.0% each). This suggests that users expect channel choice and continuity rather than a single mandatory reporting channel.
+Only 12 respondents answered the hypothetical preferred-channel question, so those results are retained as directional evidence rather than a basis for a channel-prevalence claim. Among the 48 previous claimants who identified their actual first reporting channel, phone was most common (41.7%, 20/48), followed by a mobile app (33.3%, 16/48) and a website or online form (22.9%, 11/48).
 
 ## A.3 Attitudes Towards AI Assistance
 
-When human support could be requested at any time, comfort with using an AI assistant averaged **3.25 out of 5**.
+When human support could be requested at any time, comfort with using an AI assistant averaged **3.38 out of 5** (n=155).
 
 | Comfort rating | Survey result |
 |:---:|---:|
-| 1 | 10.0% (2/20) |
-| 2 | 0% |
-| 3 | 55.0% (11/20) |
-| 4 | 25.0% (5/20) |
-| 5 | 10.0% (2/20) |
+| 1 | 5.8% (9/155) |
+| 2 | 7.1% (11/155) |
+| 3 | 37.4% (58/155) |
+| 4 | 42.6% (66/155) |
+| 5 | 7.1% (11/155) |
 
 | Concern about using AI during a claim | Survey result |
 |---|---:|
-| AI misunderstanding what happened | 60.0% (12/20) |
-| Difficulty explaining a complex or unusual situation | 60.0% (12/20) |
-| AI making decisions that should be made by a human | 40.0% (8/20) |
-| Privacy or security of personal information | 45.0% (9/20) |
-| Not knowing when a human would become involved | 20.0% (4/20) |
+| AI misunderstanding what happened | 41.9% (65/155) |
+| Difficulty explaining a complex or unusual situation | 45.8% (71/155) |
+| AI making decisions that should be made by a human | 45.8% (71/155) |
+| Privacy or security of personal information | 40.6% (63/155) |
+| Not knowing when a human would become involved | 44.5% (69/155) |
 
 The survey therefore supports AI as an assistant for guidance, information collection, structuring, and routing—not as the sole decision-maker for complex or high-impact claims.
 
@@ -532,52 +531,54 @@ The most recent claims in this segment covered motor vehicles, personal belongin
 
 | Channel | Survey result |
 |---|---:|
-| Website or online form | 37.5% (3/8) |
-| Phone call | 25.0% (2/8) |
-| Mobile app | 25.0% (2/8) |
-| Email | 12.5% (1/8) |
+| Phone call | 41.7% (20/48) |
+| Mobile app | 33.3% (16/48) |
+| Website or online form | 22.9% (11/48) |
+| Email | 2.1% (1/48) |
 
 ### Immediately After the Incident
 
 | Difficulty or uncertainty | Survey result |
 |---|---:|
-| Did not know which photos or evidence were required | 62.5% (5/8) |
-| Did not know what to do first | 50.0% (4/8) |
-| Did not know which information to collect | 62.5% (5/8) |
-| Was unsure whether the incident was covered | 50.0% (4/8) |
-| Felt stressed and found the situation difficult to manage | 37.5% (3/8) |
-| Was unsure whether police involvement was required | 25.0% (2/8) |
+| Did not know which photos or evidence were required | 50.0% (24/48) |
+| Did not know which information to collect | 50.0% (24/48) |
+| Was unsure whether the incident was covered | 39.6% (19/48) |
+| Did not know what to do first | 35.4% (17/48) |
+| Was unsure whether police involvement was required | 35.4% (17/48) |
+| Could not readily find insurer contact information | 35.4% (17/48) |
 
 ### While Reporting
 
 | Difficulty or frustration | Survey result |
 |---|---:|
-| There were too many questions | 62.5% (5/8) |
-| Insurance terminology was difficult | 37.5% (3/8) |
-| The process took too long | 37.5% (3/8) |
-| Previously provided information had to be repeated | 37.5% (3/8) |
-| Uploading photos or documents was difficult | 25.0% (2/8) |
-| Customer service involved waiting | 25.0% (2/8) |
-| It was unclear what information was required | 12.5% (1/8) |
+| Customer service involved waiting or the process was slow | 39.6% (19/48) |
+| The digital claim system or form was difficult to use | 37.5% (18/48) |
+| It was unclear what information was required | 35.4% (17/48) |
+| Previously provided information had to be repeated | 35.4% (17/48) |
+| Insurance terminology was difficult | 31.3% (15/48) |
+| Uploading photos or documents was difficult | 29.2% (14/48) |
 
 ### After Submission
 
 | Difficulty or uncertainty | Survey result |
 |---|---:|
-| Did not know how long the process would take | 62.5% (5/8) |
-| Did not know the current claim status | 62.5% (5/8) |
-| Was unsure whether enough information had been provided | 50.0% (4/8) |
-| Had to contact the insurer for updates | 50.0% (4/8) |
-| Did not know what would happen next | 37.5% (3/8) |
-| Did not know whom to contact if there was a problem | 37.5% (3/8) |
+| Did not know the current claim status | 60.4% (29/48) |
+| Received no updates unless the insurer was contacted | 50.0% (24/48) |
+| Was unsure whether enough information had been provided | 45.8% (22/48) |
+| Did not know whom to contact if there was a problem | 43.8% (21/48) |
+| Did not know what would happen next | 41.7% (20/48) |
+| Received different information from different staff | 41.7% (20/48) |
+| Experienced a long processing time | 33.3% (16/48) |
 
-Additional information or documents were requested once in 12.5% of cases and multiple times in 25.0%. No further information was requested in 25.0%, while 37.5% could not remember.
+Additional information or documents were requested once in 16.7% of cases (8/48) and multiple times in 47.9% (23/48). No further information was requested in 4.2% (2/48), while 31.3% (15/48) could not remember.
 
 When asked to identify the single most difficult part of the experience:
 
-- 37.5% selected knowing what information or evidence to collect;
-- 50.0% selected obtaining claim updates;
-- 12.5% selected understanding insurance coverage.
+- 22.9% selected communicating with insurance staff (11/48);
+- 14.6% selected waiting for assessment or approval (7/48);
+- 14.6% selected making the initial claim report (7/48);
+- 12.5% selected collecting or uploading documentation (6/48);
+- 10.4% selected tracking claim progress (5/48).
 
 Open responses requested proactive progress reporting, shorter turnaround time, fewer document requests, completion of required work in one interaction, and greater overall efficiency.
 
@@ -585,12 +586,11 @@ Open responses requested proactive progress reporting, shorter turnaround time, 
 
 | Situation | Survey result |
 |---|---:|
-| Immediately after a serious or stressful incident | 65.0% (13/20) |
-| The situation is complex or unusual | 55.0% (11/20) |
-| The digital process is difficult to use | 40.0% (8/20) |
-| There is a disagreement about the claim | 45.0% (9/20) |
-| The required information is not understood | 45.0% (9/20) |
-| Usually prefers to complete the process entirely without human support | 5.0% (1/20) |
+| The required information or policy language is not understood | 43.3% (26/60) |
+| Immediately after a serious or stressful incident | 41.7% (25/60) |
+| The situation is complex or unusual | 38.3% (23/60) |
+| There is a disagreement about the claim | 36.7% (22/60) |
+| The digital process is difficult to use | 33.3% (20/60) |
 
 ---
 
