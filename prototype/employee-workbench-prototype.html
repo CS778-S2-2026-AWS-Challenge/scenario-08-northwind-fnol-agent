@@ -48,8 +48,11 @@
     .view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
     
     /*员工AIchat窗口样式*/
-    .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:all .22s ease; font-size:13px; z-index:50; }
+    .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
+    .chat-widget.dragging { opacity:.96; transition:none; }
     .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
+    .chat-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 18px; background:linear-gradient(135deg,#173a56 0%,#157f79 100%); color:#fff; cursor:grab; touch-action:none; user-select:none; }
+    .chat-header.grabbing { cursor:grabbing; }
     .chat-widget.closed .chat-body,
     .chat-widget.closed .chat-input-bar,
     .chat-widget.closed .chat-attachments { display:none; }
@@ -115,7 +118,7 @@
   
   <!-- AI聊天窗口 -->
   <div class="chat-widget closed" id="chatWidget">
-    <div class="chat-header">
+    <div class="chat-header" id="chatHeader">
       <div>
         <strong id="chatHeaderTitle">Aurora Assistant</strong>
         <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
@@ -157,6 +160,8 @@
     let chatMode = 'assistant';
     let chatAttachments = [];
     let customerChatMessages = {};
+    /*使AI chat拖拽功能生效*/
+    let chatDrag = { active:false, offsetX:0, offsetY:0 };
 
     const byId = id => document.getElementById(id);
     const activeClaim = () => claims.find(claim => claim.id === activeClaimId);
@@ -431,6 +436,40 @@
     function openChat() { const widget = byId('chatWidget'); widget.classList.remove('closed'); byId('chatToggle').textContent = 'Close'; updateChatHeader(); }
     function closeChat() { const widget = byId('chatWidget'); widget.classList.add('closed'); byId('chatToggle').textContent = 'Open'; }
     function toggleChat() { const widget = byId('chatWidget'); if (widget.classList.contains('closed')) openChat(); else closeChat(); }
+    
+    /*实现AI聊天框的拖拽功能*/
+    function startChatDrag(event) {
+      if (event.button !== 0) return;
+      if (event.target.closest('button')) return;
+      const widget = byId('chatWidget');
+      const rect = widget.getBoundingClientRect();
+      chatDrag = { active:true, offsetX:event.clientX - rect.left, offsetY:event.clientY - rect.top, pointerId:event.pointerId };
+      widget.classList.add('dragging');
+      widget.style.left = `${rect.left}px`;
+      widget.style.top = `${rect.top}px`;
+      widget.style.right = 'auto';
+      widget.style.bottom = 'auto';
+      document.addEventListener('pointermove', dragChatMove);
+      document.addEventListener('pointerup', stopChatDrag);
+      event.preventDefault();
+    }
+    function dragChatMove(event) {
+      if (!chatDrag.active) return;
+      const widget = byId('chatWidget');
+      const left = Math.min(Math.max(0, event.clientX - chatDrag.offsetX), window.innerWidth - widget.offsetWidth);
+      const top = Math.min(Math.max(0, event.clientY - chatDrag.offsetY), window.innerHeight - widget.offsetHeight);
+      widget.style.left = `${left}px`;
+      widget.style.top = `${top}px`;
+      event.preventDefault();
+    }
+    function stopChatDrag() {
+      if (!chatDrag.active) return;
+      const widget = byId('chatWidget');
+      widget.classList.remove('dragging');
+      chatDrag.active = false;
+      document.removeEventListener('pointermove', dragChatMove);
+      document.removeEventListener('pointerup', stopChatDrag);
+    }
     function handleFileSelection(event) { chatAttachments = Array.from(event.target.files); updateAttachmentPreview(); }
     function sendChatMessage() {
       const input = byId('chatInput');
@@ -499,6 +538,8 @@
 
     /*AI聊天框的功能*/
     byId('chatToggle').addEventListener('click', toggleChat);
+    /*为聊天窗口的标题栏绑定拖拽事件，使用户可以通过鼠标拖动来移动聊天窗口的位置。*/
+    byId('chatHeader').addEventListener('pointerdown', startChatDrag);
     byId('chatSend').addEventListener('click', sendChatMessage);
     byId('chatFileBtn').addEventListener('click', () => byId('chatFileInput').click());
     byId('chatFileInput').addEventListener('change', handleFileSelection);
