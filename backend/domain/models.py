@@ -308,6 +308,50 @@ class EvidenceRecord(ContractModel):
     updated_at: datetime
 
 
+class WorkbenchSession(ContractModel):
+    """Staff projection of saved resume context without repository ownership fields."""
+
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    summary: str | None = None
+    unresolved_questions: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    prior_commitments: list[str] = Field(default_factory=list)
+    context_revision: int = Field(ge=1)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class WorkbenchClaimDetail(ContractModel):
+    """Authorised internal projection assembled from the shared claim repository."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    channel: Channel
+    locale: str
+    incident_type: str | None = None
+    claim_state: ClaimState
+    form: dict[str, StructuredFormField]
+    route: str | None = None
+    active_session_id: str | None = None
+    evidence_summary: EvidenceSummary
+    evidence: list[EvidenceRecord]
+    sessions: list[WorkbenchSession]
+    messages: list[MessageRecord]
+    decisions: list[AgentDecisionRecord]
+    signals: list[dict[str, Any]]
+    handoffs: list[dict[str, Any]]
+    staff_actions: list[dict[str, Any]]
+    customer_updates: list[dict[str, Any]]
+    external_claim: dict[str, Any] | None = None
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
 class ClaimantEvidence(ContractModel):
     """Claimant-safe evidence projection with storage and extraction details removed."""
 

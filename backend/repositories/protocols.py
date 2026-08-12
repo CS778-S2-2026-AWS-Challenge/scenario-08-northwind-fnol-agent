@@ -87,6 +87,10 @@ class ClaimRepository(Protocol):
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
 
+    def get_claim_for_staff(self, claim_id: str) -> WorkingClaim | None:
+        """Read the shared claim without claimant ownership filtering after staff auth."""
+        raise NotImplementedError
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
 

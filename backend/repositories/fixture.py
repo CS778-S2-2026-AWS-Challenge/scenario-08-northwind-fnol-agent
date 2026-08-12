@@ -41,6 +41,10 @@ class FixtureRepository(PersistenceRepository):
             return None
         return deepcopy(claim)
 
+    def get_claim_for_staff(self, claim_id: str) -> WorkingClaim | None:
+        claim = self._claims.get(claim_id)
+        return deepcopy(claim) if claim is not None else None
+
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
         stored_claim = self._claims.get(claim.claim_id)
         if stored_claim is None:

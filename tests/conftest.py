@@ -37,3 +37,8 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
     return {'Authorization': 'Bearer synthetic-claimant'}
+
+
+@pytest.fixture
+def staff_auth_headers() -> dict[str, str]:
+    return {'Authorization': 'Bearer synthetic-staff'}

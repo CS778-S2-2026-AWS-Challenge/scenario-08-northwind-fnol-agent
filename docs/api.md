@@ -953,26 +953,48 @@ Each item includes claim ID, safe display reference, state dimensions, priority,
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
-Returns the authorised internal projection:
+Returns the authorised internal projection assembled from the same repository records used by
+claimant routes:
 
 ```json
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
   "customer_reference": "customer-1042",
+  "channel": "web_agent",
+  "locale": "en-NZ",
+  "incident_type": "motor",
   "claim_state": {},
   "form": {},
+  "route": "professional_review",
+  "active_session_id": "ses_01J4Y7RPN8",
+  "evidence_summary": {},
   "evidence": [],
+  "sessions": [],
+  "messages": [],
   "decisions": [],
   "signals": [],
   "handoffs": [],
   "staff_actions": [],
   "customer_updates": [],
   "external_claim": null,
+  "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
+and context revisions. `messages` includes the complete persisted communication history,
+including internal-only staff or system records. `decisions` includes internal authority,
+tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
+workbench. These fields are never added to claimant projections.
+
+The current repository has no separate persisted handoff, staff-action, or customer-update
+records. Their arrays therefore remain empty rather than synthesising a second lifecycle or
+manual status. They can be populated when the corresponding shared repository records are
+implemented without changing the claim identity, revision, state, form, session, evidence, or
+decision fields above.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 

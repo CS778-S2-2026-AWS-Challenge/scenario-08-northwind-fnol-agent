@@ -33,6 +33,14 @@ def test_wildcard_origin_cannot_use_credentials() -> None:
         Settings(cors_allow_credentials=True)
 
 
+def test_synthetic_claimant_and_staff_tokens_must_be_separate() -> None:
+    with pytest.raises(ValueError, match='must be different'):
+        Settings(
+            synthetic_claimant_token='shared-token',
+            synthetic_staff_token='shared-token',
+        )
+
+
 def test_production_hides_interactive_api_docs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'production')
 
