@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Northwind Workbench</title>
+  <style>
+    :root {
+      color: #102a43;
+      background: #f1f5f9;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f1f5f9; }
+    button, select { font: inherit; }
+    a { color: inherit; text-decoration: none; }
+
+    .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+    .sidebar { background: #0f172a; color: #f8fafc; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+    .brand { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
+    .brand span { color: #38bdf8; }
+    .sidebar p { margin: 0; color: #cbd5e1; line-height: 1.6; font-size: 14px; }
+    .filters { display: grid; gap: 12px; }
+    .filters label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .12em; }
+    .filters select, .filters button { width: 100%; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; background: #0f172a; color: #f8fafc; }
+    .filters button { cursor: pointer; border-color: #38bdf8; background: #0f172a; }
+    .status-bar { margin-top: auto; font-size: 12px; color: #94a3b8; line-height: 1.7; }
+
+    .content { padding: 24px; }
+    .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
+    .header h1 { margin: 0; font-size: 28px; }
+    .header p { margin: 0; color: #475569; max-width: 650px; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 20px; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.04); }
+    .card h2 { margin: 0 0 12px; font-size: 16px; color: #0f172a; }
+    .card dl { margin: 0; }
+    .card dt { margin-top: 14px; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .08em; }
+    .card dd { margin: 6px 0 0; font-size: 15px; color: #0f172a; }
+
+    .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; }
+    .panel-header { padding: 18px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px; align-items: center; }
+    .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
+    .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
+    .panel-body { padding: 20px; }
+    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+    .claim-list button { width: 100%; text-align: left; border: none; background: transparent; padding: 18px 20px; cursor: pointer; display: grid; gap: 6px; border-bottom: 1px solid #e2e8f0; }
+    .claim-list button:hover { background: #f8fafc; }
+    .claim-list button.active { background: #e0f2fe; }
+    .claim-list .claim-id { font-weight: 700; color: #0f172a; }
+    .claim-list .claim-meta { display: flex; gap: 8px; flex-wrap: wrap; color: #64748b; font-size: 13px; }
+    .claim-list .badge { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .badge.urgent { background: #fee2e2; color: #991b1b; }
+    .badge.review { background: #e0f2fe; color: #075985; }
+    .badge.ready { background: #dcfce7; color: #166534; }
+    .badge.waiting { background: #f8fafc; color: #334155; }
+
+    .detail-panel { display: grid; gap: 16px; }
+    .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
+    .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .detail-item { background: #f8fafc; padding: 14px 16px; border-radius: 14px; }
+    .detail-item strong { display: block; margin-bottom: 8px; color: #0f172a; }
+    .detail-item span { color: #475569; font-size: 14px; line-height: 1.55; }
+    .note { color: #475569; line-height: 1.6; }
+    .muted { color: #64748b; font-size: 13px; }
+
+    .empty-state { padding: 30px 20px; color: #334155; }
+    .error { padding: 18px 20px; background: #fef2f2; color: #991b1b; border-radius: 14px; margin-bottom: 16px; }
+
+    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="brand">Aurora <span>Workbench</span></div>
+      <p>Staff-facing claim operations. Review claim state, internal signals, customer next steps, and internal notes from the same shared backend.</p>
+
+      <div class="filters">
+        <label for="viewSelect">Queue filter</label>
+        <select id="viewSelect">
+          <option value="all">All claims</option>
+          <option value="new_untriaged">New and untriaged</option>
+          <option value="awaiting_evidence">Awaiting evidence</option>
+          <option value="professional_review">Professional review</option>
+          <option value="ready_to_progress">Ready to progress</option>
+          <option value="created_routed">Created / routed</option>
+        </select>
+      </div>
+
+      <button id="refreshClaims">Refresh claims</button>
+      <div class="status-bar">Backend API: <code>/api/v1/workbench/claims</code><br />Staff token: <code>synthetic-staff</code></div>
+    </aside>
+
+    <main class="content">
+      <div class="header">
+        <div>
+          <h1>Employee workbench</h1>
+          <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h2>Internal view</h2>
+          <p class="note">This page is staff-only. It queries the backend workbench API and exposes internal fields that must not be rendered in the claimant interface.</p>
+        </div>
+        <div class="card">
+          <h2>Shared state</h2>
+          <p class="note">Customer-visible next steps are shown alongside internal review tags and staff notes. The data comes from the same backend claim state.</p>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
+          <div class="panel-body">
+            <div id="errorBanner" class="error" style="display:none"></div>
+            <ul id="claimList" class="claim-list"></ul>
+            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
+          </div>
+        </section>
+
+        <section class="detail-panel">
+          <div class="detail-section" id="detailSummary">
+            <h2>Claim detail</h2>
+            <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
+          </div>
+          <div class="detail-section" id="detailInternal" style="display:none">
+            <h2>Internal information</h2>
+            <div class="detail-grid">
+              <div class="detail-item"><strong>Customer</strong><span id="detailCustomer"></span></div>
+              <div class="detail-item"><strong>Customer reference</strong><span id="detailCustomerReference"></span></div>
+              <div class="detail-item"><strong>Current state</strong><span id="detailState"></span></div>
+              <div class="detail-item"><strong>Assigned to</strong><span id="detailAssigned"></span></div>
+              <div class="detail-item"><strong>Internal flags</strong><span id="detailFlags"></span></div>
+              <div class="detail-item"><strong>Last updated</strong><span id="detailUpdated"></span></div>
+            </div>
+          </div>
+          <div class="detail-section" id="detailNotes" style="display:none">
+            <h2>Staff notes</h2>
+            <p id="detailInternalNotes"></p>
+          </div>
+          <div class="detail-section" id="detailNextStep" style="display:none">
+            <h2>Customer next step</h2>
+            <p id="detailNextStepSummary"></p>
+            <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:8000/api/v1/workbench/claims';
+    const STAFF_TOKEN = 'synthetic-staff';
+
+    const byId = id => document.getElementById(id);
+    let claims = [];
+    let activeClaimId = null;
+
+    const stateMap = {
+      professional_review: 'Professional review',
+      awaiting_evidence: 'Awaiting evidence',
+      ready_to_progress: 'Ready to progress',
+      created_routed: 'Created / routed',
+      new_untriaged: 'New and untriaged',
+    };
+
+    function setError(message) {
+      const banner = byId('errorBanner');
+      if (!message) {
+        banner.style.display = 'none';
+        banner.textContent = '';
+        return;
+      }
+      banner.style.display = 'block';
+      banner.textContent = message;
+    }
+
+    function getHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${STAFF_TOKEN}`,
+      };
+    }
+
+    async function fetchClaims(view) {
+      const searchParams = new URLSearchParams();
+      if (view && view !== 'all') {
+        searchParams.set('view', view);
+      }
+      const url = `${API_BASE}?${searchParams.toString()}`;
+      const response = await fetch(url, { headers: getHeaders() });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message || `Failed to load claims (${response.status})`);
+      }
+      return response.json();
+    }
+
+    async function fetchClaimDetail(claimId) {
+      const response = await fetch(`${API_BASE}/${encodeURIComponent(claimId)}`, { headers: getHeaders() });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message || `Failed to load claim ${claimId} (${response.status})`);
+      }
+      return response.json();
+    }
+
+    function highlightQueueLabel(queue) {
+      if (queue === 'professional_review') return 'review';
+      if (queue === 'awaiting_evidence') return 'waiting';
+      if (queue === 'ready_to_progress') return 'ready';
+      if (queue === 'created_routed') return 'ready';
+      return 'urgent';
+    }
+
+    function renderClaims(list) {
+      const listEl = byId('claimList');
+      listEl.innerHTML = '';
+      if (!list.length) {
+        byId('emptyState').style.display = 'block';
+        byId('claimCount').textContent = '0 claims';
+        return;
+      }
+      byId('emptyState').style.display = 'none';
+      byId('claimCount').textContent = `${list.length} claim${list.length === 1 ? '' : 's'}`;
+
+      list.forEach(item => {
+        const button = document.createElement('button');
+        button.innerHTML = `
+          <div class="claim-id">${item.claim_id}</div>
+          <div class="claim-meta">
+            <span>${item.customer_reference}</span>
+            <span>${stateMap[item.queue] || item.queue}</span>
+            <span class="badge ${highlightQueueLabel(item.queue)}">${item.priority || 'standard'}</span>
+          </div>`;
+        button.classList.toggle('active', item.claim_id === activeClaimId);
+        button.addEventListener('click', () => {
+          activeClaimId = item.claim_id;
+          renderClaims(list);
+          renderDetail(item.claim_id);
+        });
+        listEl.appendChild(button);
+      });
+    }
+
+    function renderDetail(claimId) {
+      const selected = claims.find(item => item.claim_id === claimId);
+      if (!selected) {
+        byId('detailContent').innerHTML = '<p class="muted">Claim details are unavailable.</p>';
+        byId('detailInternal').style.display = 'none';
+        byId('detailNotes').style.display = 'none';
+        byId('detailNextStep').style.display = 'none';
+        return;
+      }
+
+      fetchClaimDetail(claimId)
+        .then(detail => {
+          byId('detailContent').innerHTML = `
+            <p><strong>${detail.claim_id}</strong></p>
+            <p class="muted">Incident type: ${detail.incident_type || 'Not set'}</p>
+            <p class="note">Claim revision ${detail.revision} · Updated ${new Date(detail.updated_at).toLocaleString()}</p>`;
+
+          byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
+          byId('detailCustomerReference').textContent = detail.customer_reference;
+          byId('detailState').textContent = detail.claim_state.workflow_state.replace('_', ' ');
+          byId('detailAssigned').textContent = detail.assigned_to || 'Unassigned';
+          byId('detailFlags').textContent = detail.internal_flags.length ? detail.internal_flags.join(', ') : 'None';
+          byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
+          byId('detailInternalNotes').textContent = detail.internal_notes || 'No internal notes available.';
+          byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
+          byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
+          byId('detailInternal').style.display = 'block';
+          byId('detailNotes').style.display = 'block';
+          byId('detailNextStep').style.display = 'block';
+        })
+        .catch(error => {
+          setError(error.message);
+        });
+    }
+
+    async function loadClaims() {
+      setError('');
+      const view = byId('viewSelect').value;
+      try {
+        const payload = await fetchClaims(view);
+        claims = payload.items || [];
+        renderClaims(claims);
+        if (claims.length && !activeClaimId) {
+          activeClaimId = claims[0].claim_id;
+          renderDetail(activeClaimId);
+        } else if (activeClaimId) {
+          renderDetail(activeClaimId);
+        }
+      } catch (error) {
+        setError(error.message);
+      }
+    }
+
+    document.getElementById('viewSelect').addEventListener('change', loadClaims);
+    document.getElementById('refreshClaims').addEventListener('click', loadClaims);
+
+    loadClaims();
+  </script>
+</body>
+</html>

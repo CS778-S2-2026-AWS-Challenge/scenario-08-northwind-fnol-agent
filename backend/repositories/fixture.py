@@ -101,6 +101,18 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(record.key)
         self._idempotency[lookup] = record
 
+    def get_claim_by_id(self, claim_id: str) -> WorkingClaim | None:
+        claim = self._claims.get(claim_id)
+        if claim is None:
+            return None
+        return deepcopy(claim)
+
+    def list_claims(self) -> list[WorkingClaim]:
+        return sorted(
+            (deepcopy(claim) for claim in self._claims.values()),
+            key=lambda claim: claim.created_at,
+        )
+
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         claims = [
             deepcopy(claim) for claim in self._claims.values() if claim.customer_id == customer_id

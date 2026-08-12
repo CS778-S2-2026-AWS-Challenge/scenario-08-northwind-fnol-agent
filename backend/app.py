@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from backend.api.claims import router as claims_router
 from backend.api.health import router as health_router
 from backend.api.legacy import router as legacy_router
+from backend.api.workbench import router as workbench_router
 from backend.core.config import Settings
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
@@ -35,4 +36,5 @@ def create_app(
     app.include_router(health_router)
     app.include_router(legacy_router)
     app.include_router(claims_router)
+    app.include_router(workbench_router)
     return app

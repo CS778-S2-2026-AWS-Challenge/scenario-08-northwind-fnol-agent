@@ -388,6 +388,41 @@ class ClaimListResponse(ContractModel):
     page: PageInfo
 
 
+class WorkbenchClaimItem(ContractModel):
+    claim_id: str
+    revision: int
+    customer_reference: str
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    customer_next_step: CustomerNextStep
+    assigned_to: str | None = None
+    internal_flags: list[str] = Field(default_factory=list)
+    queue: str | None = None
+    priority: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkbenchClaimListResponse(ContractModel):
+    items: list[WorkbenchClaimItem]
+    page: PageInfo | None = None
+
+
+class WorkbenchClaimDetail(ContractModel):
+    claim_id: str
+    revision: int
+    customer_reference: str
+    incident_type: str | None = None
+    claim_state: ClaimState
+    form: dict[str, StructuredFormField]
+    customer_next_step: CustomerNextStep
+    assigned_to: str | None = None
+    internal_flags: list[str] = Field(default_factory=list)
+    internal_notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str

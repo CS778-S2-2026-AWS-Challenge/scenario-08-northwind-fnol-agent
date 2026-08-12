@@ -33,6 +33,7 @@ Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint
 | --- | --- |
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
 | `customer/` | React and Vite claimant experience |
+| `employee/` | Static staff-facing workbench frontend and API integration demo |
 | `prototype/` | Static claimant and employee workbench demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `SPEC/` | Current product requirements and acceptance scenarios |

@@ -45,6 +45,12 @@ class ClaimRepository(Protocol):
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         raise NotImplementedError
 
+    def get_claim_by_id(self, claim_id: str) -> WorkingClaim | None:
+        raise NotImplementedError
+
+    def list_claims(self) -> list[WorkingClaim]:
+        raise NotImplementedError
+
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         raise NotImplementedError
 
