@@ -27,18 +27,66 @@
     .claim-head { padding:16px 17px 13px; border-bottom:1px solid #edf0f4; }.claim-head-top { display:flex; justify-content:space-between; gap:8px; }.claim-head h2 { margin:0; font-size:18px; }.claim-head p { margin:3px 0 0; color:var(--muted); font-size:12px; }.status-line { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }.tabs { display:flex; gap:18px; padding:0 17px; border-bottom:1px solid #edf0f4; }.tab { padding:11px 1px 9px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }.tab.active { border-color:var(--teal); color:var(--teal); font-weight:700; }.detail-body { padding:16px 17px; }.tab-content { display:none; }.tab-content.active { display:block; }
     .tip { padding:10px 11px; border:1px solid #bfdbfe; border-radius:8px; background:#eff6ff; color:#1e4d89; font-size:12px; }.section { margin-top:16px; }.section h3 { margin:0 0 8px; color:var(--muted); font-size:11px; letter-spacing:.55px; text-transform:uppercase; }.action { padding:12px; border:1px solid #bce5df; border-radius:9px; background:#f3fcfb; }.action p { margin:4px 0 10px; color:#475467; font-size:12px; }.buttons { display:flex; flex-wrap:wrap; gap:8px; }.btn { padding:8px 10px; border:1px solid transparent; border-radius:7px; font-size:12px; font-weight:650; cursor:pointer; }.btn.primary { border-color:var(--teal); background:var(--teal); color:#fff; }.btn.secondary { border-color:#cfd8e1; background:#fff; color:#344054; }.btn.danger { border-color:#fecdca; background:#fff; color:#b42318; }
     .field-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.field { padding:8px 9px; border:1px solid var(--line); border-radius:7px; }.field label { display:block; color:#98a2b3; font-size:10px; letter-spacing:.4px; text-transform:uppercase; }.field span { display:block; font-size:12px; font-weight:600; }.field small { color:var(--muted); font-size:10px; }.tag-list { display:flex; flex-wrap:wrap; gap:7px; }.tag { padding:7px 8px; border:1px solid var(--line); border-radius:6px; font-size:11px; }.tag strong,.tag small { display:block; }.tag small { color:var(--muted); font-size:10px; }.timeline { margin-left:5px; padding-left:13px; border-left:2px solid #d8e1e8; }.event { position:relative; padding:0 0 12px; font-size:12px; }.event::before { content:""; position:absolute; left:-18px; top:5px; width:7px; height:7px; border-radius:50%; background:#1d9b94; }.event small { display:block; color:var(--muted); }
-    .simple-view { display:none; }.simple-view.active { display:block; }.view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
+    .simple-view { display:none; }.simple-view.active { display:block; }
+    
+    /*与客户聊天功能样式*/
+    .customer-chat-shell { display:grid; grid-template-columns:260px 1fr; gap:16px; margin-top:16px; }
+    .customer-chat-list { padding:18px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .customer-chat-list h3 { margin:0 0 12px; font-size:12px; color:#475467; letter-spacing:.5px; text-transform:uppercase; }
+    .chat-list-items { display:grid; gap:8px; }
+    .chat-list-items .btn { width:100%; justify-content:flex-start; border-color:#d7e0e9; background:#f8fbfc; color:#0f3444; }
+    .chat-list-items .btn.active { background:#157f79; color:#fff; border-color:transparent; }
+    .customer-chat-box { display:flex; flex-direction:column; min-height:520px; }
+    .chat-box-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .chat-box-header strong { font-size:16px; }
+    .customer-chat-history { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid var(--line); border-radius:14px; background:#f6fdff; }
+    .customer-chat-message { padding:12px 14px; border-radius:16px; max-width:78%; line-height:1.5; white-space:pre-wrap; }
+    .customer-chat-message.assistant { align-self:flex-start; background:#eef7f5; color:#0f4a47; }
+    .customer-chat-message.user { align-self:flex-end; background:#157f79; color:#fff; }
+    .customer-chat-input { display:flex; gap:10px; margin-top:14px; }
+    .customer-chat-input textarea { flex:1; min-height:90px; border:1px solid var(--line); border-radius:14px; padding:12px; resize:none; }
+    .view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
+    
+    /*员工AIchat窗口样式*/
+    .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:all .22s ease; font-size:13px; z-index:50; }
+    .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
+    .chat-widget.closed .chat-body,
+    .chat-widget.closed .chat-input-bar,
+    .chat-widget.closed .chat-attachments { display:none; }
+    .chat-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 18px; background:linear-gradient(135deg,#173a56 0%,#157f79 100%); color:#fff; }
+    .chat-header-meta { margin-top:4px; font-size:11px; opacity:.82; line-height:1.4; }
+    .chat-toggle { border:none; min-width:64px; height:36px; border-radius:999px; background:rgba(255,255,255,.18); color:#fff; font-weight:700; cursor:pointer; }
+    .chat-body { display:flex; flex-direction:column; gap:12px; padding:16px 16px 0; overflow-y:auto; max-height:312px; background:#f7fbff; }
+    .chat-message { max-width:84%; padding:13px 14px; border-radius:18px; line-height:1.5; box-shadow:0 10px 24px rgba(16,42,67,.08); }
+    .chat-message.assistant { align-self:flex-start; background:#eef7f5; color:#0f4a47; border-bottom-left-radius:4px; }
+    .chat-message.user { align-self:flex-end; background:#157f79; color:#fff; border-bottom-right-radius:4px; }
+    .chat-attachments { display:none; padding:0 16px 12px; gap:8px; flex-wrap:wrap; background:#f4fdff; border-top:1px solid #e9f4f5; }
+    .chat-chip { display:inline-flex; align-items:center; gap:10px; padding:8px 10px; border-radius:999px; background:#e9f9f7; border:1px solid #c8ece4; color:#0f4a47; }
+    .chat-chip button { border:none; background:transparent; color:#0f4a47; font-weight:700; cursor:pointer; }
+    .chat-input-bar { display:flex; align-items:flex-end; gap:10px; padding:14px 16px 16px; background:#fff; border-top:1px solid #e6eff4; }
+    .chat-file-btn { width:38px; height:38px; border-radius:50%; border:1px solid #d7e9e7; background:#eef8f6; color:#157f79; font-size:22px; line-height:0; cursor:pointer; }
+    .chat-input { flex:1; min-height:42px; max-height:110px; padding:12px 14px; border-radius:16px; border:1px solid #d7e2ea; background:#f6fbff; resize:none; outline:none; }
+    .chat-send { min-width:76px; height:42px; padding:0 16px; border:none; border-radius:999px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
+    .chat-attachment-preview { display:flex; align-items:center; gap:12px; padding:10px; border-radius:16px; background:#fff; border:1px solid #e6eff4; }
+    .chat-attachment-preview img { width:48px; height:48px; border-radius:14px; object-fit:cover; }
+    .attachment-icon { width:48px; height:48px; border-radius:14px; display:grid; place-items:center; background:#eaf6f3; color:#157f79; font-size:12px; font-weight:700; }
+    .chat-attachment-preview div { font-size:12px; line-height:1.3; }
+    .chat-attachment-preview small { display:block; color:#68707d; margin-top:4px; }
+    @media(max-width:900px) { .chat-widget { right:12px; bottom:12px; width:300px; } }
+    @media(max-width:680px) { .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; } }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
     @media(max-width:720px) { .sidebar{display:none}.topbar,main{padding-left:16px;padding-right:16px}.queue-grid{grid-template-columns:repeat(2,1fr)}.filters{flex-wrap:wrap}.search{width:100%}.result-count{margin-left:0}th:nth-child(3),td:nth-child(3){display:none} }
+  
   </style>
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
+    <aside class="sidebar"> <!-- 侧边栏 -->
       <div class="brand">aurora<span>claims</span></div>
       <div class="nav-heading">Work</div>
       <ul class="nav">
         <li><button class="active" data-view="workbench"><span class="nav-icon">▣</span>Claims Workbench <span class="count">28</span></button></li>
+        <li><button data-view="customerChat"><span class="nav-icon">💬</span>Customer chat</button></li>
         <li><button data-view="tasks"><span class="nav-icon">✓</span>My Tasks <span class="count">4</span></button></li>
         <li><button data-view="urgent"><span class="nav-icon">!</span>Urgent Cases <span class="count">3</span></button></li>
       </ul>
@@ -59,11 +107,35 @@
           </div>
         </section>
         <section class="simple-view" id="tasksView"></section>
+        <section class="simple-view" id="customerChatView"></section>
         <section class="simple-view" id="guideView"></section>
       </main>
     </div>
   </div>
+  
+  <!-- AI聊天窗口 -->
+  <div class="chat-widget closed" id="chatWidget">
+    <div class="chat-header">
+      <div>
+        <strong id="chatHeaderTitle">Aurora Assistant</strong>
+        <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
+      </div>
+      <button class="chat-toggle" id="chatToggle">Open</button>
+    </div>
+    <div class="chat-body" id="chatBody">
+      <div class="chat-message assistant">Hi! I can help with claim next steps, policy checks, and process guidance.</div>
+    </div>
+    <div class="chat-attachments" id="chatAttachments"></div>
+    <div class="chat-input-bar" id="chatInputBar">
+      <button type="button" class="chat-file-btn" id="chatFileBtn">+</button>
+      <textarea id="chatInput" class="chat-input" placeholder="Type a question..." rows="1"></textarea>
+      <button class="chat-send" id="chatSend">Send</button>
+      <input id="chatFileInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
+
   <script>
     const claims = [
       { id:'CLM-2026-00841', customer:'Wei Chen', type:'Vehicle collision', product:'Motor', status:'Professional review', priority:'High', due:'Today, 3:30 pm', next:'Review risk signal', queue:'review', tag:'FRAUD-LOC-02', action:'Review the risk signal', reason:'A past claim and this incident share a location. This is a review prompt, not a finding of fraud. Do not mention it to the customer.' },
@@ -80,6 +152,11 @@
     let activeQueue = 'new';
     let activeClaimId = claims[0].id;
     let assignedToMe = false;
+    let activeChatTarget = null;
+    let activeCustomerChatId = null;
+    let chatMode = 'assistant';
+    let chatAttachments = [];
+    let customerChatMessages = {};
 
     const byId = id => document.getElementById(id);
     const activeClaim = () => claims.find(claim => claim.id === activeClaimId);
@@ -90,11 +167,283 @@
     function filteredClaims() { const search = byId('searchInput').value.trim().toLowerCase(); return claims.filter(claim => (activeQueue === 'all' || claim.queue === activeQueue) && `${claim.id} ${claim.customer}`.toLowerCase().includes(search)); }
     function renderQueues() { byId('queues').innerHTML = queues.map(queue => { const count = queue.key === 'all' ? claims.length : claims.filter(claim => claim.queue === queue.key).length; return `<button class="queue ${queue.key === 'urgent' ? 'urgent' : ''} ${queue.key === activeQueue ? 'active' : ''}" data-queue="${queue.key}"><span class="queue-title">${queue.title}</span><strong class="queue-count">${count}</strong><span class="queue-sub">${queue.sub}</span></button>`; }).join(''); document.querySelectorAll('[data-queue]').forEach(button => button.addEventListener('click', () => { activeQueue = button.dataset.queue; renderWorkbench(); })); }
     function renderRows() { const visible = filteredClaims(); byId('resultCount').textContent = visible.length; byId('claimRows').innerHTML = visible.map(claim => `<tr data-claim="${claim.id}" class="${claim.id === activeClaimId ? 'selected' : ''}"><td><div class="case-id">${claim.id}</div><div class="muted">${claim.customer} · ${claim.product}</div></td><td><span class="badge ${statusClass(claim.status)}"><i class="dot"></i>${claim.status}</span></td><td><span class="badge ${priorityClass(claim.priority)}">${claim.priority}</span></td><td>${claim.next}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No claims match this search.</td></tr>'; document.querySelectorAll('[data-claim]').forEach(row => row.addEventListener('click', () => { activeClaimId = row.dataset.claim; renderRows(); renderDetail(); })); }
-    function renderDetail() { const claim = activeClaim(); byId('claimDetail').innerHTML = `<div class="claim-head"><div class="claim-head-top"><div><h2>${claim.id}</h2><p>${claim.customer} · ${claim.type} · Session S-10182</p></div><span class="badge ${priorityClass(claim.priority)}">Due ${claim.due}</span></div><div class="status-line"><span class="badge ${statusClass(claim.status)}">${claim.status}</span><span class="badge teal">Cover confirmed</span><span class="badge blue">Photos received</span></div></div><div class="tabs"><button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="form">Claim form</button><button class="tab" data-tab="handoff">Handoff notes</button><button class="tab" data-tab="history">History</button></div><div class="detail-body"><div class="tab-content active" id="overview"><div class="tip"><b>What should I do?</b> Start with the recommended next step below.</div><div class="section"><h3>Recommended next step</h3><div class="action"><b>${claim.action}</b><p>${claim.reason}</p><div class="buttons"><button class="btn primary" data-action="complete">Complete action</button><button class="btn secondary" data-action="assign">${assignedToMe ? 'Assigned to Lin Zhang' : 'Assign to me'}</button></div></div></div><div class="section"><h3>Internal tags</h3><div class="tag-list"><div class="tag"><strong>${claim.tag} · review required</strong><small>Internal only · staff action needed</small></div><div class="tag"><strong>POLICY-CLEAR · confirmed</strong><small>Policy record P-2008</small></div></div></div></div><div class="tab-content" id="form"><div class="section"><h3>Confirmed claim details</h3><div class="field-grid"><div class="field"><label>Incident time</label><span>10 Aug 2026, 08:15</span><small>Confirmed by customer</small></div><div class="field"><label>Location</label><span>Newmarket, Auckland</span><small>Photo metadata + customer</small></div><div class="field"><label>Incident type</label><span>${claim.type}</span><small>Customer description</small></div><div class="field"><label>Injuries reported</label><span>None</span><small>Confirmed by customer</small></div></div></div></div><div class="tab-content" id="handoff"><div class="section"><h3>Everything the next person needs</h3><div class="field"><label>Confirmed summary</label><span>${claim.customer} reported a ${claim.type.toLowerCase()} in Newmarket. Key information has been confirmed.</span></div><div class="field" style="margin-top:8px"><label>Requested action</label><span>${claim.action}. Save the outcome and send the appropriate customer update.</span></div></div></div><div class="tab-content" id="history"><div class="section"><h3>Audit history</h3><div class="timeline"><div class="event">System selected next safe action<small>14:05 · Reason code: ${claim.tag}</small></div><div class="event">Cover check completed<small>14:03 · Policy P-2008</small></div><div class="event">Customer confirmed key details<small>13:58 · Session S-10182</small></div></div></div></div></div>`; document.querySelectorAll('[data-tab]').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab))); document.querySelector('[data-action="complete"]').addEventListener('click', completeAction); document.querySelector('[data-action="assign"]').addEventListener('click', assignToMe); }
+    
+    /*这个函数的作用是生成并渲染当前选中案件的“右侧详情面板”。
+    它通过获取当前选中的理赔单数据，将案件的头部状态、四大切换选项卡（Tab）以及对应的详细内容动态填入页面。*/
+    function renderDetail() {
+      const claim = activeClaim();
+      byId('claimDetail').innerHTML = `
+        <div class="claim-head">
+          <div class="claim-head-top">
+            <div>
+              <h2>${claim.id}</h2>
+              <p>${claim.customer} · ${claim.type} · Session S-10182</p>
+            </div>
+            <span class="badge ${priorityClass(claim.priority)}">Due ${claim.due}</span>
+          </div>
+          <div class="status-line">
+            <span class="badge ${statusClass(claim.status)}">${claim.status}</span>
+            <span class="badge teal">Cover confirmed</span>
+            <span class="badge blue">Photos received</span>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="overview">Overview</button>
+          <button class="tab" data-tab="form">Claim form</button>
+          <button class="tab" data-tab="handoff">Handoff notes</button>
+          <button class="tab" data-tab="history">History</button>
+        </div>
+        <div class="detail-body">
+          <div class="tab-content active" id="overview">
+            <div class="tip"><b>What should I do?</b> Start with the recommended next step below.</div>
+            <div class="section">
+              <h3>Recommended next step</h3>
+              <div class="action">
+                <b>${claim.action}</b>
+                <p>${claim.reason}</p>
+                <div class="buttons">
+                  <button class="btn primary" data-action="complete">Complete action</button>
+                  <button class="btn secondary" data-action="assign">${assignedToMe ? 'Assigned to Lin Zhang' : 'Assign to me'}</button>
+                </div>
+              </div>
+            </div>
+            <div class="section">
+              <h3>Internal tags</h3>
+              <div class="tag-list">
+                <div class="tag">
+                  <strong>${claim.tag} · review required</strong>
+                  <small>Internal only · staff action needed</small>
+                </div>
+                <div class="tag">
+                  <strong>POLICY-CLEAR · confirmed</strong>
+                  <small>Policy record P-2008</small>
+                </div>
+              </div>
+            </div>
+            <div class="section chat-card">
+              <h3>Customer chat</h3>
+              <p>Open the customer-facing chat session for this claim so you can talk directly with the customer in the dashboard.</p>
+              <div class="buttons">
+                <button class="btn primary" data-chat="${claim.id}">Go to customer chat</button>
+              </div>
+            </div>
+          </div>
+          <div class="tab-content" id="form">
+            <div class="section">
+              <h3>Confirmed claim details</h3>
+              <div class="field-grid">
+                <div class="field">
+                  <label>Incident time</label>
+                  <span>10 Aug 2026, 08:15</span>
+                  <small>Confirmed by customer</small>
+                </div>
+                <div class="field">
+                  <label>Location</label>
+                  <span>Newmarket, Auckland</span>
+                  <small>Photo metadata + customer</small>
+                </div>
+                <div class="field">
+                  <label>Incident type</label>
+                  <span>${claim.type}</span>
+                  <small>Customer description</small>
+                </div>
+                <div class="field">
+                  <label>Injuries reported</label>
+                  <span>None</span>
+                  <small>Confirmed by customer</small>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tab-content" id="handoff">
+            <div class="section">
+              <h3>Everything the next person needs</h3>
+              <div class="field">
+                <label>Confirmed summary</label>
+                <span>${claim.customer} reported a ${claim.type.toLowerCase()} in Newmarket. Key information has been confirmed.</span>
+              </div>
+              <div class="field" style="margin-top:8px">
+                <label>Requested action</label>
+                <span>${claim.action}. Save the outcome and send the appropriate customer update.</span>
+              </div>
+            </div>
+          </div>
+          <div class="tab-content" id="history">
+            <div class="section">
+              <h3>Audit history</h3>
+              <div class="timeline">
+                <div class="event">System selected next safe action<small>14:05 · Reason code: ${claim.tag}</small></div>
+                <div class="event">Cover check completed<small>14:03 · Policy P-2008</small></div>
+                <div class="event">Customer confirmed key details<small>13:58 · Session S-10182</small></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.querySelectorAll('[data-tab]').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+      bindDetailEvents();
+    }
     function switchTab(tabName) { document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName)); document.querySelectorAll('.tab-content').forEach(panel => panel.classList.toggle('active', panel.id === tabName)); }
     function completeAction() { const claim = activeClaim(); claim.status = 'Action recorded'; claim.next = 'Prepare customer update'; showToast(`Action saved for ${claim.id}`); renderWorkbench(); }
     function assignToMe() { assignedToMe = true; showToast('This claim is now assigned to you'); renderDetail(); }
+    function openCustomerChat(claimId) { activeCustomerChatId = claimId; renderCustomerChat(); activateView('customerChat'); showToast(`Opened customer chat for ${claimId}`); }
+    function bindDetailEvents() { document.querySelectorAll('[data-chat]').forEach(button => button.addEventListener('click', () => openCustomerChat(button.dataset.chat))); document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => { if (button.dataset.action === 'complete') completeAction(); if (button.dataset.action === 'assign') assignToMe(); })); }
     function renderWorkbench() { renderQueues(); renderRows(); renderDetail(); const title = queues.find(queue => queue.key === activeQueue).title; byId('queueTitle').textContent = title; }
+    
+    /*这个功能是：员工与客户聊天页面的视图渲染核心。
+    它的职责是：确定当前选中的客户、准备对话历史数据、动态拼接生成整个聊天界面的 HTML 结构，并为页面上的各种按钮绑定点击事件*/
+    function renderCustomerChat() {
+      /*如果当前没有选中的客户聊天 ID，就默认使用第一个案件的 ID，确保页面总是有一个聊天会话可显示。*/
+      if (!activeCustomerChatId) activeCustomerChatId = claims[0].id;
+      /*在所有案件中查找当前选中的客户聊天 ID 对应的案件对象，如果找不到，就退回使用第一个案件。*/
+      const claim = claims.find(claim => claim.id === activeCustomerChatId) || claims[0];
+      /*确保全局的 customerChatMessages 对象里有这个案件的聊天记录数组，如果没有，就初始化一个带有系统提示的数组，告诉用户可以开始与客户聊天。*/
+      if (!customerChatMessages[claim.id]) {
+        customerChatMessages[claim.id] = [
+          { role:'assistant', text:`Customer chat is ready for ${claim.customer}. Use this page to keep customer conversations separate from the staff AI thread.` }
+        ];
+      }
+      /*获取当前案件的聊天记录数组，用于在页面上显示历史消息。*/
+      const messages = customerChatMessages[claim.id];
+
+      /*通过byId(），动态生成整个客户聊天界面的 HTML 结构，包括左侧的客户列表和右侧的聊天框，并插入到页面中。*/
+      byId('customerChatView').innerHTML = `
+        <div class="page-heading"><div><h1>Customer chat</h1><p>Direct customer communication, separate from the internal AI support chat.</p></div></div>
+        <div class="customer-chat-shell">
+          <aside class="customer-chat-list">
+            <div class="section"><h3>Customer chats</h3></div>
+            <div class="chat-list-items">
+              ${claims.map(c => `<button class="btn ${c.id === claim.id ? 'active' : ''}" data-customer-chat="${c.id}">${c.id} · ${c.customer}</button>`).join('')}
+            </div>
+          </aside>
+          <div class="customer-chat-box">
+            <div class="chat-box-header">
+              <strong>Claim ${claim.id} · ${claim.customer}</strong>
+              <button class="btn secondary" id="customerChatBack">Back to workbench</button>
+            </div>
+            <div class="customer-chat-history" id="customerChatHistory">
+              ${messages.map(msg => `<div class="customer-chat-message ${msg.role}">${msg.text}</div>`).join('')}
+            </div>
+            <div class="customer-chat-input">
+              <textarea id="customerChatText" placeholder="Write a customer reply..."></textarea>
+              <button class="btn primary" id="customerChatSend">Send</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      /*模板写入页面后，必须重新给新生成的元素绑定事件*/
+      /*为左侧客户列表的每个按钮绑定点击事件，当点击某个客户时，更新 activeCustomerChatId 并重新渲染聊天界面。*/
+      document.querySelectorAll('[data-customer-chat]').forEach(button => button.addEventListener('click', () => { activeCustomerChatId = button.dataset.customerChat; renderCustomerChat(); }));
+      byId('customerChatSend').addEventListener('click', sendCustomerChatMessage); /*为发送按钮绑定点击事件，调用 sendCustomerChatMessage 函数发送消息。*/
+      byId('customerChatBack').addEventListener('click', () => activateView('workbench')); /*为“返回工作台”按钮绑定点击事件，切换回工作台视图。*/
+    }
+
+    /*与客户聊天功能*/
+    function sendCustomerChatMessage() {
+      /*抓取聊天输入框的 HTML 节点（即那个允许打字的 <textarea> 文本框），*/
+      const input = byId('customerChatText');
+      /*读取你输入的文字，并通过 .trim() 剔除首尾的空格/换行。防止误触发送全空格的无意义消息。*/
+      const text = input.value.trim();
+      /*拦截空消息：如果剔除空格后文本为空，直接终止函数，什么都不做。*/
+      if (!text) return;
+      /*确认当前是在跟哪位客户聊：优先使用当前选中的案件 ID（activeCustomerChatId）；如果还没选择，默认退回使用第一个案件的 ID。*/
+      const claimId = activeCustomerChatId || claims[0].id;
+      /*保障数据结构存在：检查全局消息记录对象里有没有这个案件的聊天记录列表。如果没有，就先给它初始化一个空数组 []，防止后续报“无法在 undefined 上 push”的错误。*/
+      customerChatMessages[claimId] = customerChatMessages[claimId] || [];
+      /*把你刚才输入的消息，作为一条“用户消息”，推入这个案件的聊天记录数组里。*/
+      customerChatMessages[claimId].push({ role:'user', text });
+      /*清空输入框：把 <textarea> 的 value 置空，让你可以继续输入下一条消息。*/
+      input.value = '';
+      /*重新渲染聊天记录：把最新的消息列表显示在页面上。*/
+      renderCustomerChat();
+
+      /*模拟客服回复：这里用 setTimeout 模拟了一个客服的自动回复，实际中可以替换为调用后端接口或 AI 服务。*/
+      setTimeout(() => {
+        customerChatMessages[claimId].push({ role:'assistant', text:'Thanks for your message. This is a placeholder customer reply until the live chat service is connected.' });
+        renderCustomerChat();
+      }, 260);
+    }
+    
+    /*AI聊天框的功能*/
+    /* updateAttachmentPreview() 选文件：通过文件框选择文件后，代码会把它们暂存起来*/
+    function updateAttachmentPreview() {
+      const container = byId('chatAttachments');
+      container.innerHTML = '';
+      if (!chatAttachments.length) {
+        container.style.display = 'none';
+        return;
+      }
+      container.style.display = 'flex';
+      chatAttachments.forEach((file, index) => {
+        const chip = document.createElement('div');
+        chip.className = 'chat-chip';
+        const label = document.createElement('span');
+        label.textContent = file.name;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.addEventListener('click', () => { chatAttachments.splice(index, 1); updateAttachmentPreview(); });
+        chip.appendChild(label);
+        chip.appendChild(remove);
+        container.appendChild(chip);
+      });
+    }
+    function renderAttachmentNodes(files) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'attachment-list';
+      files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'chat-attachment-preview';
+        if (file.type.startsWith('image/')) {
+          const thumbnail = document.createElement('img');
+          thumbnail.src = URL.createObjectURL(file);
+          thumbnail.onload = () => URL.revokeObjectURL(thumbnail.src);
+          item.appendChild(thumbnail);
+        } else {
+          const icon = document.createElement('div');
+          icon.className = 'attachment-icon';
+          icon.textContent = file.name.split('.').pop().toUpperCase();
+          item.appendChild(icon);
+        }
+        const info = document.createElement('div');
+        info.innerHTML = `<strong>${file.name}</strong><small>${Math.round(file.size / 1024)} KB</small>`;
+        item.appendChild(info);
+        wrapper.appendChild(item);
+      });
+      return wrapper;
+    }
+    function appendChatMessage(text, role = 'assistant', attachments = []) {
+      const body = byId('chatBody');
+      const message = document.createElement('div');
+      message.className = `chat-message ${role}`;
+      const content = document.createElement('div');
+      content.textContent = text;
+      message.appendChild(content);
+      if (attachments.length) {
+        message.appendChild(renderAttachmentNodes(attachments));
+      }
+      body.appendChild(message);
+      body.scrollTop = body.scrollHeight;
+    }
+    function updateChatHeader() { const header = byId('chatHeaderTitle'); const meta = byId('chatHeaderMeta'); if (!header || !meta) return; if (chatMode === 'customer' && activeChatTarget) { header.textContent = 'Customer chat'; meta.textContent = `Claim ${activeChatTarget} · customer session`; } else { header.textContent = 'Aurora Assistant'; meta.textContent = 'Your support companion for claim reviews.'; } }
+    function openChat() { const widget = byId('chatWidget'); widget.classList.remove('closed'); byId('chatToggle').textContent = 'Close'; updateChatHeader(); }
+    function closeChat() { const widget = byId('chatWidget'); widget.classList.add('closed'); byId('chatToggle').textContent = 'Open'; }
+    function toggleChat() { const widget = byId('chatWidget'); if (widget.classList.contains('closed')) openChat(); else closeChat(); }
+    function handleFileSelection(event) { chatAttachments = Array.from(event.target.files); updateAttachmentPreview(); }
+    function sendChatMessage() {
+      const input = byId('chatInput');
+      const text = input.value.trim();
+      if (!text && !chatAttachments.length) return;
+      appendChatMessage(text || 'Sent attachments', 'user', chatAttachments);
+      input.value = '';
+      chatAttachments = [];
+      updateAttachmentPreview();
+      setTimeout(() => appendChatMessage('This is a placeholder response for future AI integration. The assistant will be ready here.', 'assistant'), 260);
+    }
+
+
     function renderTasks() { byId('tasksView').innerHTML = `<div class="page-heading"><div><h1>My Tasks</h1><p>Your assigned work, ordered by due time.</p></div></div><div class="view-card">${claims.slice(0,4).map(claim => `<div class="task"><b>${claim.next} · ${claim.id}</b><small>Due ${claim.due} · ${claim.priority} priority</small><button class="btn secondary" data-open="${claim.id}" style="margin-top:7px">Open claim</button></div>`).join('')}</div>`; document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => openClaim(button.dataset.open))); }
     function renderGuide() { byId('guideView').innerHTML = `<div class="page-heading"><div><h1>New Starter Guide</h1><p>Use this short checklist for every claim.</p></div></div><div class="view-card">${[['Read the recommended next step','It explains what is safe to do now and why.'],['Check the claim form and evidence','Use confirmed information. Do not ask the customer for the same answer twice.'],['Take the action or ask for help','For urgent cases or unclear cover, use the appropriate handoff.'],['Keep the customer informed','Explain what happens next without exposing internal-only signals.']].map((step,index) => `<div class="guide-step"><span class="step-number">${index + 1}</span><div><b>${step[0]}</b><br><small>${step[1]}</small></div></div>`).join('')}</div>`; }
     function openClaim(id) { activeClaimId = id; activeQueue = 'all'; activateView('workbench'); }
@@ -104,11 +453,13 @@
       const workbench = byId('workbenchView');
       const tasks = byId('tasksView');
       const guide = byId('guideView');
+      const customerChat = byId('customerChatView');
       const isWorkbenchView = view === 'workbench' || view === 'urgent';
 
       workbench.style.display = isWorkbenchView ? 'block' : 'none';
       tasks.classList.toggle('active', view === 'tasks');
       guide.classList.toggle('active', view === 'guide');
+      customerChat.classList.toggle('active', view === 'customerChat');
 
       if (view === 'tasks') {
         byId('breadcrumb').textContent = 'My Tasks';
@@ -119,6 +470,12 @@
       if (view === 'guide') {
         byId('breadcrumb').textContent = 'New Starter Guide';
         renderGuide();
+        return;
+      }
+
+      if (view === 'customerChat') {
+        byId('breadcrumb').textContent = 'Customer chat';
+        renderCustomerChat();
         return;
       }
 
@@ -139,6 +496,19 @@
     }
     document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => activateView(button.dataset.view)));
     byId('searchInput').addEventListener('input', renderRows);
+
+    /*AI聊天框的功能*/
+    byId('chatToggle').addEventListener('click', toggleChat);
+    byId('chatSend').addEventListener('click', sendChatMessage);
+    byId('chatFileBtn').addEventListener('click', () => byId('chatFileInput').click());
+    byId('chatFileInput').addEventListener('change', handleFileSelection);
+    byId('chatInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendChatMessage();
+      }
+    });
+
     renderWorkbench();
   </script>
 </body>
