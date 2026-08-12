@@ -16,6 +16,19 @@ In this report, fraud control does not mean only a dedicated fraud-detection sys
 
 Customer-facing claim pages do not disclose every internal fraud rule, scoring method, investigation rule, or decision threshold. This report therefore records only controls that are explicitly supported by public material and does not infer undisclosed internal behaviour.
 
+### Analytical Framework
+
+The analysis keeps four concepts separate:
+
+| Concept | Meaning in this report |
+|---|---|
+| **Verification** | Checking the identity, relationship, incident, ownership, evidence, or history relevant to a claim |
+| **Inconsistency or indicator** | Information that may require clarification or further review but has no conclusion by itself |
+| **Professional review or investigation** | An authorised human process that considers relevant evidence and context |
+| **Fraud determination** | A high-impact conclusion that is not inferred from a single field, automated score, or unexplained discrepancy |
+
+Public descriptions of automation are treated as evidence that screening technology has been announced or used in a stated context. They do not reveal a current universal decision rule. Likewise, public claim forms establish which information may be collected, not that every answer is necessary at the initial reporting stage or that one answer determines the outcome.
+
 ### Citation provenance note
 
 The Chinese source document contained citation tokens tied to an earlier research session rather than durable public URLs. Those opaque tokens have not been reproduced as if they were valid references. Before this report is used as formal evidence, each claim should be linked to the corresponding current State, Tower, NZI, Westpac, or ICNZ source and checked for currency.
