@@ -481,6 +481,97 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert replay.json() == confirmed.json()
 
 
+def test_confirmed_intake_field_is_not_asked_again(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='guided-intake').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    first_turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='guided-description',
+        client_message_id='guided-description',
+    ).json()
+
+    confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-guided-description',
+            'If-Match': str(first_turn['claim_revision']),
+        },
+        json={'field_codes': ['incident.description']},
+    )
+    second_turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=confirmation.json()['revision'],
+        key='guided-location',
+        client_message_id='guided-location',
+        text='A synthetic car park in Auckland.',
+    )
+
+    assert confirmation.status_code == 200
+    assert confirmation.json()['customer_next_step']['status'] == 'provide_incident_location'
+    assert confirmation.json()['customer_next_step']['required_items'] == ['incident.location']
+    assert second_turn.status_code == 200
+    assert second_turn.json()['form_changes'][0]['field_code'] == 'incident.location'
+    assert second_turn.json()['decision']['customer_next_step']['required_items'] == [
+        'incident.location'
+    ]
+
+    location_confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-guided-location',
+            'If-Match': str(second_turn.json()['claim_revision']),
+        },
+        json={'field_codes': ['incident.location']},
+    ).json()
+    loss_turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=location_confirmation['revision'],
+        key='guided-loss',
+        client_message_id='guided-loss',
+        text='A synthetic rear bumper was scratched.',
+    ).json()
+    final_confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-guided-loss',
+            'If-Match': str(loss_turn['claim_revision']),
+        },
+        json={'field_codes': ['loss.description']},
+    ).json()
+    additional_turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=final_confirmation['revision'],
+        key='guided-additional',
+        client_message_id='guided-additional',
+        text='A synthetic additional note.',
+    )
+
+    assert loss_turn['form_changes'][0]['field_code'] == 'loss.description'
+    assert final_confirmation['customer_next_step']['status'] == 'core_details_confirmed'
+    assert additional_turn.status_code == 200
+    assert additional_turn.json()['form_changes'] == []
+    assert additional_turn.json()['decision']['action'] == 'UPDATE'
+
+
 def test_message_reads_hide_internal_records_and_validate_session_state(
     client: TestClient,
     auth_headers: dict[str, str],
