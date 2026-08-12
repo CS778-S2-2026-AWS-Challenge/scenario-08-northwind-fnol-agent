@@ -1,0 +1,362 @@
+from typing import cast
+
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.adapters.evidence_storage import EvidenceUploadNotFound, MockEvidenceStorage
+from backend.repositories.fixture import FixtureRepository
+
+
+def create_claim(client: TestClient, auth_headers: dict[str, str], key: str) -> dict[str, object]:
+    response = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': key},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert response.status_code == 201
+    return cast(dict[str, object], response.json())
+
+
+def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, 'pending-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    endpoint = f'/api/v1/claims/{claim_id}/evidence'
+    headers = {
+        **auth_headers,
+        'Idempotency-Key': 'pending-police-report',
+        'If-Match': '1',
+    }
+    payload = {
+        'kind': 'police_report',
+        'status': 'pending_generation',
+        'related_fields': ['authorities.police_report_reference'],
+        'needed_for': ['later_action'],
+        'claimant_note': 'The report will be available next week.',
+    }
+
+    response = client.post(endpoint, headers=headers, json=payload)
+    replay = client.post(endpoint, headers=headers, json=payload)
+    conflict = client.post(endpoint, headers=headers, json={**payload, 'kind': 'receipt'})
+    listed = client.get(endpoint, headers=auth_headers)
+    read_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+
+    assert response.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json() == response.json()
+    assert conflict.status_code == 409
+    assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert listed.status_code == 200
+    assert listed.json()['items'] == [response.json()['evidence']]
+    assert 'provenance' not in listed.json()['items'][0]
+    assert read_claim.json()['revision'] == 2
+    assert read_claim.json()['workflow_state'] == 'collecting'
+    assert read_claim.json()['customer_next_step']['status'] == 'describe_incident'
+    assert read_claim.json()['evidence_summary'] == {
+        'received': 0,
+        'pending': 1,
+        'needs_attention': 0,
+    }
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.claim_state.evidence.value == 'pending_generation'
+
+
+def test_image_upload_completion_keeps_extraction_internal_and_proposed(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, 'image-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    upload_endpoint = f'/api/v1/claims/{claim_id}/evidence/uploads'
+    upload_headers = {
+        **auth_headers,
+        'Idempotency-Key': 'upload-rear-image',
+        'If-Match': '1',
+    }
+    upload_payload = {
+        'kind': 'incident_image',
+        'original_filename': 'rear-damage.jpg',
+        'media_type': 'image/jpeg',
+        'size_bytes': 1_842_201,
+    }
+
+    requested = client.post(upload_endpoint, headers=upload_headers, json=upload_payload)
+    replay = client.post(upload_endpoint, headers=upload_headers, json=upload_payload)
+
+    assert requested.status_code == 201
+    assert replay.json() == requested.json()
+    upload = requested.json()
+    evidence_id = upload['evidence_id']
+    assert upload['revision'] == 2
+    assert upload['upload']['method'] == 'PUT'
+    assert upload['upload']['headers'] == {'Content-Type': 'image/jpeg'}
+    assert 'image/jpeg' in upload['constraints']['allowed_media_types']
+    stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert stored_before is not None
+    assert stored_before.file_status.value == 'awaiting_upload'
+    assert 'url' not in stored_before.provenance
+
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'complete-rear-image',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{"a" * 64}'},
+    )
+    completion_replay = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'complete-rear-image',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{"a" * 64}'},
+    )
+    completion_conflict = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'complete-rear-image',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{"b" * 64}'},
+    )
+    second_completion = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'complete-rear-image-again',
+            'If-Match': '3',
+        },
+        json={'upload_checksum': f'sha256:{"a" * 64}'},
+    )
+
+    assert completed.status_code == 200
+    body = completed.json()
+    assert completion_replay.json() == body
+    assert completion_conflict.status_code == 409
+    assert second_completion.status_code == 409
+    assert second_completion.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert body['revision'] == 3
+    assert body['evidence']['status'] == 'received'
+    assert body['evidence']['file_status'] == 'ready'
+    assert 'provenance' not in body['evidence']
+    stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert stored_after is not None
+    assert stored_after.provenance['extraction_state'] == 'proposed'
+    updated_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert updated_claim is not None
+    assert updated_claim.form == {}
+    assert updated_claim.evidence_summary.received == 1
+
+
+def test_evidence_mutations_enforce_headers_revision_media_and_state(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'evidence-guards')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    endpoint = f'/api/v1/claims/{claim_id}/evidence'
+    pending = {'kind': 'police_report', 'status': 'pending_generation'}
+
+    missing_key = client.post(endpoint, headers={**auth_headers, 'If-Match': '1'}, json=pending)
+    missing_revision = client.post(
+        endpoint,
+        headers={**auth_headers, 'Idempotency-Key': 'missing-revision'},
+        json=pending,
+    )
+    received_without_upload = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'received-without-upload',
+            'If-Match': '1',
+        },
+        json={'kind': 'incident_image', 'status': 'received'},
+    )
+    unsupported = client.post(
+        f'{endpoint}/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unsupported-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_audio',
+            'original_filename': 'call.wav',
+            'media_type': 'audio/wav',
+            'size_bytes': 100,
+        },
+    )
+    too_large = client.post(
+        f'{endpoint}/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'large-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_image',
+            'original_filename': 'large.png',
+            'media_type': 'image/png',
+            'size_bytes': 10_485_761,
+        },
+    )
+
+    assert missing_key.status_code == 400
+    assert missing_revision.status_code == 409
+    assert missing_revision.json()['error']['code'] == 'REVISION_REQUIRED'
+    assert received_without_upload.status_code == 422
+    assert unsupported.status_code == 415
+    assert unsupported.json()['error']['code'] == 'UNSUPPORTED_MEDIA_TYPE'
+    assert too_large.status_code == 422
+
+
+def test_evidence_rejects_stale_revision_and_unknown_completion(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'stale-evidence')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    registered = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'first-evidence',
+            'If-Match': '1',
+        },
+        json={'kind': 'police_report', 'status': 'pending_generation'},
+    )
+    stale = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'stale-evidence-change',
+            'If-Match': '1',
+        },
+        json={'kind': 'receipt', 'status': 'unofficial'},
+    )
+    unknown = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/evd_missing/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unknown-completion',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{"b" * 64}'},
+    )
+
+    assert registered.status_code == 201
+    assert stale.status_code == 409
+    assert stale.json()['error']['current_revision'] == 2
+    assert unknown.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ('status', 'expected_state'),
+    [('unofficial', 'unofficial'), ('inconsistent', 'inconsistent')],
+)
+def test_attention_evidence_updates_shared_evidence_dimension(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    status: str,
+    expected_state: str,
+) -> None:
+    created = create_claim(client, auth_headers, f'{status}-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{status}-evidence',
+            'If-Match': '1',
+        },
+        json={'kind': 'receipt', 'status': status},
+    )
+
+    assert response.status_code == 201
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.claim_state.evidence.value == expected_state
+    assert stored.evidence_summary.needs_attention == 1
+
+
+def test_unknown_claim_evidence_routes_return_not_found(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    listed = client.get('/api/v1/claims/clm_missing/evidence', headers=auth_headers)
+    uploaded = client.post(
+        '/api/v1/claims/clm_missing/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'missing-claim-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_image',
+            'original_filename': 'missing.png',
+            'media_type': 'image/png',
+            'size_bytes': 100,
+        },
+    )
+    completed = client.post(
+        '/api/v1/claims/clm_missing/evidence/evd_missing/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'missing-claim-complete',
+            'If-Match': '1',
+        },
+        json={'upload_checksum': f'sha256:{"c" * 64}'},
+    )
+
+    assert listed.status_code == 404
+    assert uploaded.status_code == 404
+    assert completed.status_code == 404
+
+
+def test_mock_storage_validates_pending_object_identity() -> None:
+    storage = MockEvidenceStorage()
+    storage.create_upload_target(
+        claim_id='clm_fixture',
+        evidence_id='evd_fixture',
+        media_type='application/pdf',
+        size_bytes=100,
+    )
+
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.complete_upload(
+            claim_id='clm_fixture',
+            evidence_id='evd_fixture',
+            checksum=f'sha256:{"d" * 64}',
+            media_type='application/pdf',
+            size_bytes=101,
+        )
+
+    completed = storage.complete_upload(
+        claim_id='clm_fixture',
+        evidence_id='evd_fixture',
+        checksum=f'sha256:{"d" * 64}',
+        media_type='application/pdf',
+        size_bytes=100,
+    )
+    assert storage.completed_upload('clm_fixture', 'evd_fixture') == completed

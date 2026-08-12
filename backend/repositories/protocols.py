@@ -172,3 +172,13 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
     def list_evidence(self, claim_id: str, customer_id: str) -> list[EvidenceRecord]:
         raise NotImplementedError
+
+    def save_evidence_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist evidence, shared claim state, and retry metadata."""
+        raise NotImplementedError

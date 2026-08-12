@@ -199,6 +199,44 @@ def test_claim_creation_rejects_claimant_auth_stale_state_and_unauthorised_decis
     assert repository.get_claim_internal(claim_id).external_claim is None  # type: ignore[union-attr]
 
 
+def test_claim_creation_rejects_authorisation_from_an_older_revision(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    created = create_working_claim(client, 'old-authorisation')
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+    claim_id = str(claim['claim_id'])
+    decision_id = 'dec_old_create_authorisation'
+    save_authorisation(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        session_id=str(session['session_id']),
+        decision_id=decision_id,
+        revision=1,
+        action=AgentAction.CREATE_CLAIM,
+        reason_code='CLAIM_CREATION_AUTHORISED',
+    )
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    repository.save_claim(stored.model_copy(update={'revision': 2}), expected_revision=1)
+
+    response = client.post(
+        '/internal/v1/claims/create',
+        headers=INTEGRATION_AUTH,
+        json=creation_payload(claim_id, 2, decision_id),
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    updated = repository.get_claim_internal(claim_id)
+    assert updated is not None
+    assert updated.external_claim is None
+
+
 def test_internal_creation_requires_authentication_and_known_claim(client: TestClient) -> None:
     payload = creation_payload('clm_missing', 1, 'dec_missing')
 

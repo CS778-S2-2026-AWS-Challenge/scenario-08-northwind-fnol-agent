@@ -100,7 +100,7 @@ def create_external_claim(
         raise _authorisation_error(
             'Claim creation requires an authorised CREATE_CLAIM decision.',
         )
-    if decision.resulting_revision > payload.claim_revision:
+    if decision.resulting_revision != payload.claim_revision:
         raise _authorisation_error('The authorising decision does not match this claim revision.')
 
     confirmed_form = {

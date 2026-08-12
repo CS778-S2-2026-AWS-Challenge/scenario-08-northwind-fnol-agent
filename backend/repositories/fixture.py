@@ -312,3 +312,34 @@ class FixtureRepository(PersistenceRepository):
             if evidence.claim_id == claim_id
         ]
         return sorted(evidence_records, key=lambda evidence: evidence.created_at)
+
+    def save_evidence_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        evidence: EvidenceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        if (
+            evidence.claim_id != claim.claim_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if (
+            existing_idempotency is not None
+            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
+        ):
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        self._idempotency[lookup] = idempotency

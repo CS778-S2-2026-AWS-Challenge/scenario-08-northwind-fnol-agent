@@ -804,6 +804,10 @@ All fields must exist and be confirmable. Response `200` returns the new claim r
 
 Returns claimant-visible evidence metadata, processing state, purpose, upload result, and plain-language next step. It never returns internal-only extraction notes or other claims' evidence.
 
+The response contains `claim_id`, current `revision`, `items`, and
+`customer_next_step`. Evidence items deliberately omit storage keys, upload
+checksums, extraction state, and internal provenance.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
@@ -820,7 +824,11 @@ Request:
 }
 ```
 
-Response `201` returns the evidence resource, new claim revision, and customer next step. A `pending_generation` item MUST NOT block an action that does not require it.
+This request requires `Idempotency-Key` and `If-Match`. Response `201` returns
+the evidence resource, new claim revision, and customer next step. A
+`pending_generation` item MUST NOT block an action that does not require it.
+Evidence with a received file must use the upload flow rather than being
+registered directly as `received`.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/uploads`
 
@@ -842,6 +850,7 @@ Response `201`:
 ```json
 {
   "evidence_id": "evd_01J4Y7V5QJ",
+  "revision": 8,
   "upload": {
     "method": "PUT",
     "url": "https://example.invalid/signed-upload",
@@ -853,11 +862,22 @@ Response `201`:
   "constraints": {
     "max_size_bytes": 10485760,
     "allowed_media_types": ["image/jpeg", "image/png", "application/pdf"]
+  },
+  "customer_next_step": {
+    "status": "add_evidence",
+    "summary": "Upload the requested evidence when it is available.",
+    "responsible_party": "claimant",
+    "expected_by": null,
+    "can_resume": true,
+    "required_items": []
   }
 }
 ```
 
-The URL is illustrative and is never stored in fixtures. The adapter MAY use local storage in Sprint 1 and object storage later without changing the client contract.
+This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative
+and is never stored in fixtures or claim records. The adapter MAY use local
+storage in Sprint 1 and object storage later without changing the client
+contract.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/complete`
 
@@ -871,7 +891,14 @@ Request:
 }
 ```
 
-Response is `200` when processing is complete or `202` when processing continues. It returns evidence state, new claim revision when state changed, and a polling or status URL. The server MUST validate media type, size, ownership, and stored object identity before accepting the item.
+This request requires `Idempotency-Key` and `If-Match`. Response is `200` when
+processing is complete or `202` when processing continues. It returns the
+claimant-safe evidence resource, new claim revision, `status_url`, and the
+current customer next step. The server MUST validate media type, size,
+ownership, and stored object identity before accepting the item. Image-derived
+fields remain proposed until a claimant or authorised staff member confirms
+them; completion never silently writes extracted values into the confirmed
+form.
 
 ### `POST /api/v1/claims/{claim_id}/support-requests`
 

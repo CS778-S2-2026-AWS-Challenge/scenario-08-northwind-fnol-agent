@@ -235,6 +235,7 @@ class WorkingClaim(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState = Field(default_factory=ClaimState)
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
     active_session_id: str | None = None
     external_claim: ExternalClaimResult | None = None
@@ -372,6 +373,84 @@ class RouteAssessorRequest(ContractModel):
     authorisation_ref: str = Field(min_length=1, max_length=100)
     requested_action: str = Field(min_length=1, max_length=100)
     location: AssessorLocation
+
+
+class ClaimantEvidence(ContractModel):
+    """Claimant-safe evidence projection with storage and extraction details removed."""
+
+    evidence_id: str
+    claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RegisterEvidenceRequest(ContractModel):
+    kind: str = Field(min_length=1, max_length=100)
+    status: EvidenceStatus
+    related_fields: list[str] = Field(default_factory=list, max_length=50)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+    claimant_note: str | None = Field(default=None, max_length=1000)
+
+
+class RequestEvidenceUploadRequest(ContractModel):
+    kind: str = Field(min_length=1, max_length=100)
+    original_filename: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(gt=0)
+
+
+class CompleteEvidenceUploadRequest(ContractModel):
+    upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
+
+
+class EvidenceListResponse(ContractModel):
+    claim_id: str
+    revision: int
+    items: list[ClaimantEvidence]
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceMutationResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    customer_next_step: CustomerNextStep
+
+
+class UploadTarget(ContractModel):
+    method: Literal['PUT'] = 'PUT'
+    url: str
+    headers: dict[str, str]
+    expires_at: datetime
+
+
+class UploadConstraints(ContractModel):
+    max_size_bytes: int
+    allowed_media_types: list[str]
+
+
+class EvidenceUploadResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    upload: UploadTarget
+    constraints: UploadConstraints
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceCompleteResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    status_url: str
+    customer_next_step: CustomerNextStep
 
 
 class CreateClaimRequest(ContractModel):
