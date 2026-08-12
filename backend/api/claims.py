@@ -10,13 +10,20 @@ from backend.domain.models import (
     ClaimListResponse,
     CreateClaimRequest,
     CreateClaimResponse,
+    CreateMessageRequest,
+    FormConfirmationRequest,
+    FormConfirmationResponse,
     FormPatchRequest,
     FormPatchResponse,
+    MessageListResponse,
+    MessageTurnResponse,
     StartSessionRequest,
     WorkflowState,
 )
-from backend.repositories.protocols import ClaimRepository
+from backend.repositories.protocols import PersistenceRepository
+from backend.services.agent import AgentTurnProvider
 from backend.services.claims import (
+    confirm_form_fields,
     get_claim,
     get_session,
     list_claims,
@@ -24,12 +31,17 @@ from backend.services.claims import (
     start_session,
     update_form,
 )
+from backend.services.messages import list_claim_messages, submit_message
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 
 
-def repository_for(request: Request) -> ClaimRepository:
-    return cast(ClaimRepository, request.app.state.claim_repository)
+def repository_for(request: Request) -> PersistenceRepository:
+    return cast(PersistenceRepository, request.app.state.claim_repository)
+
+
+def agent_for(request: Request) -> AgentTurnProvider:
+    return cast(AgentTurnProvider, request.app.state.agent_turn_provider)
 
 
 @router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -101,6 +113,57 @@ def read_session(
     return get_session(repository_for(request), principal, claim_id, session_id)
 
 
+@router.post(
+    '/{claim_id}/sessions/{session_id}/messages',
+    response_model=MessageTurnResponse,
+)
+def create_message(
+    claim_id: str,
+    session_id: str,
+    request: Request,
+    payload: CreateMessageRequest,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> MessageTurnResponse:
+    return submit_message(
+        repository_for(request),
+        agent_for(request),
+        principal,
+        claim_id,
+        session_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.get(
+    '/{claim_id}/sessions/{session_id}/messages',
+    response_model=MessageListResponse,
+)
+def read_messages(
+    claim_id: str,
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    before: datetime | None = Query(default=None),
+    after: datetime | None = Query(default=None),
+) -> MessageListResponse:
+    return list_claim_messages(
+        repository_for(request),
+        principal,
+        claim_id,
+        session_id,
+        limit=limit,
+        cursor=cursor,
+        before=before,
+        after=after,
+    )
+
+
 @router.patch('/{claim_id}/form', response_model=FormPatchResponse)
 def patch_form(
     claim_id: str,
@@ -110,3 +173,22 @@ def patch_form(
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> FormPatchResponse:
     return update_form(repository_for(request), principal, claim_id, payload, if_match)
+
+
+@router.post('/{claim_id}/form/confirmations', response_model=FormConfirmationResponse)
+def confirm_form(
+    claim_id: str,
+    request: Request,
+    payload: FormConfirmationRequest,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> FormConfirmationResponse:
+    return confirm_form_fields(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )

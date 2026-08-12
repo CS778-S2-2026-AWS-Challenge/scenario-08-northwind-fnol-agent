@@ -1,7 +1,13 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
-from backend.domain.models import EvidenceRecord, MessageRecord, SessionRecord, WorkingClaim
+from backend.domain.models import (
+    AgentDecisionRecord,
+    EvidenceRecord,
+    MessageRecord,
+    SessionRecord,
+    WorkingClaim,
+)
 
 
 class RepositoryConflict(Exception):
@@ -26,6 +32,10 @@ class IdempotencyRecord:
     request_fingerprint: str
     claim_id: str
     session_id: str
+    message_id: str | None = None
+    agent_message_id: str | None = None
+    decision_id: str | None = None
+    response_payload: dict[str, Any] | None = None
 
 
 class ClaimRepository(Protocol):
@@ -80,12 +90,61 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
 
+    def get_message(
+        self,
+        claim_id: str,
+        session_id: str,
+        message_id: str,
+        customer_id: str,
+    ) -> MessageRecord | None:
+        raise NotImplementedError
+
+    def find_message_by_client_id(
+        self,
+        claim_id: str,
+        client_message_id: str,
+        customer_id: str,
+    ) -> MessageRecord | None:
+        raise NotImplementedError
+
     def list_messages(
         self,
         claim_id: str,
         session_id: str,
         customer_id: str,
     ) -> list[MessageRecord]:
+        raise NotImplementedError
+
+    def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
+        raise NotImplementedError
+
+    def get_agent_decision(
+        self,
+        claim_id: str,
+        decision_id: str,
+        customer_id: str,
+    ) -> AgentDecisionRecord | None:
+        raise NotImplementedError
+
+    def find_agent_decision_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> AgentDecisionRecord | None:
+        raise NotImplementedError
+
+    def save_agent_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        decision: AgentDecisionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist one validated Agent turn."""
         raise NotImplementedError
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:

@@ -24,6 +24,13 @@ def message_key(claim_id: str, created_at: str, message_id: str) -> LogicalKey:
     )
 
 
+def decision_key(claim_id: str, created_at: str, decision_id: str) -> LogicalKey:
+    return LogicalKey(
+        partition=f'CLAIM#{claim_id}',
+        sort=f'DECISION#{created_at}#{decision_id}',
+    )
+
+
 def evidence_key(claim_id: str, evidence_id: str) -> LogicalKey:
     return LogicalKey(partition=f'CLAIM#{claim_id}', sort=f'EVIDENCE#{evidence_id}')
 

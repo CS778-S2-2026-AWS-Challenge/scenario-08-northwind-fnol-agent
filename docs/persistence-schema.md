@@ -23,6 +23,7 @@ methods.
 | Working claim | `CLAIM#<claim_id>` | `CLAIM` | customer ownership in the item |
 | Session | `CLAIM#<claim_id>` | `SESSION#<session_id>` | claim and customer |
 | Message | `CLAIM#<claim_id>` | `MESSAGE#<created_at>#<message_id>` | claim and session |
+| Agent decision | `CLAIM#<claim_id>` | `DECISION#<created_at>#<decision_id>` | claim, session, and trigger message |
 | Evidence | `CLAIM#<claim_id>` | `EVIDENCE#<evidence_id>` | claim |
 
 Customer claim listing needs a logical customer lookup:
@@ -41,11 +42,13 @@ part of HTTP request or response models.
 3. Read one session under its claim and retain its resume revision.
 4. Append and page messages for one claim/session, filtering visibility before
    claimant projection.
-5. Read or list evidence under a claim without returning another customer's
+5. Save and restore the validated Agent decision associated with a trigger
+   message, including its authority outcome and resulting claim revision.
+6. Read or list evidence under a claim without returning another customer's
    records.
-6. Save a material claim revision only when the expected revision still
+7. Save a material claim revision only when the expected revision still
    matches; otherwise return a repository revision conflict.
-7. Record idempotency results using actor, route, and client key.
+8. Record idempotency results using actor, route, and client key.
 
 ## Record Rules
 
@@ -60,6 +63,9 @@ part of HTTP request or response models.
   checks at the repository boundary.
 - Complete messages remain durable; session summaries are bounded resume
   context, not a replacement for message history.
+- Agent decisions preserve the proposal, reason codes, authority validation,
+  proposed form changes, and resulting revision. A review-required or blocked
+  high-impact proposal is recorded without applying its high-impact state change.
 
 ## Unknowns and Next Decision Points
 

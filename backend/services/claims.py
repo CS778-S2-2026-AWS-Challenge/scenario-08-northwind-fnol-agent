@@ -1,9 +1,4 @@
-import hashlib
-import json
-import re
-from base64 import urlsafe_b64decode, urlsafe_b64encode
-from binascii import Error as Base64Error
-from datetime import UTC, datetime
+from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
@@ -12,6 +7,7 @@ from backend.domain.ids import new_id
 from backend.domain.models import (
     ActorReference,
     ActorType,
+    AgentAction,
     ClaimantClaim,
     ClaimantSession,
     ClaimListItem,
@@ -21,9 +17,12 @@ from backend.domain.models import (
     CreateClaimResponse,
     CustomerNextStep,
     EvidenceSummary,
+    FormConfirmationRequest,
+    FormConfirmationResponse,
     FormPatchRequest,
     FormPatchResponse,
     FormSource,
+    FormStatus,
     NeededFor,
     PageInfo,
     ResponsibleParty,
@@ -34,82 +33,20 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.repositories.protocols import ClaimRepository, IdempotencyRecord, RevisionConflict
-
-IF_MATCH_PATTERN = re.compile(r'^"?(\d+)"?$')
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
-
-
-def request_fingerprint(payload: object) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def encode_cursor(offset: int) -> str:
-    return urlsafe_b64encode(str(offset).encode()).decode().rstrip('=')
-
-
-def decode_cursor(cursor: str | None) -> int:
-    if cursor is None:
-        return 0
-    try:
-        padded = cursor + '=' * (-len(cursor) % 4)
-        offset = int(urlsafe_b64decode(padded).decode())
-    except (Base64Error, UnicodeDecodeError, ValueError) as error:
-        raise ApiError(
-            status_code=422,
-            code='VALIDATION_ERROR',
-            message='The pagination cursor is invalid.',
-            details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
-        ) from error
-    if offset < 0:
-        raise ApiError(
-            status_code=422,
-            code='VALIDATION_ERROR',
-            message='The pagination cursor is invalid.',
-            details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
-        )
-    return offset
-
-
-def require_idempotency_key(key: str | None) -> str:
-    if key is None or not key.strip():
-        raise ApiError(
-            status_code=400,
-            code='VALIDATION_ERROR',
-            message='Idempotency-Key is required for this operation.',
-            details=[ErrorDetail(field='Idempotency-Key', reason='The header is required.')],
-        )
-    if len(key) > 200:
-        raise ApiError(
-            status_code=400,
-            code='VALIDATION_ERROR',
-            message='Idempotency-Key is too long.',
-            details=[
-                ErrorDetail(field='Idempotency-Key', reason='Maximum length is 200 characters.')
-            ],
-        )
-    return key.strip()
-
-
-def parse_if_match(value: str | None) -> int:
-    if value is None:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_REQUIRED',
-            message='If-Match is required when changing an existing claim.',
-        )
-    match = IF_MATCH_PATTERN.fullmatch(value.strip())
-    if match is None:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_REQUIRED',
-            message='If-Match must contain the expected numeric revision.',
-        )
-    return int(match.group(1))
+from backend.repositories.protocols import (
+    ClaimRepository,
+    IdempotencyRecord,
+    PersistenceRepository,
+    RevisionConflict,
+)
+from backend.services.support import (
+    decode_cursor,
+    encode_cursor,
+    now_utc,
+    parse_if_match,
+    request_fingerprint,
+    require_idempotency_key,
+)
 
 
 def _claim_not_found() -> ApiError:
@@ -415,6 +352,7 @@ def update_form(
             existing is not None
             and existing.status.value == 'confirmed'
             and existing.value != update.value
+            and update.correction_reason is None
         ):
             raise ApiError(
                 status_code=409,
@@ -459,3 +397,125 @@ def update_form(
         updated_fields=updated_fields,
         customer_next_step=updated_claim.customer_next_step,
     )
+
+
+def confirm_form_fields(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    payload: FormConfirmationRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> FormConfirmationResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    route = f'/api/v1/claims/{claim_id}/form/confirmations'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    existing_idempotency = repository.find_idempotency(principal.subject, route, key)
+    if existing_idempotency is not None:
+        if existing_idempotency.request_fingerprint != fingerprint:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key was reused with a different request.',
+            )
+        if existing_idempotency.response_payload is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The idempotent confirmation result could not be restored.',
+                retryable=True,
+            )
+        return FormConfirmationResponse.model_validate(existing_idempotency.response_payload)
+
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    if claim.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    duplicate_codes = len(set(payload.field_codes)) != len(payload.field_codes)
+    unavailable_codes = [
+        field_code
+        for field_code in payload.field_codes
+        if field_code not in claim.form
+        or claim.form[field_code].status not in {FormStatus.PROPOSED, FormStatus.CONFIRMED}
+    ]
+    if duplicate_codes or unavailable_codes:
+        details = [
+            ErrorDetail(field=field_code, reason='The field does not exist or is not confirmable.')
+            for field_code in unavailable_codes
+        ]
+        if duplicate_codes:
+            details.append(
+                ErrorDetail(field='field_codes', reason='Field codes must not be repeated.')
+            )
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='One or more fields cannot be confirmed.',
+            details=details,
+        )
+
+    timestamp = now_utc()
+    confirmed_fields = {
+        field_code: claim.form[field_code].model_copy(
+            update={
+                'status': FormStatus.CONFIRMED,
+                'confidence': 1.0,
+                'updated_at': timestamp,
+                'updated_by': ActorReference(
+                    actor_type=ActorType.CLAIMANT,
+                    actor_id=principal.subject,
+                ),
+            }
+        )
+        for field_code in payload.field_codes
+    }
+    next_step = CustomerNextStep(
+        status='details_confirmed',
+        summary='The selected details are confirmed. Continue with the next requested information.',
+        responsible_party=ResponsibleParty.CLAIMANT,
+    )
+    updated_claim = claim.model_copy(
+        update={
+            'form': {**claim.form, **confirmed_fields},
+            'claim_state': claim.claim_state.model_copy(update={'next_action': AgentAction.ASK}),
+            'customer_next_step': next_step,
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    try:
+        repository.save_claim(updated_claim, expected_revision=expected_revision)
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    response = FormConfirmationResponse(
+        claim_id=claim_id,
+        revision=updated_claim.revision,
+        confirmed_fields=confirmed_fields,
+        customer_next_step=next_step,
+    )
+    repository.save_idempotency(
+        IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            response_payload=response.model_dump(mode='json'),
+        )
+    )
+    return response
