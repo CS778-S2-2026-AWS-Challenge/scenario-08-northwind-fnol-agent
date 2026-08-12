@@ -61,6 +61,10 @@ jobs:
         working-directory: customer
         run: npm run lint
 
+      - name: Test customer
+        working-directory: customer
+        run: npm test
+
       - name: Build customer
         working-directory: customer
         run: npm run build

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from backend.domain.intake import next_controlled_intake_field
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -58,20 +59,21 @@ class ControlledAgent:
     """Deterministic prototype provider that can be replaced by a model adapter."""
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        if context.message_text is not None:
+        intake_field = next_controlled_intake_field(context.claim)
+        if context.message_text is not None and intake_field is not None:
             return AgentProposal(
                 action=AgentAction.CONFIRM,
                 reason_codes=['MATERIAL_FACTS_PROPOSED'],
-                customer_reason='Please check the incident description before I continue.',
+                customer_reason=intake_field.confirmation_prompt,
                 customer_next_step=CustomerNextStep(
                     status='confirmation_required',
-                    summary='Check the incident description and confirm or correct it.',
+                    summary=intake_field.confirmation_prompt,
                     responsible_party=ResponsibleParty.CLAIMANT,
-                    required_items=['incident.description'],
+                    required_items=[intake_field.field_code],
                 ),
                 form_changes=[
                     ProposedFormChange(
-                        field_code='incident.description',
+                        field_code=intake_field.field_code,
                         value=context.message_text,
                         source=FormSource.CLAIMANT,
                         status=FormStatus.PROPOSED,
@@ -82,7 +84,26 @@ class ControlledAgent:
                 state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
                 proposed_signals=[],
                 required_tools=[],
-                next_action_requirements=['confirm:incident.description'],
+                next_action_requirements=[f'confirm:{intake_field.field_code}'],
+            )
+
+        if context.message_text is not None:
+            return AgentProposal(
+                action=AgentAction.UPDATE,
+                reason_codes=['CLAIMANT_CONFIRMED'],
+                customer_reason='I have kept that information with your report.',
+                customer_next_step=CustomerNextStep(
+                    status='core_details_confirmed',
+                    summary=(
+                        'Your core incident details are confirmed. Review them before continuing.'
+                    ),
+                    responsible_party=ResponsibleParty.CLAIMANT,
+                ),
+                form_changes=[],
+                state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+                proposed_signals=[],
+                required_tools=[],
+                next_action_requirements=[],
             )
 
         return AgentProposal(

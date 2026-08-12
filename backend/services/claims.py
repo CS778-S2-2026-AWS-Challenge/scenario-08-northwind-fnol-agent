@@ -4,6 +4,7 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
+from backend.domain.intake import next_controlled_intake_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -477,11 +478,8 @@ def confirm_form_fields(
         )
         for field_code in payload.field_codes
     }
-    next_step = CustomerNextStep(
-        status='details_confirmed',
-        summary='The selected details are confirmed. Continue with the next requested information.',
-        responsible_party=ResponsibleParty.CLAIMANT,
-    )
+    projected_claim = claim.model_copy(update={'form': {**claim.form, **confirmed_fields}})
+    next_step = next_controlled_intake_step(projected_claim)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},

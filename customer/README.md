@@ -15,6 +15,7 @@ Run claimant checks with:
 
 ```powershell
 npm run lint --prefix customer
+npm test --prefix customer
 npm run build --prefix customer
 ```
 
