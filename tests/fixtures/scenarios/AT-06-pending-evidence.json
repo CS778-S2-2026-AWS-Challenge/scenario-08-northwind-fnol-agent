@@ -1,0 +1,102 @@
+{
+  "scenario_id": "AT-06-pending-evidence",
+  "description": "Synthetic motor claim with a police report that will be generated later.",
+  "claim": {
+    "claim_id": "clm_fixture_at06",
+    "customer_id": "cus_demo",
+    "revision": 3,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "clear",
+      "evidence": "pending_generation",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "ready_for_next",
+      "next_action": "PROCEED"
+    },
+    "form": {
+      "authorities.police_report_reference": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": ["msg_at06_pending"],
+        "status": "pending_generation",
+        "needed_for": "later_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-12T01:05:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 1, "needs_attention": 0},
+    "route": "standard",
+    "active_session_id": "ses_fixture_at06",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "continue_current_report",
+      "summary": "Continue the report now; the police document can be added later.",
+      "responsible_party": "claimant",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-12T01:00:00Z",
+    "updated_at": "2026-08-12T01:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at06",
+      "claim_id": "clm_fixture_at06",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "The current report can proceed while a police document is generated.",
+      "unresolved_questions": [],
+      "pending_items": ["Police report expected next week."],
+      "prior_commitments": ["The future document will not block unrelated safe work."],
+      "context_revision": 3,
+      "started_at": "2026-08-12T01:00:00Z",
+      "last_active_at": "2026-08-12T01:05:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at06_police",
+      "claim_id": "clm_fixture_at06",
+      "kind": "police_report",
+      "status": "pending_generation",
+      "file_status": "not_available",
+      "original_filename": null,
+      "media_type": null,
+      "size_bytes": null,
+      "source": "claimant",
+      "related_fields": ["authorities.police_report_reference"],
+      "needed_for": ["later_action"],
+      "provenance": {"internal_note": "Expected document only; no file exists."},
+      "claimant_note": "Police said the report will be available next week.",
+      "created_at": "2026-08-12T01:05:00Z",
+      "updated_at": "2026-08-12T01:05:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at06_pending",
+      "claim_id": "clm_fixture_at06",
+      "session_id": "ses_fixture_at06",
+      "client_message_id": "at06-police-pending",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "Police said the report will be ready next week."},
+      "evidence_refs": ["evd_fixture_at06_police"],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T01:05:00Z"
+    }
+  ],
+  "expected": {
+    "workflow_state": "ready_for_next",
+    "customer_status": "continue_current_report",
+    "pending_evidence": 1,
+    "unrelated_action_blocked": false
+  }
+}
