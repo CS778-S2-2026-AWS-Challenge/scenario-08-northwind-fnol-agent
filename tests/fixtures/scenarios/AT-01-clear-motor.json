@@ -1,0 +1,83 @@
+{
+  "scenario_id": "AT-01-clear-motor",
+  "description": "Synthetic clear minor motor claim ready for the next safe action.",
+  "claim": {
+    "claim_id": "clm_fixture_at01",
+    "customer_id": "cus_demo",
+    "revision": 4,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "fast_track",
+      "coverage": "clear",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "ready_for_next",
+      "next_action": "CREATE_CLAIM"
+    },
+    "form": {
+      "incident.description": {
+        "value": "The insured vehicle was hit at low speed while parked.",
+        "source": "claimant",
+        "source_refs": ["msg_at01_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-12T00:10:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": "fast_track",
+    "active_session_id": "ses_fixture_at01",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "ready_to_create",
+      "summary": "Your confirmed report is ready for claim creation.",
+      "responsible_party": "northwind",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-12T00:00:00Z",
+    "updated_at": "2026-08-12T00:10:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at01",
+      "claim_id": "clm_fixture_at01",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "A low-speed parked vehicle incident with the material facts confirmed.",
+      "unresolved_questions": [],
+      "pending_items": [],
+      "prior_commitments": ["Northwind will create the claim after final validation."],
+      "context_revision": 4,
+      "started_at": "2026-08-12T00:00:00Z",
+      "last_active_at": "2026-08-12T00:10:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [],
+  "messages": [
+    {
+      "message_id": "msg_at01_claimant",
+      "claim_id": "clm_fixture_at01",
+      "session_id": "ses_fixture_at01",
+      "client_message_id": "at01-incident",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My parked car was hit at low speed."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T00:02:00Z"
+    }
+  ],
+  "expected": {
+    "workflow_state": "ready_for_next",
+    "customer_status": "ready_to_create",
+    "confirmed_fields": ["incident.description"]
+  }
+}

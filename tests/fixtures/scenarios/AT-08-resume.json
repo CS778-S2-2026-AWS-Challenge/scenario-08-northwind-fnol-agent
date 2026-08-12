@@ -1,0 +1,137 @@
+{
+  "scenario_id": "AT-08-resume",
+  "description": "Synthetic claim resumed ten days after confirmed facts and a future-evidence promise were saved.",
+  "claim": {
+    "claim_id": "clm_fixture_at08",
+    "customer_id": "cus_demo",
+    "revision": 7,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "clear",
+      "evidence": "pending_generation",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "collecting",
+      "next_action": "ASK"
+    },
+    "form": {
+      "incident.description": {
+        "value": "Another vehicle struck the rear of the insured car in Newmarket.",
+        "source": "claimant",
+        "source_refs": ["msg_at08_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-02T02:15:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.location": {
+        "value": "Newmarket, Auckland",
+        "source": "claimant",
+        "source_refs": ["msg_at08_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-02T02:15:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 1, "needs_attention": 0},
+    "route": "standard",
+    "active_session_id": "ses_fixture_at08",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "confirm_future_evidence",
+      "summary": "Confirm how the police report will be added when it becomes available.",
+      "responsible_party": "claimant",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-02T02:00:00Z",
+    "updated_at": "2026-08-02T02:20:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at08",
+      "claim_id": "clm_fixture_at08",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Rear-end collision in Newmarket; incident and location are confirmed.",
+      "unresolved_questions": ["How should Northwind request the police report when it is ready?"],
+      "pending_items": ["Police report expected after the original session."],
+      "prior_commitments": ["The police report can be added later without restarting the claim."],
+      "context_revision": 7,
+      "started_at": "2026-08-02T02:00:00Z",
+      "last_active_at": "2026-08-02T02:20:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at08_police",
+      "claim_id": "clm_fixture_at08",
+      "kind": "police_report",
+      "status": "pending_generation",
+      "file_status": "not_available",
+      "original_filename": null,
+      "media_type": null,
+      "size_bytes": null,
+      "source": "claimant",
+      "related_fields": ["authorities.police_report_reference"],
+      "needed_for": ["later_action"],
+      "provenance": {"internal_storage_state": "no_object_expected_yet"},
+      "claimant_note": "The report was not available during the first session.",
+      "created_at": "2026-08-02T02:18:00Z",
+      "updated_at": "2026-08-02T02:18:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at08_claimant",
+      "claim_id": "clm_fixture_at08",
+      "session_id": "ses_fixture_at08",
+      "client_message_id": "at08-original-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I was rear-ended in Newmarket."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-02T02:05:00Z"
+    },
+    {
+      "message_id": "msg_at08_agent",
+      "claim_id": "clm_fixture_at08",
+      "session_id": "ses_fixture_at08",
+      "client_message_id": null,
+      "actor": "agent",
+      "visibility": "claimant_visible",
+      "content": {"type": "text", "text": "You can return later and add the police report without starting again."},
+      "evidence_refs": ["evd_fixture_at08_police"],
+      "in_reply_to": "msg_at08_claimant",
+      "created_at": "2026-08-02T02:19:00Z"
+    },
+    {
+      "message_id": "msg_at08_internal",
+      "claim_id": "clm_fixture_at08",
+      "session_id": "ses_fixture_at08",
+      "client_message_id": null,
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "internal_note", "text": "Storage object must not be requested until the report exists."},
+      "evidence_refs": ["evd_fixture_at08_police"],
+      "in_reply_to": null,
+      "created_at": "2026-08-02T02:20:00Z"
+    }
+  ],
+  "expected": {
+    "customer_status": "confirm_future_evidence",
+    "confirmed_fields_not_reasked": ["incident.description", "incident.location"],
+    "pending_items": ["Police report expected after the original session."],
+    "prior_commitments": ["The police report can be added later without restarting the claim."],
+    "claimant_visible_messages": 2
+  }
+}

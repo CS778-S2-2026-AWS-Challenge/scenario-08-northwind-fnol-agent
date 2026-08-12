@@ -1,0 +1,114 @@
+{
+  "scenario_id": "AT-12-signal-writeback",
+  "description": "Synthetic professional-review claim used to verify shared-state write-back and visibility.",
+  "claim": {
+    "claim_id": "clm_fixture_at12",
+    "customer_id": "cus_demo",
+    "revision": 6,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "complex",
+      "coverage": "review_required",
+      "evidence": "received",
+      "fraud_signal": "review_required",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "form": {
+      "incident.description": {
+        "value": "The vehicle was damaged overnight while parked.",
+        "source": "claimant",
+        "source_refs": ["msg_at12_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-12T03:10:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "route": "professional_review",
+    "active_session_id": "ses_fixture_at12",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "A claims professional is reviewing the information you supplied.",
+      "responsible_party": "claims_professional",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-12T03:00:00Z",
+    "updated_at": "2026-08-12T03:15:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at12",
+      "claim_id": "clm_fixture_at12",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Parked vehicle damage transferred for professional review.",
+      "unresolved_questions": [],
+      "pending_items": [],
+      "prior_commitments": ["Northwind will provide a claimant-safe review update."],
+      "context_revision": 6,
+      "started_at": "2026-08-12T03:00:00Z",
+      "last_active_at": "2026-08-12T03:15:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at12_image",
+      "claim_id": "clm_fixture_at12",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "synthetic-damage.png",
+      "media_type": "image/png",
+      "size_bytes": 1200,
+      "source": "claimant",
+      "related_fields": ["vehicle.damage_description"],
+      "needed_for": ["current_action"],
+      "provenance": {"storage_key": "fixture/at12", "extraction_state": "proposed"},
+      "claimant_note": null,
+      "created_at": "2026-08-12T03:08:00Z",
+      "updated_at": "2026-08-12T03:08:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at12_claimant",
+      "claim_id": "clm_fixture_at12",
+      "session_id": "ses_fixture_at12",
+      "client_message_id": "at12-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My car was damaged overnight while parked."},
+      "evidence_refs": ["evd_fixture_at12_image"],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T03:05:00Z"
+    },
+    {
+      "message_id": "msg_at12_internal_signal",
+      "claim_id": "clm_fixture_at12",
+      "session_id": "ses_fixture_at12",
+      "client_message_id": null,
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "review_signal", "code": "HISTORY-REVIEW-01", "outcome": "review_required"},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T03:12:00Z"
+    }
+  ],
+  "expected": {
+    "initial_customer_status": "professional_review",
+    "staff_customer_status": "review_completed",
+    "internal_signal_hidden": true,
+    "claimant_visible_messages": 1
+  }
+}
