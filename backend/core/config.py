@@ -31,6 +31,7 @@ class Settings:
     cors_allow_credentials: bool = False
     expose_api_docs: bool = True
     synthetic_claimant_token: str = 'synthetic-claimant'
+    synthetic_integration_token: str = 'synthetic-integration'
 
     def __post_init__(self) -> None:
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
@@ -50,5 +51,9 @@ class Settings:
             synthetic_claimant_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_CLAIMANT_TOKEN',
                 'synthetic-claimant',
+            ),
+            synthetic_integration_token=os.getenv(
+                'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',
+                'synthetic-integration',
             ),
         )

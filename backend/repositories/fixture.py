@@ -41,6 +41,10 @@ class FixtureRepository(PersistenceRepository):
             return None
         return deepcopy(claim)
 
+    def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
+        claim = self._claims.get(claim_id)
+        return deepcopy(claim) if claim is not None else None
+
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
         stored_claim = self._claims.get(claim.claim_id)
         if stored_claim is None:
@@ -183,6 +187,16 @@ class FixtureRepository(PersistenceRepository):
     ) -> AgentDecisionRecord | None:
         if self.get_claim(claim_id, customer_id) is None:
             return None
+        decision = self._decisions.get(decision_id)
+        if decision is None or decision.claim_id != claim_id:
+            return None
+        return deepcopy(decision)
+
+    def get_agent_decision_internal(
+        self,
+        claim_id: str,
+        decision_id: str,
+    ) -> AgentDecisionRecord | None:
         decision = self._decisions.get(decision_id)
         if decision is None or decision.claim_id != claim_id:
             return None
