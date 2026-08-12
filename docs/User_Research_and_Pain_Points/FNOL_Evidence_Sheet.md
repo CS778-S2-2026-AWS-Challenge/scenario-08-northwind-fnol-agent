@@ -21,11 +21,12 @@ Evidence status indicates traceability, not universal validity. Official evidenc
 
 ## 3. Quality-Control Summary
 
-- Survey source: [Claims Customer Experience Survey (Responses)](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912), worksheet `Form responses 1`, checked 12 August 2026.
+- Survey source: [`Claimant_Survey_Final_Responses.csv`](./Claimant_Survey_Final_Responses.csv), exported from the final Google Forms response set and checked 13 August 2026. The owner-controlled [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912) remains the collection record.
 - Questionnaire wording source: [`Insurance Claim Customer Experience Survey.pdf`](./Insurance%20Claim%20Customer%20Experience%20Survey.pdf), an eight-page export of the Google Form stored in this research folder.
-- The response sheet contained **21 submissions**. One respondent selected “No, I do not wish to participate” and was excluded before analysis, leaving **20 consented respondents**.
-- All reported survey percentages were recalculated from their stated counts and denominators; all 14 checks matched after rounding to one decimal place.
-- The previous-claim subgroup contains eight respondents. Its results are retained as prioritisation signals and are not treated as prevalence estimates.
+- The final export contains **156 submissions**. One respondent selected “No, I do not wish to participate” and was excluded before analysis, leaving **155 consented respondents**.
+- Blank answers are retained as missing data, not classified as incorrect responses. Each result uses the number who answered that question: overall questions `n=155`, previous-claim questions `n=48`, priority and human-support questions `n=60`, hypothetical-incident questions `n=12`, and the open-text improvement question `n=144`.
+- All reported survey percentages were recalculated from their stated counts and question-specific denominators. For multi-select questions, one respondent contributes at most once to each option or combined concept even if the export repeats a label.
+- The previous-claim subgroup contains 48 respondents. Its results are retained as sample findings and are not treated as population prevalence.
 - Multi-select results are not expected to total 100%.
 - Counts were recalculated directly from the linked response sheet. Each metric below retains its numerator, denominator and question context.
 - The response sheet remains access-controlled by its owner even though link-view access is currently enabled. Do not copy free-text responses into public research artifacts without an additional privacy review.
@@ -37,41 +38,41 @@ Evidence status indicates traceability, not universal validity. Official evidenc
 
 | ID | Finding | Exact result | Scope | Research relevance | Boundary | Status |
 |---|---|---:|---|---|---|---|
-| S01 | Most respondents had no previous claim experience. | 60.0% (12/20) | All consented respondents | First-time users require early orientation and guidance. | Small exploratory sample. | Survey documented |
-| S02 | A minority had previous claim experience. | 40.0% (8/20) | All consented respondents | Prior experience does not remove the need for an efficient repeat-claim path. | Small exploratory sample. | Survey documented |
-| S03 | Half selected moderate confidence in understanding policies and the claim process. | 50.0% selected 3/5 (10/20) | All consented respondents | Use plain language and explain the process in context. | Self-reported confidence, not observed knowledge; one respondent selected 5/5. | Survey documented |
-| S04 | Knowing exactly what information is required was the leading shared priority. | 65.0% (13/20) | All consented respondents; multi-select | Provide claim-specific questions and a clear completeness view. | Multi-select item. | Survey documented |
-| S05 | Respondents wanted to understand whether the incident may be covered. | 45.0% (9/20) | All consented respondents; multi-select | Explain relevant coverage concepts without presenting an automated final decision. | Does not measure actual policy coverage. | Survey documented |
-| S06 | AI misunderstanding was a leading stated AI concern. | 60.0% (12/20) | All consented respondents | Let users review and correct information structured by AI. | Measures concern, not system performance. | Survey documented |
-| S07 | Respondents were concerned about explaining a complex or unusual case to AI. | 60.0% (12/20) | All consented respondents | Complex or exceptional cases require a clear route to human judgement. | Exploratory preference. | Survey documented |
-| S08 | Respondents were concerned that AI might make decisions that should remain human. | 40.0% (8/20) | All consented respondents | Keep human oversight for consequential claim decisions. | Does not establish legal or operational decision boundaries. | Survey documented |
-| S09 | First-time claimants most wanted immediate-action guidance. | 75.0% (9/12) | No-previous-claim branch | Provide safety and immediate-action guidance before full intake. | Hypothetical minor-vehicle scenario; small subgroup. | Survey documented |
-| S10 | First-time claimants wanted guidance on photos and evidence. | 66.7% (8/12) | No-previous-claim branch | Give evidence prompts appropriate to the incident. | Small subgroup. | Survey documented |
-| S11 | Respondents with previous claims still reported uncertainty about photos and evidence. | 62.5% (5/8) | Previous-claim branch | Consolidate evidence requirements and show what is outstanding. | Small subgroup; not a prevalence estimate. | Survey documented |
-| S12 | Respondents with previous claims reported not knowing how long the process would take. | 62.5% (5/8) | Previous-claim branch | Make expected timing and changes visible. | Small subgroup; not a prevalence estimate. | Survey documented |
-| S13 | Human support was preferred after serious or stressful incidents. | 65.0% (13/20) | All consented respondents | Keep an accessible human-support path throughout FNOL. | Preference does not define a service level. | Survey documented |
-| S14 | Human support was preferred for complex or unusual situations. | 55.0% (11/20) | All consented respondents | Complexity is a distinct escalation signal in addition to urgency or distress. | Exploratory preference. | Survey documented |
+| S01 | Most respondents had no previous claim experience. | 69.0% (107/155) | All consented respondents | Users without prior claim experience need orientation that does not assume process knowledge. | Exploratory, self-reported sample; not a population estimate. | Survey documented |
+| S02 | A substantial minority had previous claim experience. | 31.0% (48/155) | All consented respondents | Prior experience does not remove the need for an efficient repeat-claim path. | Exploratory, self-reported sample; not a population estimate. | Survey documented |
+| S03 | Moderate confidence was the most common rating for understanding policies and the claim process. | 52.3% selected 3/5 (81/155) | All consented respondents | Use plain language and explain the process in context. | Self-reported confidence, not observed knowledge. | Survey documented |
+| S04 | Progress or next-stage visibility was the leading combined priority. | 71.7% (43/60) | Respondents who answered the priority item; multi-select | Show status, ownership, next step and expected timing. | Combined concept covers transparent updates, progress tracking, what happens next and stage expectations; question-specific denominator. | Survey documented |
+| S05 | Simple documentation or easy evidence upload was also a leading priority. | 48.3% (29/60) | Respondents who answered the priority item; multi-select | Provide claim-specific evidence guidance and a visible completeness view. | Combined concept; question-specific denominator. | Survey documented |
+| S06 | Respondents were concerned that AI might misunderstand the incident. | 41.9% (65/155) | All consented respondents; multi-select | Let users review and correct information structured by AI. | Combined equivalent wording; measures concern, not system performance. | Survey documented |
+| S07 | Respondents were concerned that AI might not handle a complex or unusual case. | 45.8% (71/155) | All consented respondents; multi-select | Complex or exceptional cases require a clear route to human judgement. | Combined equivalent wording; exploratory preference. | Survey documented |
+| S08 | Respondents were concerned about AI making decisions that should remain controlled. | 45.8% (71/155) | All consented respondents; multi-select | Keep deterministic or human authority for consequential claim decisions. | Combined equivalent wording; does not establish legal or operational decision boundaries. | Survey documented |
+| S09 | Immediate-action guidance led the hypothetical-incident responses. | 75.0% (9/12) | Respondents who answered the hypothetical minor-vehicle item | Provide bounded immediate-action guidance before full intake. | Question-specific small subgroup; blanks are not treated as negative responses. | Survey documented |
+| S10 | Guidance on photos and evidence was also prominent in the hypothetical item. | 66.7% (8/12) | Respondents who answered the hypothetical minor-vehicle item | Give evidence prompts appropriate to the incident. | Question-specific small subgroup. | Survey documented |
+| S11 | Previous claimants reported unclear reporting requirements. | 35.4% (17/48) | Previous-claim respondents | Ask only relevant questions and show what information is required. | Combined equivalent wording; sample finding, not population prevalence. | Survey documented |
+| S12 | Previous claimants most often reported not knowing claim status after submission. | 60.4% (29/48) | Previous-claim respondents | Make status, ownership and timing visible without requiring claimant follow-up. | Combined equivalent wording; sample finding, not population prevalence. | Survey documented |
+| S13 | Human support was preferred when information or policy terms were unclear. | 43.3% (26/60) | Respondents who answered the human-support item; multi-select | Keep an accessible human-support path when comprehension is insufficient. | Combined equivalent wording; question-specific denominator. | Survey documented |
+| S14 | Human support was preferred for urgent or stressful situations. | 41.7% (25/60) | Respondents who answered the human-support item; multi-select | Urgency and distress remain explicit escalation signals. | Combined equivalent wording; preference does not define a service level. | Survey documented |
 
 ### 4.2 Survey Calculation Checks
 
 | ID | Calculation | Recalculated value | Reported value | Result |
 |---|---:|---:|---:|---|
-| S01 | 12 / 20 | 60.0% | 60.0% | Match |
-| S02 | 8 / 20 | 40.0% | 40.0% | Match |
-| S03 | 10 / 20 | 50.0% | 50.0% | Match |
-| S04 | 13 / 20 | 65.0% | 65.0% | Match |
-| S05 | 9 / 20 | 45.0% | 45.0% | Match |
-| S06 | 12 / 20 | 60.0% | 60.0% | Match |
-| S07 | 12 / 20 | 60.0% | 60.0% | Match |
-| S08 | 8 / 20 | 40.0% | 40.0% | Match |
+| S01 | 107 / 155 | 69.0% | 69.0% | Match |
+| S02 | 48 / 155 | 31.0% | 31.0% | Match |
+| S03 | 81 / 155 | 52.3% | 52.3% | Match |
+| S04 | 43 / 60 | 71.7% | 71.7% | Match |
+| S05 | 29 / 60 | 48.3% | 48.3% | Match |
+| S06 | 65 / 155 | 41.9% | 41.9% | Match |
+| S07 | 71 / 155 | 45.8% | 45.8% | Match |
+| S08 | 71 / 155 | 45.8% | 45.8% | Match |
 | S09 | 9 / 12 | 75.0% | 75.0% | Match |
 | S10 | 8 / 12 | 66.7% | 66.7% | Match |
-| S11 | 5 / 8 | 62.5% | 62.5% | Match |
-| S12 | 5 / 8 | 62.5% | 62.5% | Match |
-| S13 | 13 / 20 | 65.0% | 65.0% | Match |
-| S14 | 11 / 20 | 55.0% | 55.0% | Match |
+| S11 | 17 / 48 | 35.4% | 35.4% | Match |
+| S12 | 29 / 48 | 60.4% | 60.4% | Match |
+| S13 | 26 / 60 | 43.3% | 43.3% | Match |
+| S14 | 25 / 60 | 41.7% | 41.7% | Match |
 
-The current AI-comfort distribution is rating 1 = 2, rating 2 = 0, rating 3 = 11, rating 4 = 5, and rating 5 = 2 (n=20), producing a weighted average of **3.25/5**.
+The current AI-comfort distribution is rating 1 = 9, rating 2 = 11, rating 3 = 58, rating 4 = 66, and rating 5 = 11 (`n=155`), producing a weighted average of **3.38/5**. This supports an assisted, user-correctable experience with an available human path; it does not support autonomous high-impact decisions.
 
 ### 4.3 Published and Public Claimant Evidence
 
@@ -206,8 +207,9 @@ The next research cycle should validate the evidence-informed findings with:
 
 ## 7. Overall Limitations
 
-- The claimant survey is small and exploratory; it informs priorities and personas rather than population estimates.
-- The previous-claim branch remains small (n=8).
+- The claimant survey is exploratory and self-selected; it informs priorities and personas rather than population estimates.
+- Question-level response counts vary. Blank answers are retained as missing data, and every percentage must preserve its question-specific denominator.
+- The previous-claim branch contains `n=48`; priority and human-support items contain `n=60`; the hypothetical minor-vehicle item contains `n=12`.
 - Public reviews are self-selected and cannot establish issue frequency.
 - Some industry statistics come from vendor or company material and require methodology checks before formal statistical use.
 - Weather-event research provides strong evidence of surge and coordination conditions but should not be generalised automatically to every routine claim.
@@ -230,4 +232,4 @@ For each new item, record:
 - verification status and checked date; and
 - the next validation action.
 
-The raw survey responses remain in the linked owner-controlled Google Sheet. The consented, anonymised interview and observation record is stored in this repository as [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md). Any future raw notes or internal workflow evidence should be stored with suitable consent, privacy and access controls. Derived percentages must retain their numerator, denominator and question wording.
+The final anonymous survey export is stored as [`Claimant_Survey_Final_Responses.csv`](./Claimant_Survey_Final_Responses.csv), with the collection record retained in the linked owner-controlled Google Sheet. The consented, anonymised interview and observation record is stored in this repository as [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md). Any future raw notes or internal workflow evidence should be stored with suitable consent, privacy and access controls. Derived percentages must retain their numerator, question-specific denominator and question wording.
