@@ -8,12 +8,14 @@ from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import ClaimRepository
+from backend.repositories.protocols import PersistenceRepository
+from backend.services.agent import AgentTurnProvider, ControlledAgent
 
 
 def create_app(
     settings: Settings | None = None,
-    repository: ClaimRepository | None = None,
+    repository: PersistenceRepository | None = None,
+    agent_turn_provider: AgentTurnProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     app = FastAPI(
@@ -24,6 +26,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.claim_repository = repository or FixtureRepository()
+    app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
 
     configure_cors(app, resolved_settings)
     app.add_middleware(RequestIdMiddleware)

@@ -1,8 +1,8 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class ContractModel(BaseModel):
@@ -18,6 +18,12 @@ class AgentAction(str, Enum):
     HANDOFF = 'HANDOFF'
     URGENT_HANDOFF = 'URGENT_HANDOFF'
     CREATE_CLAIM = 'CREATE_CLAIM'
+
+
+class AuthorityOutcome(str, Enum):
+    AUTHORISED = 'authorised'
+    BLOCKED = 'blocked'
+    REVIEW_REQUIRED = 'review_required'
 
 
 class Severity(str, Enum):
@@ -243,6 +249,46 @@ class MessageRecord(ContractModel):
     created_at: datetime
 
 
+class StateChange(ContractModel):
+    path: str = Field(min_length=1, max_length=200)
+    to: Any
+
+
+class ProposedFormChange(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    source: FormSource = FormSource.INFERENCE
+    status: FormStatus = FormStatus.PROPOSED
+    needed_for: NeededFor = NeededFor.CURRENT_ACTION
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class AgentAuthority(ContractModel):
+    proposed_by: str
+    validated_by: str
+    outcome: AuthorityOutcome
+
+
+class AgentDecisionRecord(ContractModel):
+    decision_id: str
+    claim_id: str
+    session_id: str
+    trigger_message_id: str
+    action: AgentAction
+    reason_codes: list[str] = Field(min_length=1)
+    customer_reason: str = Field(min_length=1, max_length=1000)
+    state_changes: list[StateChange] = Field(default_factory=list)
+    proposed_signals: list[dict[str, Any]] = Field(default_factory=list)
+    required_tools: list[dict[str, Any]] = Field(default_factory=list)
+    next_action_requirements: list[str] = Field(default_factory=list)
+    handoff_priority: str | None = None
+    customer_next_step: CustomerNextStep
+    authority: AgentAuthority
+    form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
+    resulting_revision: int = Field(ge=1)
+    created_at: datetime
+
+
 class EvidenceRecord(ContractModel):
     evidence_id: str
     claim_id: str
@@ -271,6 +317,28 @@ class StartSessionRequest(ContractModel):
     intent: str = Field(default='resume', min_length=1, max_length=50)
 
 
+NonEmptyText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)
+]
+
+
+class TextMessageContent(ContractModel):
+    type: Literal['text'] = 'text'
+    text: NonEmptyText
+
+
+class CreateMessageRequest(ContractModel):
+    client_message_id: str = Field(min_length=1, max_length=200)
+    content: TextMessageContent | None = None
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode='after')
+    def require_content_or_evidence(self) -> 'CreateMessageRequest':
+        if self.content is None and not self.evidence_refs:
+            raise ValueError('A text message or evidence reference is required.')
+        return self
+
+
 class FormUpdate(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -280,6 +348,10 @@ class FormUpdate(ContractModel):
 
 class FormPatchRequest(ContractModel):
     updates: list[FormUpdate] = Field(min_length=1, max_length=50)
+
+
+class FormConfirmationRequest(ContractModel):
+    field_codes: list[str] = Field(min_length=1, max_length=50)
 
 
 class ClaimantClaim(ContractModel):
@@ -335,4 +407,50 @@ class FormPatchResponse(ContractModel):
     claim_id: str
     revision: int
     updated_fields: dict[str, StructuredFormField]
+    customer_next_step: CustomerNextStep
+
+
+class ClaimantMessage(ContractModel):
+    message_id: str
+    actor: ActorType
+    content: dict[str, Any]
+    evidence_refs: list[str] = Field(default_factory=list)
+    in_reply_to: str | None = None
+    created_at: datetime
+
+
+class FormChange(ContractModel):
+    field_code: str
+    field: StructuredFormField
+
+
+class ClaimantDecision(ContractModel):
+    decision_id: str
+    action: AgentAction
+    reason_codes: list[str]
+    customer_reason: str
+    customer_next_step: CustomerNextStep
+
+
+class MessageTurnResponse(ContractModel):
+    claim_id: str
+    session_id: str
+    claim_revision: int
+    claimant_message: ClaimantMessage
+    agent_message: ClaimantMessage
+    form_changes: list[FormChange]
+    decision: ClaimantDecision
+    handoff: dict[str, Any] | None = None
+
+
+class MessageListResponse(ContractModel):
+    items: list[ClaimantMessage]
+    page: PageInfo
+
+
+class FormConfirmationResponse(ContractModel):
+    claim_id: str
+    revision: int
+    confirmed_fields: dict[str, StructuredFormField]
+    decision: ClaimantDecision | None = None
     customer_next_step: CustomerNextStep

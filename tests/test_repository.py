@@ -3,6 +3,10 @@ from datetime import UTC, datetime
 import pytest
 
 from backend.domain.models import (
+    AgentAction,
+    AgentAuthority,
+    AgentDecisionRecord,
+    AuthorityOutcome,
     Channel,
     CustomerNextStep,
     EvidenceFileStatus,
@@ -19,6 +23,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.repositories.key_layout import (
     claim_key,
     customer_claim_index_key,
+    decision_key,
     evidence_key,
     message_key,
     session_key,
@@ -142,11 +147,200 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
         repository.save_evidence(evidence, 'other_customer')
 
 
+def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None:
+    repository = FixtureRepository()
+    claim, session = make_claim()
+    repository.create_claim(claim, session)
+    claimant_message = MessageRecord(
+        message_id='msg_claimant',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        client_message_id='client-turn',
+        actor='claimant',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'A synthetic incident.'},
+        created_at=claim.created_at,
+    )
+    agent_message = MessageRecord(
+        message_id='msg_agent',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        actor='agent',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'Please confirm the incident.'},
+        in_reply_to=claimant_message.message_id,
+        created_at=claim.created_at,
+    )
+    decision = AgentDecisionRecord(
+        decision_id='dec_fixture',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        trigger_message_id=claimant_message.message_id,
+        action=AgentAction.CONFIRM,
+        reason_codes=['MATERIAL_FACTS_PROPOSED'],
+        customer_reason='Please confirm the proposed detail.',
+        customer_next_step=claim.customer_next_step,
+        authority=AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=2,
+        created_at=claim.created_at,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/clm_fixture/sessions/ses_fixture/messages',
+        key='turn-key',
+        request_fingerprint='turn-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        decision_id=decision.decision_id,
+    )
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+
+    repository.save_agent_turn(
+        updated_claim,
+        1,
+        updated_session,
+        claimant_message,
+        agent_message,
+        decision,
+        idempotency,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert (
+        repository.get_message(
+            claim.claim_id,
+            session.session_id,
+            claimant_message.message_id,
+            claim.customer_id,
+        )
+        == claimant_message
+    )
+    assert (
+        repository.find_message_by_client_id(
+            claim.claim_id,
+            'client-turn',
+            claim.customer_id,
+        )
+        == claimant_message
+    )
+    assert (
+        repository.get_agent_decision(
+            claim.claim_id,
+            decision.decision_id,
+            claim.customer_id,
+        )
+        == decision
+    )
+    assert (
+        repository.find_agent_decision_for_trigger(
+            claim.claim_id,
+            claimant_message.message_id,
+            claim.customer_id,
+        )
+        == decision
+    )
+
+    with pytest.raises(RevisionConflict):
+        repository.save_agent_turn(
+            updated_claim,
+            1,
+            updated_session,
+            claimant_message.model_copy(update={'message_id': 'msg_retry'}),
+            agent_message,
+            decision,
+            idempotency,
+        )
+
+
+def test_fixture_repository_rejects_inconsistent_agent_turn_records() -> None:
+    repository = FixtureRepository()
+    claim, session = make_claim()
+    repository.create_claim(claim, session)
+    claimant_message = MessageRecord(
+        message_id='msg_claimant',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        client_message_id='client-turn',
+        actor='claimant',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'A synthetic incident.'},
+        created_at=claim.created_at,
+    )
+    agent_message = claimant_message.model_copy(
+        update={
+            'message_id': 'msg_agent',
+            'actor': 'agent',
+            'client_message_id': None,
+            'in_reply_to': 'wrong-trigger',
+        }
+    )
+    decision = AgentDecisionRecord(
+        decision_id='dec_fixture',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        trigger_message_id=claimant_message.message_id,
+        action=AgentAction.CONFIRM,
+        reason_codes=['MATERIAL_FACTS_PROPOSED'],
+        customer_reason='Please confirm the proposed detail.',
+        customer_next_step=claim.customer_next_step,
+        authority=AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=2,
+        created_at=claim.created_at,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/messages',
+        key='turn-key',
+        request_fingerprint='turn-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        decision_id=decision.decision_id,
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_agent_turn(
+            claim.model_copy(update={'revision': 2}),
+            1,
+            session,
+            claimant_message,
+            agent_message,
+            decision,
+            idempotency,
+        )
+
+    wrong_actor = claimant_message.model_copy(update={'actor': 'agent'})
+    linked_agent_message = agent_message.model_copy(update={'in_reply_to': wrong_actor.message_id})
+    with pytest.raises(KeyError):
+        repository.save_agent_turn(
+            claim.model_copy(update={'revision': 2}),
+            1,
+            session.model_copy(update={'context_revision': 2}),
+            wrong_actor,
+            linked_agent_message,
+            decision,
+            idempotency,
+        )
+
+
 def test_logical_key_layout_keeps_provider_keys_outside_api_models() -> None:
     assert claim_key('clm_1').partition == 'CLAIM#clm_1'
     assert claim_key('clm_1').sort == 'CLAIM'
     assert session_key('clm_1', 'ses_1').sort == 'SESSION#ses_1'
     assert message_key('clm_1', '2026-08-11T00:00:00Z', 'msg_1').sort.startswith('MESSAGE#')
+    assert decision_key('clm_1', '2026-08-11T00:00:00Z', 'dec_1').sort.startswith('DECISION#')
     assert evidence_key('clm_1', 'evd_1').sort == 'EVIDENCE#evd_1'
     assert customer_claim_index_key('cus_1', '2026-08-11T00:00:00Z', 'clm_1').partition == (
         'CUSTOMER#cus_1'

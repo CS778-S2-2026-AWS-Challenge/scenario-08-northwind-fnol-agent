@@ -1,6 +1,13 @@
 from copy import deepcopy
 
-from backend.domain.models import EvidenceRecord, MessageRecord, SessionRecord, WorkingClaim
+from backend.domain.models import (
+    ActorType,
+    AgentDecisionRecord,
+    EvidenceRecord,
+    MessageRecord,
+    SessionRecord,
+    WorkingClaim,
+)
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -16,6 +23,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims: dict[str, WorkingClaim] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
+        self._decisions: dict[str, AgentDecisionRecord] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
@@ -100,9 +108,44 @@ class FixtureRepository(PersistenceRepository):
         return sorted(claims, key=lambda claim: claim.created_at)
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
-        if self.get_claim(message.claim_id, customer_id) is None:
+        if (
+            self.get_claim(message.claim_id, customer_id) is None
+            or self.get_session(
+                message.claim_id,
+                message.session_id,
+                customer_id,
+            )
+            is None
+        ):
             raise KeyError(message.claim_id)
         self._messages[message.message_id] = deepcopy(message)
+
+    def get_message(
+        self,
+        claim_id: str,
+        session_id: str,
+        message_id: str,
+        customer_id: str,
+    ) -> MessageRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        message = self._messages.get(message_id)
+        if message is None or message.claim_id != claim_id or message.session_id != session_id:
+            return None
+        return deepcopy(message)
+
+    def find_message_by_client_id(
+        self,
+        claim_id: str,
+        client_message_id: str,
+        customer_id: str,
+    ) -> MessageRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        for message in self._messages.values():
+            if message.claim_id == claim_id and message.client_message_id == client_message_id:
+                return deepcopy(message)
+        return None
 
     def list_messages(
         self,
@@ -118,6 +161,115 @@ class FixtureRepository(PersistenceRepository):
             if message.claim_id == claim_id and message.session_id == session_id
         ]
         return sorted(messages, key=lambda message: message.created_at)
+
+    def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
+        if (
+            self.get_claim(decision.claim_id, customer_id) is None
+            or self.get_session(
+                decision.claim_id,
+                decision.session_id,
+                customer_id,
+            )
+            is None
+        ):
+            raise KeyError(decision.claim_id)
+        self._decisions[decision.decision_id] = deepcopy(decision)
+
+    def get_agent_decision(
+        self,
+        claim_id: str,
+        decision_id: str,
+        customer_id: str,
+    ) -> AgentDecisionRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        decision = self._decisions.get(decision_id)
+        if decision is None or decision.claim_id != claim_id:
+            return None
+        return deepcopy(decision)
+
+    def find_agent_decision_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> AgentDecisionRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        for decision in self._decisions.values():
+            if decision.claim_id == claim_id and decision.trigger_message_id == trigger_message_id:
+                return deepcopy(decision)
+        return None
+
+    def save_agent_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        decision: AgentDecisionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        stored_session = self._sessions.get(session.session_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        records_match = (
+            stored_claim.customer_id == claim.customer_id
+            and stored_session is not None
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and claim.customer_id == session.customer_id
+            and idempotency.actor_id == claim.customer_id
+            and claim.claim_id == session.claim_id
+            and claim.claim_id == claimant_message.claim_id
+            and claim.claim_id == agent_message.claim_id
+            and claim.claim_id == decision.claim_id
+            and session.session_id == claimant_message.session_id
+            and session.session_id == agent_message.session_id
+            and session.session_id == decision.session_id
+            and session.context_revision == claim.revision
+            and decision.resulting_revision == claim.revision
+            and claimant_message.actor is ActorType.CLAIMANT
+            and agent_message.actor is ActorType.AGENT
+            and claimant_message.message_id == decision.trigger_message_id
+            and claimant_message.message_id == agent_message.in_reply_to
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.message_id == claimant_message.message_id
+            and idempotency.agent_message_id == agent_message.message_id
+            and idempotency.decision_id == decision.decision_id
+        )
+        if not records_match:
+            raise KeyError(claim.claim_id)
+        duplicate_client_message = next(
+            (
+                message
+                for message in self._messages.values()
+                if message.claim_id == claim.claim_id
+                and message.client_message_id == claimant_message.client_message_id
+            ),
+            None,
+        )
+        if duplicate_client_message is not None:
+            raise IdempotencyConflict(claimant_message.client_message_id or '')
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if (
+            existing_idempotency is not None
+            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
+        ):
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
+        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._decisions[decision.decision_id] = deepcopy(decision)
+        self._idempotency[lookup] = idempotency
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if self.get_claim(evidence.claim_id, customer_id) is None:
