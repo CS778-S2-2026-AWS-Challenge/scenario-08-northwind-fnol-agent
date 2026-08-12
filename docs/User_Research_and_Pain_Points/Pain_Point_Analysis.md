@@ -14,7 +14,7 @@ The analysis combines:
 - official and industry research;
 - research into AI-to-human handoff and context continuity.
 
-The percentages in this document are exploratory claimant survey findings. They support early prioritisation but should not be interpreted as population estimates or evidence of employee experience. Employee-side findings are based on published process and operational evidence and remain subject to validation through staff research.
+The percentages in this document were recalculated on 12 August 2026 from the [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912). Of 21 submissions, one non-consenting response was excluded, leaving n=20. Question wording is preserved in [`Insurance Claim Customer Experience Survey.pdf`](./Insurance%20Claim%20Customer%20Experience%20Survey.pdf). These exploratory findings support early prioritisation but should not be interpreted as population estimates or evidence of employee experience. Employee-side findings are based on published process and operational evidence and remain subject to validation through staff research.
 
 ## Executive Finding
 
@@ -56,7 +56,7 @@ Evidence is interpreted according to both strength and relevance:
 | **Supported mechanism** | An authoritative or process source explains how or why a problem may occur; suitable for explaining a pain point, but not for estimating how often it occurs |
 | **Risk or hypothesis** | Based on an isolated complaint, indirect evidence, or team inference; retained as a question for validation rather than treated as an established user need |
 
-Survey percentages are reported exactly as collected. They describe this exploratory sample only. Public reviews illustrate individual experiences, while regulator, insurer, and industry sources provide process or conduct context. Evidence from one category is not silently treated as evidence from another.
+Survey percentages are calculated from the current consented-response counts and rounded to one decimal place. They describe this exploratory sample only. Public reviews illustrate individual experiences, while regulator, insurer, and industry sources provide process or conduct context. Evidence from one category is not silently treated as evidence from another.
 
 ### Product-decision boundary
 
@@ -95,21 +95,21 @@ For users with no previous claim experience:
 
 | Uncertainty | Survey result |
 |---|---:|
-| What to do immediately after the incident | 77.8% |
-| What photos or evidence to collect | 55.6% |
-| Whether police contact is required | 44.4% |
-| Whether the damage may be covered | 44.4% |
+| What to do immediately after the incident | 75.0% (9/12) |
+| What photos or evidence to collect | 66.7% (8/12) |
+| Whether police contact is required | 33.3% (4/12) |
+| Whether the damage may be covered | 50.0% (6/12) |
 
 For users with previous claim experience:
 
 | Difficulty | Survey result |
 |---|---:|
-| Did not know which photos or evidence were required | 80% |
-| Did not know what to do first | 60% |
-| Did not know which information to collect | 60% |
-| Was unsure whether the incident was covered | 60% |
+| Did not know which photos or evidence were required | 62.5% (5/8) |
+| Did not know what to do first | 50.0% (4/8) |
+| Did not know which information to collect | 62.5% (5/8) |
+| Was unsure whether the incident was covered | 50.0% (4/8) |
 
-Across the survey, 64.3% prioritised knowing exactly what information was required.
+Across the survey, 65.0% (13/20) prioritised knowing exactly what information was required.
 
 ### User impact
 
@@ -138,14 +138,14 @@ After submitting an initial report, users often do not know whether enough infor
 
 | Post-submission uncertainty | Survey result |
 |---|---:|
-| Did not know how long the process would take | 80% |
-| Was unsure whether enough information had been provided | 60% |
-| Did not know whom to contact if there was a problem | 60% |
-| Had to contact the insurer for updates | 60% |
-| Did not know what would happen next | 40% |
-| Did not know the current claim status | 40% |
+| Did not know how long the process would take | 62.5% (5/8) |
+| Did not know the current claim status | 62.5% (5/8) |
+| Was unsure whether enough information had been provided | 50.0% (4/8) |
+| Had to contact the insurer for updates | 50.0% (4/8) |
+| Did not know what would happen next | 37.5% (3/8) |
+| Did not know whom to contact if there was a problem | 37.5% (3/8) |
 
-Across the survey, 42.9% prioritised knowing what happens next, and 42.9% prioritised being able to track progress.
+Across the survey, 40.0% (8/20) prioritised knowing what happens next, and 45.0% (9/20) prioritised being able to track progress.
 
 ### Supporting external evidence
 
@@ -178,10 +178,10 @@ Users may provide the same incident description, policy details, or evidence thr
 
 Among users with previous claim experience:
 
-- 40% reported having to repeat information already provided;
-- 40% experienced difficulty uploading photos or documents;
-- additional information or documents were requested once in 20% of cases and multiple times in 20%;
-- 60% were unsure whether they had provided enough information.
+- 37.5% (3/8) reported having to repeat information already provided;
+- 25.0% (2/8) experienced difficulty uploading photos or documents;
+- additional information or documents were requested once in 12.5% of cases and multiple times in 25.0%;
+- 50.0% (4/8) were unsure whether they had provided enough information.
 
 ### Supporting external evidence
 
@@ -217,12 +217,12 @@ When an AI assistant or digital form cannot handle an urgent, unusual, complex, 
 
 | Situation in which human support is preferred | Survey result |
 |---|---:|
-| Immediately after a serious or stressful incident | 64.3% |
-| The situation is complex or unusual | 50.0% |
-| The digital process is difficult to use | 50.0% |
-| There is a disagreement about the claim | 50.0% |
-| The required information is not understood | 42.9% |
-| Usually prefers fully independent self-service | 7.1% |
+| Immediately after a serious or stressful incident | 65.0% (13/20) |
+| The situation is complex or unusual | 55.0% (11/20) |
+| The digital process is difficult to use | 40.0% (8/20) |
+| There is a disagreement about the claim | 45.0% (9/20) |
+| The required information is not understood | 45.0% (9/20) |
+| Usually prefers fully independent self-service | 5.0% (1/20) |
 
 ### Supporting external evidence
 
@@ -258,13 +258,13 @@ Users are open to AI assistance only when they can verify what the AI understood
 
 | Concern about AI-assisted claims | Survey result |
 |---|---:|
-| AI may misunderstand what happened | 78.6% |
-| AI may struggle with a complex or unusual situation | 64.3% |
-| AI may make decisions that should be made by a human | 57.1% |
-| Personal information may not be secure | 42.9% |
-| It may be unclear when a human becomes involved | 21.4% |
+| AI may misunderstand what happened | 60.0% (12/20) |
+| Explaining a complex or unusual situation may be difficult | 60.0% (12/20) |
+| AI may make decisions that should be made by a human | 40.0% (8/20) |
+| Personal information may not be secure | 45.0% (9/20) |
+| It may be unclear when a human becomes involved | 20.0% (4/20) |
 
-Comfort with AI assistance averaged approximately 3.07 out of 5 when human help could be requested at any time. This indicates conditional acceptance rather than support for fully automated claim handling.
+Comfort with AI assistance averaged 3.25 out of 5 when human help could be requested at any time. This indicates conditional acceptance rather than support for fully automated claim handling.
 
 ### User impact
 
@@ -291,10 +291,10 @@ Insurance language is often designed around policies, compliance, and internal p
 
 ### Survey evidence
 
-- 60% of users with previous claim experience found insurance terminology difficult;
-- 60% were unsure whether the incident was covered when it first happened;
-- 50.0% of the overall survey prioritised understanding whether the incident may be covered;
-- 64.3% prioritised knowing exactly what information was required.
+- 37.5% (3/8) of users with previous claim experience found insurance terminology difficult;
+- 50.0% (4/8) were unsure whether the incident was covered when it first happened;
+- 45.0% (9/20) of the overall survey prioritised understanding whether the incident may be covered;
+- 65.0% (13/20) prioritised knowing exactly what information was required.
 
 ### Supporting external evidence
 
