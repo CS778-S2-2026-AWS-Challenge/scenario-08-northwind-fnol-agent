@@ -3,9 +3,12 @@ from copy import deepcopy
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
+    CustomerUpdateRecord,
     EvidenceRecord,
     MessageRecord,
     SessionRecord,
+    SignalDecisionRecord,
+    StaffActionRecord,
     WorkingClaim,
 )
 from backend.repositories.protocols import (
@@ -25,6 +28,9 @@ class FixtureRepository(PersistenceRepository):
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
+        self._staff_actions: dict[str, StaffActionRecord] = {}
+        self._customer_updates: dict[str, CustomerUpdateRecord] = {}
+        self._signal_decisions: dict[str, SignalDecisionRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
     @property
@@ -343,3 +349,68 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim.claim_id] = deepcopy(claim)
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
         self._idempotency[lookup] = idempotency
+
+    def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
+        return sorted(
+            [deepcopy(item) for item in self._staff_actions.values() if item.claim_id == claim_id],
+            key=lambda item: (item.created_at, item.action_id),
+        )
+
+    def get_staff_action(self, claim_id: str, action_id: str) -> StaffActionRecord | None:
+        action = self._staff_actions.get(action_id)
+        if action is None or action.claim_id != claim_id:
+            return None
+        return deepcopy(action)
+
+    def list_customer_updates(self, claim_id: str) -> list[CustomerUpdateRecord]:
+        return sorted(
+            [
+                deepcopy(item)
+                for item in self._customer_updates.values()
+                if item.claim_id == claim_id
+            ],
+            key=lambda item: (item.created_at, item.update_id),
+        )
+
+    def list_signal_decisions(self, claim_id: str) -> list[SignalDecisionRecord]:
+        return sorted(
+            [
+                deepcopy(item)
+                for item in self._signal_decisions.values()
+                if item.claim_id == claim_id
+            ],
+            key=lambda item: (item.created_at, item.signal_decision_id),
+        )
+
+    def save_staff_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        customer_update: CustomerUpdateRecord | None = None,
+        signal_decision: SignalDecisionRecord | None = None,
+    ) -> None:
+        stored = self._claims.get(claim.claim_id)
+        if stored is None:
+            raise KeyError(claim.claim_id)
+        if stored.revision != expected_revision:
+            raise RevisionConflict(stored.revision)
+        if not any((staff_action, customer_update, signal_decision)):
+            raise KeyError(claim.claim_id)
+        records = (staff_action, customer_update, signal_decision)
+        if any(item is not None and item.claim_id != claim.claim_id for item in records):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing = self._idempotency.get(lookup)
+        if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
+            raise IdempotencyConflict(idempotency.key)
+        self._claims[claim.claim_id] = deepcopy(claim)
+        if staff_action is not None:
+            self._staff_actions[staff_action.action_id] = deepcopy(staff_action)
+        if customer_update is not None:
+            self._customer_updates[customer_update.update_id] = deepcopy(customer_update)
+        if signal_decision is not None:
+            self._signal_decisions[signal_decision.signal_decision_id] = deepcopy(signal_decision)
+        self._idempotency[lookup] = deepcopy(idempotency)

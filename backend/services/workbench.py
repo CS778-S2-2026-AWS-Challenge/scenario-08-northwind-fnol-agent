@@ -94,7 +94,27 @@ def get_workbench_claim_detail(
         sessions,
     )
     evidence = repository.list_evidence(claim_id, claim.customer_id)
-    signals = [signal for decision in decisions for signal in decision.proposed_signals]
+    signals_by_id: dict[str, dict[str, object]] = {}
+    for decision in decisions:
+        for signal in decision.proposed_signals:
+            signal_id = str(signal.get('signal_id') or signal.get('code') or '')
+            if signal_id:
+                signals_by_id[signal_id] = dict(signal)
+    for message in messages:
+        if message.content.get('type') == 'review_signal':
+            signal_id = str(message.content.get('signal_id') or message.content.get('code') or '')
+            if signal_id:
+                signals_by_id.setdefault(signal_id, dict(message.content))
+    for signal_decision in repository.list_signal_decisions(claim_id):
+        signal = signals_by_id.setdefault(
+            signal_decision.signal_id,
+            {'signal_id': signal_decision.signal_id},
+        )
+        signal.setdefault('decisions', [])
+        decisions_list = signal['decisions']
+        if isinstance(decisions_list, list):
+            decisions_list.append(signal_decision.model_dump(mode='json'))
+    signals = list(signals_by_id.values())
 
     return WorkbenchClaimDetail(
         claim_id=claim.claim_id,
@@ -114,8 +134,12 @@ def get_workbench_claim_detail(
         decisions=decisions,
         signals=signals,
         handoffs=[],
-        staff_actions=[],
-        customer_updates=[],
+        staff_actions=[
+            item.model_dump(mode='json') for item in repository.list_staff_actions(claim_id)
+        ],
+        customer_updates=[
+            item.model_dump(mode='json') for item in repository.list_customer_updates(claim_id)
+        ],
         external_claim=claim.external_claim,
         assessor_routing=claim.assessor_routing,
         customer_next_step=claim.customer_next_step,
