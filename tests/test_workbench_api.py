@@ -34,9 +34,7 @@ def test_staff_can_list_and_read_workbench_claim(
     assert create_response.status_code == 201
     claim_id = create_response.json()['claim']['claim_id']
 
-    list_response = client.get(
-        '/api/v1/workbench/claims', headers=staff_auth_headers
-    )
+    list_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
 
     assert list_response.status_code == 200
     items = list_response.json()['items']
@@ -44,9 +42,7 @@ def test_staff_can_list_and_read_workbench_claim(
     assert items[0]['claim_id'] == claim_id
     assert items[0]['customer_reference'] == 'cus_demo'
 
-    detail_response = client.get(
-        f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers
-    )
+    detail_response = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail['claim_id'] == claim_id

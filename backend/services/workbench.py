@@ -147,11 +147,7 @@ def get_workbench_claim_detail(
     decisions = repository.list_agent_decisions(claim_id, claim.customer_id)
     evidence = repository.list_evidence(claim_id, claim.customer_id)
     handoffs = repository.list_handoffs(claim_id, claim.customer_id)
-    signals = [
-        signal
-        for decision in decisions
-        for signal in decision.proposed_signals
-    ]
+    signals = [signal for decision in decisions for signal in decision.proposed_signals]
 
     return WorkbenchClaimDetail(
         claim_id=claim.claim_id,
