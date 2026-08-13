@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.repositories.fixture import FixtureRepository
@@ -80,9 +81,18 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
     assert stored_claim.claim_state.workflow_state.value == 'professional_review'
 
 
-def test_negated_injury_does_not_trigger_urgent_handoff(
+@pytest.mark.parametrize(
+    'description',
+    [
+        'Nobody was injured. A synthetic rear bumper was damaged.',
+        'I was not hurt.',
+        'I hurt the bumper.',
+    ],
+)
+def test_non_injury_wording_does_not_trigger_urgent_handoff(
     client: TestClient,
     auth_headers: dict[str, str],
+    description: str,
 ) -> None:
     created = create_claim(client, auth_headers, 'safe-claim')
     claim = created['claim']
@@ -95,7 +105,7 @@ def test_negated_injury_does_not_trigger_urgent_handoff(
         auth_headers,
         str(claim['claim_id']),
         str(session['session_id']),
-        'Nobody was injured. A synthetic rear bumper was damaged.',
+        description,
         key='safe-message',
     )
 

@@ -28,13 +28,28 @@ HIGH_IMPACT_ACTIONS = frozenset(
 CONTROLLED_HANDOFF_REASONS = frozenset({'EXPLICIT_SAFETY_SIGNAL', 'HUMAN_SUPPORT_REQUESTED'})
 SUPPORTED_AGENT_STATE_PATHS = frozenset({'claim_state.next_action'})
 
-INJURY_PATTERNS = (
-    re.compile(r'\b(?:injured|injury|hurt|bleeding|trapped|unconscious)\b', re.IGNORECASE),
+PERSON_SUBJECT = (
+    r'(?:i|we|he|she|they|someone|somebody|'
+    r'(?:a|the|my|our)?\s*(?:passenger|driver|person|pedestrian|cyclist|child|adult))'
 )
-NEGATED_INJURY_PATTERNS = (
-    re.compile(r'\b(?:nobody|no\s+one)\s+(?:was|is|has\s+been)?\s*injured\b', re.IGNORECASE),
-    re.compile(r'\b(?:not|wasn\'t|isn\'t)\s+injured\b', re.IGNORECASE),
-    re.compile(r'\bno\s+injur(?:y|ies)\b', re.IGNORECASE),
+INJURY_PATTERNS = (
+    re.compile(
+        rf'\b{PERSON_SUBJECT}\s+'
+        r'(?:am|are|is|was|were|got|has\s+been|have\s+been)\s+'
+        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf'\b{PERSON_SUBJECT}\s+(?:has|have|suffered)\s+'
+        r'(?:(?:a|an)\s+)?(?:(?:serious|minor)\s+)?injur(?:y|ies)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\bthere\s+(?:is|are|was|were)\s+'
+        r'(?:(?:a|an)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\s+'
+        r'(?:person|people|passenger|driver|pedestrian|cyclist|child|adult)\b',
+        re.IGNORECASE,
+    ),
 )
 DANGER_PATTERNS = (
     re.compile(r'\b(?:still|continuing|immediate)\s+(?:danger|dangerous|unsafe)\b', re.IGNORECASE),
@@ -86,9 +101,7 @@ class ControlledAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         message_text = context.message_text or ''
-        injury_signal = any(
-            pattern.search(message_text) for pattern in INJURY_PATTERNS
-        ) and not any(pattern.search(message_text) for pattern in NEGATED_INJURY_PATTERNS)
+        injury_signal = any(pattern.search(message_text) for pattern in INJURY_PATTERNS)
         danger_signal = any(pattern.search(message_text) for pattern in DANGER_PATTERNS)
         if injury_signal or danger_signal:
             return AgentProposal(
