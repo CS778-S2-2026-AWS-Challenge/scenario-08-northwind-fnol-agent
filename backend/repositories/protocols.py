@@ -4,6 +4,7 @@ from typing import Any, Protocol
 from backend.domain.models import (
     AgentDecisionRecord,
     EvidenceRecord,
+    HandoffRecord,
     MessageRecord,
     SessionRecord,
     WorkingClaim,
@@ -35,6 +36,7 @@ class IdempotencyRecord:
     message_id: str | None = None
     agent_message_id: str | None = None
     decision_id: str | None = None
+    handoff_id: str | None = None
     response_payload: dict[str, Any] | None = None
 
 
@@ -155,6 +157,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         agent_message: MessageRecord,
         decision: AgentDecisionRecord,
         idempotency: IdempotencyRecord,
+        handoff: HandoffRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
         raise NotImplementedError
@@ -181,4 +184,28 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
+        raise NotImplementedError
+
+    def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
+        raise NotImplementedError
+
+    def get_handoff(
+        self,
+        claim_id: str,
+        handoff_id: str,
+        customer_id: str,
+    ) -> HandoffRecord | None:
+        raise NotImplementedError
+
+    def list_handoffs(self, claim_id: str, customer_id: str) -> list[HandoffRecord]:
+        raise NotImplementedError
+
+    def save_handoff_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        handoff: HandoffRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a handoff, shared claim state, and retry metadata."""
         raise NotImplementedError

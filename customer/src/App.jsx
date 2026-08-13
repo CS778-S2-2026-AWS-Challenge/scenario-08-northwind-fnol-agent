@@ -5,6 +5,7 @@ import {
   createClaim,
   getClaim,
   requestId,
+  requestHumanSupport,
   submitClaimMessage,
   updateClaimField,
 } from './api.js'
@@ -48,10 +49,12 @@ function App() {
   const [error, setError] = useState('')
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
+  const [handoff, setHandoff] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
+  const pendingSupportRequest = useRef(null)
 
-  const isBusy = ['starting', 'sending', 'confirming', 'saving'].includes(status)
+  const isBusy = ['starting', 'sending', 'confirming', 'saving', 'requesting-support'].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
@@ -122,6 +125,7 @@ function App() {
       setForm((current) => mergeFields(current, turn.form_changes))
       setClaim((current) => ({ ...current, revision: turn.claim_revision }))
       setNextStep(turn.decision.customer_next_step)
+      setHandoff(turn.handoff)
       setDraft('')
       pendingSubmission.current = null
       setStatus('idle')
@@ -209,6 +213,29 @@ function App() {
     }
   }
 
+  async function requestSupport() {
+    if (!claim || isBusy || handoff) return
+    setError('')
+    setStatus('requesting-support')
+    try {
+      if (!pendingSupportRequest.current) {
+        pendingSupportRequest.current = { idempotencyKey: requestId('support') }
+      }
+      const response = await requestHumanSupport({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        idempotencyKey: pendingSupportRequest.current.idempotencyKey,
+      })
+      setClaim((current) => ({ ...current, revision: response.revision }))
+      setNextStep(response.customer_next_step)
+      setHandoff(response.handoff)
+      pendingSupportRequest.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -216,7 +243,19 @@ function App() {
           <span className="brand-mark">N</span>
           <span>Northwind</span>
         </a>
-        {hasStarted && <span className="draft-label">Draft report</span>}
+        {hasStarted && (
+          <div className="header-actions">
+            <span className="draft-label">Draft report</span>
+            <button
+              className="support-button"
+              type="button"
+              onClick={requestSupport}
+              disabled={isBusy || Boolean(handoff)}
+            >
+              {status === 'requesting-support' ? 'Requesting support...' : 'Request human support'}
+            </button>
+          </div>
+        )}
       </header>
 
       {!hasStarted ? (
@@ -259,13 +298,46 @@ function App() {
               ))}
             </div>
 
+            {handoff && (
+              <section
+                className={`transfer-state ${handoff.priority === 'urgent' ? 'is-urgent' : ''}`}
+                aria-live="assertive"
+                aria-labelledby="transfer-title"
+              >
+                <p className="transfer-label">
+                  {handoff.priority === 'urgent' ? 'Urgent support' : 'Human support'}
+                </p>
+                <h2 id="transfer-title">
+                  {handoff.priority === 'urgent'
+                    ? 'Normal intake has paused'
+                    : 'Your support request is queued'}
+                </h2>
+                <p>{handoff.summary}</p>
+                <dl>
+                  <div>
+                    <dt>Next owner</dt>
+                    <dd>Northwind support</dd>
+                  </div>
+                  <div>
+                    <dt>Your report</dt>
+                    <dd>Saved with the details already provided</dd>
+                  </div>
+                </dl>
+              </section>
+            )}
+
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0}
+              disabled={proposedFields.length > 0 || Boolean(handoff)}
+              disabledNote={
+                handoff
+                  ? 'Normal intake is paused while Northwind support takes ownership.'
+                  : 'Confirm or correct the details before continuing.'
+              }
               buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}
               error={error}
             />
@@ -371,6 +443,7 @@ function MessageComposer({
   inputLabel,
   busy,
   disabled = false,
+  disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
 }) {
@@ -386,7 +459,7 @@ function MessageComposer({
         rows="4"
         disabled={busy || disabled}
       />
-      {disabled && <p className="composer-note">Confirm or correct the details before continuing.</p>}
+      {disabled && <p className="composer-note">{disabledNote}</p>}
       {error && (
         <div className="backend-status is-error" role="alert">
           <span className="status-dot" />
