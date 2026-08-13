@@ -13,7 +13,7 @@ identifiers from `docs/day3-implementation-map.md`.
 Run the reusable fixture check from the repository root:
 
 ```powershell
-python -m scripts.run_scenarios
+python scripts/run_scenarios.py
 ```
 
 The loader rejects broken claim/session links. Claimant API tests also verify
