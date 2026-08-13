@@ -14,6 +14,7 @@ on:
       - converted_to_draft
       - reopened
       - synchronize
+      - edited
       - closed
 
 permissions:
@@ -107,6 +108,20 @@ jobs:
             fi
           done
 
+          tracking_field_id=$(jq -er \
+            --arg field "$TRACKING_FIELD" \
+            '.fields[] | select(.name == $field) | .id' \
+            "$fields_file")
+          repository_tracking_option_id=$(jq -er \
+            --arg field "$TRACKING_FIELD" \
+            --arg option "$REPOSITORY_TRACKING_OPTION" \
+            '.fields[] | select(.name == $field) | .options[] | select(.name == $option) | .id' \
+            "$fields_file")
+          size_field_id=$(jq -er '.fields[] | select(.name == "Size") | .id' "$fields_file")
+          estimate_field_id=$(jq -er '.fields[] | select(.name == "Estimate") | .id' "$fields_file")
+          start_date_field_id=$(jq -er '.fields[] | select(.name == "Start date") | .id' "$fields_file")
+          target_date_field_id=$(jq -er '.fields[] | select(.name == "Target date") | .id' "$fields_file")
+
           gh project item-list "$PROJECT_NUMBER" \
             --owner "$PROJECT_OWNER" \
             --limit 1000 \
@@ -117,6 +132,51 @@ jobs:
             -f owner="${TARGET_REPOSITORY%%/*}" \
             -f name="${TARGET_REPOSITORY#*/}" \
             --jq '.data.repository.id')
+
+          update_single_select_field() {
+            local item_id=$1
+            local field_id=$2
+            local option_id=$3
+            local mutation
+            mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{singleSelectOptionId:$optionId}}){projectV2Item{id}}}'
+            gh api graphql \
+              -f query="$mutation" \
+              -f projectId="$PROJECT_ID" \
+              -f itemId="$item_id" \
+              -f fieldId="$field_id" \
+              -f optionId="$option_id" \
+              --silent
+          }
+
+          update_number_field() {
+            local item_id=$1
+            local field_id=$2
+            local value=$3
+            local mutation
+            mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$value:Float!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{number:$value}}){projectV2Item{id}}}'
+            gh api graphql \
+              -f query="$mutation" \
+              -f projectId="$PROJECT_ID" \
+              -f itemId="$item_id" \
+              -f fieldId="$field_id" \
+              -F value="$value" \
+              --silent
+          }
+
+          update_date_field() {
+            local item_id=$1
+            local field_id=$2
+            local value=$3
+            local mutation
+            mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$value:Date!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{date:$value}}){projectV2Item{id}}}'
+            gh api graphql \
+              -f query="$mutation" \
+              -f projectId="$PROJECT_ID" \
+              -f itemId="$item_id" \
+              -f fieldId="$field_id" \
+              -f value="$value" \
+              --silent
+          }
 
           mapfile -t candidate_ids < <(jq -r \
             --arg tracking "$REPOSITORY_TRACKING_OPTION" \
@@ -140,6 +200,7 @@ jobs:
             body=$(jq -r '.content.body // ""' <<< "$item")
             estimate=$(jq -r '.estimate // empty' <<< "$item")
             size=$(jq -r '.size // empty' <<< "$item")
+            tracking=$(jq -r '.tracking // empty' <<< "$item")
             start_date=$(jq -r '."start date" // empty' <<< "$item")
             target_date=$(jq -r '."target date" // empty' <<< "$item")
             draft_issue_id=$(jq -r '.content.id' <<< "$item")
@@ -155,6 +216,9 @@ jobs:
             fi
             if [[ -z "$size" ]]; then
               validation_errors+=("Size")
+            fi
+            if [[ "$tracking" != "$REPOSITORY_TRACKING_OPTION" ]]; then
+              validation_errors+=("Tracking $REPOSITORY_TRACKING_OPTION")
             fi
             if [[ -z "$start_date" ]]; then
               validation_errors+=("Start date")
@@ -181,6 +245,13 @@ jobs:
             esac
             if [[ -n "$expected_size" && "$size" != "$expected_size" ]]; then
               validation_errors+=("Size $expected_size for Estimate ${estimate}h")
+            fi
+            size_option_id=$(jq -r \
+              --arg size "$size" \
+              '.fields[] | select(.name == "Size") | .options[] | select(.name == $size) | .id' \
+              "$fields_file")
+            if [[ -z "$size_option_id" ]]; then
+              validation_errors+=("configured Size option $size")
             fi
 
             dependency_section=$(awk '
@@ -270,10 +341,48 @@ jobs:
 
             issue_number=$(jq -r '.data.convertProjectV2DraftIssueItemToIssue.item.content.number // empty' <<< "$result")
             issue_url=$(jq -r '.data.convertProjectV2DraftIssueItemToIssue.item.content.url // empty' <<< "$result")
-            if [[ -z "$issue_number" || -z "$issue_url" ]]; then
+            converted_item_id=$(jq -r '.data.convertProjectV2DraftIssueItemToIssue.item.id // empty' <<< "$result")
+            if [[ -z "$issue_number" || -z "$issue_url" || -z "$converted_item_id" ]]; then
               failed=$((failed + 1))
               echo "::error title=Draft conversion returned no issue::$title returned an incomplete response."
               printf -- '- Failed `%s`: conversion returned no Issue.\n' "$title" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            if ! update_single_select_field "$converted_item_id" "$tracking_field_id" "$repository_tracking_option_id" || \
+              ! update_single_select_field "$converted_item_id" "$size_field_id" "$size_option_id" || \
+              ! update_number_field "$converted_item_id" "$estimate_field_id" "$estimate" || \
+              ! update_date_field "$converted_item_id" "$start_date_field_id" "$start_date" || \
+              ! update_date_field "$converted_item_id" "$target_date_field_id" "$target_date"; then
+              failed=$((failed + 1))
+              echo "::error title=Project field restoration failed::Issue #$issue_number did not receive all preserved Project fields."
+              printf -- '- Failed [%s](%s): could not restore all Project fields.\n' "$title" "$issue_url" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            verification_file="$RUNNER_TEMP/converted-item-$issue_number.json"
+            gh project item-list "$PROJECT_NUMBER" \
+              --owner "$PROJECT_OWNER" \
+              --limit 1000 \
+              --format json > "$verification_file"
+            if ! jq -e \
+              --arg id "$converted_item_id" \
+              --arg tracking "$tracking" \
+              --arg size "$size" \
+              --argjson estimate "$estimate" \
+              --arg start_date "$start_date" \
+              --arg target_date "$target_date" \
+              '.items[]
+                | select(.id == $id)
+                | select(.tracking == $tracking)
+                | select(.size == $size)
+                | select(.estimate == $estimate)
+                | select(."start date" == $start_date)
+                | select(."target date" == $target_date)' \
+              "$verification_file" > /dev/null; then
+              failed=$((failed + 1))
+              echo "::error title=Project field verification failed::Issue #$issue_number does not match the Draft's Project fields."
+              printf -- '- Failed [%s](%s): restored Project fields did not verify.\n' "$title" "$issue_url" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
@@ -323,6 +432,7 @@ jobs:
           PR_ACTION: ${{ github.event.action }}
           PR_DRAFT: ${{ github.event.pull_request.draft }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
+          OLD_PR_BODY: ${{ github.event.changes.body.from || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -338,7 +448,7 @@ jobs:
             converted_to_draft)
               target_status="In progress"
               ;;
-            opened|reopened|synchronize)
+            opened|reopened|synchronize|edited)
               if [[ "$PR_DRAFT" == "true" ]]; then
                 target_status="In progress"
               else
@@ -359,14 +469,34 @@ jobs:
             --owner "$PROJECT_OWNER" \
             --format json > "$fields_file"
           status_field_id=$(jq -r '.fields[] | select(.name == "Status") | .id' "$fields_file")
-          status_option_id=$(jq -r \
-            --arg status "$target_status" \
-            '.fields[] | select(.name == "Status") | .options[] | select(.name == $status) | .id' \
-            "$fields_file")
-          if [[ -z "$status_field_id" || -z "$status_option_id" ]]; then
-            echo "::error::Project Status field or '$target_status' option was not found."
+          if [[ -z "$status_field_id" ]]; then
+            echo "::error::Project Status field was not found."
             exit 1
           fi
+
+          status_option_id() {
+            local status=$1
+            jq -er \
+              --arg status "$status" \
+              '.fields[] | select(.name == "Status") | .options[] | select(.name == $status) | .id' \
+              "$fields_file"
+          }
+
+          update_status() {
+            local item_id=$1
+            local status=$2
+            local option_id
+            local mutation
+            option_id=$(status_option_id "$status")
+            mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{singleSelectOptionId:$optionId}}){projectV2Item{id}}}'
+            gh api graphql \
+              -f query="$mutation" \
+              -f projectId="$PROJECT_ID" \
+              -f itemId="$item_id" \
+              -f fieldId="$status_field_id" \
+              -f optionId="$option_id" \
+              --silent
+          }
 
           query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:50){nodes{number url projectItems(first:20){nodes{id project{id}}}}}}}}'
           pr_data=$(gh api graphql \
@@ -384,25 +514,91 @@ jobs:
               | {itemId: .id, issueNumber: $issue.number, issueUrl: $issue.url}' \
             <<< "$pr_data")
 
+          mapfile -t current_issue_numbers < <(jq -r \
+            '.data.repository.pullRequest.closingIssuesReferences.nodes[].number' \
+            <<< "$pr_data" | sort -n -u)
+
+          removed_issue_numbers=()
+          if [[ "$PR_ACTION" == "edited" && -n "$OLD_PR_BODY" ]]; then
+            mapfile -t previous_issue_numbers < <(python - <<'PY'
+          import os
+          import re
+
+          repository = os.environ["TARGET_REPOSITORY"].lower()
+          body = os.environ.get("OLD_PR_BODY", "")
+          pattern = re.compile(
+              r"\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s*:?\s+"
+              r"(?P<reference>#\d+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+|"
+              r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/\d+)",
+              re.IGNORECASE,
+          )
+
+          issue_numbers = set()
+          for match in pattern.finditer(body):
+              reference = match.group("reference")
+              if reference.startswith("#"):
+                  issue_numbers.add(int(reference[1:]))
+              elif reference.lower().startswith("https://"):
+                  parts = reference.split("/")
+                  if f"{parts[3]}/{parts[4]}".lower() == repository:
+                      issue_numbers.add(int(parts[-1]))
+              else:
+                  referenced_repository, number = reference.rsplit("#", 1)
+                  if referenced_repository.lower() == repository:
+                      issue_numbers.add(int(number))
+
+          for issue_number in sorted(issue_numbers):
+              print(issue_number)
+          PY
+            )
+
+            for previous_issue_number in "${previous_issue_numbers[@]}"; do
+              if ! printf '%s\n' "${current_issue_numbers[@]}" | grep -qx "$previous_issue_number"; then
+                removed_issue_numbers+=("$previous_issue_number")
+              fi
+            done
+          fi
+
           echo "## Pull request status sync" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if (( ${#linked_items[@]} == 0 )); then
+          if (( ${#linked_items[@]} == 0 && ${#removed_issue_numbers[@]} == 0 )); then
             echo "No closing Issue in Project 12 is linked to PR #$PR_NUMBER." >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::PR #$PR_NUMBER has no closing Issue in Project 12. Use a closing keyword such as 'Closes #123'."
             exit 0
           fi
 
-          mutation='mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{singleSelectOptionId:$optionId}}){projectV2Item{id}}}'
           for linked_item in "${linked_items[@]}"; do
             item_id=$(jq -r '.itemId' <<< "$linked_item")
             issue_number=$(jq -r '.issueNumber' <<< "$linked_item")
             issue_url=$(jq -r '.issueUrl' <<< "$linked_item")
-            gh api graphql \
-              -f query="$mutation" \
-              -f projectId="$PROJECT_ID" \
-              -f itemId="$item_id" \
-              -f fieldId="$status_field_id" \
-              -f optionId="$status_option_id" \
-              --silent
+            update_status "$item_id" "$target_status"
             printf -- '- Set [Issue #%s](%s) to `%s`.\n' "$issue_number" "$issue_url" "$target_status" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          issue_query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){state url projectItems(first:20){nodes{id project{id}}}}}}'
+          for issue_number in "${removed_issue_numbers[@]}"; do
+            issue_data=$(gh api graphql \
+              -f query="$issue_query" \
+              -f owner="${TARGET_REPOSITORY%%/*}" \
+              -f name="${TARGET_REPOSITORY#*/}" \
+              -F number="$issue_number")
+            removed_item_id=$(jq -r \
+              --arg project "$PROJECT_ID" \
+              '.data.repository.issue.projectItems.nodes[]
+                | select(.project.id == $project)
+                | .id' \
+              <<< "$issue_data")
+            issue_state=$(jq -r '.data.repository.issue.state // empty' <<< "$issue_data")
+            issue_url=$(jq -r '.data.repository.issue.url // empty' <<< "$issue_data")
+            if [[ -z "$removed_item_id" ]]; then
+              echo "::warning::Issue #$issue_number removed from PR #$PR_NUMBER is not in Project 12."
+              continue
+            fi
+            if [[ "$issue_state" == "CLOSED" ]]; then
+              fallback_status="Done"
+            else
+              fallback_status="In progress"
+            fi
+            update_status "$removed_item_id" "$fallback_status"
+            printf -- '- Set [Issue #%s](%s) to `%s` after its closing reference was removed.\n' "$issue_number" "$issue_url" "$fallback_status" >> "$GITHUB_STEP_SUMMARY"
           done
