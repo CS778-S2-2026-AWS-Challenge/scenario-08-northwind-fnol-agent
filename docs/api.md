@@ -914,7 +914,7 @@ Request:
 
 `support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection and next step.
 
-The first human-request policy remains a controlled prototype rule: the system may transfer immediately or offer one brief, transparent choice to finish the current step. A repeated request, distress, urgent condition, or accessibility need MUST transfer immediately. The server records which rule was applied.
+The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
 ### `GET /api/v1/claims/{claim_id}/updates`
 

@@ -116,3 +116,24 @@ export function confirmClaimFields({
     body: JSON.stringify({ field_codes: fieldCodes }),
   })
 }
+
+export function requestHumanSupport({
+  claimId,
+  revision,
+  reason = 'I want to speak to a person.',
+  preferredChannel = null,
+  idempotencyKey = requestId('support'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/support-requests`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({
+      reason,
+      support_need: 'human_requested',
+      ...(preferredChannel ? { preferred_channel: preferredChannel } : {}),
+    }),
+  })
+}

@@ -16,6 +16,7 @@ from backend.domain.models import (
     CustomerNextStep,
     FormChange,
     FormStatus,
+    HandoffRecord,
     MessageListResponse,
     MessageRecord,
     MessageTurnResponse,
@@ -24,6 +25,7 @@ from backend.domain.models import (
     ProposedFormChange,
     ResponsibleParty,
     StructuredFormField,
+    SupportNeed,
 )
 from backend.repositories.protocols import (
     IdempotencyConflict,
@@ -36,6 +38,11 @@ from backend.services.agent import (
     AgentTurnProvider,
     authorised_state_changes,
     validate_proposal,
+)
+from backend.services.handoffs import (
+    build_handoff,
+    claimant_handoff,
+    updated_claim_for_handoff,
 )
 from backend.services.support import (
     decode_cursor,
@@ -104,6 +111,11 @@ def _message_turn_response(
             message='The persisted agent turn could not be restored.',
             retryable=True,
         )
+    handoff = (
+        repository.get_handoff(claim_id, decision.handoff_id, principal.subject)
+        if decision.handoff_id is not None
+        else None
+    )
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -115,6 +127,7 @@ def _message_turn_response(
             for field_code, field in decision.form_changes.items()
         ],
         decision=_claimant_decision(decision),
+        handoff=claimant_handoff(handoff).model_dump(mode='json') if handoff is not None else None,
     )
 
 
@@ -345,16 +358,37 @@ def submit_message(
                 else state_change.to
             )
             next_action = AgentAction(str(raw_action))
-    resulting_revision = claim.revision + 1
-    updated_claim = claim.model_copy(
-        update={
-            'claim_state': claim.claim_state.model_copy(update={'next_action': next_action}),
-            'form': {**claim.form, **form_changes},
-            'customer_next_step': effective_next_step,
-            'revision': resulting_revision,
-            'updated_at': timestamp,
-        }
-    )
+    handoff: HandoffRecord | None = None
+    if authority.outcome is AuthorityOutcome.AUTHORISED and proposal.action in {
+        AgentAction.HANDOFF,
+        AgentAction.URGENT_HANDOFF,
+    }:
+        support_need = (
+            SupportNeed.URGENT
+            if proposal.action is AgentAction.URGENT_HANDOFF
+            else SupportNeed.HUMAN_REQUESTED
+        )
+        handoff, effective_next_step = build_handoff(
+            repository,
+            claim,
+            support_need=support_need,
+            reason=proposal.customer_reason,
+            preferred_channel=None,
+            source_message_id=claimant_message.message_id,
+            reason_code=proposal.reason_codes[0],
+        )
+        updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
+    else:
+        updated_claim = claim.model_copy(
+            update={
+                'claim_state': claim.claim_state.model_copy(update={'next_action': next_action}),
+                'form': {**claim.form, **form_changes},
+                'customer_next_step': effective_next_step,
+                'revision': claim.revision + 1,
+                'updated_at': timestamp,
+            }
+        )
+    resulting_revision = updated_claim.revision
     updated_session = session.model_copy(
         update={
             'last_active_at': timestamp,
@@ -384,6 +418,7 @@ def submit_message(
         required_tools=proposal.required_tools,
         next_action_requirements=proposal.next_action_requirements,
         handoff_priority=proposal.handoff_priority,
+        handoff_id=handoff.handoff_id if handoff is not None else None,
         customer_next_step=effective_next_step,
         authority=authority,
         form_changes=form_changes,
@@ -400,6 +435,7 @@ def submit_message(
         message_id=claimant_message.message_id,
         agent_message_id=agent_message.message_id,
         decision_id=decision.decision_id,
+        handoff_id=handoff.handoff_id if handoff is not None else None,
     )
     try:
         repository.save_agent_turn(
@@ -410,6 +446,7 @@ def submit_message(
             agent_message,
             decision,
             idempotency,
+            handoff,
         )
     except RevisionConflict as conflict:
         raise ApiError(

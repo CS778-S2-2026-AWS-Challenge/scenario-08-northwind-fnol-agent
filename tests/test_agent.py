@@ -87,3 +87,13 @@ def test_validator_blocks_an_unknown_next_action_value() -> None:
     )
 
     assert validate_proposal(candidate).outcome is AuthorityOutcome.BLOCKED
+
+
+def test_handoff_reason_code_alone_cannot_bypass_high_impact_review() -> None:
+    candidate = proposal(
+        AgentAction.HANDOFF,
+        StateChange(path='claim_state.next_action', to='HANDOFF'),
+    )
+    candidate.reason_codes[:] = ['HUMAN_SUPPORT_REQUESTED']
+
+    assert validate_proposal(candidate).outcome is AuthorityOutcome.REVIEW_REQUIRED
