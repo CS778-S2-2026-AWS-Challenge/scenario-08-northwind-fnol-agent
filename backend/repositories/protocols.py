@@ -57,6 +57,10 @@ class ClaimRepository(Protocol):
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         raise NotImplementedError
 
+    def list_claims_internal(self) -> list[WorkingClaim]:
+        """Return claims for an authorised staff projection."""
+        raise NotImplementedError
+
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
         raise NotImplementedError
 
