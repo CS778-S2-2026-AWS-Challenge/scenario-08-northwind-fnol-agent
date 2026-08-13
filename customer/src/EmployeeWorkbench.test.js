@@ -18,6 +18,7 @@ function response(body, status = 200) {
 
 it('renders persisted claim context and uses the handoff accept endpoint', async () => {
   let handoffStatus = 'queued'
+  let claimRevision = 4
   const listItem = {
     claim_id: 'clm_employee',
     revision: 4,
@@ -35,6 +36,7 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
   }
   const detail = () => ({
     ...listItem,
+    revision: claimRevision,
     channel: 'web_agent',
     locale: 'en-NZ',
     claim_state: { workflow_state: 'professional_review' },
@@ -101,7 +103,10 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
   const fetchMock = vi.fn((url, options = {}) => {
     if (options.method === 'POST' && String(url).endsWith('/handoffs/hnd_employee/accept')) {
       handoffStatus = 'accepted'
-      return response({ handoff: detail().handoffs[0], revision: 5 })
+      claimRevision = 5
+      listItem.revision = claimRevision
+      listItem.assignee_id = 'stf_demo'
+      return response({ handoff: detail().handoffs[0], revision: claimRevision })
     }
     if (String(url).endsWith('/clm_employee')) return response(detail())
     return response({ items: [listItem], page: { next_cursor: null } })

@@ -10,7 +10,7 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     ClaimantClaim,
-    ClaimantMessageChannel,
+    ClaimantHandoff,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -41,6 +41,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -68,7 +69,7 @@ def _session_not_found() -> ApiError:
 
 
 def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
-    handoff: ClaimantMessageChannel | None = None
+    handoff: ClaimantHandoff | None = None
     if claim.active_session_id is not None:
         # Claimant receives only the public lifecycle state, never staff routing data.
         open_handoffs = [
@@ -78,11 +79,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         ]
         if open_handoffs:
             active = open_handoffs[-1]
-            handoff = ClaimantMessageChannel(
-                handoff_id=active.handoff_id,
-                status=active.status,
-                updated_at=active.resolved_at or active.accepted_at or active.created_at,
-            )
+            handoff = claimant_handoff(active)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,

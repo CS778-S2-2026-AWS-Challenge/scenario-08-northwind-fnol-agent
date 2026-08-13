@@ -236,6 +236,7 @@ describe('claimant intake', () => {
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
 
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
+    expect(screen.getByText('Status: Queued')).toBeVisible()
     expect(screen.getByText('Northwind support')).toBeVisible()
     expect(screen.getByText('Saved with the details already provided')).toBeVisible()
     expect(screen.getByLabelText('Add more information')).toBeEnabled()
