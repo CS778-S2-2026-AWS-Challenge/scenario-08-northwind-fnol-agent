@@ -206,6 +206,9 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Temporary demonstration runtime state
+.demo/
+
 # PyPI configuration file
 .pypirc
 

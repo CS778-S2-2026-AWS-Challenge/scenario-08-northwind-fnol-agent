@@ -96,6 +96,33 @@ Every invocation creates a fresh in-memory repository, so rerunning the command
 is the clean fixture reset. The concrete API and logical DynamoDB mapping is
 [documented here](docs/api-dynamodb-fixture-examples.md).
 
+## Temporary Demonstration Origin
+
+Build and start the claimant UI, employee workbench, and FastAPI on one loopback-only origin:
+
+```powershell
+./scripts/start-demo.ps1
+```
+
+The command serves the claimant build at `/`, the employee workbench at `/employee/`, the API
+at `/api/*`, and the presentation health check at `/api/health` on
+`http://127.0.0.1:8765`. It trusts forwarded headers only from the local loopback connector.
+
+Reset the in-memory fixture by restarting only the recorded demonstration process:
+
+```powershell
+./scripts/reset-demo.ps1
+```
+
+Stop the origin with:
+
+```powershell
+./scripts/stop-demo.ps1
+```
+
+Runtime PID and log files are written under the ignored `.demo/` directory. These commands do
+not create DNS records, configure Cloudflare Tunnel, or persist fixture data outside the process.
+
 ## Contract Changes
 
 `docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.

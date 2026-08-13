@@ -10,20 +10,14 @@ This static page demonstrates the employee-facing workbench using the backend wo
 
 ## Local use
 
-1. Start the backend from the repository root:
+Run the single-origin demonstration server from the repository root:
 
-```bash
-python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```powershell
+./scripts/start-demo.ps1
 ```
 
-2. Serve the employee page from the `employee/` folder:
-
-```bash
-cd employee
-python -m http.server 8002
-```
-
-3. Open `http://127.0.0.1:8002` in your browser.
+Open `http://127.0.0.1:8765/employee/`. The page uses the same-origin workbench API under
+`/api/v1/workbench/claims`.
 
 ## Staff credentials
 
