@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Northwind Workbench</title>
+  <style>
+    :root {
+      color: #102a43;
+      background: #f1f5f9;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f1f5f9; }
+    button, select { font: inherit; }
+    a { color: inherit; text-decoration: none; }
+
+    .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+    .sidebar { background: #0f172a; color: #f8fafc; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+    .brand { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
+    .brand span { color: #38bdf8; }
+    .sidebar p { margin: 0; color: #cbd5e1; line-height: 1.6; font-size: 14px; }
+    .filters { display: grid; gap: 12px; }
+    .filters label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .12em; }
+    .filters select, .filters button { width: 100%; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; background: #0f172a; color: #f8fafc; }
+    .filters button { cursor: pointer; border-color: #38bdf8; background: #0f172a; }
+    .sidebar-nav { display:grid; gap:8px; }
+    .sidebar-nav button { width:100%; border:1px solid #334155; border-radius:10px; padding:12px 14px; background:#0f172a; color:#f8fafc; text-align:left; cursor:pointer; }
+    .sidebar-nav button:hover, .sidebar-nav button.active { border-color:#38bdf8; background:#172b45; }
+    .status-bar { margin-top: auto; font-size: 12px; color: #94a3b8; line-height: 1.7; }
+
+    .help { margin-top:auto; padding:17px 12px 0; border-top:1px solid #29475f; color:#aac0d1; font-size:12px; }.help b { display:block; color:#fff; margin-bottom:3px; }
+    .profile { margin-top:14px; padding:10px; border-radius:8px; background:#173a56; }.avatar { display:inline-grid; width:27px; height:27px; margin-right:7px; place-items:center; border-radius:50%; background:#2fa49f; color:#fff; font-size:10px; font-weight:700; vertical-align:middle; }
+
+    .content { padding: 24px; }
+    .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
+    .header h1 { margin: 0; font-size: 28px; }
+    .header p { margin: 0; color: #475569; max-width: 650px; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 20px; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.04); }
+    .card h2 { margin: 0 0 12px; font-size: 16px; color: #0f172a; }
+    .card dl { margin: 0; }
+    .card dt { margin-top: 14px; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .08em; }
+    .card dd { margin: 6px 0 0; font-size: 15px; color: #0f172a; }
+
+    .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; }
+    .panel-header { padding: 18px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px; align-items: center; }
+    .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
+    .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
+    .panel-body { padding: 20px; }
+    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+    .claim-list button { width: 100%; text-align: left; border: none; background: transparent; padding: 18px 20px; cursor: pointer; display: grid; gap: 6px; border-bottom: 1px solid #e2e8f0; }
+    .claim-list button:hover { background: #f8fafc; }
+    .claim-list button.active { background: #e0f2fe; }
+    .claim-list .claim-id { font-weight: 700; color: #0f172a; }
+    .claim-list .claim-meta { display: flex; gap: 8px; flex-wrap: wrap; color: #64748b; font-size: 13px; }
+    .claim-list .badge { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .badge.urgent { background: #fee2e2; color: #991b1b; }
+    .badge.review { background: #e0f2fe; color: #075985; }
+    .badge.ready { background: #dcfce7; color: #166534; }
+    .badge.waiting { background: #f8fafc; color: #334155; }
+
+    .detail-panel { display: grid; gap: 16px; }
+    .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
+    .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .detail-item { background: #f8fafc; padding: 14px 16px; border-radius: 14px; }
+    .detail-item strong { display: block; margin-bottom: 8px; color: #0f172a; }
+    .detail-item span { color: #475569; font-size: 14px; line-height: 1.55; }
+    .note { color: #475569; line-height: 1.6; }
+    .muted { color: #64748b; font-size: 13px; }
+
+    .empty-state { padding: 30px 20px; color: #334155; }
+    .error { padding: 18px 20px; background: #fef2f2; color: #991b1b; border-radius: 14px; margin-bottom: 16px; }
+
+    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
+
+    /* Assistant and customer conversation components */
+    .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
+    .chat-widget.dragging { opacity:.96; transition:none; }
+    .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
+    .chat-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 18px; background:linear-gradient(135deg,#173a56 0%,#157f79 100%); color:#fff; cursor:grab; touch-action:none; user-select:none; }
+    .chat-header.grabbing { cursor:grabbing; }
+    .chat-widget.closed .chat-body,
+    .chat-widget.closed .chat-input-bar,
+    .chat-widget.closed .chat-attachments { display:none; }
+    .chat-header-meta { margin-top:4px; font-size:11px; opacity:.82; line-height:1.4; }
+    .chat-toggle { border:none; min-width:64px; height:36px; border-radius:999px; background:rgba(255,255,255,.18); color:#fff; font-weight:700; cursor:pointer; }
+    .chat-body { display:flex; flex-direction:column; gap:12px; padding:16px 16px 0; overflow-y:auto; max-height:312px; background:#f7fbff; }
+    .chat-message { max-width:84%; padding:13px 14px; border-radius:18px; line-height:1.5; box-shadow:0 10px 24px rgba(16,42,67,.08); }
+    .chat-message.assistant { align-self:flex-start; background:#eef7f5; color:#0f4a47; border-bottom-left-radius:4px; }
+    .chat-message.user { align-self:flex-end; background:#157f79; color:#fff; border-bottom-right-radius:4px; }
+    .chat-attachments { display:none; padding:0 16px 12px; gap:8px; flex-wrap:wrap; background:#f4fdff; border-top:1px solid #e9f4f5; }
+    .chat-chip { display:inline-flex; align-items:center; gap:10px; padding:8px 10px; border-radius:999px; background:#e9f9f7; border:1px solid #c8ece4; color:#0f4a47; }
+    .chat-chip button { border:none; background:transparent; color:#0f4a47; font-weight:700; cursor:pointer; }
+    .chat-input-bar { display:flex; align-items:flex-end; gap:10px; padding:14px 16px 16px; background:#fff; border-top:1px solid #e6eff4; }
+    .chat-file-btn { width:38px; height:38px; border-radius:50%; border:1px solid #d7e9e7; background:#eef8f6; color:#157f79; font-size:22px; line-height:0; cursor:pointer; }
+    .chat-input { flex:1; min-height:42px; max-height:110px; padding:12px 14px; border-radius:16px; border:1px solid #d7e2ea; background:#f6fbff; resize:none; outline:none; }
+    .chat-send { min-width:76px; height:42px; padding:0 16px; border:none; border-radius:999px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
+    .chat-attachment-preview { display:flex; align-items:center; gap:12px; padding:10px; border-radius:16px; background:#fff; border:1px solid #e6eff4; }
+    .chat-attachment-preview img { width:48px; height:48px; border-radius:14px; object-fit:cover; }
+    .attachment-icon { width:48px; height:48px; border-radius:14px; display:grid; place-items:center; background:#eaf6f3; color:#157f79; font-size:12px; font-weight:700; }
+
+    .chat-attachment-preview div { font-size:12px; line-height:1.3; }
+    .chat-attachment-preview small { display:block; color:#68707d; margin-top:4px; }
+    .customer-chat-view { min-height:calc(100vh - 48px); }
+    .customer-chat-panel { min-height:calc(100vh - 48px); display:grid; grid-template-rows:auto 1fr; overflow:hidden; border:1px solid #e2e8f0; border-radius:18px; background:#fff; box-shadow:0 18px 48px rgba(15,23,42,.04); }
+    .customer-chat-panel > header { display:flex; align-items:center; justify-content:space-between; padding:20px; border-bottom:1px solid #e2e8f0; }
+    .customer-chat-content { min-height:0; display:grid; grid-template-columns:250px 1fr; }
+    .customer-chat-list { padding:18px; overflow:auto; border-right:1px solid #e2e8f0; background:#fbfeff; }
+    .customer-chat-list h3 { margin:0 0 12px; font-size:12px; color:#475467; letter-spacing:.08em; text-transform:uppercase; }
+    .customer-chat-list button { width:100%; margin-bottom:8px; padding:10px 12px; border:1px solid #d7e0e9; border-radius:10px; background:#f8fbfc; color:#0f3444; text-align:left; cursor:pointer; }
+    .customer-chat-list button.active { border-color:#157f79; background:#157f79; color:#fff; }
+    .customer-chat-main { min-width:0; min-height:0; display:flex; flex-direction:column; padding:18px; }
+    .customer-chat-title { display:flex; align-items:start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .customer-chat-status { color:#64748b; font-size:12px; margin-top:4px; }
+    .customer-chat-history { min-height:0; flex:1; overflow:auto; display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid #e2e8f0; border-radius:14px; background:#f6fdff; }
+    .customer-chat-message { padding:12px 14px; border-radius:16px; max-width:78%; line-height:1.5; white-space:pre-wrap; }
+    .customer-chat-message.customer { align-self:flex-start; background:#eef7f5; color:#0f4a47; }
+    .customer-chat-message.staff { align-self:flex-end; background:#157f79; color:#fff; }
+    .customer-chat-input { display:flex; gap:10px; margin-top:14px; }
+    .customer-chat-input textarea { flex:1; min-height:76px; padding:12px; border:1px solid #d7e2ea; border-radius:12px; resize:vertical; font:inherit; }
+    .customer-chat-button { border:0; border-radius:10px; padding:10px 14px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
+    .customer-chat-close { border:0; border-radius:8px; padding:8px 10px; background:#f1f5f9; color:#334155; cursor:pointer; }
+    @media(max-width:900px) { .chat-widget { right:12px; bottom:12px; width:300px; } }
+    @media(max-width:680px) { .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; } }
+    @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
+    @media(max-width:720px) { .customer-chat-content { grid-template-columns:1fr; } .customer-chat-list { display:none; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="brand">Northwind <span>Workbench</span></div>
+      
+
+      <div class="filters">
+        <label for="viewSelect">Queue filter</label>
+        <select id="viewSelect">
+          <option value="all">All claims</option>
+          <option value="new_untriaged">New and untriaged</option>
+          <option value="awaiting_evidence">Awaiting evidence</option>
+          <option value="professional_review">Professional review</option>
+          <option value="ready_to_progress">Ready to progress</option>
+          <option value="created_routed">Created / routed</option>
+        </select>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Workbench navigation">
+        <button id="workbenchNav" class="active" type="button">Claim workbench</button>
+        <button id="customerChatNav" type="button">Customer chat</button>
+      </nav>
+
+      <button id="refreshClaims">Refresh claims</button>
+
+      <div class="help">
+        <b>Need a hand?</b>
+        Start with the recommended next step. You can ask for help at any point.
+        <div class="profile"><span class="avatar">LZ</span>Lin Zhang<br><small style="margin-left:35px">Claims Professional</small>
+        </div>
+      </div>
+    
+    </aside>
+
+    <main class="content">
+      <section id="workbenchView">
+      <div class="header">
+        <div>
+          <h1>Employee workbench</h1>
+          <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h2>Internal view</h2>
+          <p class="note">This page is staff-only. It queries the backend workbench API and exposes internal fields that must not be rendered in the claimant interface.</p>
+        </div>
+        <div class="card">
+          <h2>Shared state</h2>
+          <p class="note">Customer-visible next steps are shown alongside internal review tags and staff notes. The data comes from the same backend claim state.</p>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
+          <div class="panel-body">
+            <div id="errorBanner" class="error" style="display:none"></div>
+            <ul id="claimList" class="claim-list"></ul>
+            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
+          </div>
+        </section>
+
+        <section class="detail-panel">
+          <div class="detail-section" id="detailSummary">
+            <h2>Claim detail</h2>
+            <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
+          </div>
+          <div class="detail-section" id="detailInternal" style="display:none">
+            <h2>Internal information</h2>
+            <div class="detail-grid">
+              <div class="detail-item"><strong>Customer</strong><span id="detailCustomer"></span></div>
+              <div class="detail-item"><strong>Customer reference</strong><span id="detailCustomerReference"></span></div>
+              <div class="detail-item"><strong>Current state</strong><span id="detailState"></span></div>
+              <div class="detail-item"><strong>Assigned to</strong><span id="detailAssigned"></span></div>
+              <div class="detail-item"><strong>Internal flags</strong><span id="detailFlags"></span></div>
+              <div class="detail-item"><strong>Last updated</strong><span id="detailUpdated"></span></div>
+            </div>
+          </div>
+          <div class="detail-section" id="detailNotes" style="display:none">
+            <h2>Staff notes</h2>
+            <p id="detailInternalNotes"></p>
+          </div>
+          <div class="detail-section" id="detailNextStep" style="display:none">
+            <h2>Customer next step</h2>
+            <p id="detailNextStepSummary"></p>
+            <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
+            <div style="margin-top:12px">
+              <button id="openCustomerChatBtn" class="customer-chat-button">Open customer chat</button>
+              <button id="toggleAssistantBtn" class="customer-chat-close" style="margin-left:8px">Open assistant</button>
+            </div>
+            </div>
+        </section>
+      </div>
+      </section>
+
+      <section id="customerChatView" class="customer-chat-view" hidden aria-labelledby="customerChatTitle">
+        <div class="customer-chat-panel">
+          <header>
+            <div>
+              <strong id="customerChatTitle">Customer chat</strong>
+              <div class="customer-chat-status">Direct customer communication, separate from the internal AI assistant.</div>
+            </div>
+            <button id="customerChatBack" class="customer-chat-close" type="button">Back to workbench</button>
+          </header>
+          <div class="customer-chat-content">
+            <aside class="customer-chat-list">
+              <h3>Customer chats</h3>
+              <div id="customerChatList"></div>
+            </aside>
+            <div class="customer-chat-main">
+              <div class="customer-chat-title">
+                <div><strong id="customerChatHeader">Select a conversation</strong><div id="customerChatStatus" class="customer-chat-status"></div></div>
+              </div>
+              <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
+              <div class="customer-chat-input">
+                <textarea id="customerChatText" placeholder="Write a customer reply..."></textarea>
+                <button id="customerChatSend" class="customer-chat-button" type="button">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Internal AI assistant -->
+  <div class="chat-widget closed" id="chatWidget">
+    <div class="chat-header" id="chatHeader">
+      <div>
+        <strong id="chatHeaderTitle">Aurora Assistant</strong>
+        <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
+      </div>
+      <button class="chat-toggle" id="chatToggle">Open</button>
+    </div>
+    <div class="chat-body" id="chatBody">
+      <div class="chat-message assistant">Hi! I can help with claim next steps, policy checks, and process guidance.</div>
+    </div>
+    <div class="chat-attachments" id="chatAttachments"></div>
+    <div class="chat-input-bar" id="chatInputBar">
+      <button type="button" class="chat-file-btn" id="chatFileBtn">+</button>
+      <textarea id="chatInput" class="chat-input" placeholder="Type a question..." rows="1"></textarea>
+      <button class="chat-send" id="chatSend">Send</button>
+      <input id="chatFileInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:8000/api/v1/workbench/claims';
+    const STAFF_TOKEN = 'synthetic-staff';
+
+    const byId = id => document.getElementById(id);
+    let claims = [];
+    let activeClaimId = null;
+
+    const stateMap = {
+      professional_review: 'Professional review',
+      awaiting_evidence: 'Awaiting evidence',
+      ready_to_progress: 'Ready to progress',
+      created_routed: 'Created / routed',
+      new_untriaged: 'New and untriaged',
+    };
+
+    function setError(message) {
+      const banner = byId('errorBanner');
+      if (!message) {
+        banner.style.display = 'none';
+        banner.textContent = '';
+        return;
+      }
+      banner.style.display = 'block';
+      banner.textContent = message;
+    }
+
+    function getHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${STAFF_TOKEN}`,
+      };
+    }
+
+    async function fetchClaims(view) {
+      const searchParams = new URLSearchParams();
+      if (view && view !== 'all') {
+        searchParams.set('view', view);
+      }
+      const url = `${API_BASE}?${searchParams.toString()}`;
+      const response = await fetch(url, { headers: getHeaders() });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message || `Failed to load claims (${response.status})`);
+      }
+      return response.json();
+    }
+
+    async function fetchClaimDetail(claimId) {
+      const response = await fetch(`${API_BASE}/${encodeURIComponent(claimId)}`, { headers: getHeaders() });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message || `Failed to load claim ${claimId} (${response.status})`);
+      }
+      return response.json();
+    }
+
+    function highlightQueueLabel(queue) {
+      if (queue === 'professional_review') return 'review';
+      if (queue === 'awaiting_evidence') return 'waiting';
+      if (queue === 'ready_to_progress') return 'ready';
+      if (queue === 'created_routed') return 'ready';
+      return 'urgent';
+    }
+
+    function renderClaims(list) {
+      const listEl = byId('claimList');
+      listEl.innerHTML = '';
+      if (!list.length) {
+        byId('emptyState').style.display = 'block';
+        byId('claimCount').textContent = '0 claims';
+        return;
+      }
+      byId('emptyState').style.display = 'none';
+      byId('claimCount').textContent = `${list.length} claim${list.length === 1 ? '' : 's'}`;
+
+      list.forEach(item => {
+        const button = document.createElement('button');
+        const claimIdDiv = document.createElement('div');
+        claimIdDiv.className = 'claim-id';
+        claimIdDiv.textContent = item.claim_id;
+        
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'claim-meta';
+        
+        const refSpan = document.createElement('span');
+        refSpan.textContent = item.customer_reference;
+        metaDiv.appendChild(refSpan);
+        
+        const stateSpan = document.createElement('span');
+        stateSpan.textContent = stateMap[item.queue] || item.queue;
+        metaDiv.appendChild(stateSpan);
+        
+        const badgeSpan = document.createElement('span');
+        badgeSpan.className = `badge ${highlightQueueLabel(item.queue)}`;
+        badgeSpan.textContent = item.priority || 'standard';
+        metaDiv.appendChild(badgeSpan);
+        
+        button.appendChild(claimIdDiv);
+        button.appendChild(metaDiv);
+        button.classList.toggle('active', item.claim_id === activeClaimId);
+        button.addEventListener('click', () => {
+          activeClaimId = item.claim_id;
+          renderClaims(list);
+          renderDetail(item.claim_id);
+        });
+        listEl.appendChild(button);
+      });
+    }
+
+    function renderDetail(claimId) {
+      const selected = claims.find(item => item.claim_id === claimId);
+      if (!selected) {
+        byId('detailContent').innerHTML = '<p class="muted">Claim details are unavailable.</p>';
+        byId('detailInternal').style.display = 'none';
+        byId('detailNotes').style.display = 'none';
+        byId('detailNextStep').style.display = 'none';
+        return;
+      }
+
+      fetchClaimDetail(claimId)
+        .then(detail => {
+          const detailContent = byId('detailContent');
+          detailContent.innerHTML = '';
+          const idP = document.createElement('p');
+          const idStrong = document.createElement('strong');
+          idStrong.textContent = detail.claim_id;
+          idP.appendChild(idStrong);
+          detailContent.appendChild(idP);
+          
+          const incidentP = document.createElement('p');
+          incidentP.className = 'muted';
+          incidentP.textContent = `Incident type: ${detail.incident_type || 'Not set'}`;
+          detailContent.appendChild(incidentP);
+          
+          const noteP = document.createElement('p');
+          noteP.className = 'note';
+          noteP.textContent = `Claim revision ${detail.revision} · Updated ${new Date(detail.updated_at).toLocaleString()}`;
+          detailContent.appendChild(noteP);
+
+          byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
+          byId('detailCustomerReference').textContent = detail.customer_reference;
+          byId('detailState').textContent = detail.claim_state.workflow_state.replace('_', ' ');
+          byId('detailAssigned').textContent = detail.assigned_to || 'Unassigned';
+          byId('detailFlags').textContent = detail.internal_flags.length ? detail.internal_flags.join(', ') : 'None';
+          byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
+          byId('detailInternalNotes').textContent = detail.internal_notes || 'No internal notes available.';
+          byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
+          byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
+          byId('detailInternal').style.display = 'block';
+          byId('detailNotes').style.display = 'block';
+          byId('detailNextStep').style.display = 'block';
+        })
+        .catch(error => {
+          setError(error.message);
+        });
+    }
+
+    async function loadClaims() {
+      setError('');
+      const view = byId('viewSelect').value;
+      try {
+        const payload = await fetchClaims(view);
+        claims = payload.items || [];
+        renderClaims(claims);
+        if (claims.length && !activeClaimId) {
+          activeClaimId = claims[0].claim_id;
+          renderDetail(activeClaimId);
+        } else if (activeClaimId) {
+          renderDetail(activeClaimId);
+        }
+        if (!customerChatView.hidden) renderCustomerChat();
+      } catch (error) {
+        setError(error.message);
+      }
+    }
+
+    document.getElementById('viewSelect').addEventListener('change', loadClaims);
+    document.getElementById('refreshClaims').addEventListener('click', loadClaims);
+
+    loadClaims();
+
+    // --- Internal AI assistant and customer conversation ---
+    const chatWidget = byId('chatWidget');
+    const chatHeader = byId('chatHeader');
+    const chatToggle = byId('chatToggle');
+    const chatBody = byId('chatBody');
+    const chatInput = byId('chatInput');
+    const chatFileInput = byId('chatFileInput');
+    const workbenchView = byId('workbenchView');
+    const customerChatView = byId('customerChatView');
+    let activeCustomerChatId = null;
+    const customerChatMessages = {};
+    let assistantAttachments = [];
+    let chatDrag = null;
+
+    function setView(view) {
+      const showCustomerChat = view === 'customer-chat';
+      workbenchView.hidden = showCustomerChat;
+      customerChatView.hidden = !showCustomerChat;
+      byId('workbenchNav').classList.toggle('active', !showCustomerChat);
+      byId('customerChatNav').classList.toggle('active', showCustomerChat);
+      if (showCustomerChat) renderCustomerChat();
+    }
+
+    function setAssistantOpen(open) {
+      chatWidget.classList.toggle('closed', !open);
+      chatToggle.textContent = open ? 'Close' : 'Open';
+      byId('toggleAssistantBtn').textContent = open ? 'Close assistant' : 'Open assistant';
+      if (open) chatInput.focus();
+    }
+
+    function appendAssistantMessage(text, role = 'assistant', files = []) {
+      const message = document.createElement('div');
+      message.className = `chat-message ${role}`;
+      message.textContent = text;
+      if (files.length) {
+        const attachments = document.createElement('small');
+        attachments.style.display = 'block';
+        attachments.style.marginTop = '8px';
+        attachments.textContent = `Attached: ${files.map(file => file.name).join(', ')}`;
+        message.appendChild(attachments);
+      }
+      chatBody.appendChild(message);
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }
+
+    function sendAssistantMessage() {
+      const text = chatInput.value.trim();
+      if (!text && !assistantAttachments.length) return;
+      const files = assistantAttachments;
+      appendAssistantMessage(text || 'Sent attachments', 'user', files);
+      chatInput.value = '';
+      assistantAttachments = [];
+      byId('chatAttachments').replaceChildren();
+      byId('chatAttachments').style.display = 'none';
+      window.setTimeout(() => appendAssistantMessage(activeClaimId
+        ? `I can help with ${activeClaimId}. This demo assistant is ready for a connected AI service.`
+        : 'Select a claim and I can help review its next steps.'), 260);
+    }
+
+    function renderAttachmentPreview() {
+      const preview = byId('chatAttachments');
+      preview.replaceChildren();
+      preview.style.display = assistantAttachments.length ? 'flex' : 'none';
+      assistantAttachments.forEach((file, index) => {
+        const chip = document.createElement('span');
+        chip.className = 'chat-chip';
+        chip.append(file.name);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `Remove ${file.name}`);
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+          assistantAttachments.splice(index, 1);
+          renderAttachmentPreview();
+        });
+        chip.append(remove);
+        preview.append(chip);
+      });
+    }
+
+    function currentCustomerClaim() {
+      return claims.find(claim => claim.claim_id === activeCustomerChatId) || claims[0] || null;
+    }
+
+    function renderCustomerChat() {
+      const claim = currentCustomerClaim();
+      if (!claim) {
+        byId('customerChatList').replaceChildren();
+        byId('customerChatHeader').textContent = 'No customer chats available';
+        byId('customerChatStatus').textContent = 'Load claims to view customer conversations.';
+        byId('customerChatHistory').textContent = 'No customer conversation has been selected.';
+        return;
+      }
+      activeCustomerChatId = claim.claim_id;
+      if (!customerChatMessages[claim.claim_id]) {
+        customerChatMessages[claim.claim_id] = [{
+          role: 'customer',
+          text: `Conversation ready for ${claim.customer_reference}. Keep customer updates separate from the internal AI thread.`
+        }];
+      }
+      const list = byId('customerChatList');
+      list.replaceChildren();
+      claims.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.classList.toggle('active', item.claim_id === claim.claim_id);
+        button.textContent = `${item.claim_id} · ${item.customer_reference}`;
+        button.addEventListener('click', () => {
+          activeCustomerChatId = item.claim_id;
+          renderCustomerChat();
+        });
+        list.append(button);
+      });
+      byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
+      byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
+      const history = byId('customerChatHistory');
+      history.replaceChildren();
+      customerChatMessages[claim.claim_id].forEach(item => {
+        const message = document.createElement('div');
+        message.className = `customer-chat-message ${item.role}`;
+        message.textContent = item.text;
+        history.append(message);
+      });
+      history.scrollTop = history.scrollHeight;
+    }
+
+    function openCustomerChat(claimId = activeClaimId) {
+      if (!claimId) {
+        setError('Select a claim first to open customer chat.');
+        return;
+      }
+      activeCustomerChatId = claimId;
+      renderCustomerChat();
+      setView('customer-chat');
+      byId('customerChatText').focus();
+    }
+
+    function sendCustomerChatMessage() {
+      const input = byId('customerChatText');
+      const text = input.value.trim();
+      const claim = currentCustomerClaim();
+      if (!text) return;
+      if (!claim) {
+        byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
+        return;
+      }
+      customerChatMessages[claim.claim_id] ||= [];
+      customerChatMessages[claim.claim_id].push({ role: 'staff', text });
+      input.value = '';
+      renderCustomerChat();
+      window.setTimeout(() => {
+        customerChatMessages[claim.claim_id] ||= [];
+        customerChatMessages[claim.claim_id].push({
+          role: 'customer',
+          text: 'Thanks for the update. This prototype will show live customer replies once the chat service is connected.'
+        });
+        if (activeCustomerChatId === claim.claim_id) renderCustomerChat();
+      }, 350);
+    }
+
+    function startChatDrag(event) {
+      if (event.button !== 0 || event.target.closest('button')) return;
+      const rect = chatWidget.getBoundingClientRect();
+      chatDrag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+      chatWidget.classList.add('dragging');
+      chatHeader.classList.add('grabbing');
+      chatWidget.style.left = `${rect.left}px`;
+      chatWidget.style.top = `${rect.top}px`;
+      chatWidget.style.right = 'auto';
+      chatWidget.style.bottom = 'auto';
+      chatHeader.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    }
+
+    function dragChat(event) {
+      if (!chatDrag || event.pointerId !== chatDrag.pointerId) return;
+      const left = Math.min(Math.max(8, event.clientX - chatDrag.offsetX), window.innerWidth - chatWidget.offsetWidth - 8);
+      const top = Math.min(Math.max(8, event.clientY - chatDrag.offsetY), window.innerHeight - chatWidget.offsetHeight - 8);
+      chatWidget.style.left = `${left}px`;
+      chatWidget.style.top = `${top}px`;
+    }
+
+    function stopChatDrag(event) {
+      if (!chatDrag || (event && event.pointerId !== chatDrag.pointerId)) return;
+      chatHeader.releasePointerCapture?.(chatDrag.pointerId);
+      chatDrag = null;
+      chatWidget.classList.remove('dragging');
+      chatHeader.classList.remove('grabbing');
+    }
+
+    chatToggle.addEventListener('click', event => {
+      event.stopPropagation();
+      setAssistantOpen(chatWidget.classList.contains('closed'));
+    });
+    byId('chatHeader').addEventListener('pointerdown', startChatDrag);
+    document.addEventListener('pointermove', dragChat);
+    document.addEventListener('pointerup', stopChatDrag);
+    document.addEventListener('pointercancel', stopChatDrag);
+    byId('toggleAssistantBtn').addEventListener('click', () => setAssistantOpen(chatWidget.classList.contains('closed')));
+    byId('chatSend').addEventListener('click', sendAssistantMessage);
+    byId('chatInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendAssistantMessage();
+      }
+    });
+    byId('chatFileBtn').addEventListener('click', () => chatFileInput.click());
+    chatFileInput.addEventListener('change', () => {
+      assistantAttachments = Array.from(chatFileInput.files || []);
+      renderAttachmentPreview();
+    });
+    byId('openCustomerChatBtn').addEventListener('click', () => openCustomerChat());
+    byId('workbenchNav').addEventListener('click', () => setView('workbench'));
+    byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
+    byId('customerChatBack').addEventListener('click', () => setView('workbench'));
+    byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
+    byId('customerChatText').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendCustomerChatMessage();
+      }
+    });
+  </script>
+</body>
+</html>
