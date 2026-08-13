@@ -436,3 +436,63 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         'msg_workbench_assessor',
     }
     assert detail['messages'] == []
+
+
+def test_workbench_list_requires_staff_token(
+    client: TestClient,
+) -> None:
+    response = client.get('/api/v1/workbench/claims')
+
+    assert response.status_code == 401
+    assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
+def test_workbench_list_rejects_claimant_token(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = client.get('/api/v1/workbench/claims', headers=auth_headers)
+
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
+def test_staff_can_list_and_read_workbench_claim(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+) -> None:
+    create_response = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'workbench-list-claim-1'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert create_response.status_code == 201
+    claim_id = create_response.json()['claim']['claim_id']
+
+    list_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert 'items' in body
+    matching = [item for item in body['items'] if item['claim_id'] == claim_id]
+    assert len(matching) == 1
+    item = matching[0]
+    assert item['customer_reference'] == 'cus_demo'
+    assert item['incident_type'] == 'motor'
+    assert 'workflow_state' in item
+    assert 'customer_next_step' in item
+
+    detail_response = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail['claim_id'] == claim_id
+    assert detail['customer_reference'] == 'cus_demo'
+    assert 'claim_state' in detail
+    assert 'sessions' in detail
+    assert 'messages' in detail
+    assert 'decisions' in detail
+    assert 'evidence' in detail
+    assert 'signals' in detail
+    assert 'handoffs' in detail
+    assert 'customer_next_step' in detail

@@ -788,6 +788,24 @@ class ClaimListResponse(ContractModel):
     page: PageInfo
 
 
+class WorkbenchClaimItem(ContractModel):
+    """Lightweight summary of a claim for workbench queue display."""
+
+    claim_id: str
+    revision: int
+    customer_reference: str
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkbenchClaimListResponse(ContractModel):
+    items: list[WorkbenchClaimItem]
+    page: PageInfo | None = None
+
+
 class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str

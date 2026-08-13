@@ -10,16 +10,25 @@ from backend.domain.models import (
     StaffActionMutationResponse,
     UpdateStaffActionRequest,
     WorkbenchClaimDetail,
+    WorkbenchClaimListResponse,
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.staff_actions import create_staff_action, decide_signal, update_staff_action
-from backend.services.workbench import get_workbench_claim_detail
+from backend.services.workbench import get_workbench_claim_detail, list_workbench_claims
 
 router = APIRouter(prefix='/api/v1/workbench/claims', tags=['workbench'])
 
 
 def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
+
+
+@router.get('', response_model=WorkbenchClaimListResponse)
+def read_workbench_claims(
+    request: Request,
+    principal: Principal = Depends(require_staff),
+) -> WorkbenchClaimListResponse:
+    return list_workbench_claims(repository_for(request), principal)
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)

@@ -54,6 +54,9 @@ class ClaimRepository(Protocol):
         """Return the internal claim projection to an authorised service only."""
         raise NotImplementedError
 
+    def list_claims(self) -> list[WorkingClaim]:
+        raise NotImplementedError
+
     def list_claims_for_customer(self, customer_id: str) -> list[WorkingClaim]:
         raise NotImplementedError
 

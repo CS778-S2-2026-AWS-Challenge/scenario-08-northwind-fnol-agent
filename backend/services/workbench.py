@@ -5,6 +5,8 @@ from backend.domain.models import (
     MessageRecord,
     SessionRecord,
     WorkbenchClaimDetail,
+    WorkbenchClaimItem,
+    WorkbenchClaimListResponse,
     WorkbenchHandoff,
     WorkbenchSession,
 )
@@ -84,6 +86,30 @@ def _claim_messages(
 
     messages.sort(key=lambda item: (item.created_at, item.message_id))
     return messages
+
+
+def list_workbench_claims(
+    repository: PersistenceRepository,
+    principal: Principal,
+) -> WorkbenchClaimListResponse:
+    if principal.actor_type != 'staff':
+        raise _staff_access_required()
+
+    claims = repository.list_claims()
+    items = [
+        WorkbenchClaimItem(
+            claim_id=claim.claim_id,
+            revision=claim.revision,
+            customer_reference=claim.customer_id,
+            incident_type=claim.incident_type,
+            workflow_state=claim.claim_state.workflow_state,
+            customer_next_step=claim.customer_next_step,
+            created_at=claim.created_at,
+            updated_at=claim.updated_at,
+        )
+        for claim in claims
+    ]
+    return WorkbenchClaimListResponse(items=items, page=None)
 
 
 def get_workbench_claim_detail(

@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Northwind Employee Workbench</title>
+  <style>
+    :root {
+      color: #102a43;
+      background: #f1f5f9;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #f1f5f9; }
+    button, select { font: inherit; cursor: pointer; }
+    h1 { font-size: 1.25rem; font-weight: 700; margin: 0; }
+    h2 { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; }
+    header {
+      background: #1e3a5f;
+      color: #fff;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    #app { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+    #error-banner {
+      background: #fee2e2;
+      border: 1px solid #f87171;
+      color: #991b1b;
+      border-radius: 0.375rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.5rem;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .claim-list { display: grid; gap: 0.5rem; }
+    .claim-row {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.375rem;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .claim-row:hover { border-color: #3b82f6; }
+    .claim-id { font-weight: 600; font-size: 0.875rem; }
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.2em 0.6em;
+      border-radius: 9999px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-blue { background: #dbeafe; color: #1d4ed8; }
+    .badge-yellow { background: #fef9c3; color: #92400e; }
+    .badge-green { background: #d1fae5; color: #065f46; }
+    .badge-red { background: #fee2e2; color: #991b1b; }
+    .meta { color: #64748b; font-size: 0.8rem; }
+    #detail-panel { display: none; }
+    .detail-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+    .back-btn {
+      background: none;
+      border: 1px solid #cbd5e1;
+      border-radius: 0.375rem;
+      padding: 0.375rem 0.75rem;
+      font-size: 0.875rem;
+      color: #374151;
+    }
+    .back-btn:hover { background: #f1f5f9; }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 700px) { .detail-grid { grid-template-columns: 1fr; } }
+    .field-row { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.875rem; }
+    .field-label { color: #64748b; min-width: 9rem; }
+    .field-value { font-weight: 500; word-break: break-all; }
+    .section-title { font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th { text-align: left; padding: 0.375rem 0.5rem; color: #64748b; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
+    td { padding: 0.375rem 0.5rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .empty { color: #94a3b8; font-size: 0.8rem; font-style: italic; }
+    #loading { text-align: center; color: #64748b; padding: 2rem; display: none; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Northwind Employee Workbench</h1>
+</header>
+<div id="app">
+  <div id="error-banner"></div>
+  <div id="loading">Loading…</div>
+
+  <div id="list-panel">
+    <div class="card">
+      <h2>Claims Queue</h2>
+      <div id="claim-list" class="claim-list">
+        <div class="empty">No claims found.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-panel">
+    <div class="detail-header">
+      <button class="back-btn" id="back-btn">← Back to list</button>
+      <h2 id="detail-title" style="margin:0"></h2>
+    </div>
+    <div class="detail-grid">
+      <div class="card" id="claim-info-card">
+        <h2>Claim Information</h2>
+        <div id="claim-info"></div>
+      </div>
+      <div class="card" id="claim-state-card">
+        <h2>Claim State</h2>
+        <div id="claim-state-info"></div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div class="card">
+        <h2>Sessions</h2>
+        <div id="sessions-section"></div>
+      </div>
+      <div class="card">
+        <h2>Handoffs</h2>
+        <div id="handoffs-section"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Messages</h2>
+      <div id="messages-section"></div>
+    </div>
+    <div class="card">
+      <h2>Evidence</h2>
+      <div id="evidence-section"></div>
+    </div>
+    <div class="card">
+      <h2>Decisions</h2>
+      <div id="decisions-section"></div>
+    </div>
+    <div class="card">
+      <h2>Fraud Signals</h2>
+      <div id="signals-section"></div>
+    </div>
+    <div class="card">
+      <h2>Staff Actions</h2>
+      <div id="staff-actions-section"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = '/api/v1/workbench/claims';
+  const STAFF_TOKEN = 'staff_demo';
+
+  const authHeaders = {
+    Authorization: `******
+    'Content-Type': 'application/json',
+  };
+
+  function showError(msg) {
+    const el = document.getElementById('error-banner');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function clearError() {
+    document.getElementById('error-banner').style.display = 'none';
+  }
+
+  function setLoading(on) {
+    document.getElementById('loading').style.display = on ? 'block' : 'none';
+  }
+
+  function workflowBadgeClass(state) {
+    const map = {
+      collecting: 'badge-blue',
+      professional_review: 'badge-yellow',
+      created: 'badge-green',
+      declined: 'badge-red',
+    };
+    return map[state] || 'badge-blue';
+  }
+
+  function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fieldRow(label, value) {
+    return `<div class="field-row"><span class="field-label">${escapeHtml(label)}</span><span class="field-value">${escapeHtml(value ?? '—')}</span></div>`;
+  }
+
+  function renderList(items, emptyMsg, rowFn) {
+    if (!items || items.length === 0) return `<div class="empty">${escapeHtml(emptyMsg)}</div>`;
+    return items.map(rowFn).join('');
+  }
+
+  async function loadClaims() {
+    clearError();
+    setLoading(true);
+    try {
+      const res = await fetch(API_BASE, { headers: authHeaders });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      renderClaimList(data.items || []);
+    } catch (e) {
+      showError(`Failed to load claims: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderClaimList(items) {
+    const container = document.getElementById('claim-list');
+    if (!items.length) {
+      container.innerHTML = '<div class="empty">No claims found.</div>';
+      return;
+    }
+    container.innerHTML = items.map(item => {
+      const state = item.workflow_state || 'unknown';
+      const badgeClass = workflowBadgeClass(state);
+      const nextStatus = item.customer_next_step?.status ?? '—';
+      return `<div class="claim-row" data-claim-id="${escapeHtml(item.claim_id)}">
+        <span class="claim-id">${escapeHtml(item.claim_id)}</span>
+        <span class="badge ${badgeClass}">${escapeHtml(state)}</span>
+        <span class="meta">${escapeHtml(item.incident_type ?? 'unknown')} · ${escapeHtml(item.customer_reference)}</span>
+        <span class="meta" style="margin-left:auto">${escapeHtml(nextStatus)}</span>
+      </div>`;
+    }).join('');
+
+    container.querySelectorAll('.claim-row').forEach(row => {
+      row.addEventListener('click', () => loadDetail(row.dataset.claimId));
+    });
+  }
+
+  async function loadDetail(claimId) {
+    clearError();
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/${encodeURIComponent(claimId)}`, { headers: authHeaders });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const detail = await res.json();
+      renderDetail(detail);
+      document.getElementById('list-panel').style.display = 'none';
+      document.getElementById('detail-panel').style.display = 'block';
+    } catch (e) {
+      showError(`Failed to load claim: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderDetail(detail) {
+    document.getElementById('detail-title').textContent = detail.claim_id;
+
+    // Claim info — uses fields from WorkbenchClaimDetail
+    const state = detail.claim_state || {};
+    const route = detail.route ?? '—';
+    const activeSession = detail.active_session_id ?? '—';
+    const handoffAssignedTo = (detail.handoffs || [])
+      .filter(h => h.assigned_to)
+      .map(h => h.assigned_to)
+      .join(', ') || '—';
+
+    document.getElementById('claim-info').innerHTML = [
+      fieldRow('Claim ID', detail.claim_id),
+      fieldRow('Customer', detail.customer_reference),
+      fieldRow('Channel', detail.channel),
+      fieldRow('Locale', detail.locale),
+      fieldRow('Incident type', detail.incident_type),
+      fieldRow('Route', route),
+      fieldRow('Active session', activeSession),
+      fieldRow('Assigned to (handoff)', handoffAssignedTo),
+      fieldRow('Created at', detail.created_at),
+      fieldRow('Updated at', detail.updated_at),
+    ].join('');
+
+    // Claim state — uses claim_state fields from WorkbenchClaimDetail
+    document.getElementById('claim-state-info').innerHTML = [
+      fieldRow('Workflow state', state.workflow_state),
+      fieldRow('Fraud signal', state.fraud_signal),
+      fieldRow('Decision confidence', state.decision_confidence),
+      fieldRow('Coverage confirmation', state.coverage_confirmed),
+    ].join('');
+
+    // Sessions
+    document.getElementById('sessions-section').innerHTML = renderList(
+      detail.sessions, 'No sessions.',
+      s => `<div class="field-row"><span class="field-label">${escapeHtml(s.session_id)}</span><span class="field-value">${escapeHtml(s.summary || '(no summary)')}</span></div>`
+    );
+
+    // Handoffs — assigned_to is available on handoff objects
+    document.getElementById('handoffs-section').innerHTML = renderList(
+      detail.handoffs, 'No handoffs.',
+      h => `<div class="field-row">
+        <span class="field-label">${escapeHtml(h.handoff_id)}</span>
+        <span class="field-value">${escapeHtml(h.queue ?? '—')} · assigned: ${escapeHtml(h.assigned_to ?? '—')}</span>
+      </div>`
+    );
+
+    // Messages
+    document.getElementById('messages-section').innerHTML = renderList(
+      detail.messages, 'No messages.',
+      m => `<div class="field-row">
+        <span class="field-label">[${escapeHtml(m.visibility)}] ${escapeHtml(m.actor)}</span>
+        <span class="field-value">${escapeHtml(m.content?.text ?? m.content?.type ?? JSON.stringify(m.content))}</span>
+      </div>`
+    );
+
+    // Evidence
+    document.getElementById('evidence-section').innerHTML = renderList(
+      detail.evidence, 'No evidence.',
+      e => `<div class="field-row">
+        <span class="field-label">${escapeHtml(e.kind)}</span>
+        <span class="field-value">${escapeHtml(e.status)}</span>
+      </div>`
+    );
+
+    // Decisions
+    document.getElementById('decisions-section').innerHTML = renderList(
+      detail.decisions, 'No decisions.',
+      d => `<div class="field-row">
+        <span class="field-label">${escapeHtml(d.action)}</span>
+        <span class="field-value">${escapeHtml(d.customer_reason)}</span>
+      </div>`
+    );
+
+    // Signals — use code/signal_id from the signals list
+    document.getElementById('signals-section').innerHTML = renderList(
+      detail.signals, 'No signals.',
+      sig => `<div class="field-row">
+        <span class="field-label">${escapeHtml(sig.code ?? sig.signal_id ?? '—')}</span>
+        <span class="field-value">${escapeHtml(sig.status ?? '—')}</span>
+      </div>`
+    );
+
+    // Staff actions
+    document.getElementById('staff-actions-section').innerHTML = renderList(
+      detail.staff_actions, 'No staff actions.',
+      a => `<div class="field-row">
+        <span class="field-label">${escapeHtml(a.action_type ?? a.action_id ?? '—')}</span>
+        <span class="field-value">${escapeHtml(a.note ?? '—')}</span>
+      </div>`
+    );
+  }
+
+  document.getElementById('back-btn').addEventListener('click', () => {
+    document.getElementById('detail-panel').style.display = 'none';
+    document.getElementById('list-panel').style.display = 'block';
+    clearError();
+    loadClaims();
+  });
+
+  loadClaims();
+</script>
+</body>
+</html>
