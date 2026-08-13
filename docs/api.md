@@ -1149,8 +1149,8 @@ reply. Prefixing claimant text with `@agent` explicitly requests an Agent turn. 
 `POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
 `in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
 
-The prototype clients poll these provider-neutral HTTP resources for new messages. Real-time
-delivery infrastructure remains replaceable and is not part of the API contract.
+The prototype clients use these provider-neutral HTTP resources for explicit message refreshes.
+Real-time delivery infrastructure remains replaceable and is not part of the API contract.
 
 Resolve request:
 

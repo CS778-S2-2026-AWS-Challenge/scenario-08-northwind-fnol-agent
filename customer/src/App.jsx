@@ -132,15 +132,6 @@ function App() {
     }
   }, [claim, sessionId])
 
-  useEffect(() => {
-    if (!claim || !sessionId) return undefined
-    const timer = window.setInterval(() => {
-      if (['sending', 'starting'].includes(status)) return
-      refreshClaimStatus({ silent: true }).catch(() => {})
-    }, 4000)
-    return () => window.clearInterval(timer)
-  }, [claim, refreshClaimStatus, sessionId, status])
-
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
       setError('Your report changed while this page was open. We refreshed it; review the latest details and try again.')

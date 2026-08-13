@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.repositories.fixture import FixtureRepository
 
-JOURNEY_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'PRES-01-rear-end-handoff.json'
+JOURNEY_PATH = Path(__file__).parents[1] / 'journeys' / 'PRES-01-rear-end-handoff.json'
 
 
 def _journey() -> dict[str, Any]:
