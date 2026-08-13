@@ -62,7 +62,7 @@ def list_workbench_claims(
         raise ApiError(
             status_code=403,
             code='AUTHORIZATION_REQUIRED',
-            message='Staff credentials are required to access the workbench.',
+            message='Staff credentials required to access the workbench.',
         )
 
     claims = repository.list_claims()
@@ -100,7 +100,7 @@ def get_workbench_claim(
         raise ApiError(
             status_code=403,
             code='AUTHORIZATION_REQUIRED',
-            message='Staff credentials are required to access the workbench.',
+            message='Staff credentials required to access the workbench.',
         )
 
     claim = repository.get_claim_by_id(claim_id)
