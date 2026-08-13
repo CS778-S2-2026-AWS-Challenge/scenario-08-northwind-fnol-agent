@@ -53,7 +53,7 @@ def next_controlled_intake_step(claim: WorkingClaim) -> CustomerNextStep:
             required_items=[intake_field.field_code],
         )
     return CustomerNextStep(
-        status='core_details_confirmed',
-        summary='Your core incident details are confirmed. Review them before continuing.',
+        status='ready_to_create',
+        summary='Your confirmed report is ready for controlled claim creation.',
         responsible_party=ResponsibleParty.CLAIMANT,
     )

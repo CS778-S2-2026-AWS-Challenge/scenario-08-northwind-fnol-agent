@@ -62,6 +62,20 @@ export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }
 
+export function createExternalClaim({
+  claimId,
+  revision,
+  idempotencyKey = requestId('claim-creation'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/creation`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
 export function submitClaimMessage({
   claimId,
   sessionId,

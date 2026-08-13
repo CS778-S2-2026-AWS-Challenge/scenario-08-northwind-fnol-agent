@@ -48,7 +48,7 @@ def _workbench_session(session: SessionRecord) -> WorkbenchSession:
     )
 
 
-def _workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
+def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
     return WorkbenchHandoff(
         handoff_id=handoff.handoff_id,
         claim_id=handoff.claim_id,
@@ -209,7 +209,7 @@ def get_workbench_claim_detail(
         messages=messages,
         decisions=decisions,
         signals=signals,
-        handoffs=[_workbench_handoff(handoff) for handoff in handoffs],
+        handoffs=[workbench_handoff(handoff) for handoff in handoffs],
         staff_actions=[
             item.model_dump(mode='json') for item in repository.list_staff_actions(claim_id)
         ],

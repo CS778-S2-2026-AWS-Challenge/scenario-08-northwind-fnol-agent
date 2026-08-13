@@ -33,7 +33,8 @@ Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint
 | --- | --- |
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
 | `customer/` | React and Vite claimant experience |
-| `prototype/` | Static claimant and employee workbench demonstrators |
+| `employee/` | Static employee workbench backed by the shared Workbench API |
+| `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `SPEC/` | Current product requirements and acceptance scenarios |
 | `docs/` | API contract, engineering conventions, and research material |
@@ -72,7 +73,9 @@ In another terminal, start the claimant client:
 npm run dev --prefix customer
 ```
 
-The Vite development server proxies `/api` requests to the local backend. The static employee workbench demonstrator is `prototype/employee-workbench-prototype.html` and does not require a server.
+The Vite development server proxies `/api` requests to the local backend. To run the employee
+workbench, serve `employee/` on port 8002 as documented in `employee/README.md`; it reads and
+updates the same backend claim state.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
@@ -89,7 +92,7 @@ After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a f
 Run the synthetic integration fixtures from the repository root with:
 
 ```powershell
-python scripts/run_scenarios.py
+py -3.12 scripts/run_scenarios.py
 ```
 
 Every invocation creates a fresh in-memory repository, so rerunning the command

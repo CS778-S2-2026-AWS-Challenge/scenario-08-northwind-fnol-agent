@@ -564,6 +564,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
+| `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -799,6 +800,60 @@ Request:
 ```
 
 All fields must exist and be confirmable. Response `200` returns the new claim revision, confirmed fields, any new decision, and the current customer next step.
+
+When all controlled intake fields are confirmed, `customer_next_step.status` becomes
+`ready_to_create`. Confirmation does not itself invoke an external claims service.
+
+### `POST /api/v1/claims/{claim_id}/creation`
+
+Creates an external claim through the configured provider-neutral claims adapter. The endpoint
+accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,
+and controlled prototype route from the persisted Working Claim.
+
+Sprint 1 deterministic creation is limited to the controlled motor fixture path. Other incident
+types remain unconfigured until approved routing rules are available.
+
+The request requires `If-Match` and `Idempotency-Key` headers and has no body. The service rejects
+creation when required intake fields are not confirmed, a human handoff is open, the report is in
+professional review, or the Working Claim has already been created. Pending later evidence does not
+by itself block this operation and is passed to the adapter as outstanding work.
+
+Before invoking the adapter, the service records a deterministic `CREATE_CLAIM` decision with
+`CLAIM_CREATION_AUTHORISED`. A model proposal or claimant-supplied decision ID cannot authorise
+this operation.
+
+Response `201`:
+
+```json
+{
+  "claim_id": "clm_01J4Y7Q2AW",
+  "revision": 5,
+  "decision": {
+    "decision_id": "dec_01J4YD82JA",
+    "action": "CREATE_CLAIM",
+    "reason_codes": ["CLAIM_CREATION_AUTHORISED"],
+    "customer_reason": "The controlled intake fields are confirmed and no open handoff blocks creation.",
+    "customer_next_step": {}
+  },
+  "external_claim": {
+    "external_claim_id": "ext_fixture_1042",
+    "claim_number": "NWF-2026-001042",
+    "creation_status": "created",
+    "route": "standard_motor_intake",
+    "next_step": "Claims intake review",
+    "expected_by": "2026-08-11T05:00:00Z",
+    "created_at": "2026-08-10T03:55:00Z"
+  },
+  "customer_next_step": {
+    "status": "claim_created",
+    "summary": "Claims intake review",
+    "responsible_party": "northwind"
+  }
+}
+```
+
+An idempotent replay restores the same response. The mock adapter supplies synthetic values only;
+this contract does not assert a Northwind provider schema or AWS implementation.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 
@@ -1201,6 +1256,21 @@ The orchestration request contains references and a bounded context package, not
 ```
 
 Response is a complete `AgentDecision` proposal. Deterministic validation MUST run before high-impact changes or side effects. The full model prompt, hidden reasoning, and secrets are not part of the public contract or ordinary logs.
+
+The canonical product actions are `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`,
+`UPDATE`, `HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM`. They are business
+action semantics rather than MCP commands or provider tool names. Each action
+has stable preconditions, allowed state paths, tool policy, authority outcome,
+claimant-response requirement, and prohibited outcomes. A model-backed provider
+or MCP-connected tool adapter must implement these semantics rather than create
+an incompatible private action vocabulary.
+
+The persisted decision records both `customer_response` and
+`customer_next_step`. `customer_response` is the contextual conversational
+reply to the triggering message. `customer_next_step` is the structured status,
+responsibility, required work, and timing shown outside the conversation. The
+Agent message uses `customer_response`; clients must not manufacture a chat
+reply by repeating the next-step summary.
 
 ### `POST /internal/v1/policy/search`
 

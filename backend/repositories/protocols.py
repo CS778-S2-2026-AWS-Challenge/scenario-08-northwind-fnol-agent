@@ -172,6 +172,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         decision: AgentDecisionRecord,
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
+        evidence: EvidenceRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
         raise NotImplementedError
@@ -221,6 +222,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         staff_action: StaffActionRecord | None = None,
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
+        handoff: HandoffRecord | None = None,
     ) -> None:
         """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError
