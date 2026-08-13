@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   confirmClaimFields,
   createClaim,
   createExternalClaim,
   getClaim,
+  getClaimMessages,
   requestId,
   requestHumanSupport,
   submitClaimMessage,
@@ -90,23 +91,40 @@ function App() {
     setNextStep(current.customer_next_step)
   }
 
-  async function refreshClaimStatus() {
+  const refreshClaimStatus = useCallback(async ({ silent = false } = {}) => {
     if (!claim || isBusy) return
-    setError('')
-    setStatus('refreshing')
+    if (!silent) {
+      setError('')
+      setStatus('refreshing')
+    }
     try {
       const current = await getClaim(claim.claim_id)
       setClaim(current)
       setForm(current.form)
       setNextStep(current.customer_next_step)
-      if (current.customer_next_step?.status === 'staff_update') {
-        setHandoff(null)
+      setHandoff(current.handoff || null)
+      if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
+      if (sessionId) {
+        const latest = await getClaimMessages(claim.claim_id, sessionId)
+        setMessages(latest.items)
       }
-      setStatus('idle')
+      if (!silent) setStatus('idle')
     } catch (requestError) {
-      showError(requestError)
+      if (!silent) {
+        setError(requestError.message || 'We could not refresh your report. Please try again.')
+        setStatus('error')
+      }
     }
-  }
+  }, [claim, isBusy, sessionId])
+
+  useEffect(() => {
+    if (!claim || !sessionId) return undefined
+    const timer = window.setInterval(() => {
+      if (['sending', 'refreshing', 'starting'].includes(status)) return
+      refreshClaimStatus({ silent: true }).catch(() => {})
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [claim, refreshClaimStatus, sessionId, status])
 
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -155,11 +173,15 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      setMessages((current) => [...current, turn.claimant_message, turn.agent_message])
+      setMessages((current) => [
+        ...current,
+        turn.claimant_message,
+        ...(turn.agent_message ? [turn.agent_message] : []),
+      ])
       setForm((current) => mergeFields(current, turn.form_changes))
       setClaim((current) => ({ ...current, revision: turn.claim_revision }))
-      setNextStep(turn.decision.customer_next_step)
-      setHandoff(turn.handoff)
+      if (turn.decision) setNextStep(turn.decision.customer_next_step)
+      if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
       pendingSubmission.current = null
       setStatus('idle')
@@ -370,7 +392,9 @@ function App() {
                 <h2 id="transfer-title">
                   {handoff.priority === 'urgent'
                     ? 'Normal intake has paused'
-                    : 'Your support request is queued'}
+                    : handoff.status === 'queued'
+                      ? 'Your support request is queued'
+                      : 'Northwind support is handling your request'}
                 </h2>
                 <p>{handoff.summary}</p>
                 <dl>
@@ -383,6 +407,7 @@ function App() {
                     <dd>Saved with the details already provided</dd>
                   </div>
                 </dl>
+                <p>Your message will be saved for Northwind support. Start with @agent when you need an Agent response.</p>
                 <button
                   className="secondary-button refresh-button"
                   type="button"
@@ -423,10 +448,10 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0 || Boolean(handoff)}
+              disabled={proposedFields.length > 0 && !handoff}
               disabledNote={
                 handoff
-                  ? 'Normal intake is paused while Northwind support takes ownership.'
+                  ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
                   : 'Confirm or correct the details before continuing.'
               }
               buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}

@@ -6,11 +6,13 @@ from backend.core.auth import Principal, require_staff
 from backend.domain.models import (
     AcceptHandoffRequest,
     CreateStaffActionRequest,
+    CreateStaffMessageRequest,
     HandoffMutationResponse,
     ResolveHandoffRequest,
     SignalDecisionRequest,
     SignalDecisionResponse,
     StaffActionMutationResponse,
+    StaffMessageResponse,
     UpdateStaffActionRequest,
     WorkbenchClaimDetail,
     WorkbenchClaimListResponse,
@@ -21,11 +23,26 @@ from backend.services.staff_actions import (
     create_staff_action,
     decide_signal,
     resolve_handoff,
+    send_staff_message,
     update_staff_action,
 )
 from backend.services.workbench import get_workbench_claim_detail, list_workbench_claims
 
 router = APIRouter(prefix='/api/v1/workbench/claims', tags=['workbench'])
+
+
+@router.post('/{claim_id}/messages', response_model=StaffMessageResponse)
+def create_staff_message(
+    claim_id: str,
+    payload: CreateStaffMessageRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> StaffMessageResponse:
+    return send_staff_message(
+        repository_for(request), principal, claim_id, payload, idempotency_key, if_match
+    )
 
 
 def repository_for(request: Request) -> PersistenceRepository:
