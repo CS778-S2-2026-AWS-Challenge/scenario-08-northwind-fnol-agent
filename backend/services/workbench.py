@@ -92,9 +92,6 @@ def _claim_messages(
 
 
 def _queue_for_claim(claim: WorkingClaim) -> str:
-    route = claim.route
-    if route:
-        return route
     workflow_state = claim.claim_state.workflow_state
     return {
         WorkflowState.COLLECTING: 'new_untriaged',
@@ -117,9 +114,7 @@ def list_workbench_claims(
     for claim in repository.list_claims_internal():
         handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
         open_handoffs = [
-            handoff
-            for handoff in handoffs
-            if handoff.status.value not in {'resolved', 'cancelled'}
+            handoff for handoff in handoffs if handoff.status.value not in {'resolved', 'cancelled'}
         ]
         queue = _queue_for_claim(claim)
         priority = max(
