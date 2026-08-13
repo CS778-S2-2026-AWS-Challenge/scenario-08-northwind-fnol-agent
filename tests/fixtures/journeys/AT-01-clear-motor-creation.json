@@ -1,0 +1,12 @@
+{
+  "scenario_id": "AT-01-clear-motor-creation",
+  "description": "A clear minor motor report progresses from natural language through confirmation to controlled mock claim creation.",
+  "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+  "expected_proposed_fields": [
+    "incident.description",
+    "incident.location",
+    "loss.description"
+  ],
+  "expected_route": "standard_motor_intake",
+  "expected_creation_status": "created"
+}

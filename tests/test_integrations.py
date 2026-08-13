@@ -65,6 +65,7 @@ def save_authorisation(
             action=action,
             reason_codes=[reason_code],
             customer_reason='A deterministic rule authorised this fixture action.',
+            customer_response='The authorised integration action can continue.',
             customer_next_step=CustomerNextStep(
                 status='authorised',
                 summary='The authorised integration action can continue.',

@@ -386,6 +386,65 @@
   background: #f1faf6;
 }
 
+.refresh-button {
+  margin-top: 4px;
+}
+
+.staff-update {
+  width: min(100%, 720px);
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #8fc3b3;
+  border-left: 4px solid #2c806a;
+  border-radius: 8px;
+  background: #edf8f3;
+}
+
+.claim-created {
+  width: min(100%, 720px);
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #8fc3b3;
+  border-left: 4px solid #2c806a;
+  border-radius: 8px;
+  background: #edf8f3;
+}
+
+.claim-created h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+}
+
+.claim-created dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.claim-created dt {
+  color: #667a73;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.claim-created dd {
+  margin: 3px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.staff-update h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.staff-update > p:last-child {
+  margin: 8px 0 0;
+  color: #4d625b;
+  line-height: 1.55;
+}
+
 .transfer-state.is-urgent {
   border-color: #bd665e;
   background: #fff4f2;
@@ -509,6 +568,11 @@
 .status-confirmed {
   color: #256650;
   background: #e3f4ed;
+}
+
+.status-pending_generation {
+  color: #805817;
+  background: #fff3d3;
 }
 
 .field-value {

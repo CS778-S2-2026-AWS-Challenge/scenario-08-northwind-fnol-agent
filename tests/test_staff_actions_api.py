@@ -194,6 +194,7 @@ def test_signal_decision_finds_claim_decision_without_trigger_message(
             action=AgentAction.PROCEED,
             reason_codes=['SIGNAL_REVIEW_REQUIRED'],
             customer_reason='Continue while the internal signal is reviewed.',
+            customer_response='Your report can continue while Northwind reviews it.',
             proposed_signals=[
                 {'signal_id': 'sig_without_trigger_message', 'status': 'review_required'}
             ],

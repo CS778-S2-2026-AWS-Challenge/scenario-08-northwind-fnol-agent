@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from backend.core.auth import Principal, require_staff
 from backend.domain.models import (
+    AcceptHandoffRequest,
     CreateStaffActionRequest,
+    HandoffMutationResponse,
+    ResolveHandoffRequest,
     SignalDecisionRequest,
     SignalDecisionResponse,
     StaffActionMutationResponse,
@@ -13,7 +16,13 @@ from backend.domain.models import (
     WorkbenchClaimListResponse,
 )
 from backend.repositories.protocols import PersistenceRepository
-from backend.services.staff_actions import create_staff_action, decide_signal, update_staff_action
+from backend.services.staff_actions import (
+    accept_handoff,
+    create_staff_action,
+    decide_signal,
+    resolve_handoff,
+    update_staff_action,
+)
 from backend.services.workbench import get_workbench_claim_detail, list_workbench_claims
 
 router = APIRouter(prefix='/api/v1/workbench/claims', tags=['workbench'])
@@ -90,4 +99,46 @@ def create_signal_decision(
 ) -> SignalDecisionResponse:
     return decide_signal(
         repository_for(request), principal, claim_id, signal_id, payload, idempotency_key, if_match
+    )
+
+
+@router.post('/{claim_id}/handoffs/{handoff_id}/accept', response_model=HandoffMutationResponse)
+def accept_claim_handoff(
+    claim_id: str,
+    handoff_id: str,
+    payload: AcceptHandoffRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> HandoffMutationResponse:
+    return accept_handoff(
+        repository_for(request),
+        principal,
+        claim_id,
+        handoff_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post('/{claim_id}/handoffs/{handoff_id}/resolve', response_model=HandoffMutationResponse)
+def resolve_claim_handoff(
+    claim_id: str,
+    handoff_id: str,
+    payload: ResolveHandoffRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> HandoffMutationResponse:
+    return resolve_handoff(
+        repository_for(request),
+        principal,
+        claim_id,
+        handoff_id,
+        payload,
+        idempotency_key,
+        if_match,
     )
