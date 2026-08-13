@@ -1,9 +1,11 @@
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import (
+    HandoffRecord,
     MessageRecord,
     SessionRecord,
     WorkbenchClaimDetail,
+    WorkbenchHandoff,
     WorkbenchSession,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -38,6 +40,29 @@ def _workbench_session(session: SessionRecord) -> WorkbenchSession:
         started_at=session.started_at,
         last_active_at=session.last_active_at,
         closed_at=session.closed_at,
+    )
+
+
+def _workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
+    return WorkbenchHandoff(
+        handoff_id=handoff.handoff_id,
+        claim_id=handoff.claim_id,
+        type=handoff.type,
+        status=handoff.status,
+        priority=handoff.priority,
+        queue=handoff.queue,
+        support_need=handoff.support_need,
+        preferred_channel=handoff.preferred_channel,
+        reason_codes=handoff.reason_codes,
+        reason=handoff.reason,
+        requested_action=handoff.requested_action,
+        applied_rule=handoff.applied_rule,
+        packet=handoff.packet,
+        source_message_id=handoff.source_message_id,
+        assigned_to=handoff.assigned_to,
+        created_at=handoff.created_at,
+        accepted_at=handoff.accepted_at,
+        resolved_at=handoff.resolved_at,
     )
 
 
@@ -82,6 +107,7 @@ def get_workbench_claim_detail(
     )
     decisions = repository.list_agent_decisions(claim_id, claim.customer_id)
     evidence = repository.list_evidence(claim_id, claim.customer_id)
+    handoffs = repository.list_handoffs(claim_id, claim.customer_id)
     signals = [signal for decision in decisions for signal in decision.proposed_signals]
 
     return WorkbenchClaimDetail(
@@ -101,7 +127,7 @@ def get_workbench_claim_detail(
         messages=messages,
         decisions=decisions,
         signals=signals,
-        handoffs=[],
+        handoffs=[_workbench_handoff(handoff) for handoff in handoffs],
         staff_actions=[],
         customer_updates=[],
         external_claim=claim.external_claim,

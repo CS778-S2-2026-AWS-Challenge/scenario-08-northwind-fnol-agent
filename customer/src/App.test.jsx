@@ -202,4 +202,93 @@ describe('claimant intake', () => {
     const retryHeaders = fetch.mock.calls[1][1].headers
     expect(retryHeaders['Idempotency-Key']).toBe(firstHeaders['Idempotency-Key'])
   })
+
+  it('requests human support and pauses ordinary intake with preserved context', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'queued',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued with the details already provided.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_queued',
+          summary: 'A Northwind support request has been queued with the details already provided.',
+          responsible_party: 'northwind',
+        },
+      }, 201),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(
+      screen.getByLabelText('Incident description'),
+      'Another vehicle hit my parked car.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+
+    expect(await screen.findByText('Your support request is queued')).toBeVisible()
+    expect(screen.getByText('Northwind support')).toBeVisible()
+    expect(screen.getByText('Saved with the details already provided')).toBeVisible()
+    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByText(/Normal intake is paused/)).toBeVisible()
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/claims/clm_test/support-requests',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('renders an urgent message handoff without claiming emergency contact', async () => {
+    const urgentTurn = {
+      ...firstTurn(),
+      form_changes: [],
+      decision: {
+        ...firstTurn().decision,
+        action: 'URGENT_HANDOFF',
+        reason_codes: ['EXPLICIT_SAFETY_SIGNAL'],
+        customer_next_step: {
+          ...nextStep,
+          status: 'urgent_support_queued',
+          responsible_party: 'northwind',
+          summary: 'Contact local emergency services yourself if immediate help is needed.',
+        },
+      },
+      agent_message: {
+        ...firstTurn().agent_message,
+        content: {
+          type: 'text',
+          text: 'Contact local emergency services yourself if immediate help is needed.',
+        },
+      },
+      handoff: {
+        handoff_id: 'hnd_urgent',
+        status: 'queued',
+        priority: 'urgent',
+        support_need: 'urgent',
+        summary: 'Contact local emergency services yourself if immediate help is needed.',
+        created_at: '2026-08-12T00:02:00Z',
+      },
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(urgentTurn))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A passenger is injured.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(await screen.findByText('Normal intake has paused')).toBeVisible()
+    expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)
+    expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+  })
 })

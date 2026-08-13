@@ -914,7 +914,7 @@ Request:
 
 `support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection and next step.
 
-The first human-request policy remains a controlled prototype rule: the system may transfer immediately or offer one brief, transparent choice to finish the current step. A repeated request, distress, urgent condition, or accessibility need MUST transfer immediately. The server records which rule was applied.
+The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
 ### `GET /api/v1/claims/{claim_id}/updates`
 
@@ -992,15 +992,16 @@ claimant routes:
 and context revisions. `messages` includes the complete persisted communication history,
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
-workbench. `external_claim` and `assessor_routing` use the shared typed creation and routing
-results, including their status, next step, and expected timing. These fields are never added to
-claimant projections unless their claimant-safe contract explicitly includes them.
+workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
+includes routing fields plus the complete transfer packet. Claimant routes return only the
+separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
+action, applied rule, assignment, source message, or packet. `external_claim` and
+`assessor_routing` use the shared typed creation and routing results, including their status,
+next step, and expected timing. Internal fields are never added to claimant projections unless
+their claimant-safe contract explicitly includes them.
 
-The current repository has no separate persisted handoff, staff-action, or customer-update
-records. Their arrays therefore remain empty rather than synthesising a second lifecycle or
-manual status. They can be populated when the corresponding shared repository records are
-implemented without changing the claim identity, revision, state, form, session, evidence, or
-decision fields above.
+The current repository has no separate persisted staff-action or customer-update records. Those
+arrays therefore remain empty rather than synthesising a second lifecycle or manual status.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 

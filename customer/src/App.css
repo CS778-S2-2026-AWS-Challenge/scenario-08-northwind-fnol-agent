@@ -43,6 +43,36 @@
   font-weight: 600;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.support-button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #8ba9a0;
+  border-radius: 7px;
+  color: #315f53;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.support-button:hover:not(:disabled) {
+  border-color: #2c806a;
+  color: #246f5c;
+}
+
+.support-button:disabled {
+  color: #70827b;
+  background: #eef3f1;
+  cursor: not-allowed;
+}
+
 .entry-page {
   min-height: calc(100svh - 66px);
   display: grid;
@@ -346,6 +376,70 @@
   margin-top: auto;
 }
 
+.transfer-state {
+  width: min(100%, 720px);
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #7eb4a4;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #f1faf6;
+}
+
+.transfer-state.is-urgent {
+  border-color: #bd665e;
+  background: #fff4f2;
+}
+
+.transfer-state .transfer-label {
+  margin: 0 0 5px;
+  color: #2c806a;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.transfer-state.is-urgent .transfer-label {
+  color: #a24842;
+}
+
+.transfer-state h2 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.transfer-state > p:not(.transfer-label) {
+  margin: 8px 0 14px;
+  color: #4d625b;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.transfer-state dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.transfer-state dl div {
+  padding-top: 10px;
+  border-top: 1px solid rgba(63, 105, 93, 0.2);
+}
+
+.transfer-state dt {
+  color: #667a73;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.transfer-state dd {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .claim-panel {
   min-width: 0;
   padding: 42px clamp(22px, 3vw, 42px) 48px;
@@ -528,6 +622,16 @@ textarea:focus-visible {
     padding: 0 15px;
   }
 
+  .draft-label {
+    display: none;
+  }
+
+  .support-button {
+    max-width: 170px;
+    min-height: 40px;
+    line-height: 1.2;
+  }
+
   .entry-main,
   .conversation-panel {
     padding: 31px 15px 34px;
@@ -565,6 +669,10 @@ textarea:focus-visible {
 
   .message {
     max-width: 92%;
+  }
+
+  .transfer-state dl {
+    grid-template-columns: 1fr;
   }
 
   .claim-panel-heading,
