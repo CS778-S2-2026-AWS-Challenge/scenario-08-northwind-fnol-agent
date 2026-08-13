@@ -33,7 +33,12 @@ The page is hard-coded for the local prototype staff token.
 
 ## Notes
 
-- The workbench data is read-only; the AI assistant and customer-chat replies are local prototype interactions until their respective live services are connected.
+- Claim browsing uses the shared staff projection. Staff actions, action completion, authorised
+  claim-state changes, claimant-safe updates, and review-signal decisions use the live workbench
+  mutation API with revision and idempotency guards.
+- The AI assistant and free-form customer-chat replies remain local prototype interactions until
+  their respective live services are connected. Claimant-safe updates submitted while completing
+  a staff action are persisted through the backend.
 - It derives internal flags from `signals`, assignment from open `handoffs`, and notes from
 	persisted internal messages and `staff_actions`.
 - It does not expose claimant-only private data.
