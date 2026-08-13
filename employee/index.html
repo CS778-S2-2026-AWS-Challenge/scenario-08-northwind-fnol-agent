@@ -355,13 +355,28 @@
 
       list.forEach(item => {
         const button = document.createElement('button');
-        button.innerHTML = `
-          <div class="claim-id">${item.claim_id}</div>
-          <div class="claim-meta">
-            <span>${item.customer_reference}</span>
-            <span>${stateMap[item.queue] || item.queue}</span>
-            <span class="badge ${highlightQueueLabel(item.queue)}">${item.priority || 'standard'}</span>
-          </div>`;
+        const claimIdDiv = document.createElement('div');
+        claimIdDiv.className = 'claim-id';
+        claimIdDiv.textContent = item.claim_id;
+        
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'claim-meta';
+        
+        const refSpan = document.createElement('span');
+        refSpan.textContent = item.customer_reference;
+        metaDiv.appendChild(refSpan);
+        
+        const stateSpan = document.createElement('span');
+        stateSpan.textContent = stateMap[item.queue] || item.queue;
+        metaDiv.appendChild(stateSpan);
+        
+        const badgeSpan = document.createElement('span');
+        badgeSpan.className = `badge ${highlightQueueLabel(item.queue)}`;
+        badgeSpan.textContent = item.priority || 'standard';
+        metaDiv.appendChild(badgeSpan);
+        
+        button.appendChild(claimIdDiv);
+        button.appendChild(metaDiv);
         button.classList.toggle('active', item.claim_id === activeClaimId);
         button.addEventListener('click', () => {
           activeClaimId = item.claim_id;
@@ -384,10 +399,23 @@
 
       fetchClaimDetail(claimId)
         .then(detail => {
-          byId('detailContent').innerHTML = `
-            <p><strong>${detail.claim_id}</strong></p>
-            <p class="muted">Incident type: ${detail.incident_type || 'Not set'}</p>
-            <p class="note">Claim revision ${detail.revision} · Updated ${new Date(detail.updated_at).toLocaleString()}</p>`;
+          const detailContent = byId('detailContent');
+          detailContent.innerHTML = '';
+          const idP = document.createElement('p');
+          const idStrong = document.createElement('strong');
+          idStrong.textContent = detail.claim_id;
+          idP.appendChild(idStrong);
+          detailContent.appendChild(idP);
+          
+          const incidentP = document.createElement('p');
+          incidentP.className = 'muted';
+          incidentP.textContent = `Incident type: ${detail.incident_type || 'Not set'}`;
+          detailContent.appendChild(incidentP);
+          
+          const noteP = document.createElement('p');
+          noteP.className = 'note';
+          noteP.textContent = `Claim revision ${detail.revision} · Updated ${new Date(detail.updated_at).toLocaleString()}`;
+          detailContent.appendChild(noteP);
 
           byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
           byId('detailCustomerReference').textContent = detail.customer_reference;

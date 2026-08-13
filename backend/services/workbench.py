@@ -1,9 +1,7 @@
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import (
-    ClaimState,
     CustomerNextStep,
-    FraudSignal,
     Urgency,
     WorkbenchClaimDetail,
     WorkbenchClaimItem,
@@ -37,27 +35,22 @@ def _priority_for(claim: WorkingClaim) -> str:
 
 
 def _internal_flags_for(claim: WorkingClaim) -> list[str]:
+    flags = []
     if claim.claim_state.fraud_signal.value == 'review_required':
-        return ['FRAUD_REVIEW_REQUIRED']
-    return []
+        flags.append('FRAUD_REVIEW_REQUIRED')
+    return flags
 
 
 def _assigned_to_for(claim: WorkingClaim) -> str | None:
-    if claim.claim_state.workflow_state == WorkflowState.PROFESSIONAL_REVIEW:
-        return 'Lin Zhang'
-    if claim.claim_state.urgency == Urgency.URGENT:
-        return 'Ava Patel'
+    # Return persisted assignment if available, otherwise None
+    # TODO: wire to persistent handoff/assignment records (PR #81)
     return None
 
 
 def _internal_notes_for(claim: WorkingClaim) -> str:
-    if claim.claim_state.workflow_state == WorkflowState.AWAITING_EVIDENCE:
-        return 'Awaiting evidence before creating the claim. Do not progress until the next update is received.'
-    if claim.claim_state.workflow_state == WorkflowState.PROFESSIONAL_REVIEW:
-        return 'Check the flagged items and determine whether the claim can be progressed safely.'
-    if claim.claim_state.urgency == Urgency.URGENT:
-        return 'This is an urgent claim. Follow urgent handoff protocols and notify operations.'
-    return 'Claim is configured for the next safe action. Confirm the summary before notifying the customer.'
+    # Return persisted internal notes if available
+    # TODO: wire to persistent action/handoff notes (PR #81)
+    return ''
 
 
 def list_workbench_claims(
