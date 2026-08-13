@@ -62,6 +62,10 @@ export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }
 
+export function getClaimMessages(claimId, sessionId) {
+  return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages?limit=100`)
+}
+
 export function createExternalClaim({
   claimId,
   revision,

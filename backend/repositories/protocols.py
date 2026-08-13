@@ -103,6 +103,17 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
 
+    def save_message_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        message: MessageRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a claimant or staff message and claim revision."""
+        raise NotImplementedError
+
     def get_message(
         self,
         claim_id: str,
@@ -223,6 +234,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
+        message: MessageRecord | None = None,
     ) -> None:
         """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError

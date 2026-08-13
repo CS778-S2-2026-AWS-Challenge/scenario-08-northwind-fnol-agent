@@ -238,8 +238,8 @@ describe('claimant intake', () => {
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
     expect(screen.getByText('Northwind support')).toBeVisible()
     expect(screen.getByText('Saved with the details already provided')).toBeVisible()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
-    expect(screen.getByText(/Normal intake is paused/)).toBeVisible()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
+    expect(screen.getByText(/message will be saved for Northwind support/)).toBeVisible()
     expect(fetch).toHaveBeenNthCalledWith(
       3,
       '/api/v1/claims/clm_test/support-requests',
@@ -441,6 +441,6 @@ describe('claimant intake', () => {
     expect(await screen.findByText('Normal intake has paused')).toBeVisible()
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)
     expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 })

@@ -177,12 +177,80 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
     assert accepted['handoff']['status'] == 'accepted'
     assert accepted['handoff']['assigned_to'] == 'stf_demo'
 
+    claimant_accepted = client.get(f'/api/v1/claims/{claim_id}', headers=claimant).json()
+    assert claimant_accepted['handoff']['status'] == 'accepted'
+    assert 'assigned_to' not in claimant_accepted['handoff']
+
+    support_message = _message(
+        client,
+        claim_id,
+        session_id,
+        accepted['revision'],
+        'Can I still send more details while I wait?',
+        4,
+    )
+    assert support_message['agent_message'] is None
+    assert support_message['decision'] is None
+    support_retry = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={
+            **claimant,
+            'Idempotency-Key': 'pres-turn-4',
+            'If-Match': str(accepted['revision']),
+        },
+        json={
+            'client_message_id': 'pres-message-4',
+            'content': {'type': 'text', 'text': 'Can I still send more details while I wait?'},
+            'evidence_refs': [],
+        },
+    )
+    assert support_retry.status_code == 200
+    assert support_retry.json() == support_message
+
+    staff_message_response = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            'Authorization': 'Bearer synthetic-staff',
+            'Idempotency-Key': 'pres-staff-message',
+            'If-Match': str(support_message['claim_revision']),
+        },
+        json={'content': {'type': 'text', 'text': 'Yes. Your additional details are saved here.'}},
+    )
+    assert staff_message_response.status_code == 200, staff_message_response.text
+    staff_message = staff_message_response.json()
+    assert staff_message['message']['actor'] == 'staff'
+    staff_retry = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            'Authorization': 'Bearer synthetic-staff',
+            'Idempotency-Key': 'pres-staff-message',
+            'If-Match': str(support_message['claim_revision']),
+        },
+        json={'content': {'type': 'text', 'text': 'Yes. Your additional details are saved here.'}},
+    )
+    assert staff_retry.status_code == 200
+    assert staff_retry.json() == staff_message
+
+    conversation = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages', headers=claimant
+    ).json()['items']
+    assert any(
+        item['content'].get('text') == 'Yes. Your additional details are saved here.'
+        for item in conversation
+    )
+
+    latest_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()
+    assert latest_detail['handoffs'][0]['status'] == 'in_progress'
+
     resolved_response = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff["handoff_id"]}/resolve',
         headers={
             'Authorization': 'Bearer synthetic-staff',
             'Idempotency-Key': 'pres-resolve-handoff',
-            'If-Match': str(accepted['revision']),
+            'If-Match': str(staff_message['claim_revision']),
         },
         json={
             'result': {

@@ -272,8 +272,9 @@
               </div>
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
               <div class="customer-chat-input">
-                <textarea id="customerChatText" placeholder="Write the claimant-visible update used to resolve the accepted handoff..."></textarea>
-                <button id="customerChatSend" class="customer-chat-button" type="button">Resolve and update</button>
+                <textarea id="customerChatText" placeholder="Write a message to the claimant..."></textarea>
+                <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
+                <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
               </div>
             </div>
           </div>
@@ -910,28 +911,46 @@
       const button = byId('customerChatSend');
       button.disabled = true;
       try {
-        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/resolve`, {
+        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/messages`, {
           method: 'POST',
           headers: {
-            'Idempotency-Key': requestKey('resolve-handoff'),
+            'Idempotency-Key': requestKey('staff-message'),
             'If-Match': String(detail.revision),
           },
           body: JSON.stringify({
-            result: {
-              outcome: 'support_update_provided',
-              summary: 'The assigned staff member reviewed the saved handoff context and provided the customer update.',
-              reason_codes: ['HANDOFF_RESOLVED'],
-              source_refs: [handoff.handoff_id],
-            },
-            state_changes: [],
-            customer_update: {
-              summary: text,
-              responsible_party: 'northwind',
-              related_refs: [handoff.handoff_id],
-            },
+            content: { type: 'text', text },
           }),
         });
         input.value = '';
+        detailCache.delete(claim.claim_id);
+        await refreshQueue();
+        await refreshDetail(claim.claim_id);
+        await renderCustomerChat();
+      } catch (error) {
+        byId('customerChatStatus').textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function resolveCustomerHandoff() {
+      const claim = currentCustomerClaim();
+      if (!claim) return;
+      const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+      const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
+      if (!handoff) return;
+      const button = byId('customerChatResolve');
+      button.disabled = true;
+      try {
+        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/resolve`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': requestKey('resolve-handoff'), 'If-Match': String(detail.revision) },
+          body: JSON.stringify({
+            result: { outcome: 'support_completed', summary: 'The staff support conversation was completed.', reason_codes: ['HANDOFF_RESOLVED'], source_refs: [handoff.handoff_id] },
+            state_changes: [],
+            customer_update: { summary: 'Your Northwind support conversation is complete. You can continue your report or contact us again if needed.', responsible_party: 'claimant', related_refs: [handoff.handoff_id] },
+          }),
+        });
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
@@ -999,12 +1018,19 @@
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
     byId('customerChatBack').addEventListener('click', () => setView('workbench'));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
+    byId('customerChatResolve').addEventListener('click', resolveCustomerHandoff);
     byId('customerChatText').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         sendCustomerChatMessage();
       }
     });
+    window.setInterval(async () => {
+      if (document.hidden) return;
+      detailCache.clear();
+      await loadClaims();
+      if (!customerChatView.hidden) await renderCustomerChat();
+    }, 7000);
   </script>
 </body>
 </html>

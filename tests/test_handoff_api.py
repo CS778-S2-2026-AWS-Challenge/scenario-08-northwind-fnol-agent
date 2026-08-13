@@ -142,9 +142,9 @@ def test_ordinary_intake_does_not_restart_after_urgent_handoff(
         revision=int(str(first_turn['claim_revision'])),
     )
 
-    assert follow_up['decision']['action'] == 'UPDATE'  # type: ignore[index]
+    assert follow_up['decision'] is None
+    assert follow_up['agent_message'] is None
     assert follow_up['form_changes'] == []
-    assert follow_up['decision']['reason_codes'] == ['HANDOFF_ALREADY_QUEUED']  # type: ignore[index]
 
 
 def test_explicit_human_request_preserves_confirmed_context(
@@ -205,7 +205,7 @@ def test_explicit_human_request_preserves_confirmed_context(
         auth_headers,
         claim_id,
         session_id,
-        'I still want to speak to a person.',
+        '@agent I still want to speak to a person.',
         key='repeated-human-message',
         revision=int(str(turn['claim_revision'])),
     )

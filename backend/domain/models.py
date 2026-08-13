@@ -431,6 +431,14 @@ class ClaimantHandoff(ContractModel):
     created_at: datetime
 
 
+class ClaimantMessageChannel(ContractModel):
+    """Customer-safe live support projection; staff routing remains hidden."""
+
+    handoff_id: str
+    status: HandoffStatus
+    updated_at: datetime
+
+
 class WorkbenchSession(ContractModel):
     """Staff projection of saved resume context without repository ownership fields."""
 
@@ -784,6 +792,11 @@ class CreateMessageRequest(ContractModel):
         return self
 
 
+class CreateStaffMessageRequest(ContractModel):
+    content: TextMessageContent
+    in_reply_to: str | None = None
+
+
 class FormUpdate(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -808,6 +821,7 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
+    handoff: ClaimantMessageChannel | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -878,15 +892,22 @@ class MessageTurnResponse(ContractModel):
     session_id: str
     claim_revision: int
     claimant_message: ClaimantMessage
-    agent_message: ClaimantMessage
+    agent_message: ClaimantMessage | None = None
     form_changes: list[FormChange]
-    decision: ClaimantDecision
+    decision: ClaimantDecision | None = None
     handoff: dict[str, Any] | None = None
 
 
 class MessageListResponse(ContractModel):
     items: list[ClaimantMessage]
     page: PageInfo
+
+
+class StaffMessageResponse(ContractModel):
+    claim_id: str
+    session_id: str
+    claim_revision: int
+    message: MessageRecord
 
 
 class FormConfirmationResponse(ContractModel):
