@@ -24,6 +24,7 @@ class HighImpactAgent:
             action=AgentAction.CREATE_CLAIM,
             reason_codes=['CLAIM_CREATION_AUTHORISED'],
             customer_reason='A model proposed claim creation.',
+            customer_response='I have enough confirmed information to propose claim creation.',
             customer_next_step=CustomerNextStep(
                 status='claim_creation_proposed',
                 summary='The claim is being created.',
@@ -566,7 +567,7 @@ def test_confirmed_intake_field_is_not_asked_again(
     )
 
     assert loss_turn['form_changes'][0]['field_code'] == 'loss.description'
-    assert final_confirmation['customer_next_step']['status'] == 'core_details_confirmed'
+    assert final_confirmation['customer_next_step']['status'] == 'ready_to_create'
     assert additional_turn.status_code == 200
     assert additional_turn.json()['form_changes'] == []
     assert additional_turn.json()['decision']['action'] == 'UPDATE'

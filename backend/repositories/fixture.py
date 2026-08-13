@@ -254,6 +254,7 @@ class FixtureRepository(PersistenceRepository):
         decision: AgentDecisionRecord,
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
+        evidence: EvidenceRecord | None = None,
     ) -> None:
         stored_claim = self._claims.get(claim.claim_id)
         stored_session = self._sessions.get(session.session_id)
@@ -289,6 +290,7 @@ class FixtureRepository(PersistenceRepository):
             and (handoff is None or handoff.claim_id == claim.claim_id)
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
+            and (evidence is None or evidence.claim_id == claim.claim_id)
         )
         if not records_match:
             raise KeyError(claim.claim_id)
@@ -318,6 +320,8 @@ class FixtureRepository(PersistenceRepository):
         self._decisions[decision.decision_id] = deepcopy(decision)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        if evidence is not None:
+            self._evidence[evidence.evidence_id] = deepcopy(evidence)
         self._idempotency[lookup] = idempotency
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
@@ -420,15 +424,16 @@ class FixtureRepository(PersistenceRepository):
         staff_action: StaffActionRecord | None = None,
         customer_update: CustomerUpdateRecord | None = None,
         signal_decision: SignalDecisionRecord | None = None,
+        handoff: HandoffRecord | None = None,
     ) -> None:
         stored = self._claims.get(claim.claim_id)
         if stored is None:
             raise KeyError(claim.claim_id)
         if stored.revision != expected_revision:
             raise RevisionConflict(stored.revision)
-        if not any((staff_action, customer_update, signal_decision)):
+        if not any((staff_action, customer_update, signal_decision, handoff)):
             raise KeyError(claim.claim_id)
-        records = (staff_action, customer_update, signal_decision)
+        records = (staff_action, customer_update, signal_decision, handoff)
         if any(item is not None and item.claim_id != claim.claim_id for item in records):
             raise KeyError(claim.claim_id)
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
@@ -442,6 +447,8 @@ class FixtureRepository(PersistenceRepository):
             self._customer_updates[customer_update.update_id] = deepcopy(customer_update)
         if signal_decision is not None:
             self._signal_decisions[signal_decision.signal_decision_id] = deepcopy(signal_decision)
+        if handoff is not None:
+            self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:

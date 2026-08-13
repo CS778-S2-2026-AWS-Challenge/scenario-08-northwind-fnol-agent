@@ -3,6 +3,7 @@ import {
   ApiRequestError,
   confirmClaimFields,
   createClaim,
+  createExternalClaim,
   getClaim,
   requestId,
   requestHumanSupport,
@@ -25,6 +26,12 @@ const INPUT_LABELS = {
 
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
+}
+
+function fieldStatusLabel(status) {
+  if (status === 'confirmed') return 'Confirmed'
+  if (status === 'pending_generation') return 'Pending'
+  return 'Check this'
 }
 
 function messageText(message) {
@@ -53,8 +60,17 @@ function App() {
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
+  const pendingClaimCreation = useRef(null)
 
-  const isBusy = ['starting', 'sending', 'confirming', 'saving', 'requesting-support'].includes(status)
+  const isBusy = [
+    'starting',
+    'sending',
+    'confirming',
+    'saving',
+    'requesting-support',
+    'refreshing',
+    'creating-claim',
+  ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
@@ -72,6 +88,24 @@ function App() {
     setClaim(current)
     setForm(current.form)
     setNextStep(current.customer_next_step)
+  }
+
+  async function refreshClaimStatus() {
+    if (!claim || isBusy) return
+    setError('')
+    setStatus('refreshing')
+    try {
+      const current = await getClaim(claim.claim_id)
+      setClaim(current)
+      setForm(current.form)
+      setNextStep(current.customer_next_step)
+      if (current.customer_next_step?.status === 'staff_update') {
+        setHandoff(null)
+      }
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
   }
 
   function showError(requestError) {
@@ -236,6 +270,32 @@ function App() {
     }
   }
 
+  async function createConfirmedClaim() {
+    if (!claim || isBusy || nextStep?.status !== 'ready_to_create') return
+    setError('')
+    setStatus('creating-claim')
+    try {
+      if (!pendingClaimCreation.current) {
+        pendingClaimCreation.current = { idempotencyKey: requestId('claim-creation') }
+      }
+      const response = await createExternalClaim({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        idempotencyKey: pendingClaimCreation.current.idempotencyKey,
+      })
+      setClaim((current) => ({
+        ...current,
+        revision: response.revision,
+        external_claim: response.external_claim,
+      }))
+      setNextStep(response.customer_next_step)
+      pendingClaimCreation.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -323,6 +383,37 @@ function App() {
                     <dd>Saved with the details already provided</dd>
                   </div>
                 </dl>
+                <button
+                  className="secondary-button refresh-button"
+                  type="button"
+                  onClick={refreshClaimStatus}
+                  disabled={isBusy}
+                >
+                  {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}
+                </button>
+              </section>
+            )}
+
+            {!handoff && nextStep?.status === 'staff_update' && (
+              <section className="staff-update" role="status" aria-labelledby="staff-update-title">
+                <p className="transfer-label">Northwind update</p>
+                <h2 id="staff-update-title">Your support request has been reviewed</h2>
+                <p>{nextStep.summary}</p>
+              </section>
+            )}
+
+            {claim.external_claim && (
+              <section className="claim-created" role="status" aria-labelledby="claim-created-title">
+                <p className="transfer-label">Claim created</p>
+                <h2 id="claim-created-title">{claim.external_claim.claim_number}</h2>
+                <dl>
+                  <div><dt>Route</dt><dd>{claim.external_claim.route}</dd></div>
+                  <div><dt>Next step</dt><dd>{claim.external_claim.next_step}</dd></div>
+                  <div>
+                    <dt>Expected by</dt>
+                    <dd>{new Date(claim.external_claim.expected_by).toLocaleString()}</dd>
+                  </div>
+                </dl>
               </section>
             )}
 
@@ -361,7 +452,7 @@ function App() {
                     <div className="field-heading">
                       <span>{fieldLabel(fieldCode)}</span>
                       <span className={`field-status status-${field.status}`}>
-                        {field.status === 'confirmed' ? 'Confirmed' : 'Check this'}
+                        {fieldStatusLabel(field.status)}
                       </span>
                     </div>
                     {editingField === fieldCode ? (
@@ -427,6 +518,16 @@ function App() {
               <div className="next-step" role="status">
                 <span>Next</span>
                 <p>{nextStep?.summary}</p>
+                {nextStep?.status === 'ready_to_create' && !claim.external_claim && (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={createConfirmedClaim}
+                    disabled={isBusy}
+                  >
+                    {status === 'creating-claim' ? 'Creating claim...' : 'Create claim'}
+                  </button>
+                )}
               </div>
             )}
           </aside>

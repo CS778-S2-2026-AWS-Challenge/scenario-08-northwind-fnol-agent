@@ -407,6 +407,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         action=AgentAction.CREATE_CLAIM,
         reason_codes=['CLAIM_CREATION_AUTHORISED'],
         customer_reason='A controlled fixture authorised claim creation.',
+        customer_response='The controlled fixture can create the claim.',
         customer_next_step=CustomerNextStep(
             status='authorised',
             summary='The claim can be created.',
@@ -447,6 +448,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         action=AgentAction.PROCEED,
         reason_codes=['ASSESSOR_RULE_AUTHORISED'],
         customer_reason='A controlled fixture authorised assessor routing.',
+        customer_response='The controlled fixture can request assessor routing.',
         customer_next_step=created_claim.customer_next_step,
         authority=AgentAuthority(
             proposed_by='fixture_rule',

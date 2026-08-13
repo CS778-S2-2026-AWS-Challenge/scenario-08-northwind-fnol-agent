@@ -14,13 +14,20 @@ from backend.domain.models import (
     ClaimantMessage,
     CreateMessageRequest,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceState,
+    EvidenceStatus,
     FormChange,
+    FormSource,
     FormStatus,
     HandoffRecord,
     MessageListResponse,
     MessageRecord,
     MessageTurnResponse,
     MessageVisibility,
+    NeededFor,
     PageInfo,
     ProposedFormChange,
     ResponsibleParty,
@@ -178,6 +185,40 @@ def _build_form_changes(
             updated_by=ActorReference(actor_type=ActorType.AGENT, actor_id='controlled_agent'),
         )
     return form_changes
+
+
+def _pending_evidence_for_proposal(
+    claim_id: str,
+    proposal: object,
+    claimant_message: MessageRecord,
+    timestamp: datetime,
+) -> EvidenceRecord | None:
+    required_tools = getattr(proposal, 'required_tools', [])
+    pending = next(
+        (
+            tool
+            for tool in required_tools
+            if tool.get('tool') == 'evidence_registry'
+            and tool.get('operation') == 'record_pending_generation'
+        ),
+        None,
+    )
+    if pending is None:
+        return None
+    return EvidenceRecord(
+        evidence_id=new_id('evd'),
+        claim_id=claim_id,
+        kind=str(pending.get('kind') or 'document'),
+        status=EvidenceStatus.PENDING_GENERATION,
+        file_status=EvidenceFileStatus.NOT_AVAILABLE,
+        source=EvidenceSource.CLAIMANT,
+        related_fields=['authorities.police_report_reference'],
+        needed_for=['later_action'],
+        provenance={'reported_in_message_id': claimant_message.message_id},
+        claimant_note=str(claimant_message.content.get('text') or ''),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
 
 
 def submit_message(
@@ -346,6 +387,23 @@ def submit_message(
     form_changes = _build_form_changes(
         claim.form, proposal.form_changes, claimant_message, timestamp
     )
+    pending_evidence = _pending_evidence_for_proposal(
+        claim_id,
+        proposal,
+        claimant_message,
+        timestamp,
+    )
+    if pending_evidence is not None:
+        form_changes['authorities.police_report_reference'] = StructuredFormField(
+            value=None,
+            source=FormSource.CLAIMANT,
+            source_refs=[claimant_message.message_id, pending_evidence.evidence_id],
+            status=FormStatus.PENDING_GENERATION,
+            needed_for=NeededFor.LATER_ACTION,
+            confidence=1.0,
+            updated_at=timestamp,
+            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
+        )
     if authority.outcome is AuthorityOutcome.BLOCKED:
         form_changes = {}
 
@@ -381,8 +439,24 @@ def submit_message(
     else:
         updated_claim = claim.model_copy(
             update={
-                'claim_state': claim.claim_state.model_copy(update={'next_action': next_action}),
+                'claim_state': claim.claim_state.model_copy(
+                    update={
+                        'next_action': next_action,
+                        **(
+                            {'evidence': EvidenceState.PENDING_GENERATION}
+                            if pending_evidence is not None
+                            else {}
+                        ),
+                    }
+                ),
                 'form': {**claim.form, **form_changes},
+                'evidence_summary': (
+                    claim.evidence_summary.model_copy(
+                        update={'pending': claim.evidence_summary.pending + 1}
+                    )
+                    if pending_evidence is not None
+                    else claim.evidence_summary
+                ),
                 'customer_next_step': effective_next_step,
                 'revision': claim.revision + 1,
                 'updated_at': timestamp,
@@ -401,7 +475,7 @@ def submit_message(
         session_id=session_id,
         actor=ActorType.AGENT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': effective_next_step.summary},
+        content={'type': 'text', 'text': proposal.customer_response},
         in_reply_to=claimant_message.message_id,
         created_at=timestamp,
     )
@@ -413,6 +487,7 @@ def submit_message(
         action=proposal.action,
         reason_codes=proposal.reason_codes,
         customer_reason=proposal.customer_reason,
+        customer_response=proposal.customer_response,
         state_changes=proposal.state_changes,
         proposed_signals=proposal.proposed_signals,
         required_tools=proposal.required_tools,
@@ -447,6 +522,7 @@ def submit_message(
             decision,
             idempotency,
             handoff,
+            pending_evidence,
         )
     except RevisionConflict as conflict:
         raise ApiError(

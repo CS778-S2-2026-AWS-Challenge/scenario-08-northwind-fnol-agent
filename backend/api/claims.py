@@ -3,10 +3,12 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
+from backend.adapters.claims_service import ClaimsServiceAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantSession,
+    ClaimCreationResponse,
     ClaimListResponse,
     CreateClaimRequest,
     CreateClaimResponse,
@@ -22,6 +24,7 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
+from backend.services.claim_creation import create_claim_from_confirmed_report
 from backend.services.claims import (
     confirm_form_fields,
     get_claim,
@@ -42,6 +45,10 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 def agent_for(request: Request) -> AgentTurnProvider:
     return cast(AgentTurnProvider, request.app.state.agent_turn_provider)
+
+
+def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
+    return cast(ClaimsServiceAdapter, request.app.state.claims_service_adapter)
 
 
 @router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -80,6 +87,28 @@ def read_claim(
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
     return get_claim(repository_for(request), principal, claim_id)
+
+
+@router.post(
+    '/{claim_id}/creation',
+    response_model=ClaimCreationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_external_claim(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimCreationResponse:
+    return create_claim_from_confirmed_report(
+        repository_for(request),
+        claims_adapter_for(request),
+        principal,
+        claim_id,
+        idempotency_key,
+        if_match,
+    )
 
 
 @router.post(

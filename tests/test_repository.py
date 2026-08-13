@@ -179,6 +179,7 @@ def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None
         action=AgentAction.CONFIRM,
         reason_codes=['MATERIAL_FACTS_PROPOSED'],
         customer_reason='Please confirm the proposed detail.',
+        customer_response='Please confirm the proposed detail.',
         customer_next_step=claim.customer_next_step,
         authority=AgentAuthority(
             proposed_by='agent',
@@ -291,6 +292,7 @@ def test_fixture_repository_rejects_inconsistent_agent_turn_records() -> None:
         action=AgentAction.CONFIRM,
         reason_codes=['MATERIAL_FACTS_PROPOSED'],
         customer_reason='Please confirm the proposed detail.',
+        customer_response='Please confirm the proposed detail.',
         customer_next_step=claim.customer_next_step,
         authority=AgentAuthority(
             proposed_by='agent',
