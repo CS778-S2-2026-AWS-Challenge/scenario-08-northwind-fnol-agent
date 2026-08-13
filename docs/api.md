@@ -988,6 +988,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` | Accept a handoff |
+| `POST` | `/workbench/claims/{claim_id}/messages` | Send a persisted claimant-visible staff message |
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve` | Resolve a handoff and write back state |
 | `POST` | `/workbench/claims/{claim_id}/updates` | Send a claimant-visible update |
 | `GET` | `/workbench/claims/{claim_id}/events` | Read the claim audit timeline |
@@ -1141,6 +1142,15 @@ Request:
 ### Handoff Accept and Resolve
 
 `POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` accepts the queued handoff for the authenticated staff member or an authorised `assignee_id`.
+
+After a handoff is accepted, both parties may continue using the persisted session message
+history. A claimant message during an open handoff is routed to staff without an automatic Agent
+reply. Prefixing claimant text with `@agent` explicitly requests an Agent turn. Staff messages use
+`POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
+`in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
+
+The prototype clients use these provider-neutral HTTP resources for explicit message refreshes.
+Real-time delivery infrastructure remains replaceable and is not part of the API contract.
 
 Resolve request:
 

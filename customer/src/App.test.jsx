@@ -236,10 +236,11 @@ describe('claimant intake', () => {
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
 
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
+    expect(screen.getByText('Status: Queued')).toBeVisible()
     expect(screen.getByText('Northwind support')).toBeVisible()
     expect(screen.getByText('Saved with the details already provided')).toBeVisible()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
-    expect(screen.getByText(/Normal intake is paused/)).toBeVisible()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
+    expect(screen.getByText(/message will be saved for Northwind support/)).toBeVisible()
     expect(fetch).toHaveBeenNthCalledWith(
       3,
       '/api/v1/claims/clm_test/support-requests',
@@ -295,6 +296,57 @@ describe('claimant intake', () => {
       '/api/v1/claims/clm_test',
       expect.objectContaining({ headers: expect.any(Object) }),
     )
+  })
+
+  it('replaces the handoff card with a system notice when staff support starts', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'queued',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: { ...nextStep, status: 'human_support_queued' },
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        revision: 5,
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'in_progress',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_in_progress',
+          summary: 'A Northwind staff member is now assisting you.',
+          responsible_party: 'northwind',
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() => jsonResponse({ items: [], page: { next_cursor: null } }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+
+    expect(await screen.findByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    expect(screen.queryByText('Human support')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument()
   })
 
   it('labels pending evidence fields without asking the claimant to confirm them', async () => {
@@ -441,6 +493,6 @@ describe('claimant intake', () => {
     expect(await screen.findByText('Normal intake has paused')).toBeVisible()
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)
     expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 })

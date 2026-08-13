@@ -10,6 +10,7 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     ClaimantClaim,
+    ClaimantHandoff,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -40,6 +41,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -66,7 +68,18 @@ def _session_not_found() -> ApiError:
     )
 
 
-def _claimant_claim(claim: WorkingClaim) -> ClaimantClaim:
+def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
+    handoff: ClaimantHandoff | None = None
+    if claim.active_session_id is not None:
+        # Claimant receives only the public lifecycle state, never staff routing data.
+        open_handoffs = [
+            item
+            for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
+            if item.status.value not in {'resolved', 'cancelled'}
+        ]
+        if open_handoffs:
+            active = open_handoffs[-1]
+            handoff = claimant_handoff(active)
     return ClaimantClaim(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -76,6 +89,7 @@ def _claimant_claim(claim: WorkingClaim) -> ClaimantClaim:
         evidence_summary=claim.evidence_summary,
         external_claim=claim.external_claim,
         customer_next_step=claim.customer_next_step,
+        handoff=handoff,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )
@@ -114,7 +128,7 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
 
 
 def start_claim(
-    repository: ClaimRepository,
+    repository: PersistenceRepository,
     principal: Principal,
     payload: CreateClaimRequest,
     idempotency_key: str | None,
@@ -140,7 +154,7 @@ def start_claim(
                 retryable=True,
             )
         return CreateClaimResponse(
-            claim=_claimant_claim(claim),
+            claim=_claimant_claim(repository, claim),
             session=_claimant_session(session, claim.customer_next_step),
         )
 
@@ -184,16 +198,18 @@ def start_claim(
         )
     )
     return CreateClaimResponse(
-        claim=_claimant_claim(claim),
+        claim=_claimant_claim(repository, claim),
         session=_claimant_session(session, next_step),
     )
 
 
-def get_claim(repository: ClaimRepository, principal: Principal, claim_id: str) -> ClaimantClaim:
+def get_claim(
+    repository: PersistenceRepository, principal: Principal, claim_id: str
+) -> ClaimantClaim:
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
-    return _claimant_claim(claim)
+    return _claimant_claim(repository, claim)
 
 
 def list_claims(

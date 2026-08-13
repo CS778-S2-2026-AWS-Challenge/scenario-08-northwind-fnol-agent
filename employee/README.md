@@ -37,8 +37,8 @@ The page is hard-coded for the local prototype staff token.
 
 ## Notes
 
-- The customer communication view is persisted history, not a real-time chat service. A staff
-  update is created only when an accepted handoff is formally resolved.
+- The customer communication view is persisted conversation history. Staff messages can be sent
+  while an accepted handoff remains open; resolving the handoff is a separate lifecycle action.
 - The floating AI assistant remains a local, non-authoritative prototype interaction. It cannot
   change claim state.
 - The page derives internal flags from `signals` and assignment from open `handoffs`.

@@ -370,6 +370,20 @@
   font-weight: 700;
 }
 
+.system-notice {
+  align-self: center;
+  width: fit-content;
+  max-width: min(92%, 560px);
+  margin: 4px auto 16px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #e8eeeb;
+  color: #52635d;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .conversation-panel .report-box {
   width: min(100%, 720px);
   max-width: none;

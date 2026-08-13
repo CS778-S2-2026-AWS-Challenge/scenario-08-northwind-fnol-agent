@@ -5,14 +5,18 @@ from backend.core.errors import ApiError
 from backend.domain.ids import new_id
 from backend.domain.models import (
     AcceptHandoffRequest,
+    ActorType,
     Coverage,
     CreateStaffActionRequest,
+    CreateStaffMessageRequest,
     CustomerNextStep,
     CustomerUpdateRecord,
     FraudSignal,
     HandoffMutationResponse,
     HandoffRecord,
     HandoffStatus,
+    MessageRecord,
+    MessageVisibility,
     ResolveHandoffRequest,
     SignalDecisionRecord,
     SignalDecisionRequest,
@@ -20,6 +24,7 @@ from backend.domain.models import (
     StaffActionMutationResponse,
     StaffActionRecord,
     StaffActionStatus,
+    StaffMessageResponse,
     UpdateStaffActionRequest,
     WorkflowState,
     WorkingClaim,
@@ -152,7 +157,17 @@ def accept_handoff(
             'accepted_at': timestamp,
         }
     )
-    updated = claim.model_copy(update={'revision': claim.revision + 1, 'updated_at': timestamp})
+    updated = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+            'customer_next_step': CustomerNextStep(
+                status='human_support_in_progress',
+                summary='A Northwind staff member is now assisting you.',
+                responsible_party='northwind',
+            ),
+        }
+    )
     response = HandoffMutationResponse(
         handoff=workbench_handoff(accepted),
         revision=updated.revision,
@@ -168,6 +183,75 @@ def accept_handoff(
         response_payload=response.model_dump(mode='json'),
     )
     _save(repository, updated, expected, idempotency, handoff=accepted)
+    return response
+
+
+def send_staff_message(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    payload: CreateStaffMessageRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> StaffMessageResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/messages'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return StaffMessageResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    if claim.revision != expected:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    handoffs = repository.list_handoffs(claim_id, claim.customer_id)
+    active = next(
+        (
+            item
+            for item in reversed(handoffs)
+            if item.status in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}
+        ),
+        None,
+    )
+    if active is None:
+        raise _validation('An accepted handoff is required before sending a staff message.')
+    timestamp = now_utc()
+    message = MessageRecord(
+        message_id=new_id('msg'),
+        claim_id=claim_id,
+        session_id=claim.active_session_id or '',
+        actor=ActorType.STAFF,
+        visibility=MessageVisibility.SHARED,
+        content=payload.content.model_dump(mode='json'),
+        in_reply_to=payload.in_reply_to,
+        created_at=timestamp,
+    )
+    updated_handoff = active.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+    updated = claim.model_copy(update={'revision': claim.revision + 1, 'updated_at': timestamp})
+    response = StaffMessageResponse(
+        claim_id=claim_id,
+        session_id=message.session_id,
+        claim_revision=updated.revision,
+        message=message,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=message.session_id,
+        message_id=message.message_id,
+        handoff_id=active.handoff_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+    _save(repository, updated, expected, idempotency, handoff=updated_handoff, message=message)
     return response
 
 
