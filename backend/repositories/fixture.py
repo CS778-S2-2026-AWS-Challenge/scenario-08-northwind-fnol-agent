@@ -119,6 +119,13 @@ class FixtureRepository(PersistenceRepository):
         ]
         return sorted(claims, key=lambda claim: claim.created_at)
 
+    def list_claims_internal(self) -> list[WorkingClaim]:
+        return sorted(
+            (deepcopy(claim) for claim in self._claims.values()),
+            key=lambda claim: claim.updated_at,
+            reverse=True,
+        )
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         if (
             self.get_claim(message.claim_id, customer_id) is None

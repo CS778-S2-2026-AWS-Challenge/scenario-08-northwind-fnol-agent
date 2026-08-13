@@ -182,6 +182,37 @@ def test_staff_reads_complete_claim_detail_from_shared_state(
     assert detail['customer_updates'] == []
 
 
+def test_staff_lists_claims_for_workbench_queue(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
+
+    response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['page'] == {'next_cursor': None}
+    item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
+    assert item['customer_reference'] == 'cus_demo'
+    assert item['queue'] == 'professional_review'
+    assert item['priority'] == 'standard'
+    assert item['next_action'] == 'CONFIRM'
+    assert item['evidence_summary']['pending'] == 1
+
+
+def test_workbench_claim_list_rejects_claimant_credentials(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = client.get('/api/v1/workbench/claims', headers=auth_headers)
+
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
 def test_workbench_claim_detail_returns_documented_not_found(
     client: TestClient,
     staff_auth_headers: dict[str, str],

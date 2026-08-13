@@ -420,10 +420,21 @@
           byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
           byId('detailCustomerReference').textContent = detail.customer_reference;
           byId('detailState').textContent = detail.claim_state.workflow_state.replace('_', ' ');
-          byId('detailAssigned').textContent = detail.assigned_to || 'Unassigned';
-          byId('detailFlags').textContent = detail.internal_flags.length ? detail.internal_flags.join(', ') : 'None';
+          const openHandoffs = (detail.handoffs || []).filter(item => !['resolved', 'cancelled'].includes(item.status));
+          const staffActions = detail.staff_actions || [];
+          const assignedTo = openHandoffs.find(item => item.assigned_to)?.assigned_to
+            || staffActions.find(item => item.assigned_to)?.assigned_to;
+          const signalFlags = (detail.signals || []).map(item => item.code || item.signal_id).filter(Boolean);
+          byId('detailAssigned').textContent = assignedTo || 'Unassigned';
+          byId('detailFlags').textContent = signalFlags.length ? signalFlags.join(', ') : 'None';
           byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
-          byId('detailInternalNotes').textContent = detail.internal_notes || 'No internal notes available.';
+          const internalNotes = (detail.messages || [])
+            .filter(item => item.visibility === 'internal_only' && item.content?.text)
+            .map(item => item.content.text);
+          const staffNotes = staffActions
+            .map(item => item.requested_outcome || item.result?.summary)
+            .filter(Boolean);
+          byId('detailInternalNotes').textContent = [...internalNotes, ...staffNotes].join('\n') || 'No internal notes available.';
           byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
           byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
           byId('detailInternal').style.display = 'block';

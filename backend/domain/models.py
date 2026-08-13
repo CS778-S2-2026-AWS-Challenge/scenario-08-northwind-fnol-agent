@@ -586,6 +586,33 @@ class WorkbenchClaimDetail(ContractModel):
     updated_at: datetime
 
 
+class PageInfo(ContractModel):
+    next_cursor: str | None = None
+
+
+class WorkbenchClaimListItem(ContractModel):
+    """Compact staff projection used to populate the workbench queue."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    incident_type: str | None = None
+    workflow_state: WorkflowState
+    queue: str
+    priority: HandoffPriority
+    next_action: AgentAction
+    evidence_summary: EvidenceSummary
+    open_handoff_count: int = Field(ge=0)
+    assignee_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkbenchClaimListResponse(ContractModel):
+    items: list[WorkbenchClaimListItem]
+    page: PageInfo
+
+
 class PendingEvidenceReference(ContractModel):
     evidence_id: str = Field(min_length=1, max_length=100)
     kind: str = Field(min_length=1, max_length=100)
@@ -777,10 +804,6 @@ class ClaimListItem(ContractModel):
     created_at: datetime
     updated_at: datetime
     can_resume: bool
-
-
-class PageInfo(ContractModel):
-    next_cursor: str | None = None
 
 
 class ClaimListResponse(ContractModel):

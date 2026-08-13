@@ -954,6 +954,12 @@ Supported filters:
 
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, next action, evidence summary, open handoff summary, assignee, service timing, and update time. It is a projection of shared claim state, not a separately editable board record.
 
+The response is shaped as `{ "items": [...], "page": { "next_cursor": null } }`. Each item
+contains `claim_id`, `revision`, `customer_reference`, `incident_type`, `workflow_state`,
+`queue`, `priority`, `next_action`, `evidence_summary`, `open_handoff_count`, `assignee_id`,
+`created_at`, and `updated_at`. Queue assignment, priority, and assignee are derived from
+the shared claim state and active persisted handoffs.
+
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
 Returns the authorised internal projection assembled from the same repository records used by

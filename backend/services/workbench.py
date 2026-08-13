@@ -1,12 +1,17 @@
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import (
+    HandoffPriority,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
     WorkbenchClaimDetail,
+    WorkbenchClaimListItem,
+    WorkbenchClaimListResponse,
     WorkbenchHandoff,
     WorkbenchSession,
+    WorkflowState,
+    WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
 
@@ -84,6 +89,68 @@ def _claim_messages(
 
     messages.sort(key=lambda item: (item.created_at, item.message_id))
     return messages
+
+
+def _queue_for_claim(claim: WorkingClaim) -> str:
+    route = claim.route
+    if route:
+        return route
+    workflow_state = claim.claim_state.workflow_state
+    return {
+        WorkflowState.COLLECTING: 'new_untriaged',
+        WorkflowState.READY_FOR_NEXT: 'ready_to_progress',
+        WorkflowState.AWAITING_EVIDENCE: 'awaiting_evidence',
+        WorkflowState.PROFESSIONAL_REVIEW: 'professional_review',
+        WorkflowState.CREATED: 'created_routed',
+    }[workflow_state]
+
+
+def list_workbench_claims(
+    repository: PersistenceRepository,
+    principal: Principal,
+    view: str | None = None,
+) -> WorkbenchClaimListResponse:
+    if principal.actor_type != 'staff':
+        raise _staff_access_required()
+
+    items: list[WorkbenchClaimListItem] = []
+    for claim in repository.list_claims_internal():
+        handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
+        open_handoffs = [
+            handoff
+            for handoff in handoffs
+            if handoff.status.value not in {'resolved', 'cancelled'}
+        ]
+        queue = _queue_for_claim(claim)
+        priority = max(
+            (handoff.priority for handoff in open_handoffs),
+            default=HandoffPriority.STANDARD,
+            key=lambda value: list(HandoffPriority).index(value),
+        )
+        assignee_id = next(
+            (handoff.assigned_to for handoff in open_handoffs if handoff.assigned_to),
+            None,
+        )
+        if view and view != 'all' and view != queue:
+            continue
+        items.append(
+            WorkbenchClaimListItem(
+                claim_id=claim.claim_id,
+                revision=claim.revision,
+                customer_reference=claim.customer_id,
+                incident_type=claim.incident_type,
+                workflow_state=claim.claim_state.workflow_state,
+                queue=queue,
+                priority=priority,
+                next_action=claim.claim_state.next_action,
+                evidence_summary=claim.evidence_summary,
+                open_handoff_count=len(open_handoffs),
+                assignee_id=assignee_id,
+                created_at=claim.created_at,
+                updated_at=claim.updated_at,
+            )
+        )
+    return WorkbenchClaimListResponse(items=items, page={'next_cursor': None})
 
 
 def get_workbench_claim_detail(
