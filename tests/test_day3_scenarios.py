@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from backend.repositories.scenario_loader import load_scenario, load_scenarios, 
 from scripts.run_scenarios import run_scenarios
 
 SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
+REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
 def scenario(name: str) -> tuple[FixtureRepository, str, str]:
@@ -61,6 +64,21 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
     ]
     assert all(result.sessions == 1 for result in results)
     assert next(result for result in results if result.scenario_id == 'AT-08-resume').evidence == 1
+
+
+def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
+    completed = subprocess.run(
+        [sys.executable, 'scripts/run_scenarios.py'],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.count('PASS AT-') == 4
+    assert 'PASS AT-06-pending-evidence' in completed.stdout
+    assert 'PASS AT-08-resume' in completed.stdout
 
 
 def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() -> None:
@@ -127,6 +145,36 @@ def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> Non
     assert messages.status_code == 200
     assert len(messages.json()['items']) == 2
     assert all(item['actor'] != 'system' for item in messages.json()['items'])
+
+
+def test_fixture_public_api_never_exposes_logical_storage_keys() -> None:
+    repository, claim_id, session_id = scenario('AT-08-resume')
+    auth = {'Authorization': 'Bearer synthetic-claimant'}
+
+    with client_for(repository) as client:
+        responses = [
+            client.get(f'/api/v1/claims/{claim_id}', headers=auth),
+            client.get(f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=auth),
+            client.get(f'/api/v1/claims/{claim_id}/evidence', headers=auth),
+            client.get(
+                f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+                headers=auth,
+            ),
+        ]
+
+    assert all(response.status_code == 200 for response in responses)
+    public_payload = json.dumps([response.json() for response in responses])
+    for private_token in (
+        'CLAIM#',
+        'SESSION#',
+        'MESSAGE#',
+        'EVIDENCE#',
+        'internal_storage_state',
+        'partition',
+        'sort',
+    ):
+        assert private_token not in public_payload
+    assert 'Storage object must not be requested' not in public_payload
 
 
 def test_claimant_and_staff_projections_share_state_without_leaking_internal_signal() -> None:

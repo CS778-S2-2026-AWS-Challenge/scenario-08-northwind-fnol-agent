@@ -86,6 +86,17 @@ Run the complete repository quality gate before requesting review:
 
 After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run. The command checks backend formatting, linting, types, tests and coverage, then checks and builds the claimant client.
 
+Run the synthetic integration fixtures from the repository root with:
+
+```powershell
+python scripts/run_scenarios.py
+```
+
+Every invocation creates a fresh in-memory repository, so rerunning the command
+is the clean fixture reset. The concrete API and logical DynamoDB mapping is
+[documented here](docs/api-dynamodb-fixture-examples.md), and the latest Day 4
+integration record is [documented here](docs/day4-bdfa-integration-results.md).
+
 ## Contract Changes
 
 `docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.

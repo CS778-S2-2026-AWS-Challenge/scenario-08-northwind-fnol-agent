@@ -1,10 +1,15 @@
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.repositories.fixture import FixtureRepository
-from backend.repositories.scenario_loader import load_scenarios, seed_scenario
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'tests' / 'fixtures' / 'scenarios'
+from backend.repositories.fixture import FixtureRepository  # noqa: E402
+from backend.repositories.scenario_loader import load_scenarios, seed_scenario  # noqa: E402
+
+SCENARIO_DIRECTORY = REPOSITORY_ROOT / 'tests' / 'fixtures' / 'scenarios'
 
 
 @dataclass(frozen=True, slots=True)
