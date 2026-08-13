@@ -49,6 +49,9 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 - Sprint 1 MAY use signed synthetic identities, but the server MUST still enforce role and claim ownership. A client-supplied `customer_id`, role, or staff identity MUST NOT grant access.
 - Claimant access MUST be restricted to claims linked to the authenticated claimant.
 - Internal routes MUST reject claimant credentials.
+- In the Sprint 1 fixture environment, internal integration routes use a separate
+  `NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN`. This synthetic token is not a production
+  identity design and is disabled outside development and test environments.
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
 Prototype scopes:
@@ -801,6 +804,10 @@ All fields must exist and be confirmable. Response `200` returns the new claim r
 
 Returns claimant-visible evidence metadata, processing state, purpose, upload result, and plain-language next step. It never returns internal-only extraction notes or other claims' evidence.
 
+The response contains `claim_id`, current `revision`, `items`, and
+`customer_next_step`. Evidence items deliberately omit storage keys, upload
+checksums, extraction state, and internal provenance.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
@@ -817,7 +824,11 @@ Request:
 }
 ```
 
-Response `201` returns the evidence resource, new claim revision, and customer next step. A `pending_generation` item MUST NOT block an action that does not require it.
+This request requires `Idempotency-Key` and `If-Match`. Response `201` returns
+the evidence resource, new claim revision, and customer next step. A
+`pending_generation` item MUST NOT block an action that does not require it.
+Evidence with a received file must use the upload flow rather than being
+registered directly as `received`.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/uploads`
 
@@ -839,6 +850,7 @@ Response `201`:
 ```json
 {
   "evidence_id": "evd_01J4Y7V5QJ",
+  "revision": 8,
   "upload": {
     "method": "PUT",
     "url": "https://example.invalid/signed-upload",
@@ -850,11 +862,22 @@ Response `201`:
   "constraints": {
     "max_size_bytes": 10485760,
     "allowed_media_types": ["image/jpeg", "image/png", "application/pdf"]
+  },
+  "customer_next_step": {
+    "status": "add_evidence",
+    "summary": "Upload the requested evidence when it is available.",
+    "responsible_party": "claimant",
+    "expected_by": null,
+    "can_resume": true,
+    "required_items": []
   }
 }
 ```
 
-The URL is illustrative and is never stored in fixtures. The adapter MAY use local storage in Sprint 1 and object storage later without changing the client contract.
+This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative
+and is never stored in fixtures or claim records. The adapter MAY use local
+storage in Sprint 1 and object storage later without changing the client
+contract.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/complete`
 
@@ -868,7 +891,14 @@ Request:
 }
 ```
 
-Response is `200` when processing is complete or `202` when processing continues. It returns evidence state, new claim revision when state changed, and a polling or status URL. The server MUST validate media type, size, ownership, and stored object identity before accepting the item.
+This request requires `Idempotency-Key` and `If-Match`. Response is `200` when
+processing is complete or `202` when processing continues. It returns the
+claimant-safe evidence resource, new claim revision, `status_url`, and the
+current customer next step. The server MUST validate media type, size,
+ownership, and stored object identity before accepting the item. Image-derived
+fields remain proposed until a claimant or authorised staff member confirms
+them; completion never silently writes extracted values into the confirmed
+form.
 
 ### `POST /api/v1/claims/{claim_id}/support-requests`
 
@@ -884,7 +914,7 @@ Request:
 
 `support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection and next step.
 
-The first human-request policy remains a controlled prototype rule: the system may transfer immediately or offer one brief, transparent choice to finish the current step. A repeated request, distress, urgent condition, or accessibility need MUST transfer immediately. The server records which rule was applied.
+The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
 ### `GET /api/v1/claims/{claim_id}/updates`
 
@@ -926,26 +956,52 @@ Each item includes claim ID, safe display reference, state dimensions, priority,
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
-Returns the authorised internal projection:
+Returns the authorised internal projection assembled from the same repository records used by
+claimant routes:
 
 ```json
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
   "customer_reference": "customer-1042",
+  "channel": "web_agent",
+  "locale": "en-NZ",
+  "incident_type": "motor",
   "claim_state": {},
   "form": {},
+  "route": "professional_review",
+  "active_session_id": "ses_01J4Y7RPN8",
+  "evidence_summary": {},
   "evidence": [],
+  "sessions": [],
+  "messages": [],
   "decisions": [],
   "signals": [],
   "handoffs": [],
   "staff_actions": [],
   "customer_updates": [],
   "external_claim": null,
+  "assessor_routing": null,
+  "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
+and context revisions. `messages` includes the complete persisted communication history,
+including internal-only staff or system records. `decisions` includes internal authority,
+tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
+workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
+includes routing fields plus the complete transfer packet. Claimant routes return only the
+separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
+action, applied rule, assignment, source message, or packet. `external_claim` and
+`assessor_routing` use the shared typed creation and routing results, including their status,
+next step, and expected timing. Internal fields are never added to claimant projections unless
+their claimant-safe contract explicitly includes them.
+
+The current repository has no separate persisted staff-action or customer-update records. Those
+arrays therefore remain empty rather than synthesising a second lifecycle or manual status.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -1256,6 +1312,10 @@ Response `201` or `200` for an idempotent replay:
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
 
+The request and response above are the provider-neutral boundary. AWS table names,
+partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
+remain inside a future adapter and are rejected if supplied as request fields.
+
 ### `POST /internal/v1/assessors/route`
 
 Request requires an authorised rule or staff decision:
@@ -1273,6 +1333,24 @@ Request requires an authorised rule or staff decision:
 ```
 
 Response returns `routing_status`, assessor or queue reference when assigned, claimant-visible next step, expected timing when known, and limitations. Assessor routing MUST NOT be triggered solely by `severity`.
+
+Response `201`, or `200` for an idempotent replay:
+
+```json
+{
+  "routing_status": "assigned",
+  "assessor_reference": "asr_fixture_01",
+  "queue_reference": "QUE-AUC-001",
+  "next_step": "An assessor will review the confirmed claim information.",
+  "expected_by": "2026-08-12T05:00:00Z",
+  "limitations": [
+    "Synthetic fixture routing; no production assessor was contacted."
+  ]
+}
+```
+
+The authorisation reference must resolve to an authorised decision containing
+`ASSESSOR_RULE_AUTHORISED`. A severity value by itself is not routing authority.
 
 ## Reason Codes
 

@@ -1,43 +1,238 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import {
+  ApiRequestError,
+  confirmClaimFields,
+  createClaim,
+  getClaim,
+  requestId,
+  requestHumanSupport,
+  submitClaimMessage,
+  updateClaimField,
+} from './api.js'
 import './App.css'
 
-function App() {
-  const [message, setMessage] = useState('')
-  const [reply, setReply] = useState('')
-  const [status, setStatus] = useState('idle')
+const FIELD_LABELS = {
+  'incident.description': 'What happened',
+  'incident.location': 'Incident location',
+  'loss.description': 'Damage or loss',
+}
 
-  const isSending = status === 'sending'
+const INPUT_LABELS = {
+  describe_incident: 'Incident description',
+  provide_incident_location: 'Incident location',
+  describe_loss: 'Damage or loss',
+}
+
+function fieldLabel(fieldCode) {
+  return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
+}
+
+function messageText(message) {
+  return message?.content?.type === 'text' ? message.content.text : ''
+}
+
+function mergeFields(current, changes) {
+  return changes.reduce(
+    (fields, change) => ({ ...fields, [change.field_code]: change.field }),
+    current,
+  )
+}
+
+function App() {
+  const [draft, setDraft] = useState('')
+  const [claim, setClaim] = useState(null)
+  const [sessionId, setSessionId] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [form, setForm] = useState({})
+  const [nextStep, setNextStep] = useState(null)
+  const [status, setStatus] = useState('idle')
+  const [error, setError] = useState('')
+  const [editingField, setEditingField] = useState(null)
+  const [editValue, setEditValue] = useState('')
+  const [handoff, setHandoff] = useState(null)
+  const pendingSubmission = useRef(null)
+  const pendingConfirmation = useRef(null)
+  const pendingSupportRequest = useRef(null)
+
+  const isBusy = ['starting', 'sending', 'confirming', 'saving', 'requesting-support'].includes(status)
+  const proposedFields = useMemo(
+    () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
+    [form],
+  )
+  const confirmedFields = useMemo(
+    () => Object.entries(form).filter(([, field]) => field.status === 'confirmed'),
+    [form],
+  )
+  const hasStarted = claim !== null
+  const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
+
+  async function refreshAfterConflict() {
+    if (!claim) return
+    const current = await getClaim(claim.claim_id)
+    setClaim(current)
+    setForm(current.form)
+    setNextStep(current.customer_next_step)
+  }
+
+  function showError(requestError) {
+    if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
+      setError('Your report changed while this page was open. We refreshed it; review the latest details and try again.')
+      refreshAfterConflict().catch(() => {})
+    } else {
+      setError(requestError.message || 'We could not complete that request. Please try again.')
+    }
+    setStatus('error')
+  }
 
   async function sendMessage(event) {
     event.preventDefault()
+    const text = draft.trim()
+    if (!text || isBusy || proposedFields.length > 0) return
 
-    const trimmedMessage = message.trim()
-    if (!trimmedMessage || isSending) return
-
-    setStatus('sending')
-    setReply('Sending your description...')
-
+    setError('')
+    setStatus(hasStarted ? 'sending' : 'starting')
     try {
-      const response = await fetch('/api/claims/message', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: trimmedMessage,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
+      if (pendingSubmission.current?.text !== text) {
+        pendingSubmission.current = {
+          text,
+          claimKey: requestId('claim'),
+          turnKey: requestId('turn'),
+          clientMessageId: requestId('message'),
+        }
+      }
+      const operation = pendingSubmission.current
+      let activeClaim = claim
+      let activeSessionId = sessionId
+      if (!activeClaim) {
+        const created = await createClaim({ idempotencyKey: operation.claimKey })
+        activeClaim = created.claim
+        activeSessionId = created.session.session_id
+        setClaim(created.claim)
+        setSessionId(activeSessionId)
+        setForm(created.claim.form)
+        setNextStep(created.claim.customer_next_step)
       }
 
-      const data = await response.json()
-      setReply(data.reply || 'Your description was received.')
-      setStatus('success')
-    } catch (error) {
-      setReply(`We could not reach the claim service. ${error.message}`)
-      setStatus('error')
+      const turn = await submitClaimMessage({
+        claimId: activeClaim.claim_id,
+        sessionId: activeSessionId,
+        revision: activeClaim.revision,
+        text,
+        idempotencyKey: operation.turnKey,
+        clientMessageId: operation.clientMessageId,
+      })
+      setMessages((current) => [...current, turn.claimant_message, turn.agent_message])
+      setForm((current) => mergeFields(current, turn.form_changes))
+      setClaim((current) => ({ ...current, revision: turn.claim_revision }))
+      setNextStep(turn.decision.customer_next_step)
+      setHandoff(turn.handoff)
+      setDraft('')
+      pendingSubmission.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
+  async function confirmProposedFields() {
+    if (!claim || proposedFields.length === 0 || isBusy) return
+    setError('')
+    setStatus('confirming')
+    try {
+      const fieldCodes = proposedFields.map(([fieldCode]) => fieldCode)
+      const fingerprint = `${claim.revision}:${fieldCodes.join(',')}`
+      if (pendingConfirmation.current?.fingerprint !== fingerprint) {
+        pendingConfirmation.current = {
+          fingerprint,
+          idempotencyKey: requestId('confirmation'),
+        }
+      }
+      const response = await confirmClaimFields({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        fieldCodes,
+        idempotencyKey: pendingConfirmation.current.idempotencyKey,
+      })
+      setForm((current) => ({ ...current, ...response.confirmed_fields }))
+      setClaim((current) => ({ ...current, revision: response.revision }))
+      setNextStep(response.customer_next_step)
+      pendingConfirmation.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
+  function beginEdit(fieldCode, value) {
+    setEditingField(fieldCode)
+    setEditValue(String(value ?? ''))
+    setError('')
+  }
+
+  async function saveFieldCorrection(fieldCode, field) {
+    const value = editValue.trim()
+    if (!claim || !value || isBusy) return
+    if (value === String(field.value)) {
+      setEditingField(null)
+      return
+    }
+
+    setError('')
+    setStatus('saving')
+    try {
+      const update = await updateClaimField({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        fieldCode,
+        value,
+        status: field.status === 'proposed' ? 'proposed' : 'confirmed',
+        reason: 'The claimant corrected this detail in the review form.',
+      })
+      let revision = update.revision
+      let updatedForm = { ...form, ...update.updated_fields }
+      let updatedNextStep = update.customer_next_step
+
+      if (field.status === 'proposed') {
+        const confirmation = await confirmClaimFields({
+          claimId: claim.claim_id,
+          revision,
+          fieldCodes: [fieldCode],
+        })
+        revision = confirmation.revision
+        updatedForm = { ...updatedForm, ...confirmation.confirmed_fields }
+        updatedNextStep = confirmation.customer_next_step
+      }
+
+      setForm(updatedForm)
+      setClaim((current) => ({ ...current, revision }))
+      setNextStep(updatedNextStep)
+      setEditingField(null)
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
+  async function requestSupport() {
+    if (!claim || isBusy || handoff) return
+    setError('')
+    setStatus('requesting-support')
+    try {
+      if (!pendingSupportRequest.current) {
+        pendingSupportRequest.current = { idempotencyKey: requestId('support') }
+      }
+      const response = await requestHumanSupport({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        idempotencyKey: pendingSupportRequest.current.idempotencyKey,
+      })
+      setClaim((current) => ({ ...current, revision: response.revision }))
+      setNextStep(response.customer_next_step)
+      setHandoff(response.handoff)
+      pendingSupportRequest.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
     }
   }
 
@@ -48,66 +243,255 @@ function App() {
           <span className="brand-mark">N</span>
           <span>Northwind</span>
         </a>
+        {hasStarted && (
+          <div className="header-actions">
+            <span className="draft-label">Draft report</span>
+            <button
+              className="support-button"
+              type="button"
+              onClick={requestSupport}
+              disabled={isBusy || Boolean(handoff)}
+            >
+              {status === 'requesting-support' ? 'Requesting support...' : 'Request human support'}
+            </button>
+          </div>
+        )}
       </header>
 
-      <main className="entry-page">
-        <section className="entry-main">
-          <div className="entry-content">
-            <p className="eyebrow">Start a new claim</p>
-            <h1>Tell us what happened in your own words</h1>
-            <p className="entry-intro">
-              You do not need to use insurance terms. Start with the details you
-              know now.
-            </p>
-
-            <form className="report-box" onSubmit={sendMessage}>
-              <label htmlFor="incident-input">Incident description</label>
-              <textarea
-                id="incident-input"
-                className="report-text"
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                placeholder="For example: This morning, another vehicle hit the rear bumper of my car in a car park..."
-                rows="5"
+      {!hasStarted ? (
+        <main className="entry-page">
+          <section className="entry-main">
+            <div className="entry-content">
+              <p className="eyebrow">Start a new claim</p>
+              <h1>Tell us what happened in your own words</h1>
+              <p className="entry-intro">
+                You do not need to use insurance terms. Start with the details you know now.
+              </p>
+              <MessageComposer
+                draft={draft}
+                setDraft={setDraft}
+                onSubmit={sendMessage}
+                inputLabel="Incident description"
+                busy={isBusy}
+                buttonLabel={status === 'starting' ? 'Starting report...' : 'Continue claim'}
+                error={error}
               />
+            </div>
+          </section>
+          <HelpfulDetails />
+        </main>
+      ) : (
+        <main className="intake-page">
+          <section className="conversation-panel" aria-labelledby="conversation-title">
+            <div className="conversation-heading">
+              <p className="eyebrow">Your report</p>
+              <h1 id="conversation-title">Let&apos;s build the details together</h1>
+              <p>{nextStep?.summary}</p>
+            </div>
 
-              {status !== 'idle' && (
-                <div
-                  className={`backend-status ${status === 'error' ? 'is-error' : ''}`}
-                  role="status"
-                  aria-live="polite"
-                >
-                  <span className="status-dot" />
-                  <span>{reply}</span>
-                </div>
-              )}
+            <div className="message-list" aria-live="polite">
+              {messages.map((message) => (
+                <article className={`message message-${message.actor}`} key={message.message_id}>
+                  <p className="message-author">{message.actor === 'claimant' ? 'You' : 'Northwind'}</p>
+                  <p>{messageText(message)}</p>
+                </article>
+              ))}
+            </div>
 
-              <div className="report-actions">
+            {handoff && (
+              <section
+                className={`transfer-state ${handoff.priority === 'urgent' ? 'is-urgent' : ''}`}
+                aria-live="assertive"
+                aria-labelledby="transfer-title"
+              >
+                <p className="transfer-label">
+                  {handoff.priority === 'urgent' ? 'Urgent support' : 'Human support'}
+                </p>
+                <h2 id="transfer-title">
+                  {handoff.priority === 'urgent'
+                    ? 'Normal intake has paused'
+                    : 'Your support request is queued'}
+                </h2>
+                <p>{handoff.summary}</p>
+                <dl>
+                  <div>
+                    <dt>Next owner</dt>
+                    <dd>Northwind support</dd>
+                  </div>
+                  <div>
+                    <dt>Your report</dt>
+                    <dd>Saved with the details already provided</dd>
+                  </div>
+                </dl>
+              </section>
+            )}
+
+            <MessageComposer
+              draft={draft}
+              setDraft={setDraft}
+              onSubmit={sendMessage}
+              inputLabel={inputLabel}
+              busy={isBusy}
+              disabled={proposedFields.length > 0 || Boolean(handoff)}
+              disabledNote={
+                handoff
+                  ? 'Normal intake is paused while Northwind support takes ownership.'
+                  : 'Confirm or correct the details before continuing.'
+              }
+              buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}
+              error={error}
+            />
+          </section>
+
+          <aside className="claim-panel" aria-labelledby="claim-details-title">
+            <div className="claim-panel-heading">
+              <div>
+                <p className="eyebrow">Structured report</p>
+                <h2 id="claim-details-title">Claim details</h2>
+              </div>
+              <span className="revision-label">Revision {claim.revision}</span>
+            </div>
+
+            {Object.keys(form).length === 0 ? (
+              <p className="empty-details">Details from your conversation will appear here.</p>
+            ) : (
+              <div className="field-list">
+                {Object.entries(form).map(([fieldCode, field]) => (
+                  <div className="claim-field" key={fieldCode}>
+                    <div className="field-heading">
+                      <span>{fieldLabel(fieldCode)}</span>
+                      <span className={`field-status status-${field.status}`}>
+                        {field.status === 'confirmed' ? 'Confirmed' : 'Check this'}
+                      </span>
+                    </div>
+                    {editingField === fieldCode ? (
+                      <div className="field-editor">
+                        <textarea
+                          aria-label={`Correct ${fieldLabel(fieldCode)}`}
+                          value={editValue}
+                          onChange={(event) => setEditValue(event.target.value)}
+                          rows="3"
+                        />
+                        <div className="field-actions">
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => setEditingField(null)}
+                            disabled={isBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="primary-button compact-button"
+                            type="button"
+                            onClick={() => saveFieldCorrection(fieldCode, field)}
+                            disabled={!editValue.trim() || isBusy}
+                          >
+                            {status === 'saving' ? 'Saving...' : 'Save correction'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="field-value">{String(field.value)}</p>
+                        <button
+                          className="text-button"
+                          type="button"
+                          onClick={() => beginEdit(fieldCode, field.value)}
+                          disabled={isBusy}
+                        >
+                          Edit
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {proposedFields.length > 0 && editingField === null && (
+              <div className="confirmation-bar">
+                <p>Check the highlighted details before continuing.</p>
                 <button
                   className="primary-button"
-                  type="submit"
-                  disabled={!message.trim() || isSending}
+                  type="button"
+                  onClick={confirmProposedFields}
+                  disabled={isBusy}
                 >
-                  {isSending ? 'Sending...' : 'Continue claim'}
+                  {status === 'confirming' ? 'Confirming...' : 'Confirm details'}
                 </button>
               </div>
-            </form>
-          </div>
-        </section>
+            )}
 
-        <aside className="entry-side" aria-labelledby="helpful-details-title">
-          <div className="side-content">
-            <p className="side-label">When available</p>
-            <h2 id="helpful-details-title">Helpful details to include</h2>
-            <ul className="detail-list">
-              <li>When and where the incident happened</li>
-              <li>Who or what was involved</li>
-              <li>Any damage, injuries, or immediate safety concerns</li>
-            </ul>
-          </div>
-        </aside>
-      </main>
+            {confirmedFields.length > 0 && proposedFields.length === 0 && (
+              <div className="next-step" role="status">
+                <span>Next</span>
+                <p>{nextStep?.summary}</p>
+              </div>
+            )}
+          </aside>
+        </main>
+      )}
     </div>
+  )
+}
+
+function MessageComposer({
+  draft,
+  setDraft,
+  onSubmit,
+  inputLabel,
+  busy,
+  disabled = false,
+  disabledNote = 'Confirm or correct the details before continuing.',
+  buttonLabel,
+  error,
+}) {
+  return (
+    <form className="report-box" onSubmit={onSubmit}>
+      <label htmlFor="incident-input">{inputLabel}</label>
+      <textarea
+        id="incident-input"
+        className="report-text"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="Write the details you know..."
+        rows="4"
+        disabled={busy || disabled}
+      />
+      {disabled && <p className="composer-note">{disabledNote}</p>}
+      {error && (
+        <div className="backend-status is-error" role="alert">
+          <span className="status-dot" />
+          <span>{error}</span>
+        </div>
+      )}
+      <div className="report-actions">
+        <button
+          className="primary-button"
+          type="submit"
+          disabled={!draft.trim() || busy || disabled}
+        >
+          {buttonLabel}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function HelpfulDetails() {
+  return (
+    <aside className="entry-side" aria-labelledby="helpful-details-title">
+      <div className="side-content">
+        <p className="side-label">When available</p>
+        <h2 id="helpful-details-title">Helpful details to include</h2>
+        <ul className="detail-list">
+          <li>When and where the incident happened</li>
+          <li>Who or what was involved</li>
+          <li>Any damage, injuries, or immediate safety concerns</li>
+        </ul>
+      </div>
+    </aside>
   )
 }
 

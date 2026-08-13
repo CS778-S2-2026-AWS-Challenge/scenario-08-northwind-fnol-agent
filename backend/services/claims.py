@@ -4,6 +4,7 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
+from backend.domain.intake import next_controlled_intake_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -16,7 +17,6 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
-    EvidenceSummary,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -28,6 +28,7 @@ from backend.domain.models import (
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
+    SessionStatus,
     StartSessionRequest,
     StructuredFormField,
     WorkflowState,
@@ -72,7 +73,7 @@ def _claimant_claim(claim: WorkingClaim) -> ClaimantClaim:
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         form=claim.form,
-        evidence_summary=EvidenceSummary(),
+        evidence_summary=claim.evidence_summary,
         external_claim=claim.external_claim,
         customer_next_step=claim.customer_next_step,
         created_at=claim.created_at,
@@ -265,15 +266,39 @@ def start_session(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
+
     active_session = repository.get_active_session(claim_id, principal.subject)
-    if active_session is not None:
+    if active_session is not None and active_session.status is SessionStatus.ACTIVE:
         session = active_session
     else:
+        previous_sessions = repository.list_sessions_for_claim(
+            claim_id,
+            principal.subject,
+        )
+        resume_source = active_session
+        if resume_source is None and previous_sessions:
+            resume_source = max(
+                previous_sessions,
+                key=lambda item: (
+                    item.last_active_at,
+                    item.started_at,
+                    item.session_id,
+                ),
+            )
+
         timestamp = now_utc()
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
             customer_id=principal.subject,
+            summary=resume_source.summary if resume_source is not None else None,
+            unresolved_questions=(
+                list(resume_source.unresolved_questions) if resume_source is not None else []
+            ),
+            pending_items=list(resume_source.pending_items) if resume_source is not None else [],
+            prior_commitments=(
+                list(resume_source.prior_commitments) if resume_source is not None else []
+            ),
             context_revision=claim.revision,
             started_at=timestamp,
             last_active_at=timestamp,
@@ -477,11 +502,8 @@ def confirm_form_fields(
         )
         for field_code in payload.field_codes
     }
-    next_step = CustomerNextStep(
-        status='details_confirmed',
-        summary='The selected details are confirmed. Continue with the next requested information.',
-        responsible_party=ResponsibleParty.CLAIMANT,
-    )
+    projected_claim = claim.model_copy(update={'form': {**claim.form, **confirmed_fields}})
+    next_step = next_controlled_intake_step(projected_claim)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},

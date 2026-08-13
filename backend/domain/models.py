@@ -152,6 +152,54 @@ class ResponsibleParty(str, Enum):
     EXTERNAL_PARTY = 'external_party'
 
 
+class ClaimCreationStatus(str, Enum):
+    CREATED = 'created'
+    PENDING = 'pending'
+    FAILED = 'failed'
+
+
+class AssessorRoutingStatus(str, Enum):
+    ASSIGNED = 'assigned'
+    QUEUED = 'queued'
+    NOT_REQUIRED = 'not_required'
+    FAILED = 'failed'
+
+
+class SupportNeed(str, Enum):
+    HUMAN_REQUESTED = 'human_requested'
+    ACCESSIBILITY_REQUIRED = 'accessibility_required'
+    DISTRESS = 'distress'
+    URGENT = 'urgent'
+
+
+class PreferredChannel(str, Enum):
+    IN_APP = 'in_app'
+    EMAIL = 'email'
+    PHONE = 'phone'
+    SMS = 'sms'
+
+
+class HandoffType(str, Enum):
+    HUMAN_SUPPORT = 'human_support'
+    URGENT_SUPPORT = 'urgent_support'
+
+
+class HandoffStatus(str, Enum):
+    REQUESTED = 'requested'
+    QUEUED = 'queued'
+    ACCEPTED = 'accepted'
+    IN_PROGRESS = 'in_progress'
+    RESOLVED = 'resolved'
+    CANCELLED = 'cancelled'
+
+
+class HandoffPriority(str, Enum):
+    STANDARD = 'standard'
+    HIGH = 'high'
+    URGENT = 'urgent'
+    IMMEDIATE = 'immediate'
+
+
 class ClaimState(ContractModel):
     severity: Severity = Severity.UNASSESSED
     coverage: Coverage = Coverage.NOT_ASSESSED
@@ -194,6 +242,25 @@ class EvidenceSummary(ContractModel):
     needs_attention: int = 0
 
 
+class ExternalClaimResult(ContractModel):
+    external_claim_id: str | None = None
+    claim_number: str | None = None
+    creation_status: ClaimCreationStatus
+    route: str
+    next_step: str
+    expected_by: datetime | None = None
+    created_at: datetime
+
+
+class AssessorRoutingResult(ContractModel):
+    routing_status: AssessorRoutingStatus
+    assessor_reference: str | None = None
+    queue_reference: str | None = None
+    next_step: str
+    expected_by: datetime | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -203,9 +270,14 @@ class WorkingClaim(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState = Field(default_factory=ClaimState)
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
     active_session_id: str | None = None
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
+    external_claim_source_revision: int | None = Field(default=None, ge=1)
+    external_claim_fingerprint: str | None = None
+    assessor_routing: AssessorRoutingResult | None = None
+    assessor_routing_fingerprint: str | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
@@ -282,6 +354,7 @@ class AgentDecisionRecord(ContractModel):
     required_tools: list[dict[str, Any]] = Field(default_factory=list)
     next_action_requirements: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+    handoff_id: str | None = None
     customer_next_step: CustomerNextStep
     authority: AgentAuthority
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
@@ -305,6 +378,245 @@ class EvidenceRecord(ContractModel):
     claimant_note: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class HandoffPacket(ContractModel):
+    """Staff-only transfer context built from the authoritative working claim."""
+
+    incident_summary: str | None = None
+    form_revision: int = Field(ge=1)
+    form_snapshot: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list)
+    missing_items: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    low_confidence_items: list[str] = Field(default_factory=list)
+    policy_citation_refs: list[str] = Field(default_factory=list)
+    history_evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    prior_customer_updates: list[str] = Field(default_factory=list)
+    promised_next_step: str
+
+
+class HandoffRecord(ContractModel):
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=1000)
+    requested_action: str = Field(min_length=1, max_length=1000)
+    applied_rule: str = Field(min_length=1, max_length=100)
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
+class ClaimantHandoff(ContractModel):
+    """Customer-safe projection; staff routing reasons and packet details are excluded."""
+
+    handoff_id: str
+    status: HandoffStatus
+    priority: HandoffPriority
+    support_need: SupportNeed
+    summary: str
+    created_at: datetime
+
+
+class WorkbenchSession(ContractModel):
+    """Staff projection of saved resume context without repository ownership fields."""
+
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    summary: str | None = None
+    unresolved_questions: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    prior_commitments: list[str] = Field(default_factory=list)
+    context_revision: int = Field(ge=1)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class WorkbenchHandoff(ContractModel):
+    """Staff-only handoff projection including the complete transfer packet."""
+
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str]
+    reason: str
+    requested_action: str
+    applied_rule: str
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
+class WorkbenchClaimDetail(ContractModel):
+    """Authorised internal projection assembled from the shared claim repository."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    channel: Channel
+    locale: str
+    incident_type: str | None = None
+    claim_state: ClaimState
+    form: dict[str, StructuredFormField]
+    route: str | None = None
+    active_session_id: str | None = None
+    evidence_summary: EvidenceSummary
+    evidence: list[EvidenceRecord]
+    sessions: list[WorkbenchSession]
+    messages: list[MessageRecord]
+    decisions: list[AgentDecisionRecord]
+    signals: list[dict[str, Any]]
+    handoffs: list[WorkbenchHandoff]
+    staff_actions: list[dict[str, Any]]
+    customer_updates: list[dict[str, Any]]
+    external_claim: ExternalClaimResult | None = None
+    assessor_routing: AssessorRoutingResult | None = None
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
+class PendingEvidenceReference(ContractModel):
+    evidence_id: str = Field(min_length=1, max_length=100)
+    kind: str = Field(min_length=1, max_length=100)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CreateExternalClaimRequest(ContractModel):
+    working_claim_id: str = Field(min_length=1, max_length=100)
+    claim_revision: int = Field(ge=1)
+    authorised_decision_id: str = Field(min_length=1, max_length=100)
+    confirmed_form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+    pending_evidence: list[PendingEvidenceReference] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    route: str = Field(min_length=1, max_length=100)
+
+
+class AssessorLocation(ContractModel):
+    region: str = Field(min_length=1, max_length=100)
+
+
+class RouteAssessorRequest(ContractModel):
+    claim_id: str = Field(min_length=1, max_length=100)
+    external_claim_id: str = Field(min_length=1, max_length=100)
+    authorisation_ref: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    location: AssessorLocation
+
+
+class ClaimantEvidence(ContractModel):
+    """Claimant-safe evidence projection with storage and extraction details removed."""
+
+    evidence_id: str
+    claim_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    source: EvidenceSource
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RegisterEvidenceRequest(ContractModel):
+    kind: str = Field(min_length=1, max_length=100)
+    status: EvidenceStatus
+    related_fields: list[str] = Field(default_factory=list, max_length=50)
+    needed_for: list[str] = Field(default_factory=list, max_length=20)
+    claimant_note: str | None = Field(default=None, max_length=1000)
+
+
+class RequestEvidenceUploadRequest(ContractModel):
+    kind: str = Field(min_length=1, max_length=100)
+    original_filename: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(gt=0)
+
+
+class CompleteEvidenceUploadRequest(ContractModel):
+    upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
+
+
+class CreateSupportRequest(ContractModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+
+
+class SupportRequestResponse(ContractModel):
+    handoff: ClaimantHandoff
+    revision: int
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceListResponse(ContractModel):
+    claim_id: str
+    revision: int
+    items: list[ClaimantEvidence]
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceMutationResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    customer_next_step: CustomerNextStep
+
+
+class UploadTarget(ContractModel):
+    method: Literal['PUT'] = 'PUT'
+    url: str
+    headers: dict[str, str]
+    expires_at: datetime
+
+
+class UploadConstraints(ContractModel):
+    max_size_bytes: int
+    allowed_media_types: list[str]
+
+
+class EvidenceUploadResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    upload: UploadTarget
+    constraints: UploadConstraints
+    customer_next_step: CustomerNextStep
+
+
+class EvidenceCompleteResponse(ContractModel):
+    evidence: ClaimantEvidence
+    revision: int
+    status_url: str
+    customer_next_step: CustomerNextStep
 
 
 class CreateClaimRequest(ContractModel):
@@ -361,7 +673,7 @@ class ClaimantClaim(ContractModel):
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
     evidence_summary: EvidenceSummary
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
@@ -372,7 +684,7 @@ class ClaimListItem(ContractModel):
     revision: int
     incident_type: str | None = None
     workflow_state: WorkflowState
-    external_claim: dict[str, Any] | None = None
+    external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
