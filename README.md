@@ -94,8 +94,7 @@ python scripts/run_scenarios.py
 
 Every invocation creates a fresh in-memory repository, so rerunning the command
 is the clean fixture reset. The concrete API and logical DynamoDB mapping is
-[documented here](docs/api-dynamodb-fixture-examples.md), and the latest Day 4
-integration record is [documented here](docs/day4-bdfa-integration-results.md).
+[documented here](docs/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 
