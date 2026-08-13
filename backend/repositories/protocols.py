@@ -3,10 +3,13 @@ from typing import Any, Protocol
 
 from backend.domain.models import (
     AgentDecisionRecord,
+    CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
+    SignalDecisionRecord,
+    StaffActionRecord,
     WorkingClaim,
 )
 
@@ -191,6 +194,31 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
+        raise NotImplementedError
+
+    def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
+        raise NotImplementedError
+
+    def get_staff_action(self, claim_id: str, action_id: str) -> StaffActionRecord | None:
+        raise NotImplementedError
+
+    def list_customer_updates(self, claim_id: str) -> list[CustomerUpdateRecord]:
+        raise NotImplementedError
+
+    def list_signal_decisions(self, claim_id: str) -> list[SignalDecisionRecord]:
+        raise NotImplementedError
+
+    def save_staff_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        *,
+        staff_action: StaffActionRecord | None = None,
+        customer_update: CustomerUpdateRecord | None = None,
+        signal_decision: SignalDecisionRecord | None = None,
+    ) -> None:
+        """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:

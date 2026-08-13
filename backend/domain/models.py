@@ -446,6 +446,94 @@ class WorkbenchSession(ContractModel):
     closed_at: datetime | None = None
 
 
+class StaffActionStatus(str, Enum):
+    OPEN = 'open'
+    IN_PROGRESS = 'in_progress'
+    COMPLETED = 'completed'
+    CANCELLED = 'cancelled'
+
+
+class SignalDecisionValue(str, Enum):
+    CONFIRMED = 'confirmed'
+    DISMISSED = 'dismissed'
+    OVERRIDDEN = 'overridden'
+    RESOLVED = 'resolved'
+
+
+class StaffActionResult(ContractModel):
+    outcome: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    source_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CustomerUpdateInput(ContractModel):
+    summary: str = Field(min_length=1, max_length=1000)
+    responsible_party: ResponsibleParty
+    related_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CustomerUpdateRecord(CustomerUpdateInput):
+    update_id: str
+    claim_id: str
+    created_by: str
+    created_at: datetime
+
+
+class StaffActionRecord(ContractModel):
+    action_id: str
+    claim_id: str
+    action_type: str = Field(min_length=1, max_length=100)
+    status: StaffActionStatus
+    assigned_to: str
+    requested_outcome: str = Field(min_length=1, max_length=1000)
+    source_refs: list[str] = Field(default_factory=list, max_length=100)
+    result: StaffActionResult | None = None
+    completed_by: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class CreateStaffActionRequest(ContractModel):
+    action_type: str = Field(min_length=1, max_length=100)
+    assigned_to: str | None = Field(default=None, min_length=1, max_length=100)
+    requested_outcome: str = Field(min_length=1, max_length=1000)
+    source_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class UpdateStaffActionRequest(ContractModel):
+    status: StaffActionStatus
+    result: StaffActionResult | None = None
+    state_changes: list[StateChange] = Field(default_factory=list, max_length=20)
+    customer_update: CustomerUpdateInput | None = None
+
+
+class StaffActionMutationResponse(ContractModel):
+    action: StaffActionRecord
+    revision: int = Field(ge=1)
+    customer_update: CustomerUpdateRecord | None = None
+
+
+class SignalDecisionRequest(ContractModel):
+    decision: SignalDecisionValue
+    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    summary: str = Field(min_length=1, max_length=1000)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
+
+
+class SignalDecisionRecord(SignalDecisionRequest):
+    signal_decision_id: str
+    claim_id: str
+    signal_id: str
+    actor_id: str
+    created_at: datetime
+
+
+class SignalDecisionResponse(ContractModel):
+    signal_decision: SignalDecisionRecord
+    revision: int = Field(ge=1)
+
+
 class WorkbenchHandoff(ContractModel):
     """Staff-only handoff projection including the complete transfer packet."""
 
