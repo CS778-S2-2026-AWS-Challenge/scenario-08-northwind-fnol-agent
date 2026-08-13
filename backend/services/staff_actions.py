@@ -294,14 +294,7 @@ def decide_signal(
         if message.content.get('type') == 'review_signal'
     ) or any(
         str(signal.get('signal_id') or signal.get('code')) == signal_id
-        for session in sessions
-        for message in repository.list_messages(claim_id, session.session_id, claim.customer_id)
-        for decision in [
-            repository.find_agent_decision_for_trigger(
-                claim_id, message.message_id, claim.customer_id
-            )
-        ]
-        if decision is not None
+        for decision in repository.list_agent_decisions(claim_id, claim.customer_id)
         for signal in decision.proposed_signals
     )
     if not signal_exists:

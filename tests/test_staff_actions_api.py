@@ -2,7 +2,15 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
-from backend.domain.models import ActorType, MessageRecord, MessageVisibility
+from backend.domain.models import (
+    ActorType,
+    AgentAction,
+    AgentAuthority,
+    AgentDecisionRecord,
+    AuthorityOutcome,
+    MessageRecord,
+    MessageVisibility,
+)
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -164,3 +172,58 @@ def test_signal_decision_is_internal_idempotent_and_never_declares_fraud(
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
     assert 'signal_decision' not in claimant
     assert 'SOURCE_RECORD_NOT_COMPARABLE' not in str(claimant)
+
+
+def test_signal_decision_finds_claim_decision_without_trigger_message(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim = create_claim(client, auth_headers)
+    claim_id = str(claim['claim_id'])
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.active_session_id is not None
+    repository.save_agent_decision(
+        AgentDecisionRecord(
+            decision_id='dec_without_trigger_message',
+            claim_id=claim_id,
+            session_id=stored.active_session_id,
+            trigger_message_id='msg_not_persisted',
+            action=AgentAction.PROCEED,
+            reason_codes=['SIGNAL_REVIEW_REQUIRED'],
+            customer_reason='Continue while the internal signal is reviewed.',
+            proposed_signals=[
+                {'signal_id': 'sig_without_trigger_message', 'status': 'review_required'}
+            ],
+            customer_next_step=stored.customer_next_step,
+            authority=AgentAuthority(
+                proposed_by='fixture_rule',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.AUTHORISED,
+            ),
+            resulting_revision=stored.revision,
+            created_at=datetime.now(UTC),
+        ),
+        stored.customer_id,
+    )
+
+    response = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/signals/sig_without_trigger_message/decisions',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'decision-without-trigger-message',
+            'If-Match': '1',
+        },
+        json={
+            'decision': 'confirmed',
+            'reason_codes': ['CLAIM_LEVEL_SIGNAL_CONFIRMED'],
+            'summary': 'The persisted claim-level signal requires review.',
+            'evidence_refs': [],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()['signal_decision']['signal_id'] == 'sig_without_trigger_message'
+    assert len(repository.list_signal_decisions(claim_id)) == 1
