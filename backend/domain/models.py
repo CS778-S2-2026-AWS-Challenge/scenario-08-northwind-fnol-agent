@@ -165,6 +165,41 @@ class AssessorRoutingStatus(str, Enum):
     FAILED = 'failed'
 
 
+class SupportNeed(str, Enum):
+    HUMAN_REQUESTED = 'human_requested'
+    ACCESSIBILITY_REQUIRED = 'accessibility_required'
+    DISTRESS = 'distress'
+    URGENT = 'urgent'
+
+
+class PreferredChannel(str, Enum):
+    IN_APP = 'in_app'
+    EMAIL = 'email'
+    PHONE = 'phone'
+    SMS = 'sms'
+
+
+class HandoffType(str, Enum):
+    HUMAN_SUPPORT = 'human_support'
+    URGENT_SUPPORT = 'urgent_support'
+
+
+class HandoffStatus(str, Enum):
+    REQUESTED = 'requested'
+    QUEUED = 'queued'
+    ACCEPTED = 'accepted'
+    IN_PROGRESS = 'in_progress'
+    RESOLVED = 'resolved'
+    CANCELLED = 'cancelled'
+
+
+class HandoffPriority(str, Enum):
+    STANDARD = 'standard'
+    HIGH = 'high'
+    URGENT = 'urgent'
+    IMMEDIATE = 'immediate'
+
+
 class ClaimState(ContractModel):
     severity: Severity = Severity.UNASSESSED
     coverage: Coverage = Coverage.NOT_ASSESSED
@@ -319,6 +354,7 @@ class AgentDecisionRecord(ContractModel):
     required_tools: list[dict[str, Any]] = Field(default_factory=list)
     next_action_requirements: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+    handoff_id: str | None = None
     customer_next_step: CustomerNextStep
     authority: AgentAuthority
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
@@ -342,6 +378,56 @@ class EvidenceRecord(ContractModel):
     claimant_note: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class HandoffPacket(ContractModel):
+    """Staff-only transfer context built from the authoritative working claim."""
+
+    incident_summary: str | None = None
+    form_revision: int = Field(ge=1)
+    form_snapshot: dict[str, StructuredFormField] = Field(default_factory=dict)
+    evidence_refs: list[str] = Field(default_factory=list)
+    missing_items: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    low_confidence_items: list[str] = Field(default_factory=list)
+    policy_citation_refs: list[str] = Field(default_factory=list)
+    history_evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    prior_customer_updates: list[str] = Field(default_factory=list)
+    promised_next_step: str
+
+
+class HandoffRecord(ContractModel):
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=1000)
+    requested_action: str = Field(min_length=1, max_length=1000)
+    applied_rule: str = Field(min_length=1, max_length=100)
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
+class ClaimantHandoff(ContractModel):
+    """Customer-safe projection; staff routing reasons and packet details are excluded."""
+
+    handoff_id: str
+    status: HandoffStatus
+    priority: HandoffPriority
+    support_need: SupportNeed
+    summary: str
+    created_at: datetime
 
 
 class WorkbenchSession(ContractModel):
@@ -448,6 +534,29 @@ class SignalDecisionResponse(ContractModel):
     revision: int = Field(ge=1)
 
 
+class WorkbenchHandoff(ContractModel):
+    """Staff-only handoff projection including the complete transfer packet."""
+
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str]
+    reason: str
+    requested_action: str
+    applied_rule: str
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
 class WorkbenchClaimDetail(ContractModel):
     """Authorised internal projection assembled from the shared claim repository."""
 
@@ -467,7 +576,7 @@ class WorkbenchClaimDetail(ContractModel):
     messages: list[MessageRecord]
     decisions: list[AgentDecisionRecord]
     signals: list[dict[str, Any]]
-    handoffs: list[dict[str, Any]]
+    handoffs: list[WorkbenchHandoff]
     staff_actions: list[dict[str, Any]]
     customer_updates: list[dict[str, Any]]
     external_claim: ExternalClaimResult | None = None
@@ -544,6 +653,18 @@ class RequestEvidenceUploadRequest(ContractModel):
 
 class CompleteEvidenceUploadRequest(ContractModel):
     upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
+
+
+class CreateSupportRequest(ContractModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+
+
+class SupportRequestResponse(ContractModel):
+    handoff: ClaimantHandoff
+    revision: int
+    customer_next_step: CustomerNextStep
 
 
 class EvidenceListResponse(ContractModel):

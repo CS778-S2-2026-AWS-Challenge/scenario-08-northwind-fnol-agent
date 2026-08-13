@@ -249,6 +249,74 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
     assert 'provenance' not in claimant_evidence['items'][0]
 
 
+def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_safe(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
+    stored_claim = repository.get_claim_internal(claim_id)
+    assert stored_claim is not None
+
+    claimant_response = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'workbench-handoff',
+            'If-Match': str(stored_claim.revision),
+        },
+        json={
+            'reason': 'I need a person to continue this synthetic report.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'phone',
+        },
+    )
+    assert claimant_response.status_code == 201
+
+    stored_handoffs = repository.list_handoffs(claim_id, stored_claim.customer_id)
+    assert len(stored_handoffs) == 1
+    staff_response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+    claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+
+    assert staff_response.status_code == 200
+    staff_handoff = staff_response.json()['handoffs'][0]
+    assert staff_handoff == stored_handoffs[0].model_dump(mode='json')
+    assert staff_handoff['queue'] == 'claimant_support'
+    assert staff_handoff['reason_codes'] == ['HUMAN_SUPPORT_REQUESTED']
+    assert staff_handoff['requested_action'].startswith('Contact the claimant')
+    assert staff_handoff['packet']['pending_items'] == staff_handoff['packet']['evidence_refs']
+    assert staff_handoff['packet']['source_refs']
+    assert staff_handoff['packet']['promised_next_step'].startswith(
+        'A Northwind support request has been queued'
+    )
+
+    claimant_handoff = claimant_response.json()['handoff']
+    assert set(claimant_handoff) == {
+        'handoff_id',
+        'status',
+        'priority',
+        'support_need',
+        'summary',
+        'created_at',
+    }
+    assert {
+        'queue',
+        'reason_codes',
+        'reason',
+        'requested_action',
+        'applied_rule',
+        'packet',
+        'source_message_id',
+        'assigned_to',
+    }.isdisjoint(claimant_handoff)
+    assert claimant_claim.status_code == 200
+    assert 'handoffs' not in claimant_claim.json()
+
+
 def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -359,3 +427,12 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['assessor_routing'] == routing
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
+    assert {decision['decision_id'] for decision in detail['decisions']} == {
+        create_decision.decision_id,
+        route_decision.decision_id,
+    }
+    assert {decision['trigger_message_id'] for decision in detail['decisions']} == {
+        'msg_workbench_create',
+        'msg_workbench_assessor',
+    }
+    assert detail['messages'] == []

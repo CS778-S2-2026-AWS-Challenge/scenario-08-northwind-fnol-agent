@@ -1,10 +1,11 @@
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import (
-    AgentDecisionRecord,
+    HandoffRecord,
     MessageRecord,
     SessionRecord,
     WorkbenchClaimDetail,
+    WorkbenchHandoff,
     WorkbenchSession,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -42,36 +43,47 @@ def _workbench_session(session: SessionRecord) -> WorkbenchSession:
     )
 
 
-def _claim_messages_and_decisions(
+def _workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
+    return WorkbenchHandoff(
+        handoff_id=handoff.handoff_id,
+        claim_id=handoff.claim_id,
+        type=handoff.type,
+        status=handoff.status,
+        priority=handoff.priority,
+        queue=handoff.queue,
+        support_need=handoff.support_need,
+        preferred_channel=handoff.preferred_channel,
+        reason_codes=handoff.reason_codes,
+        reason=handoff.reason,
+        requested_action=handoff.requested_action,
+        applied_rule=handoff.applied_rule,
+        packet=handoff.packet,
+        source_message_id=handoff.source_message_id,
+        assigned_to=handoff.assigned_to,
+        created_at=handoff.created_at,
+        accepted_at=handoff.accepted_at,
+        resolved_at=handoff.resolved_at,
+    )
+
+
+def _claim_messages(
     repository: PersistenceRepository,
     claim_id: str,
     customer_id: str,
     sessions: list[SessionRecord],
-) -> tuple[list[MessageRecord], list[AgentDecisionRecord]]:
+) -> list[MessageRecord]:
     messages: list[MessageRecord] = []
-    decisions_by_id: dict[str, AgentDecisionRecord] = {}
     for session in sessions:
-        session_messages = repository.list_messages(
-            claim_id,
-            session.session_id,
-            customer_id,
-        )
-        messages.extend(session_messages)
-        for message in session_messages:
-            decision = repository.find_agent_decision_for_trigger(
+        messages.extend(
+            repository.list_messages(
                 claim_id,
-                message.message_id,
+                session.session_id,
                 customer_id,
             )
-            if decision is not None:
-                decisions_by_id[decision.decision_id] = decision
+        )
 
     messages.sort(key=lambda item: (item.created_at, item.message_id))
-    decisions = sorted(
-        decisions_by_id.values(),
-        key=lambda item: (item.created_at, item.decision_id),
-    )
-    return messages, decisions
+    return messages
 
 
 def get_workbench_claim_detail(
@@ -87,12 +99,13 @@ def get_workbench_claim_detail(
         raise _claim_not_found()
 
     sessions = repository.list_sessions_for_claim(claim_id, claim.customer_id)
-    messages, decisions = _claim_messages_and_decisions(
+    messages = _claim_messages(
         repository,
         claim_id,
         claim.customer_id,
         sessions,
     )
+    decisions = repository.list_agent_decisions(claim_id, claim.customer_id)
     evidence = repository.list_evidence(claim_id, claim.customer_id)
     signals_by_id: dict[str, dict[str, object]] = {}
     for decision in decisions:
@@ -115,6 +128,7 @@ def get_workbench_claim_detail(
         if isinstance(decisions_list, list):
             decisions_list.append(signal_decision.model_dump(mode='json'))
     signals = list(signals_by_id.values())
+    handoffs = repository.list_handoffs(claim_id, claim.customer_id)
 
     return WorkbenchClaimDetail(
         claim_id=claim.claim_id,
@@ -133,7 +147,7 @@ def get_workbench_claim_detail(
         messages=messages,
         decisions=decisions,
         signals=signals,
-        handoffs=[],
+        handoffs=[_workbench_handoff(handoff) for handoff in handoffs],
         staff_actions=[
             item.model_dump(mode='json') for item in repository.list_staff_actions(claim_id)
         ],

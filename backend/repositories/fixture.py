@@ -5,6 +5,7 @@ from backend.domain.models import (
     AgentDecisionRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    HandoffRecord,
     MessageRecord,
     SessionRecord,
     SignalDecisionRecord,
@@ -31,6 +32,7 @@ class FixtureRepository(PersistenceRepository):
         self._staff_actions: dict[str, StaffActionRecord] = {}
         self._customer_updates: dict[str, CustomerUpdateRecord] = {}
         self._signal_decisions: dict[str, SignalDecisionRecord] = {}
+        self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
     @property
@@ -221,6 +223,20 @@ class FixtureRepository(PersistenceRepository):
                 return deepcopy(decision)
         return None
 
+    def list_agent_decisions(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[AgentDecisionRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        decisions = [
+            deepcopy(decision)
+            for decision in self._decisions.values()
+            if decision.claim_id == claim_id
+        ]
+        return sorted(decisions, key=lambda decision: (decision.created_at, decision.decision_id))
+
     def save_agent_turn(
         self,
         claim: WorkingClaim,
@@ -230,6 +246,7 @@ class FixtureRepository(PersistenceRepository):
         agent_message: MessageRecord,
         decision: AgentDecisionRecord,
         idempotency: IdempotencyRecord,
+        handoff: HandoffRecord | None = None,
     ) -> None:
         stored_claim = self._claims.get(claim.claim_id)
         stored_session = self._sessions.get(session.session_id)
@@ -262,6 +279,9 @@ class FixtureRepository(PersistenceRepository):
             and idempotency.message_id == claimant_message.message_id
             and idempotency.agent_message_id == agent_message.message_id
             and idempotency.decision_id == decision.decision_id
+            and (handoff is None or handoff.claim_id == claim.claim_id)
+            and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
+            and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
         )
         if not records_match:
             raise KeyError(claim.claim_id)
@@ -289,6 +309,8 @@ class FixtureRepository(PersistenceRepository):
         self._messages[claimant_message.message_id] = deepcopy(claimant_message)
         self._messages[agent_message.message_id] = deepcopy(agent_message)
         self._decisions[decision.decision_id] = deepcopy(decision)
+        if handoff is not None:
+            self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         self._idempotency[lookup] = idempotency
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
@@ -414,3 +436,61 @@ class FixtureRepository(PersistenceRepository):
         if signal_decision is not None:
             self._signal_decisions[signal_decision.signal_decision_id] = deepcopy(signal_decision)
         self._idempotency[lookup] = deepcopy(idempotency)
+
+    def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
+        if self.get_claim(handoff.claim_id, customer_id) is None:
+            raise KeyError(handoff.claim_id)
+        self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+
+    def get_handoff(
+        self,
+        claim_id: str,
+        handoff_id: str,
+        customer_id: str,
+    ) -> HandoffRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        handoff = self._handoffs.get(handoff_id)
+        if handoff is None or handoff.claim_id != claim_id:
+            return None
+        return deepcopy(handoff)
+
+    def list_handoffs(self, claim_id: str, customer_id: str) -> list[HandoffRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        handoffs = [
+            deepcopy(handoff) for handoff in self._handoffs.values() if handoff.claim_id == claim_id
+        ]
+        return sorted(handoffs, key=lambda handoff: handoff.created_at)
+
+    def save_handoff_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        handoff: HandoffRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        if (
+            handoff.claim_id != claim.claim_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.session_id != (claim.active_session_id or '')
+            or idempotency.handoff_id != handoff.handoff_id
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if (
+            existing_idempotency is not None
+            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
+        ):
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        self._idempotency[lookup] = idempotency

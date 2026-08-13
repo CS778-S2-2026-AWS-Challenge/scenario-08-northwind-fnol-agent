@@ -37,8 +37,15 @@ class Settings:
     def __post_init__(self) -> None:
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
             raise ValueError('Wildcard CORS origins cannot be used with credentials.')
-        if self.synthetic_claimant_token == self.synthetic_staff_token:
-            raise ValueError('Synthetic claimant and staff tokens must be different.')
+        synthetic_tokens = {
+            self.synthetic_claimant_token,
+            self.synthetic_staff_token,
+            self.synthetic_integration_token,
+        }
+        if len(synthetic_tokens) != 3:
+            raise ValueError(
+                'Synthetic claimant, staff, and integration tokens must be pairwise distinct.'
+            )
 
     @classmethod
     def from_environment(cls) -> 'Settings':
