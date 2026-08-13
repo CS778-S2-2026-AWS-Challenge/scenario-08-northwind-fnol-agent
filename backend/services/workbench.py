@@ -4,11 +4,14 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     SessionRecord,
+    Urgency,
     WorkbenchClaimDetail,
     WorkbenchClaimItem,
     WorkbenchClaimListResponse,
     WorkbenchHandoff,
     WorkbenchSession,
+    WorkflowState,
+    WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
 
@@ -88,9 +91,34 @@ def _claim_messages(
     return messages
 
 
+def _queue_for(claim: WorkingClaim) -> str:
+    if claim.claim_state.workflow_state == WorkflowState.PROFESSIONAL_REVIEW:
+        return 'professional_review'
+    if claim.claim_state.workflow_state == WorkflowState.AWAITING_EVIDENCE:
+        return 'awaiting_evidence'
+    if claim.claim_state.workflow_state == WorkflowState.READY_FOR_NEXT:
+        return 'ready_to_progress'
+    if claim.claim_state.workflow_state == WorkflowState.CREATED:
+        return 'created_routed'
+    return 'new_untriaged'
+
+
+def _priority_for(claim: WorkingClaim) -> str:
+    if claim.claim_state.urgency == Urgency.URGENT:
+        return 'urgent'
+    return 'standard'
+
+
+def _internal_flags_for(claim: WorkingClaim) -> list[str]:
+    if claim.claim_state.fraud_signal.value == 'review_required':
+        return ['FRAUD_REVIEW_REQUIRED']
+    return []
+
+
 def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
+    view: str | None = None,
 ) -> WorkbenchClaimListResponse:
     """List all claims available to staff workbench.
 
@@ -103,6 +131,14 @@ def list_workbench_claims(
     claims = repository.list_claims()
     items: list[WorkbenchClaimItem] = []
     for claim in claims:
+        queue = _queue_for(claim)
+        if view is not None and view != 'all' and queue != view:
+            continue
+        handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
+        assigned_handoff = next(
+            (handoff for handoff in handoffs if handoff.assigned_to),
+            None,
+        )
         items.append(
             WorkbenchClaimItem(
                 claim_id=claim.claim_id,
@@ -111,6 +147,10 @@ def list_workbench_claims(
                 incident_type=claim.incident_type,
                 workflow_state=claim.claim_state.workflow_state,
                 customer_next_step=claim.customer_next_step,
+                assigned_to=assigned_handoff.assigned_to if assigned_handoff else None,
+                internal_flags=_internal_flags_for(claim),
+                queue=queue,
+                priority=_priority_for(claim),
                 created_at=claim.created_at,
                 updated_at=claim.updated_at,
             )

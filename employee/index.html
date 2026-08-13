@@ -399,6 +399,21 @@
 
       fetchClaimDetail(claimId)
         .then(detail => {
+          const handoffs = detail.handoffs || [];
+          const assignedHandoff = handoffs.find(handoff => handoff.assigned_to);
+          const internalMessages = (detail.messages || []).filter(message => (
+            message.visibility === 'internal_only'
+          ));
+          const internalNotes = internalMessages
+            .map(message => message.content?.text)
+            .filter(Boolean);
+          const signalFlags = (detail.signals || [])
+            .map(signal => signal.code)
+            .filter(Boolean);
+          if (detail.claim_state.fraud_signal === 'review_required') {
+            signalFlags.unshift('FRAUD_REVIEW_REQUIRED');
+          }
+
           const detailContent = byId('detailContent');
           detailContent.innerHTML = '';
           const idP = document.createElement('p');
@@ -420,10 +435,10 @@
           byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
           byId('detailCustomerReference').textContent = detail.customer_reference;
           byId('detailState').textContent = detail.claim_state.workflow_state.replace('_', ' ');
-          byId('detailAssigned').textContent = detail.assigned_to || 'Unassigned';
-          byId('detailFlags').textContent = detail.internal_flags.length ? detail.internal_flags.join(', ') : 'None';
+          byId('detailAssigned').textContent = assignedHandoff?.assigned_to || 'Unassigned';
+          byId('detailFlags').textContent = signalFlags.length ? signalFlags.join(', ') : 'None';
           byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
-          byId('detailInternalNotes').textContent = detail.internal_notes || 'No internal notes available.';
+          byId('detailInternalNotes').textContent = internalNotes.length ? internalNotes.join('\n') : 'No internal notes available.';
           byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
           byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
           byId('detailInternal').style.display = 'block';

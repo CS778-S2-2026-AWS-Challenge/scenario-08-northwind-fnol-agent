@@ -1,6 +1,6 @@
 from typing import cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from backend.core.auth import Principal, require_staff
 from backend.domain.models import WorkbenchClaimDetail, WorkbenchClaimListResponse
@@ -21,8 +21,9 @@ def repository_for(request: Request) -> PersistenceRepository:
 def read_workbench_claims(
     request: Request,
     principal: Principal = Depends(require_staff),
+    view: str | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
-    return list_workbench_claims(repository_for(request), principal)
+    return list_workbench_claims(repository_for(request), principal, view=view)
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)
