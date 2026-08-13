@@ -87,7 +87,10 @@ def _claim_messages(
             )
         )
 
-    messages.sort(key=lambda item: (item.created_at, item.message_id))
+    actor_order = {'claimant': 0, 'agent': 1, 'staff': 2, 'system': 3}
+    messages.sort(
+        key=lambda item: (item.created_at, actor_order[item.actor.value], item.message_id)
+    )
     return messages
 
 

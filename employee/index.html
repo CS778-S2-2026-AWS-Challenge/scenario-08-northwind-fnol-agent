@@ -879,7 +879,9 @@
         } else {
           input.disabled = false;
           send.disabled = false;
-          byId('customerChatStatus').textContent = `Accepted by ${openHandoff.assigned_to}. Resolve it with a claimant-visible update.`;
+          byId('customerChatStatus').textContent = openHandoff.status === 'in_progress'
+            ? `In progress with ${openHandoff.assigned_to}. Messages remain open until the handoff is resolved.`
+            : `Accepted by ${openHandoff.assigned_to}. Send a message to begin support.`;
         }
         history.scrollTop = history.scrollHeight;
       } catch (error) {
