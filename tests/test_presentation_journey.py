@@ -244,6 +244,20 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
         headers={'Authorization': 'Bearer synthetic-staff'},
     ).json()
     assert latest_detail['handoffs'][0]['status'] == 'in_progress'
+    assert latest_detail['customer_next_step']['status'] == 'human_support_in_progress'
+    claimant_request_index = next(
+        index
+        for index, item in enumerate(latest_detail['messages'])
+        if item['content'].get('text') == handoff_spec['input']
+    )
+    handoff_reply_index = next(
+        index
+        for index, item in enumerate(latest_detail['messages'])
+        if item['actor'] == 'agent'
+        and item.get('in_reply_to')
+        == latest_detail['messages'][claimant_request_index]['message_id']
+    )
+    assert claimant_request_index < handoff_reply_index
 
     resolved_response = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff["handoff_id"]}/resolve',

@@ -157,7 +157,17 @@ def accept_handoff(
             'accepted_at': timestamp,
         }
     )
-    updated = claim.model_copy(update={'revision': claim.revision + 1, 'updated_at': timestamp})
+    updated = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+            'customer_next_step': CustomerNextStep(
+                status='human_support_in_progress',
+                summary='A Northwind staff member is now assisting you.',
+                responsible_party='northwind',
+            ),
+        }
+    )
     response = HandoffMutationResponse(
         handoff=workbench_handoff(accepted),
         revision=updated.revision,

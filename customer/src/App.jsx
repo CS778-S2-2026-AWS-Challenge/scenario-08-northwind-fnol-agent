@@ -68,6 +68,7 @@ function App() {
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
+  const latestRevision = useRef(0)
 
   const isBusy = [
     'starting',
@@ -89,6 +90,12 @@ function App() {
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
 
+  useEffect(() => {
+    if (claim?.revision) {
+      latestRevision.current = Math.max(latestRevision.current, claim.revision)
+    }
+  }, [claim?.revision])
+
   async function refreshAfterConflict() {
     if (!claim) return
     const current = await getClaim(claim.claim_id)
@@ -105,13 +112,15 @@ function App() {
     }
     try {
       const current = await getClaim(claim.claim_id)
+      if (current.revision < latestRevision.current) return
+      latestRevision.current = current.revision
       setClaim(current)
       setForm(current.form)
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
       if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
       if (sessionId) {
-        const latest = await getClaimMessages(claim.claim_id, sessionId)
+      const latest = await getClaimMessages(claim.claim_id, sessionId)
         setMessages(latest.items)
       }
       if (!silent) setStatus('idle')
@@ -374,7 +383,7 @@ function App() {
             <div className="conversation-heading">
               <p className="eyebrow">Your report</p>
               <h1 id="conversation-title">Let&apos;s build the details together</h1>
-              <p>{nextStep?.summary}</p>
+              {handoff?.status !== 'in_progress' && <p>{nextStep?.summary}</p>}
             </div>
 
             <div className="message-list" aria-live="polite">
@@ -386,7 +395,7 @@ function App() {
               ))}
             </div>
 
-            {handoff && (
+            {handoff && ['queued', 'accepted'].includes(handoff.status) && (
               <section
                 className={`transfer-state ${handoff.priority === 'urgent' ? 'is-urgent' : ''}`}
                 aria-live="assertive"
@@ -424,6 +433,12 @@ function App() {
                   {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}
                 </button>
               </section>
+            )}
+
+            {handoff?.status === 'in_progress' && (
+              <div className="system-notice" role="status">
+                A Northwind staff member is now assisting you.
+              </div>
             )}
 
             {!handoff && nextStep?.status === 'staff_update' && (
