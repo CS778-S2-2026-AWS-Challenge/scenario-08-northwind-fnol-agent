@@ -956,26 +956,52 @@ Each item includes claim ID, safe display reference, state dimensions, priority,
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
-Returns the authorised internal projection:
+Returns the authorised internal projection assembled from the same repository records used by
+claimant routes:
 
 ```json
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
   "customer_reference": "customer-1042",
+  "channel": "web_agent",
+  "locale": "en-NZ",
+  "incident_type": "motor",
   "claim_state": {},
   "form": {},
+  "route": "professional_review",
+  "active_session_id": "ses_01J4Y7RPN8",
+  "evidence_summary": {},
   "evidence": [],
+  "sessions": [],
+  "messages": [],
   "decisions": [],
   "signals": [],
   "handoffs": [],
   "staff_actions": [],
   "customer_updates": [],
   "external_claim": null,
+  "assessor_routing": null,
+  "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
+and context revisions. `messages` includes the complete persisted communication history,
+including internal-only staff or system records. `decisions` includes internal authority,
+tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
+workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
+includes routing fields plus the complete transfer packet. Claimant routes return only the
+separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
+action, applied rule, assignment, source message, or packet. `external_claim` and
+`assessor_routing` use the shared typed creation and routing results, including their status,
+next step, and expected timing. Internal fields are never added to claimant projections unless
+their claimant-safe contract explicitly includes them.
+
+The current repository has no separate persisted staff-action or customer-update records. Those
+arrays therefore remain empty rather than synthesising a second lifecycle or manual status.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 

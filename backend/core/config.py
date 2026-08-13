@@ -31,11 +31,21 @@ class Settings:
     cors_allow_credentials: bool = False
     expose_api_docs: bool = True
     synthetic_claimant_token: str = 'synthetic-claimant'
+    synthetic_staff_token: str = 'synthetic-staff'
     synthetic_integration_token: str = 'synthetic-integration'
 
     def __post_init__(self) -> None:
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
             raise ValueError('Wildcard CORS origins cannot be used with credentials.')
+        synthetic_tokens = {
+            self.synthetic_claimant_token,
+            self.synthetic_staff_token,
+            self.synthetic_integration_token,
+        }
+        if len(synthetic_tokens) != 3:
+            raise ValueError(
+                'Synthetic claimant, staff, and integration tokens must be pairwise distinct.'
+            )
 
     @classmethod
     def from_environment(cls) -> 'Settings':
@@ -51,6 +61,10 @@ class Settings:
             synthetic_claimant_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_CLAIMANT_TOKEN',
                 'synthetic-claimant',
+            ),
+            synthetic_staff_token=os.getenv(
+                'NORTHWIND_SYNTHETIC_STAFF_TOKEN',
+                'synthetic-staff',
             ),
             synthetic_integration_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',

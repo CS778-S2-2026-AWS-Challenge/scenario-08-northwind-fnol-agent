@@ -430,6 +430,74 @@ class ClaimantHandoff(ContractModel):
     created_at: datetime
 
 
+class WorkbenchSession(ContractModel):
+    """Staff projection of saved resume context without repository ownership fields."""
+
+    session_id: str
+    claim_id: str
+    status: SessionStatus
+    summary: str | None = None
+    unresolved_questions: list[str] = Field(default_factory=list)
+    pending_items: list[str] = Field(default_factory=list)
+    prior_commitments: list[str] = Field(default_factory=list)
+    context_revision: int = Field(ge=1)
+    started_at: datetime
+    last_active_at: datetime
+    closed_at: datetime | None = None
+
+
+class WorkbenchHandoff(ContractModel):
+    """Staff-only handoff projection including the complete transfer packet."""
+
+    handoff_id: str
+    claim_id: str
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str
+    support_need: SupportNeed
+    preferred_channel: PreferredChannel | None = None
+    reason_codes: list[str]
+    reason: str
+    requested_action: str
+    applied_rule: str
+    packet: HandoffPacket
+    source_message_id: str | None = None
+    assigned_to: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
+class WorkbenchClaimDetail(ContractModel):
+    """Authorised internal projection assembled from the shared claim repository."""
+
+    claim_id: str
+    revision: int = Field(ge=1)
+    customer_reference: str
+    channel: Channel
+    locale: str
+    incident_type: str | None = None
+    claim_state: ClaimState
+    form: dict[str, StructuredFormField]
+    route: str | None = None
+    active_session_id: str | None = None
+    evidence_summary: EvidenceSummary
+    evidence: list[EvidenceRecord]
+    sessions: list[WorkbenchSession]
+    messages: list[MessageRecord]
+    decisions: list[AgentDecisionRecord]
+    signals: list[dict[str, Any]]
+    handoffs: list[WorkbenchHandoff]
+    staff_actions: list[dict[str, Any]]
+    customer_updates: list[dict[str, Any]]
+    external_claim: ExternalClaimResult | None = None
+    assessor_routing: AssessorRoutingResult | None = None
+    customer_next_step: CustomerNextStep
+    created_at: datetime
+    updated_at: datetime
+
+
 class PendingEvidenceReference(ContractModel):
     evidence_id: str = Field(min_length=1, max_length=100)
     kind: str = Field(min_length=1, max_length=100)

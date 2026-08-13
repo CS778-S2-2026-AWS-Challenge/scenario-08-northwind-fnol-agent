@@ -246,6 +246,8 @@ def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None
         )
         == decision
     )
+    assert repository.list_agent_decisions(claim.claim_id, claim.customer_id) == [decision]
+    assert repository.list_agent_decisions(claim.claim_id, 'other_customer') == []
 
     with pytest.raises(RevisionConflict):
         repository.save_agent_turn(

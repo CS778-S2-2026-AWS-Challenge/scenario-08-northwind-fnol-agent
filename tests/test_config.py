@@ -33,6 +33,28 @@ def test_wildcard_origin_cannot_use_credentials() -> None:
         Settings(cors_allow_credentials=True)
 
 
+@pytest.mark.parametrize(
+    ('claimant_token', 'staff_token', 'integration_token'),
+    [
+        ('shared-token', 'shared-token', 'integration-token'),
+        ('shared-token', 'staff-token', 'shared-token'),
+        ('claimant-token', 'shared-token', 'shared-token'),
+    ],
+    ids=['claimant-staff', 'claimant-integration', 'staff-integration'],
+)
+def test_synthetic_tokens_must_be_pairwise_distinct(
+    claimant_token: str,
+    staff_token: str,
+    integration_token: str,
+) -> None:
+    with pytest.raises(ValueError, match='must be pairwise distinct'):
+        Settings(
+            synthetic_claimant_token=claimant_token,
+            synthetic_staff_token=staff_token,
+            synthetic_integration_token=integration_token,
+        )
+
+
 def test_production_hides_interactive_api_docs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'production')
 
