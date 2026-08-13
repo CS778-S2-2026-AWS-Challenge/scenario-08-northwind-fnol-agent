@@ -146,6 +146,13 @@ class PersistenceRepository(ClaimRepository, Protocol):
     ) -> AgentDecisionRecord | None:
         raise NotImplementedError
 
+    def list_agent_decisions(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[AgentDecisionRecord]:
+        raise NotImplementedError
+
     def save_agent_turn(
         self,
         claim: WorkingClaim,

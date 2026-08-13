@@ -215,6 +215,20 @@ class FixtureRepository(PersistenceRepository):
                 return deepcopy(decision)
         return None
 
+    def list_agent_decisions(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[AgentDecisionRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        decisions = [
+            deepcopy(decision)
+            for decision in self._decisions.values()
+            if decision.claim_id == claim_id
+        ]
+        return sorted(decisions, key=lambda decision: (decision.created_at, decision.decision_id))
+
     def save_agent_turn(
         self,
         claim: WorkingClaim,

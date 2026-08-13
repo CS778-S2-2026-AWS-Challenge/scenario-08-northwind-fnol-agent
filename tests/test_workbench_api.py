@@ -359,3 +359,12 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['assessor_routing'] == routing
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
+    assert {decision['decision_id'] for decision in detail['decisions']} == {
+        create_decision.decision_id,
+        route_decision.decision_id,
+    }
+    assert {decision['trigger_message_id'] for decision in detail['decisions']} == {
+        'msg_workbench_create',
+        'msg_workbench_assessor',
+    }
+    assert detail['messages'] == []
