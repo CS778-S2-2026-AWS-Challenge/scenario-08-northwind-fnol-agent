@@ -3,8 +3,10 @@
 ## Scope
 
 This record covers the Day 4 checks assigned to `bdfa123` on 13 August 2026.
-All inputs are synthetic. The verified base was `main` at `15c870a`; the
-candidate integration also included PR #80 (`c8e9a20`) and PR #81 (`9659aa4`).
+All inputs are synthetic. The verified branch includes `main` at `bf2db2c`,
+including the public API fixture examples from PR #83. A disposable candidate
+also combined PR #80 (`c8e9a20`) and PR #81 (`9659aa4`) for compatibility
+testing; those two PRs remain unmerged.
 
 ## Test records
 
@@ -17,8 +19,8 @@ candidate integration also included PR #80 (`c8e9a20`) and PR #81 (`9659aa4`).
 | Image completion | Synthetic JPEG upload target and checksum completion | Evidence returns `received` and file status `ready` | Internal extraction state is `proposed`; the claim form remains unchanged | Pass | The claimant evidence-upload UI remains planned |
 | Later submission | Pending evidence followed by the upload/completion route | The later item is listed without exposing provenance | Evidence summary updates without restarting the claim | Pass | Uses the mock evidence-storage adapter |
 | Cross-session resume | AT-08 ten-day resume package | Summary, unresolved question, pending item, and prior commitment are restored | Confirmed incident and location fields remain intact | Pass | Full transcript and internal note are deliberately excluded |
-| Shared claimant/staff state | AT-12 plus candidate workbench detail from PR #80 | Staff reads the shared persisted claim; claimant projection excludes internal signal | Staff-safe and claimant-safe projections are derived from the same claim revision | Pass in candidate integration | Functional staff actions are not yet implemented |
-| Urgent and human support | PR #81 injury, continuing-danger, negated-injury, and explicit-human-request cases | Ordinary intake pauses only for a real urgent/support trigger; claimant is told to contact emergency services themselves | One context-preserving handoff record is stored | Pass in candidate integration | PR #81 is not yet merged into `main` |
+| Shared claimant/staff state | AT-12 plus candidate workbench detail from PR #80 | Staff reads shared claim fields; claimant projection excludes the internal signal | Staff-safe and claimant-safe projections use the same claim revision | Partial in candidate integration | PR #80 currently omits persisted handoffs and can miss decisions that have no message record; functional staff actions are also not implemented |
+| Urgent and human support | PR #81 injury, continuing-danger, negated-injury, and explicit-human-request cases | Ordinary intake pauses only for a real urgent/support trigger; claimant is told to contact emergency services themselves | One context-preserving handoff record is stored | Claimant-side pass in candidate integration | PR #81 is unmerged, and the current PR #80 workbench projection does not return the persisted handoff packet |
 
 ## Integration result
 
@@ -27,7 +29,8 @@ PR #80 and PR #81 both add routes to `backend/app.py` and models to
 candidate branches are combined. The intended resolution is additive: register
 both the workbench and handoff routers and retain both sets of model classes.
 
-After applying that resolution in a disposable integration worktree:
+After applying that resolution in a disposable integration worktree, the
+existing automated compatibility checks passed:
 
 | Check | Result |
 |---|---|
@@ -38,16 +41,22 @@ After applying that resolution in a disposable integration worktree:
 | Claimant tests | 6 passed |
 | Claimant lint and production build | Passed |
 
-The merge conflict still needs to be incorporated by the owner of whichever PR
-merges second. No failing behaviour remained after the additive resolution.
+These results prove that the candidate branches can be combined and that their
+existing tests pass. They do not prove the complete workbench-handoff acceptance
+path. Subsequent review of PR #80 found that its workbench projection hard-codes
+`handoffs=[]` and discovers decisions through messages, which can omit a
+persisted handoff from PR #81 and decisions without a matching message. PR #80
+therefore remains blocked for its owners to correct. After that change and the
+relevant merges, `bdfa123` must rerun the shared-state and integration checks
+under Issues #48 and #54.
 
 ## Demonstration evidence
 
 ![Urgent claimant handoff using synthetic data](demo-evidence/day4-urgent-handoff.png)
 
-The capture comes from the locally tested PR #80 + PR #81 candidate. It shows
-that ordinary intake pauses, the supplied context is saved, Northwind support
-becomes the next owner, and the product does not claim that it contacted
-emergency services. A verified staff-action screenshot cannot be captured yet
-because D3-P08 has not been implemented; the current candidate provides a
-staff detail API rather than a functional employee UI.
+The capture comes from the locally tested PR #80 + PR #81 candidate. It verifies
+the claimant side only: ordinary intake pauses, supplied context is saved,
+Northwind support becomes the next owner, and the product does not claim that
+it contacted emergency services. It is not evidence that the handoff appears in
+the workbench. A verified staff-action or staff-handoff screenshot cannot be
+captured until the workbench gap above and D3-P08 are implemented.
