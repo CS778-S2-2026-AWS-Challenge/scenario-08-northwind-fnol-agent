@@ -25,6 +25,12 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const HANDOFF_STATUS_LABELS = {
+  queued: 'Queued',
+  accepted: 'Accepted by Northwind support',
+  in_progress: 'Support conversation in progress',
+}
+
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
 }
@@ -92,7 +98,7 @@ function App() {
   }
 
   const refreshClaimStatus = useCallback(async ({ silent = false } = {}) => {
-    if (!claim || isBusy) return
+    if (!claim) return
     if (!silent) {
       setError('')
       setStatus('refreshing')
@@ -115,12 +121,12 @@ function App() {
         setStatus('error')
       }
     }
-  }, [claim, isBusy, sessionId])
+  }, [claim, sessionId])
 
   useEffect(() => {
     if (!claim || !sessionId) return undefined
     const timer = window.setInterval(() => {
-      if (['sending', 'refreshing', 'starting'].includes(status)) return
+      if (['sending', 'starting'].includes(status)) return
       refreshClaimStatus({ silent: true }).catch(() => {})
     }, 4000)
     return () => window.clearInterval(timer)
@@ -396,6 +402,7 @@ function App() {
                       ? 'Your support request is queued'
                       : 'Northwind support is handling your request'}
                 </h2>
+                <p className="handoff-status">Status: {HANDOFF_STATUS_LABELS[handoff.status] || handoff.status}</p>
                 <p>{handoff.summary}</p>
                 <dl>
                   <div>
@@ -411,7 +418,7 @@ function App() {
                 <button
                   className="secondary-button refresh-button"
                   type="button"
-                  onClick={refreshClaimStatus}
+                  onClick={() => refreshClaimStatus()}
                   disabled={isBusy}
                 >
                   {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}

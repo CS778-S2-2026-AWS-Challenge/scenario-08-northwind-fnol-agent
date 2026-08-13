@@ -431,14 +431,6 @@ class ClaimantHandoff(ContractModel):
     created_at: datetime
 
 
-class ClaimantMessageChannel(ContractModel):
-    """Customer-safe live support projection; staff routing remains hidden."""
-
-    handoff_id: str
-    status: HandoffStatus
-    updated_at: datetime
-
-
 class WorkbenchSession(ContractModel):
     """Staff projection of saved resume context without repository ownership fields."""
 
@@ -821,7 +813,7 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
-    handoff: ClaimantMessageChannel | None = None
+    handoff: ClaimantHandoff | None = None
     created_at: datetime
     updated_at: datetime
 

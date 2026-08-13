@@ -313,6 +313,8 @@
     let activeClaimId = null;
     let activeClaimDetail = null;
     const detailCache = new Map();
+    let queueSnapshot = '';
+    let detailRevision = null;
 
     const stateMap = {
       professional_review: 'Professional review',
@@ -626,7 +628,7 @@
       }
     }
 
-    function renderDetail(claimId) {
+    function renderDetail(claimId, providedDetail = null) {
       const selected = claims.find(item => item.claim_id === claimId);
       if (!selected) {
         byId('detailContent').innerHTML = '<p class="muted">Claim details are unavailable.</p>';
@@ -636,9 +638,10 @@
         return;
       }
 
-      fetchClaimDetail(claimId)
+      (providedDetail ? Promise.resolve(providedDetail) : fetchClaimDetail(claimId))
         .then(detail => {
           activeClaimDetail = detail;
+          detailRevision = detail.revision;
           detailCache.set(detail.claim_id, detail);
           const detailContent = byId('detailContent');
           detailContent.innerHTML = '';
@@ -685,7 +688,7 @@
     async function refreshDetail(claimId) {
       const detail = await fetchClaimDetail(claimId);
       detailCache.set(claimId, detail);
-      if (claimId === activeClaimId) renderDetail(claimId);
+      if (claimId === activeClaimId && detail.revision !== detailRevision) renderDetail(claimId, detail);
       return detail;
     }
 
@@ -693,6 +696,7 @@
       const view = byId('viewSelect').value;
       const payload = await fetchClaims(view);
       claims = payload.items || [];
+      queueSnapshot = snapshotClaims(claims);
       renderClaims(claims);
     }
 
@@ -702,6 +706,7 @@
       try {
         const payload = await fetchClaims(view);
         claims = payload.items || [];
+        queueSnapshot = snapshotClaims(claims);
         renderClaims(claims);
         if (claims.length && !activeClaimId) {
           activeClaimId = claims[0].claim_id;
@@ -933,6 +938,16 @@
       }
     }
 
+    function snapshotClaims(list) {
+      return JSON.stringify(list.map(item => [
+        item.claim_id,
+        item.revision,
+        item.queue,
+        item.open_handoff_count,
+        item.assignee_id,
+      ]));
+    }
+
     async function resolveCustomerHandoff() {
       const claim = currentCustomerClaim();
       if (!claim) return;
@@ -1027,9 +1042,34 @@
     });
     window.setInterval(async () => {
       if (document.hidden) return;
-      detailCache.clear();
-      await loadClaims();
-      if (!customerChatView.hidden) await renderCustomerChat();
+      try {
+        const view = byId('viewSelect').value;
+        const payload = await fetchClaims(view);
+        const nextClaims = payload.items || [];
+        const nextSnapshot = snapshotClaims(nextClaims);
+        if (nextSnapshot !== queueSnapshot) {
+          claims = nextClaims;
+          queueSnapshot = nextSnapshot;
+          renderClaims(claims);
+        }
+        if (activeClaimId) {
+          const active = nextClaims.find(item => item.claim_id === activeClaimId);
+          if (active?.revision !== detailRevision) {
+            detailCache.delete(activeClaimId);
+            renderDetail(activeClaimId);
+          }
+        }
+        if (!customerChatView.hidden) {
+          const chatClaim = nextClaims.find(item => item.claim_id === activeCustomerChatId);
+          const cached = detailCache.get(activeCustomerChatId);
+          if (chatClaim?.revision !== cached?.revision) {
+            detailCache.delete(activeCustomerChatId);
+            await renderCustomerChat();
+          }
+        }
+      } catch (error) {
+        setError(error.message);
+      }
     }, 7000);
   </script>
 </body>
