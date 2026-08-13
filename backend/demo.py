@@ -6,6 +6,11 @@ from fastapi.responses import FileResponse
 from backend.app import create_app
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+DEMO_MEDIA_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+}
+DEMO_STATIC_HEADERS = {'Cache-Control': 'no-store'}
 
 
 def _required_directory(path: Path, description: str) -> Path:
@@ -20,8 +25,12 @@ def _required_directory(path: Path, description: str) -> Path:
 def _frontend_response(root: Path, requested_path: str) -> FileResponse:
     candidate = (root / requested_path).resolve()
     if candidate.is_relative_to(root) and candidate.is_file():
-        return FileResponse(candidate)
-    return FileResponse(root / 'index.html')
+        return FileResponse(
+            candidate,
+            media_type=DEMO_MEDIA_TYPES.get(candidate.suffix.lower()),
+            headers=DEMO_STATIC_HEADERS,
+        )
+    return FileResponse(root / 'index.html', headers=DEMO_STATIC_HEADERS)
 
 
 def create_demo_app(

@@ -22,7 +22,11 @@ def test_demo_app_serves_both_frontends_and_spa_fallbacks(tmp_path: Path) -> Non
 
     assert client.get('/').text == 'claimant application'
     assert client.get('/claim/deep-link').text == 'claimant application'
-    assert client.get('/assets/app.js').text == 'console.log("claimant")'
+    javascript = client.get('/assets/app.js')
+    assert javascript.text == 'console.log("claimant")'
+    assert javascript.headers['content-type'] == 'text/javascript; charset=utf-8'
+    assert javascript.headers['cache-control'] == 'no-store'
+    assert client.get('/').headers['cache-control'] == 'no-store'
     assert client.get('/employee/').text == 'employee application'
     assert client.get('/employee/claim/deep-link').text == 'employee application'
 
