@@ -1,7 +1,9 @@
 from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, StringConstraints
+
+from backend.core.auth import Principal, require_claimant
 
 router = APIRouter(tags=['temporary-connectivity'])
 
@@ -22,7 +24,10 @@ class ClaimMessageResponse(BaseModel):
     response_model=ClaimMessageResponse,
     deprecated=True,
 )
-def claim_message(data: ClaimMessage) -> ClaimMessageResponse:
+def claim_message(
+    data: ClaimMessage,
+    _principal: Principal = Depends(require_claimant),
+) -> ClaimMessageResponse:
     """Keep the connectivity shell working until the versioned routes replace it."""
     return ClaimMessageResponse(
         reply='I received your claim.',

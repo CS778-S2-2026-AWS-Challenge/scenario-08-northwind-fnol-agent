@@ -24,10 +24,19 @@ def require_claimant(
 
     token = authorization.removeprefix('Bearer ').strip()
     settings = request.app.state.settings
-    if (
-        settings.environment not in {'development', 'test'}
-        or token != settings.synthetic_claimant_token
-    ):
+    if settings.environment not in {'development', 'test'}:
+        raise ApiError(
+            status_code=401,
+            code='AUTHENTICATION_REQUIRED',
+            message='The claimant identity could not be authenticated.',
+        )
+    if token in {settings.synthetic_staff_token, settings.synthetic_integration_token}:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Staff and integration credentials cannot access claimant APIs.',
+        )
+    if token != settings.synthetic_claimant_token:
         raise ApiError(
             status_code=401,
             code='AUTHENTICATION_REQUIRED',
@@ -56,11 +65,11 @@ def require_staff(
             code='AUTHENTICATION_REQUIRED',
             message='The staff identity could not be authenticated.',
         )
-    if token == settings.synthetic_claimant_token:
+    if token in {settings.synthetic_claimant_token, settings.synthetic_integration_token}:
         raise ApiError(
             status_code=403,
             code='ACCESS_DENIED',
-            message='Claimant credentials cannot access the staff workbench.',
+            message='Claimant and integration credentials cannot access the staff workbench.',
         )
     if token != settings.synthetic_staff_token:
         raise ApiError(
@@ -85,10 +94,19 @@ def require_integration_service(
 
     token = authorization.removeprefix('Bearer ').strip()
     settings = request.app.state.settings
-    if (
-        settings.environment not in {'development', 'test'}
-        or token != settings.synthetic_integration_token
-    ):
+    if settings.environment not in {'development', 'test'}:
+        raise ApiError(
+            status_code=401,
+            code='AUTHENTICATION_REQUIRED',
+            message='The integration-service identity could not be authenticated.',
+        )
+    if token in {settings.synthetic_claimant_token, settings.synthetic_staff_token}:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Claimant and staff credentials cannot access integration-service APIs.',
+        )
+    if token != settings.synthetic_integration_token:
         raise ApiError(
             status_code=401,
             code='AUTHENTICATION_REQUIRED',
