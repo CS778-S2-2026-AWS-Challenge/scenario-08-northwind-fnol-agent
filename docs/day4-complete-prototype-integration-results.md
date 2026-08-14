@@ -3,9 +3,12 @@
 ## Scope
 
 This record completes the shared integration verification for D4-T01 (#40) on
-14 August 2026. It was run from `main` commit `4c9e806`, after the staff
-workbench actions and shared-state write-back from #37 were merged. All data
-used by the verification is synthetic.
+14 August 2026. The live run used checkout commit
+`ed4579a5170ee73f8c7eab4598ed614f04a5c1a9`; its application source is the
+merged `main` commit `4c9e8069e0bee68f0a3daf269f964bb1bcc2d9c0`, with only this
+documentation record added. Staff workbench actions and shared-state
+write-back from #37 are therefore included. All verification data is
+synthetic.
 
 The earlier [Day 3 integration record](day3-bdfa-integration-results.md)
 verified the claimant, fixture, and persistence foundations before the final
@@ -31,11 +34,58 @@ The merged prototype now contains and verifies:
 - repeatable synthetic scenarios with a fresh in-memory repository on every
   invocation.
 
+## Live shared-process run
+
+The documented start sequence was run from the repository root in three local
+terminals. On this Windows verification host, the configured Python 3.12
+executable was used in place of the `py -3.12` launcher:
+
+```powershell
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+npm run dev --prefix customer -- --host 127.0.0.1 --port 5173
+python -m http.server 8002 --bind 127.0.0.1 --directory employee
+```
+
+The following live URLs were checked before exercising the shared state:
+
+| Surface | URL | Observed result |
+|---|---|---|
+| FastAPI liveness | `http://127.0.0.1:8000/health/live` | `200`, status `ok` |
+| Claimant client | `http://127.0.0.1:5173/` | `200` |
+| Employee workbench | `http://127.0.0.1:8002/` | `200` |
+
+A claimant-authenticated request then created a working claim through the same
+versioned route used by the claimant client:
+
+```text
+POST http://127.0.0.1:8000/api/v1/claims
+Authorization: Bearer synthetic-claimant
+Idempotency-Key: issue40-readme-live-claim
+
+claim_id = clm_5d14d4937bfb216f3eff
+revision = 1
+```
+
+Without restarting the backend or editing repository state, a
+staff-authenticated workbench request read that exact record:
+
+```text
+GET http://127.0.0.1:8000/api/v1/workbench/claims/clm_5d14d4937bfb216f3eff
+Authorization: Bearer synthetic-staff
+
+claim_id = clm_5d14d4937bfb216f3eff
+revision = 1
+```
+
+The matching claim identifier and revision demonstrate observable claimant-to-
+workbench state through one running FastAPI process. All three local services
+were stopped after the check.
+
 ## Verification results
 
 | Check | Result |
 |---|---|
-| Backend formatting | Passed; 64 files already formatted |
+| Backend formatting | Passed; 66 files already formatted |
 | Backend lint | Passed |
 | Mypy strict type check | Passed; 63 source files checked |
 | Backend tests | Passed; 130 tests |
