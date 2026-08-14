@@ -105,6 +105,6 @@ is the clean fixture reset. The concrete API and logical DynamoDB mapping is
 
 The Day 3 claimant, Agent, API, fixture, and observable-state dependency map is [documented here](docs/day3-implementation-map.md). It is a planning contract, not a claim that full frontend-backend integration is complete.
 
-The completed Sprint 1 shared-run checks, including the employee workbench and
-staff write-back path, are recorded in the
-[Day 4 complete prototype integration results](docs/day4-complete-prototype-integration-results.md).
+The assembled Sprint 1 shared-runtime baseline, including verified employee
+workbench write-back and the known claimant/Agent journey blockers, is recorded
+in the [Day 4 prototype integration baseline](docs/day4-assembled-prototype-integration-results.md).

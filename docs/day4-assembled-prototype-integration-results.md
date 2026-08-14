@@ -1,9 +1,11 @@
-# Day 4 Complete Prototype Integration Results
+# Day 4 Assembled Prototype Integration Baseline
 
 ## Scope
 
-This record completes the shared integration verification for D4-T01 (#40) on
-14 August 2026. The live run used checkout commit
+This record verifies the assembled shared-runtime baseline for D4-T01 (#40) on
+14 August 2026. It establishes the runnable foundation required for the Day 4
+journey tests; it does not claim that every claimant or Agent journey passes.
+The live run used checkout commit
 `ed4579a5170ee73f8c7eab4598ed614f04a5c1a9`; its application source is the
 merged `main` commit `4c9e8069e0bee68f0a3daf269f964bb1bcc2d9c0`, with only this
 documentation record added. Staff workbench actions and shared-state
@@ -13,7 +15,8 @@ synthetic.
 The earlier [Day 3 integration record](day3-bdfa-integration-results.md)
 verified the claimant, fixture, and persistence foundations before the final
 staff-action routes and workbench controls were available. This record adds
-that remaining employee-side scope and reruns the complete repository gate.
+that employee-side assembly evidence, reruns the repository gate, and records
+the live journey blockers found during subsequent verification.
 
 ## Integrated path
 
@@ -22,9 +25,11 @@ starts the backend, claimant client, and employee workbench against the same
 backend process. No source file, fixture, or hidden record needs to be edited
 between roles.
 
-The merged prototype now contains and verifies:
+The merged prototype now assembles these surfaces and verifies their stated
+automated or shared-state boundaries:
 
-- claimant intake, confirmation, evidence, session resume, and claim creation;
+- claimant intake, confirmation, evidence, session resume, and controlled claim
+  creation components, subject to the live journey blockers below;
 - Agent decisions bounded by the shared authority and state models;
 - claimant and staff projections over the same repository record;
 - workbench queue/detail, persisted handoff communication, staff actions, and
@@ -81,6 +86,30 @@ The matching claim identifier and revision demonstrate observable claimant-to-
 workbench state through one running FastAPI process. All three local services
 were stopped after the check.
 
+## Known live journey blockers
+
+A separate reviewer live run against the same merged application commit found
+two reproducible claimant/Agent journey failures. They are tracked for the
+claimant and Agent owners in [#47](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/47):
+
+1. Claim `clm_be32363c66551b25916b` explicitly stated, "No one was injured and
+   there is no continuing danger," but intake paused and the workbench received
+   an `urgent` queued handoff with the reason "You described an injury or
+   continuing danger."
+2. Claim `clm_fa91f238a889049d3dd1` progressed through a clear
+   car/rear-bumper journey and confirmed the incident, loss, and Queen Street
+   location. **Create claim** then failed with "Controlled claim creation is
+   currently available
+   only for the motor fixture path," while the workbench displayed "Incident
+   type: Not set."
+
+The same reviewer run also confirmed a positive explicit-human-handoff path:
+context was preserved and staff acceptance propagated back to the claimant.
+Together, these observations show that the shared runtime is assembled and can
+support D4-T02 through D4-T07, while specific journeys still require fixes and
+retesting. They must not be represented as successfully integrated until #47
+is resolved.
+
 ## Verification results
 
 | Check | Result |
@@ -122,17 +151,17 @@ from the Day 3 record:
 
 ## Acceptance mapping
 
-| D4-T01 acceptance criterion | Evidence |
+| D4-T01 baseline acceptance criterion | Evidence |
 |---|---|
 | The prototype uses one documented start path. | The root README documents the backend, claimant client, and employee workbench sequence and their shared API. |
 | The run does not require manual hidden-data changes. | Tests and UI clients use public versioned routes; scenarios seed synthetic records through the repository loader. |
 | A clean fixture reset is available. | `scripts/run_scenarios.py` creates a fresh repository per scenario; two consecutive full runs produced identical starting IDs and counts. |
 
-No integration blocker was found in the verified scope.
-
 ## Boundary
 
-This is Sprint 1 prototype verification, not production-readiness evidence.
+This is an assembled Sprint 1 prototype baseline, not a statement that every
+journey is complete and not production-readiness evidence. The known journey
+failures above remain open for targeted Day 4 correction and regression tests.
 AWS services remain replaceable adapters or fixtures, and the results do not
 claim production identity, security, performance, operational-volume, or
 insurer-rule validation.
