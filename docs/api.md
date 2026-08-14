@@ -1171,6 +1171,38 @@ Resolve request:
 
 Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
 
+### `POST /api/v1/workbench/demo/reset`
+
+Resets the running local demonstration state. The route requires the synthetic
+staff credential and is therefore unavailable outside the development and test
+environments. It clears claims, sessions, messages, decisions, evidence,
+handoffs, staff records, idempotency records, and mock integration results.
+
+Every runtime component must explicitly implement the demo-reset boundary. If
+the repository or any adapter does not opt in, the server returns `409
+DEMO_RESET_UNAVAILABLE` before clearing any component. This prevents the local
+command from deleting data through a future production persistence or provider
+adapter.
+
+Response `200`:
+
+```json
+{
+  "status": "reset",
+  "cleared": {
+    "claims": 2,
+    "evidence": 1,
+    "handoffs": 1,
+    "idempotency_records": 6,
+    "mock_claim_results": 1
+  }
+}
+```
+
+Use `py -3.12 scripts/reset_demo.py` while the local backend is running. The
+command prints the cleared record counts and exits non-zero for connection,
+authentication, unsupported-component, or invalid-response failures.
+
 ### `POST /api/v1/workbench/claims/{claim_id}/updates`
 
 Creates a claimant-visible update. Internal notes use the staff action or event model and MUST NOT be sent through this endpoint.

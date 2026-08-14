@@ -916,3 +916,8 @@ class ClaimCreationResponse(ContractModel):
     decision: ClaimantDecision
     external_claim: ExternalClaimResult
     customer_next_step: CustomerNextStep
+
+
+class DemoResetResponse(ContractModel):
+    status: Literal['reset']
+    cleared: dict[str, int]
