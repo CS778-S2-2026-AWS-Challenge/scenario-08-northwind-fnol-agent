@@ -236,13 +236,217 @@ describe('claimant intake', () => {
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
 
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
+    expect(screen.getByText('Status: Queued')).toBeVisible()
     expect(screen.getByText('Northwind support')).toBeVisible()
     expect(screen.getByText('Saved with the details already provided')).toBeVisible()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
-    expect(screen.getByText(/Normal intake is paused/)).toBeVisible()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
+    expect(screen.getByText(/message will be saved for Northwind support/)).toBeVisible()
     expect(fetch).toHaveBeenNthCalledWith(
       3,
       '/api/v1/claims/clm_test/support-requests',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('refreshes a queued handoff and displays the persisted staff update', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'queued',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued with the details already provided.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_queued',
+          responsible_party: 'northwind',
+        },
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        revision: 5,
+        customer_next_step: {
+          ...nextStep,
+          status: 'staff_update',
+          summary: 'A staff member reviewed your report and will contact you.',
+          responsible_party: 'northwind',
+        },
+      }),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+
+    expect(await screen.findByText('Your support request has been reviewed')).toBeVisible()
+    expect(screen.getAllByText('A staff member reviewed your report and will contact you.')).toHaveLength(2)
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      '/api/v1/claims/clm_test',
+      expect.objectContaining({ headers: expect.any(Object) }),
+    )
+  })
+
+  it('replaces the handoff card with a system notice when staff support starts', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'queued',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: { ...nextStep, status: 'human_support_queued' },
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        revision: 5,
+        handoff: {
+          handoff_id: 'hnd_test',
+          status: 'in_progress',
+          priority: 'standard',
+          support_need: 'human_requested',
+          summary: 'A Northwind support request has been queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_in_progress',
+          summary: 'A Northwind staff member is now assisting you.',
+          responsible_party: 'northwind',
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() => jsonResponse({ items: [], page: { next_cursor: null } }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+
+    expect(await screen.findByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    expect(screen.queryByText('Human support')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument()
+  })
+
+  it('labels pending evidence fields without asking the claimant to confirm them', async () => {
+    const pendingTurn = {
+      ...firstTurn(),
+      form_changes: [{
+        field_code: 'authorities.police_report_reference',
+        field: {
+          ...firstTurn().form_changes[0].field,
+          value: 'Expected next week',
+          status: 'pending_generation',
+        },
+      }],
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(pendingTurn))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Police report is due next week.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(await screen.findByText('Pending')).toBeVisible()
+  })
+
+  it('creates a mock claim only after all proposed facts are confirmed', async () => {
+    const completeTurn = {
+      ...firstTurn(),
+      form_changes: [
+        firstTurn().form_changes[0],
+        {
+          field_code: 'incident.location',
+          field: { ...firstTurn().form_changes[0].field, value: 'Queen Street' },
+        },
+        {
+          field_code: 'loss.description',
+          field: { ...firstTurn().form_changes[0].field, value: 'Rear bumper damage' },
+        },
+      ],
+    }
+    const confirmedFields = Object.fromEntries(
+      completeTurn.form_changes.map(({ field_code: fieldCode, field }) => [
+        fieldCode,
+        { ...field, status: 'confirmed' },
+      ]),
+    )
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(completeTurn))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        claim_id: 'clm_test',
+        revision: 3,
+        confirmed_fields: confirmedFields,
+        decision: null,
+        customer_next_step: {
+          ...nextStep,
+          status: 'ready_to_create',
+          summary: 'Your confirmed report is ready for controlled claim creation.',
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        claim_id: 'clm_test',
+        revision: 4,
+        decision: {
+          action: 'CREATE_CLAIM',
+          reason_codes: ['CLAIM_CREATION_AUTHORISED'],
+        },
+        external_claim: {
+          external_claim_id: 'ext_fixture_test',
+          claim_number: 'NWF-2026-TEST01',
+          creation_status: 'created',
+          route: 'standard_motor_intake',
+          next_step: 'Claims intake review',
+          expected_by: '2026-08-14T00:00:00Z',
+          created_at: '2026-08-13T00:00:00Z',
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'claim_created',
+          summary: 'Claims intake review',
+          responsible_party: 'northwind',
+        },
+      }, 201),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
+    await user.click(await screen.findByRole('button', { name: 'Create claim' }))
+
+    expect(await screen.findByText('NWF-2026-TEST01')).toBeVisible()
+    expect(screen.getByText('standard_motor_intake')).toBeVisible()
+    expect(screen.getAllByText('Claims intake review').length).toBeGreaterThan(0)
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      '/api/v1/claims/clm_test/creation',
       expect.objectContaining({ method: 'POST' }),
     )
   })
@@ -289,6 +493,6 @@ describe('claimant intake', () => {
     expect(await screen.findByText('Normal intake has paused')).toBeVisible()
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)
     expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 })

@@ -14,13 +14,20 @@ from backend.domain.models import (
     ClaimantMessage,
     CreateMessageRequest,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceState,
+    EvidenceStatus,
     FormChange,
+    FormSource,
     FormStatus,
     HandoffRecord,
     MessageListResponse,
     MessageRecord,
     MessageTurnResponse,
     MessageVisibility,
+    NeededFor,
     PageInfo,
     ProposedFormChange,
     ResponsibleParty,
@@ -131,6 +138,22 @@ def _message_turn_response(
     )
 
 
+def _message_only_response(
+    claim_id: str,
+    session_id: str,
+    revision: int,
+    message: MessageRecord,
+) -> MessageTurnResponse:
+    return MessageTurnResponse(
+        claim_id=claim_id,
+        session_id=session_id,
+        claim_revision=revision,
+        claimant_message=_claimant_message(message),
+        form_changes=[],
+        handoff=None,
+    )
+
+
 def _effective_next_step(
     proposed: CustomerNextStep,
     outcome: AuthorityOutcome,
@@ -180,6 +203,40 @@ def _build_form_changes(
     return form_changes
 
 
+def _pending_evidence_for_proposal(
+    claim_id: str,
+    proposal: object,
+    claimant_message: MessageRecord,
+    timestamp: datetime,
+) -> EvidenceRecord | None:
+    required_tools = getattr(proposal, 'required_tools', [])
+    pending = next(
+        (
+            tool
+            for tool in required_tools
+            if tool.get('tool') == 'evidence_registry'
+            and tool.get('operation') == 'record_pending_generation'
+        ),
+        None,
+    )
+    if pending is None:
+        return None
+    return EvidenceRecord(
+        evidence_id=new_id('evd'),
+        claim_id=claim_id,
+        kind=str(pending.get('kind') or 'document'),
+        status=EvidenceStatus.PENDING_GENERATION,
+        file_status=EvidenceFileStatus.NOT_AVAILABLE,
+        source=EvidenceSource.CLAIMANT,
+        related_fields=['authorities.police_report_reference'],
+        needed_for=['later_action'],
+        provenance={'reported_in_message_id': claimant_message.message_id},
+        claimant_note=str(claimant_message.content.get('text') or ''),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
 def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
@@ -202,6 +259,8 @@ def submit_message(
                 code='IDEMPOTENCY_CONFLICT',
                 message='The idempotency key was reused with a different request.',
             )
+        if existing_idempotency.response_payload is not None:
+            return MessageTurnResponse.model_validate(existing_idempotency.response_payload)
         if existing_idempotency.message_id is None or existing_idempotency.decision_id is None:
             raise ApiError(
                 status_code=500,
@@ -256,12 +315,12 @@ def submit_message(
                 principal.subject,
             )
             if decision is None:
-                raise ApiError(
-                    status_code=500,
-                    code='INTERNAL_ERROR',
-                    message='The deduplicated message turn could not be restored.',
-                    retryable=True,
-                )
+                claim = repository.get_claim(claim_id, principal.subject)
+                if claim is not None:
+                    return _message_only_response(
+                        claim_id, session_id, claim.revision, existing_client_message
+                    )
+                raise _session_not_found()
             return _message_turn_response(
                 repository,
                 principal,
@@ -291,6 +350,67 @@ def submit_message(
             code='INVALID_STATE_TRANSITION',
             message='Messages can only be submitted to the claim active session.',
         )
+    active_handoff = next(
+        (
+            item
+            for item in reversed(repository.list_handoffs(claim_id, principal.subject))
+            if item.status.value not in {'resolved', 'cancelled'}
+        ),
+        None,
+    )
+    message_text = payload.content.text if payload.content is not None else ''
+    if active_handoff is not None and not message_text.lstrip().lower().startswith('@agent'):
+        timestamp = now_utc()
+        claimant_message = MessageRecord(
+            message_id=new_id('msg'),
+            claim_id=claim_id,
+            session_id=session_id,
+            client_message_id=payload.client_message_id,
+            actor=ActorType.CLAIMANT,
+            visibility=MessageVisibility.SHARED,
+            content=payload.content.model_dump(mode='json')
+            if payload.content is not None
+            else {'type': 'evidence_reference'},
+            evidence_refs=payload.evidence_refs,
+            created_at=timestamp,
+        )
+        updated_claim = claim.model_copy(
+            update={'revision': claim.revision + 1, 'updated_at': timestamp}
+        )
+        updated_session = session.model_copy(
+            update={'last_active_at': timestamp, 'context_revision': updated_claim.revision}
+        )
+        idempotency = IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=session_id,
+            message_id=claimant_message.message_id,
+        )
+        response = _message_only_response(
+            claim_id, session_id, updated_claim.revision, claimant_message
+        )
+        idempotency = IdempotencyRecord(
+            **{
+                **idempotency.__dict__,
+                'response_payload': response.model_dump(mode='json'),
+            }
+        )
+        try:
+            repository.save_message_mutation(
+                updated_claim, expected_revision, updated_session, claimant_message, idempotency
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed after this page was loaded.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        return response
     if claim.revision != expected_revision:
         raise ApiError(
             status_code=409,
@@ -336,7 +456,14 @@ def submit_message(
             claim=claim,
             session_id=session_id,
             trigger_message_id=claimant_message.message_id,
-            message_text=payload.content.text if payload.content is not None else None,
+            message_text=(
+                payload.content.text.lstrip()[len('@agent') :].lstrip()
+                if payload.content is not None
+                and payload.content.text.lstrip().lower().startswith('@agent')
+                else payload.content.text
+                if payload.content is not None
+                else None
+            ),
             evidence_refs=payload.evidence_refs,
         )
     )
@@ -346,6 +473,23 @@ def submit_message(
     form_changes = _build_form_changes(
         claim.form, proposal.form_changes, claimant_message, timestamp
     )
+    pending_evidence = _pending_evidence_for_proposal(
+        claim_id,
+        proposal,
+        claimant_message,
+        timestamp,
+    )
+    if pending_evidence is not None:
+        form_changes['authorities.police_report_reference'] = StructuredFormField(
+            value=None,
+            source=FormSource.CLAIMANT,
+            source_refs=[claimant_message.message_id, pending_evidence.evidence_id],
+            status=FormStatus.PENDING_GENERATION,
+            needed_for=NeededFor.LATER_ACTION,
+            confidence=1.0,
+            updated_at=timestamp,
+            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
+        )
     if authority.outcome is AuthorityOutcome.BLOCKED:
         form_changes = {}
 
@@ -381,8 +525,24 @@ def submit_message(
     else:
         updated_claim = claim.model_copy(
             update={
-                'claim_state': claim.claim_state.model_copy(update={'next_action': next_action}),
+                'claim_state': claim.claim_state.model_copy(
+                    update={
+                        'next_action': next_action,
+                        **(
+                            {'evidence': EvidenceState.PENDING_GENERATION}
+                            if pending_evidence is not None
+                            else {}
+                        ),
+                    }
+                ),
                 'form': {**claim.form, **form_changes},
+                'evidence_summary': (
+                    claim.evidence_summary.model_copy(
+                        update={'pending': claim.evidence_summary.pending + 1}
+                    )
+                    if pending_evidence is not None
+                    else claim.evidence_summary
+                ),
                 'customer_next_step': effective_next_step,
                 'revision': claim.revision + 1,
                 'updated_at': timestamp,
@@ -401,7 +561,7 @@ def submit_message(
         session_id=session_id,
         actor=ActorType.AGENT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': effective_next_step.summary},
+        content={'type': 'text', 'text': proposal.customer_response},
         in_reply_to=claimant_message.message_id,
         created_at=timestamp,
     )
@@ -413,6 +573,7 @@ def submit_message(
         action=proposal.action,
         reason_codes=proposal.reason_codes,
         customer_reason=proposal.customer_reason,
+        customer_response=proposal.customer_response,
         state_changes=proposal.state_changes,
         proposed_signals=proposal.proposed_signals,
         required_tools=proposal.required_tools,
@@ -447,6 +608,7 @@ def submit_message(
             decision,
             idempotency,
             handoff,
+            pending_evidence,
         )
     except RevisionConflict as conflict:
         raise ApiError(

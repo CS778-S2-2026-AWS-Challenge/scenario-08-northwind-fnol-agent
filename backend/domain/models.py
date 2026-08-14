@@ -349,6 +349,7 @@ class AgentDecisionRecord(ContractModel):
     action: AgentAction
     reason_codes: list[str] = Field(min_length=1)
     customer_reason: str = Field(min_length=1, max_length=1000)
+    customer_response: str = Field(min_length=1, max_length=5000)
     state_changes: list[StateChange] = Field(default_factory=list)
     proposed_signals: list[dict[str, Any]] = Field(default_factory=list)
     required_tools: list[dict[str, Any]] = Field(default_factory=list)
@@ -555,6 +556,23 @@ class WorkbenchHandoff(ContractModel):
     created_at: datetime
     accepted_at: datetime | None = None
     resolved_at: datetime | None = None
+
+
+class AcceptHandoffRequest(ContractModel):
+    assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class ResolveHandoffRequest(ContractModel):
+    result: StaffActionResult
+    state_changes: list[StateChange] = Field(default_factory=list, max_length=20)
+    customer_update: CustomerUpdateInput
+
+
+class HandoffMutationResponse(ContractModel):
+    handoff: WorkbenchHandoff
+    revision: int = Field(ge=1)
+    staff_action: StaffActionRecord | None = None
+    customer_update: CustomerUpdateRecord | None = None
 
 
 class WorkbenchClaimDetail(ContractModel):
@@ -766,6 +784,11 @@ class CreateMessageRequest(ContractModel):
         return self
 
 
+class CreateStaffMessageRequest(ContractModel):
+    content: TextMessageContent
+    in_reply_to: str | None = None
+
+
 class FormUpdate(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -790,6 +813,7 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
+    handoff: ClaimantHandoff | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -860,9 +884,9 @@ class MessageTurnResponse(ContractModel):
     session_id: str
     claim_revision: int
     claimant_message: ClaimantMessage
-    agent_message: ClaimantMessage
+    agent_message: ClaimantMessage | None = None
     form_changes: list[FormChange]
-    decision: ClaimantDecision
+    decision: ClaimantDecision | None = None
     handoff: dict[str, Any] | None = None
 
 
@@ -871,9 +895,24 @@ class MessageListResponse(ContractModel):
     page: PageInfo
 
 
+class StaffMessageResponse(ContractModel):
+    claim_id: str
+    session_id: str
+    claim_revision: int
+    message: MessageRecord
+
+
 class FormConfirmationResponse(ContractModel):
     claim_id: str
     revision: int
     confirmed_fields: dict[str, StructuredFormField]
     decision: ClaimantDecision | None = None
+    customer_next_step: CustomerNextStep
+
+
+class ClaimCreationResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    decision: ClaimantDecision
+    external_claim: ExternalClaimResult
     customer_next_step: CustomerNextStep

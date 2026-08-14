@@ -4,17 +4,27 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.ids import new_id
 from backend.domain.models import (
+    AcceptHandoffRequest,
+    ActorType,
     Coverage,
     CreateStaffActionRequest,
+    CreateStaffMessageRequest,
     CustomerNextStep,
     CustomerUpdateRecord,
     FraudSignal,
+    HandoffMutationResponse,
+    HandoffRecord,
+    HandoffStatus,
+    MessageRecord,
+    MessageVisibility,
+    ResolveHandoffRequest,
     SignalDecisionRecord,
     SignalDecisionRequest,
     SignalDecisionResponse,
     StaffActionMutationResponse,
     StaffActionRecord,
     StaffActionStatus,
+    StaffMessageResponse,
     UpdateStaffActionRequest,
     WorkflowState,
     WorkingClaim,
@@ -31,6 +41,7 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+from backend.services.workbench import workbench_handoff
 
 
 def _not_found(message: str) -> ApiError:
@@ -97,6 +108,261 @@ def _save(
             code='IDEMPOTENCY_CONFLICT',
             message='The staff operation was already accepted with different data.',
         ) from conflict
+
+
+def _handoff(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+    handoff_id: str,
+) -> HandoffRecord:
+    handoff = repository.get_handoff(claim.claim_id, handoff_id, claim.customer_id)
+    if handoff is None:
+        raise _not_found('The handoff was not found.')
+    return handoff
+
+
+def accept_handoff(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    handoff_id: str,
+    payload: AcceptHandoffRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> HandoffMutationResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return HandoffMutationResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    if claim.revision != expected:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    handoff = _handoff(repository, claim, handoff_id)
+    if handoff.status is not HandoffStatus.QUEUED:
+        raise _validation('Only a queued handoff can be accepted.')
+    timestamp = now_utc()
+    accepted = handoff.model_copy(
+        update={
+            'status': HandoffStatus.ACCEPTED,
+            'assigned_to': payload.assignee_id or principal.subject,
+            'accepted_at': timestamp,
+        }
+    )
+    updated = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+            'customer_next_step': CustomerNextStep(
+                status='human_support_in_progress',
+                summary='A Northwind staff member is now assisting you.',
+                responsible_party='northwind',
+            ),
+        }
+    )
+    response = HandoffMutationResponse(
+        handoff=workbench_handoff(accepted),
+        revision=updated.revision,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=claim.active_session_id or '',
+        handoff_id=handoff_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+    _save(repository, updated, expected, idempotency, handoff=accepted)
+    return response
+
+
+def send_staff_message(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    payload: CreateStaffMessageRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> StaffMessageResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/messages'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return StaffMessageResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    if claim.revision != expected:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    handoffs = repository.list_handoffs(claim_id, claim.customer_id)
+    active = next(
+        (
+            item
+            for item in reversed(handoffs)
+            if item.status in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}
+        ),
+        None,
+    )
+    if active is None:
+        raise _validation('An accepted handoff is required before sending a staff message.')
+    timestamp = now_utc()
+    message = MessageRecord(
+        message_id=new_id('msg'),
+        claim_id=claim_id,
+        session_id=claim.active_session_id or '',
+        actor=ActorType.STAFF,
+        visibility=MessageVisibility.SHARED,
+        content=payload.content.model_dump(mode='json'),
+        in_reply_to=payload.in_reply_to,
+        created_at=timestamp,
+    )
+    updated_handoff = active.model_copy(update={'status': HandoffStatus.IN_PROGRESS})
+    updated = claim.model_copy(update={'revision': claim.revision + 1, 'updated_at': timestamp})
+    response = StaffMessageResponse(
+        claim_id=claim_id,
+        session_id=message.session_id,
+        claim_revision=updated.revision,
+        message=message,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=message.session_id,
+        message_id=message.message_id,
+        handoff_id=active.handoff_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+    _save(repository, updated, expected, idempotency, handoff=updated_handoff, message=message)
+    return response
+
+
+def resolve_handoff(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    handoff_id: str,
+    payload: ResolveHandoffRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> HandoffMutationResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected = parse_if_match(if_match)
+    route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    if replay is not None:
+        return HandoffMutationResponse.model_validate(replay)
+    claim = _staff_claim(repository, principal, claim_id)
+    if claim.revision != expected:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    handoff = _handoff(repository, claim, handoff_id)
+    if handoff.status not in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}:
+        raise _validation('The handoff must be accepted before it can be resolved.')
+    if handoff.assigned_to not in {None, principal.subject}:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The handoff is assigned to another staff member.',
+        )
+    projected = _apply_state_changes(
+        claim,
+        UpdateStaffActionRequest(
+            status=StaffActionStatus.COMPLETED,
+            result=payload.result,
+            state_changes=payload.state_changes,
+            customer_update=payload.customer_update,
+        ),
+    )
+    timestamp = now_utc()
+    resolved = handoff.model_copy(
+        update={
+            'status': HandoffStatus.RESOLVED,
+            'assigned_to': handoff.assigned_to or principal.subject,
+            'resolved_at': timestamp,
+        }
+    )
+    action = StaffActionRecord(
+        action_id=new_id('act'),
+        claim_id=claim_id,
+        action_type='handoff_support',
+        status=StaffActionStatus.COMPLETED,
+        assigned_to=resolved.assigned_to or principal.subject,
+        requested_outcome=handoff.requested_action,
+        source_refs=[handoff_id],
+        result=payload.result,
+        completed_by=principal.subject,
+        created_at=handoff.accepted_at or timestamp,
+        completed_at=timestamp,
+    )
+    customer_update = CustomerUpdateRecord(
+        **payload.customer_update.model_dump(),
+        update_id=new_id('upd'),
+        claim_id=claim_id,
+        created_by=principal.subject,
+        created_at=timestamp,
+    )
+    updated = projected.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+            'customer_next_step': CustomerNextStep(
+                status='staff_update',
+                summary=customer_update.summary,
+                responsible_party=customer_update.responsible_party,
+            ),
+        }
+    )
+    response = HandoffMutationResponse(
+        handoff=workbench_handoff(resolved),
+        revision=updated.revision,
+        staff_action=action,
+        customer_update=customer_update,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=claim.active_session_id or '',
+        handoff_id=handoff_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+    _save(
+        repository,
+        updated,
+        expected,
+        idempotency,
+        handoff=resolved,
+        staff_action=action,
+        customer_update=customer_update,
+    )
+    return response
 
 
 def create_staff_action(

@@ -12,7 +12,7 @@
     }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #f1f5f9; }
-    button, select { font: inherit; }
+    button, select, textarea, input { font: inherit; }
     a { color: inherit; text-decoration: none; }
 
     .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
@@ -70,6 +70,32 @@
     .detail-item span { color: #475569; font-size: 14px; line-height: 1.55; }
     .note { color: #475569; line-height: 1.6; }
     .muted { color: #64748b; font-size: 13px; }
+    .context-stack { display:grid; gap:18px; }
+    .context-block { border-top:1px solid #e2e8f0; padding-top:16px; }
+    .context-block:first-child { border-top:0; padding-top:0; }
+    .context-block h3 { margin:0 0 10px; color:#334155; font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+    .context-list { display:grid; gap:9px; margin:0; padding:0; list-style:none; }
+    .context-row { display:grid; grid-template-columns:minmax(130px,.5fr) minmax(0,1.5fr); gap:12px; padding:11px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+    .context-row dt, .context-row dd { margin:0; overflow-wrap:anywhere; }
+    .context-row dt { color:#64748b; font-size:12px; }
+    .context-row dd { color:#0f172a; font-size:14px; line-height:1.5; }
+    .inline-meta { display:flex; flex-wrap:wrap; gap:7px; margin-top:5px; color:#64748b; font-size:11px; }
+    .plain-list { margin:0; padding-left:18px; color:#475569; line-height:1.7; }
+    .handoff-panel { padding:16px; border:1px solid #bae6fd; border-left:4px solid #0284c7; border-radius:8px; background:#f0f9ff; }
+    .handoff-panel.is-resolved { border-color:#bbf7d0; border-left-color:#16a34a; background:#f0fdf4; }
+    .handoff-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
+    .handoff-heading strong { margin-right:auto; }
+    .action-form { display:grid; gap:10px; margin-top:14px; }
+    .action-form label { color:#334155; font-size:12px; font-weight:700; }
+    .action-form textarea { width:100%; min-height:86px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; resize:vertical; }
+    .action-button { width:fit-content; border:0; border-radius:8px; padding:10px 14px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
+    .action-button:disabled { background:#94a3b8; cursor:not-allowed; }
+    .action-feedback { min-height:20px; color:#475569; font-size:12px; }
+    .communication-entry { padding:12px 14px; border-left:3px solid #94a3b8; background:#f8fafc; }
+    .communication-entry.claimant { border-left-color:#157f79; }
+    .communication-entry.agent { border-left-color:#0284c7; }
+    .communication-entry.staff { border-left-color:#7c3aed; }
+    .communication-entry p { margin:4px 0 0; color:#334155; line-height:1.55; white-space:pre-wrap; }
 
     .empty-state { padding: 30px 20px; color: #334155; }
     .error { padding: 18px 20px; background: #fef2f2; color: #991b1b; border-radius: 14px; margin-bottom: 16px; }
@@ -82,7 +108,7 @@
     .staff-control textarea { min-height:74px; resize:vertical; }
     .staff-control .wide { grid-column:1 / -1; }
     .staff-action-button { margin-top:12px; padding:10px 14px; border:0; border-radius:9px; background:#0369a1; color:#fff; font-weight:700; cursor:pointer; }
-    .staff-action-button:disabled { opacity:.55; cursor:wait; }
+    .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
     .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
 
     @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
@@ -221,15 +247,15 @@
             </div>
           </div>
           <div class="detail-section" id="detailNotes" style="display:none">
-            <h2>Staff notes</h2>
-            <p id="detailInternalNotes"></p>
+            <h2>Claim context</h2>
+            <div id="detailContext"></div>
           </div>
           <div class="detail-section" id="detailNextStep" style="display:none">
             <h2>Customer next step</h2>
             <p id="detailNextStepSummary"></p>
             <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
             <div style="margin-top:12px">
-              <button id="openCustomerChatBtn" class="customer-chat-button">Open customer chat</button>
+              <button id="openCustomerChatBtn" class="customer-chat-button">View customer communication</button>
               <button id="toggleAssistantBtn" class="customer-chat-close" style="margin-left:8px">Open assistant</button>
             </div>
             </div>
@@ -246,7 +272,6 @@
                 </div>
                 <button id="createStaffActionBtn" class="staff-action-button" type="button">Create action</button>
               </section>
-
               <section class="staff-control">
                 <h3>Complete an open action</h3>
                 <div class="staff-form-grid">
@@ -254,39 +279,17 @@
                   <label>Outcome code<input id="completeOutcomeCode" value="professional_review_completed" maxlength="100"></label>
                   <label>Reason codes<input id="completeReasonCodes" value="STAFF_REVIEW_COMPLETED"></label>
                   <label class="wide">Internal result summary<textarea id="completeResultSummary">The staff review is complete.</textarea></label>
-                  <label>New workflow state
-                    <select id="completeWorkflowState">
-                      <option value="">No workflow change</option>
-                      <option value="ready_for_next">Ready for next action</option>
-                      <option value="awaiting_evidence">Awaiting evidence</option>
-                      <option value="professional_review">Professional review</option>
-                    </select>
-                  </label>
-                  <label>Customer responsible party
-                    <select id="customerResponsibleParty">
-                      <option value="northwind">Northwind</option>
-                      <option value="claimant">Claimant</option>
-                      <option value="claims_professional">Claims professional</option>
-                      <option value="external_party">External party</option>
-                    </select>
-                  </label>
+                  <label>New workflow state<select id="completeWorkflowState"><option value="">No workflow change</option><option value="ready_for_next">Ready for next action</option><option value="awaiting_evidence">Awaiting evidence</option><option value="professional_review">Professional review</option></select></label>
+                  <label>Customer responsible party<select id="customerResponsibleParty"><option value="northwind">Northwind</option><option value="claimant">Claimant</option><option value="claims_professional">Claims professional</option><option value="external_party">External party</option></select></label>
                   <label class="wide">Claimant-safe update<textarea id="customerUpdateSummary">Your claim has been reviewed. We will guide you through the next step.</textarea></label>
                 </div>
                 <button id="completeStaffActionBtn" class="staff-action-button" type="button">Complete action and update claim</button>
               </section>
-
               <section class="staff-control">
                 <h3>Decide a review signal</h3>
                 <div class="staff-form-grid">
                   <label class="wide">Review signal<select id="signalDecisionSelect"></select></label>
-                  <label>Decision
-                    <select id="signalDecisionValue">
-                      <option value="confirmed">Confirmed for review</option>
-                      <option value="dismissed">Dismissed</option>
-                      <option value="overridden">Overridden</option>
-                      <option value="resolved">Resolved</option>
-                    </select>
-                  </label>
+                  <label>Decision<select id="signalDecisionValue"><option value="confirmed">Confirmed for review</option><option value="dismissed">Dismissed</option><option value="overridden">Overridden</option><option value="resolved">Resolved</option></select></label>
                   <label>Reason codes<input id="signalReasonCodes" value="STAFF_SIGNAL_REVIEWED"></label>
                   <label class="wide">Internal decision summary<textarea id="signalDecisionSummary">A staff member reviewed this signal against the available evidence.</textarea></label>
                 </div>
@@ -319,8 +322,9 @@
               </div>
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
               <div class="customer-chat-input">
-                <textarea id="customerChatText" placeholder="Write a customer reply..."></textarea>
-                <button id="customerChatSend" class="customer-chat-button" type="button">Send</button>
+                <textarea id="customerChatText" placeholder="Write a message to the claimant..."></textarea>
+                <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
+                <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
               </div>
             </div>
           </div>
@@ -358,6 +362,8 @@
     let claims = [];
     let activeClaimId = null;
     let activeClaimDetail = null;
+    const detailCache = new Map();
+    let detailRevision = null;
 
     const stateMap = {
       professional_review: 'Professional review',
@@ -385,12 +391,24 @@
       };
     }
 
+    function requestKey(prefix) {
+      return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+    }
+
+    async function apiRequest(url, options = {}) {
+      const response = await fetch(url, {
+        ...options,
+        headers: { ...getHeaders(), ...options.headers },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || `The workbench request failed (${response.status}).`);
+      }
+      return payload;
+    }
+
     function mutationHeaders(revision) {
-      return {
-        ...getHeaders(),
-        'Idempotency-Key': crypto.randomUUID(),
-        'If-Match': String(revision),
-      };
+      return { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID(), 'If-Match': String(revision) };
     }
 
     function commaSeparatedValues(value) {
@@ -398,16 +416,11 @@
     }
 
     async function requestMutation(path, method, revision, payload) {
-      const response = await fetch(`${API_BASE}/${encodeURIComponent(activeClaimId)}${path}`, {
+      return apiRequest(`${API_BASE}/${encodeURIComponent(activeClaimId)}${path}`, {
         method,
         headers: mutationHeaders(revision),
         body: JSON.stringify(payload),
       });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(body?.error?.message || `Staff operation failed (${response.status})`);
-      }
-      return body;
     }
 
     function setMutationStatus(message, isError = false) {
@@ -416,53 +429,44 @@
       status.style.color = isError ? '#991b1b' : '#166534';
     }
 
-    function populateStaffControls(detail) {
-      const openActions = (detail.staff_actions || []).filter(
-        item => !['completed', 'cancelled'].includes(item.status)
-      );
-      const actionSelect = byId('completeActionSelect');
-      actionSelect.replaceChildren();
-      openActions.forEach(action => {
-        const option = document.createElement('option');
-        option.value = action.action_id;
-        option.textContent = `${action.action_type} · ${action.status}`;
-        actionSelect.appendChild(option);
-      });
-      if (!openActions.length) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'Create an action first';
-        actionSelect.appendChild(option);
-      }
-      byId('completeStaffActionBtn').disabled = !openActions.length;
-
-      const undecidedSignals = (detail.signals || []).filter(
-        signal => !(signal.decisions || []).length
-      );
-      const signalSelect = byId('signalDecisionSelect');
-      signalSelect.replaceChildren();
-      undecidedSignals.forEach(signal => {
-        const signalId = signal.signal_id || signal.code;
-        if (!signalId) return;
-        const option = document.createElement('option');
-        option.value = signalId;
-        option.textContent = signal.code || signal.signal_id;
-        signalSelect.appendChild(option);
-      });
-      if (!signalSelect.options.length) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No undecided review signals';
-        signalSelect.appendChild(option);
-      }
-      byId('decideSignalBtn').disabled = !signalSelect.value;
-      byId('detailStaffActions').style.display = 'block';
+    function syncStaffControlState() {
+      byId('createStaffActionBtn').disabled = !activeClaimDetail;
+      byId('completeStaffActionBtn').disabled = !activeClaimDetail || !byId('completeActionSelect').value;
+      byId('decideSignalBtn').disabled = !activeClaimDetail || !byId('signalDecisionSelect').value;
     }
 
-    async function refreshActiveClaim(message) {
+    function populateStaffControls(detail) {
+      const openActions = (detail.staff_actions || []).filter(item => !['completed', 'cancelled'].includes(item.status));
+      const actionSelect = byId('completeActionSelect');
+      actionSelect.replaceChildren();
+      openActions.forEach(action => actionSelect.add(new Option(`${action.action_type} · ${action.status}`, action.action_id)));
+      if (!openActions.length) actionSelect.add(new Option('No open staff actions', ''));
+
+      const signalSelect = byId('signalDecisionSelect');
+      signalSelect.replaceChildren();
+      (detail.signals || []).filter(signal => !(signal.decisions || []).length).forEach(signal => {
+        const signalId = signal.signal_id || signal.code;
+        if (signalId) signalSelect.add(new Option(signal.code || signal.signal_id, signalId));
+      });
+      if (!signalSelect.options.length) signalSelect.add(new Option('No undecided review signals', ''));
+      byId('detailStaffActions').style.display = 'block';
+      syncStaffControlState();
+    }
+
+    function clearClaimDetail() {
+      activeClaimId = null;
+      activeClaimDetail = null;
+      detailRevision = null;
+      byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
+      ['detailInternal', 'detailNotes', 'detailNextStep', 'detailStaffActions'].forEach(id => { byId(id).style.display = 'none'; });
+      setMutationStatus('');
+      syncStaffControlState();
+    }
+
+    async function refreshAfterStaffMutation(message) {
+      if (activeClaimId) detailCache.delete(activeClaimId);
       await loadClaims();
-      if (!activeClaimDetail) throw new Error('The saved operation could not be reloaded.');
-      setMutationStatus(message);
+      if (activeClaimDetail) setMutationStatus(message);
     }
 
     async function runStaffMutation(button, operation) {
@@ -473,7 +477,7 @@
       } catch (error) {
         setMutationStatus(error.message, true);
       } finally {
-        button.disabled = false;
+        syncStaffControlState();
       }
     }
 
@@ -482,12 +486,8 @@
       const actionType = byId('createActionType').value.trim();
       const requestedOutcome = byId('createActionOutcome').value.trim();
       if (!actionType || !requestedOutcome) throw new Error('Action type and outcome are required.');
-      await requestMutation('/staff-actions', 'POST', activeClaimDetail.revision, {
-        action_type: actionType,
-        requested_outcome: requestedOutcome,
-        source_refs: commaSeparatedValues(byId('createActionRefs').value),
-      });
-      await refreshActiveClaim('Staff action created and recorded in the shared claim state.');
+      await requestMutation('/staff-actions', 'POST', activeClaimDetail.revision, { action_type: actionType, requested_outcome: requestedOutcome, source_refs: commaSeparatedValues(byId('createActionRefs').value) });
+      await refreshAfterStaffMutation('Staff action created and recorded in the shared claim state.');
     }
 
     async function completeStaffActionFromForm() {
@@ -498,28 +498,15 @@
       const outcomeCode = byId('completeOutcomeCode').value.trim();
       const resultSummary = byId('completeResultSummary').value.trim();
       const customerSummary = byId('customerUpdateSummary').value.trim();
-      if (!outcomeCode || !reasonCodes.length || !resultSummary || !customerSummary) {
-        throw new Error('Outcome, result, reason code, and claimant-safe update are required.');
-      }
+      if (!outcomeCode || !reasonCodes.length || !resultSummary || !customerSummary) throw new Error('Outcome, result, reason code, and claimant-safe update are required.');
       const workflowState = byId('completeWorkflowState').value;
       await requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH', activeClaimDetail.revision, {
         status: 'completed',
-        result: {
-          outcome: outcomeCode,
-          summary: resultSummary,
-          reason_codes: reasonCodes,
-          source_refs: [],
-        },
-        state_changes: workflowState
-          ? [{ path: 'claim_state.workflow_state', to: workflowState }]
-          : [],
-        customer_update: {
-          summary: customerSummary,
-          responsible_party: byId('customerResponsibleParty').value,
-          related_refs: [actionId],
-        },
+        result: { outcome: outcomeCode, summary: resultSummary, reason_codes: reasonCodes, source_refs: [] },
+        state_changes: workflowState ? [{ path: 'claim_state.workflow_state', to: workflowState }] : [],
+        customer_update: { summary: customerSummary, responsible_party: byId('customerResponsibleParty').value, related_refs: [actionId] },
       });
-      await refreshActiveClaim('Action completed; claim state and claimant-safe update persisted.');
+      await refreshAfterStaffMutation('Action completed; claim state and claimant-safe update persisted.');
     }
 
     async function decideSignalFromForm() {
@@ -529,13 +516,8 @@
       const reasonCodes = commaSeparatedValues(byId('signalReasonCodes').value);
       const summary = byId('signalDecisionSummary').value.trim();
       if (!reasonCodes.length || !summary) throw new Error('Decision reason and summary are required.');
-      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, {
-        decision: byId('signalDecisionValue').value,
-        reason_codes: reasonCodes,
-        summary,
-        evidence_refs: [],
-      });
-      await refreshActiveClaim('Review-signal decision recorded as an internal audited decision.');
+      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, { decision: byId('signalDecisionValue').value, reason_codes: reasonCodes, summary, evidence_refs: [] });
+      await refreshAfterStaffMutation('Review-signal decision recorded as an internal audited decision.');
     }
 
     async function fetchClaims(view) {
@@ -544,21 +526,67 @@
         searchParams.set('view', view);
       }
       const url = `${API_BASE}?${searchParams.toString()}`;
-      const response = await fetch(url, { headers: getHeaders() });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error?.message || `Failed to load claims (${response.status})`);
-      }
-      return response.json();
+      return apiRequest(url);
     }
 
     async function fetchClaimDetail(claimId) {
-      const response = await fetch(`${API_BASE}/${encodeURIComponent(claimId)}`, { headers: getHeaders() });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error?.message || `Failed to load claim ${claimId} (${response.status})`);
-      }
-      return response.json();
+      return apiRequest(`${API_BASE}/${encodeURIComponent(claimId)}`);
+    }
+
+    function formatLabel(value) {
+      return String(value || '').replaceAll('.', ' / ').replaceAll('_', ' ')
+        .replace(/\b\w/g, character => character.toUpperCase());
+    }
+
+    function textOrEmpty(value, fallback = 'None recorded') {
+      if (Array.isArray(value)) return value.length ? value.join(', ') : fallback;
+      return value === null || value === undefined || value === '' ? fallback : String(value);
+    }
+
+    function contextBlock(title, content) {
+      const block = document.createElement('section');
+      block.className = 'context-block';
+      const heading = document.createElement('h3');
+      heading.textContent = title;
+      block.append(heading, content);
+      return block;
+    }
+
+    function definitionList(rows) {
+      const list = document.createElement('dl');
+      list.className = 'context-list';
+      rows.forEach(({ label, value, meta = [] }) => {
+        const row = document.createElement('div');
+        row.className = 'context-row';
+        const term = document.createElement('dt');
+        term.textContent = label;
+        const description = document.createElement('dd');
+        description.textContent = textOrEmpty(value);
+        if (meta.length) {
+          const metadata = document.createElement('div');
+          metadata.className = 'inline-meta';
+          meta.filter(Boolean).forEach(item => {
+            const span = document.createElement('span');
+            span.textContent = item;
+            metadata.append(span);
+          });
+          description.append(metadata);
+        }
+        row.append(term, description);
+        list.append(row);
+      });
+      return list;
+    }
+
+    function bulletList(items, fallback = 'None recorded') {
+      const list = document.createElement('ul');
+      list.className = 'plain-list';
+      (items.length ? items : [fallback]).forEach(item => {
+        const entry = document.createElement('li');
+        entry.textContent = item;
+        list.append(entry);
+      });
+      return list;
     }
 
     function highlightQueueLabel(queue) {
@@ -596,6 +624,14 @@
         const stateSpan = document.createElement('span');
         stateSpan.textContent = stateMap[item.queue] || item.queue;
         metaDiv.appendChild(stateSpan);
+
+        const handoffSpan = document.createElement('span');
+        handoffSpan.textContent = `${item.open_handoff_count} open handoff${item.open_handoff_count === 1 ? '' : 's'}`;
+        metaDiv.appendChild(handoffSpan);
+
+        const assigneeSpan = document.createElement('span');
+        assigneeSpan.textContent = item.assignee_id ? `Assigned: ${item.assignee_id}` : 'Unassigned';
+        metaDiv.appendChild(assigneeSpan);
         
         const badgeSpan = document.createElement('span');
         badgeSpan.className = `badge ${highlightQueueLabel(item.queue)}`;
@@ -614,19 +650,158 @@
       });
     }
 
-    function renderDetail(claimId) {
+    function renderContext(detail) {
+      const container = byId('detailContext');
+      container.replaceChildren();
+      container.className = 'context-stack';
+
+      const fields = Object.entries(detail.form || {}).map(([code, field]) => ({
+        label: formatLabel(code),
+        value: field.value,
+        meta: [
+          `Status: ${formatLabel(field.status)}`,
+          `Source: ${formatLabel(field.source)}`,
+          field.source_refs?.length ? `Refs: ${field.source_refs.join(', ')}` : '',
+          field.confidence === null || field.confidence === undefined ? '' : `Confidence: ${field.confidence}`,
+        ],
+      }));
+      container.append(contextBlock('Structured facts and provenance', definitionList(fields)));
+
+      const evidenceRows = (detail.evidence || []).map(item => ({
+        label: formatLabel(item.kind),
+        value: formatLabel(item.status),
+        meta: [
+          `Source: ${formatLabel(item.source)}`,
+          item.claimant_note,
+          item.needed_for?.length ? `Needed for: ${item.needed_for.join(', ')}` : '',
+        ],
+      }));
+      container.append(contextBlock('Evidence', definitionList(evidenceRows)));
+
+      const continuityItems = (detail.sessions || []).flatMap(session => [
+        ...(session.summary ? [`Summary: ${session.summary}`] : []),
+        ...session.unresolved_questions.map(item => `Open question: ${item}`),
+        ...session.pending_items.map(item => `Pending: ${item}`),
+        ...session.prior_commitments.map(item => `Commitment: ${item}`),
+      ]);
+      container.append(contextBlock('Session continuity', bulletList(continuityItems)));
+
+      const signalRows = (detail.signals || []).map(signal => ({
+        label: textOrEmpty(signal.code || signal.signal_id, 'Internal signal'),
+        value: formatLabel(signal.status || 'review required'),
+        meta: [signal.reason, signal.decisions?.length ? `${signal.decisions.length} staff decision(s)` : ''],
+      }));
+      container.append(contextBlock('Internal signals', definitionList(signalRows)));
+
+      const handoffContainer = document.createElement('div');
+      handoffContainer.className = 'context-stack';
+      (detail.handoffs || []).forEach(handoff => handoffContainer.append(renderHandoff(detail, handoff)));
+      if (!detail.handoffs?.length) handoffContainer.append(bulletList([]));
+      container.append(contextBlock('Human handoff', handoffContainer));
+
+      container.append(contextBlock('Communication history', communicationHistory(detail)));
+    }
+
+    function renderHandoff(detail, handoff) {
+      const wrapper = document.createElement('article');
+      wrapper.className = `handoff-panel${handoff.status === 'resolved' ? ' is-resolved' : ''}`;
+      const heading = document.createElement('div');
+      heading.className = 'handoff-heading';
+      const title = document.createElement('strong');
+      title.textContent = `${formatLabel(handoff.support_need)} · ${formatLabel(handoff.status)}`;
+      const priority = document.createElement('span');
+      priority.className = `badge ${handoff.priority === 'urgent' ? 'urgent' : 'review'}`;
+      priority.textContent = handoff.priority;
+      heading.append(title, priority);
+      wrapper.append(heading);
+      wrapper.append(definitionList([
+        { label: 'Reason', value: handoff.reason },
+        { label: 'Requested action', value: handoff.requested_action },
+        { label: 'Promised next step', value: handoff.packet?.promised_next_step },
+        { label: 'Assigned to', value: handoff.assigned_to || 'Unassigned' },
+        { label: 'Pending items', value: handoff.packet?.pending_items || [] },
+        { label: 'Missing items', value: handoff.packet?.missing_items || [] },
+        { label: 'Conflicts', value: handoff.packet?.conflicts || [] },
+        { label: 'Low-confidence items', value: handoff.packet?.low_confidence_items || [] },
+      ]));
+
+      if (handoff.status === 'queued') {
+        const button = document.createElement('button');
+        button.className = 'action-button';
+        button.type = 'button';
+        button.textContent = 'Accept handoff';
+        button.addEventListener('click', () => acceptHandoff(detail, handoff, button));
+        wrapper.append(button);
+      }
+      if (['accepted', 'in_progress'].includes(handoff.status)) {
+        const note = document.createElement('p');
+        note.className = 'muted';
+        note.textContent = 'This handoff is ready for a claimant-visible resolution update.';
+        wrapper.append(note);
+      }
+      return wrapper;
+    }
+
+    function communicationHistory(detail) {
+      const history = document.createElement('div');
+      history.className = 'context-list';
+      const entries = [
+        ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
+          actor: item.actor,
+          text: item.content.text,
+          createdAt: item.created_at,
+        })),
+        ...(detail.customer_updates || []).map(item => ({
+          actor: 'staff',
+          text: item.summary,
+          createdAt: item.created_at,
+        })),
+      ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
+      if (!entries.length) return bulletList([]);
+      entries.forEach(entry => {
+        const item = document.createElement('div');
+        item.className = `communication-entry ${entry.actor}`;
+        const meta = document.createElement('strong');
+        meta.textContent = `${formatLabel(entry.actor)} · ${new Date(entry.createdAt).toLocaleString()}`;
+        const body = document.createElement('p');
+        body.textContent = entry.text;
+        item.append(meta, body);
+        history.append(item);
+      });
+      return history;
+    }
+
+    async function acceptHandoff(detail, handoff, button) {
+      button.disabled = true;
+      try {
+        await apiRequest(`${API_BASE}/${encodeURIComponent(detail.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/accept`, {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': requestKey('accept-handoff'),
+            'If-Match': String(detail.revision),
+          },
+          body: JSON.stringify({}),
+        });
+        await refreshDetail(detail.claim_id);
+        await refreshQueue();
+      } catch (error) {
+        setError(error.message);
+        button.disabled = false;
+      }
+    }
+
+    function renderDetail(claimId, providedDetail = null) {
       const selected = claims.find(item => item.claim_id === claimId);
       if (!selected) {
-        byId('detailContent').innerHTML = '<p class="muted">Claim details are unavailable.</p>';
-        byId('detailInternal').style.display = 'none';
-        byId('detailNotes').style.display = 'none';
-        byId('detailNextStep').style.display = 'none';
-        return;
+        clearClaimDetail();
+        return Promise.resolve();
       }
 
-      return fetchClaimDetail(claimId)
+      return (providedDetail ? Promise.resolve(providedDetail) : fetchClaimDetail(claimId))
         .then(detail => {
           activeClaimDetail = detail;
+          detailRevision = detail.revision;
+          detailCache.set(detail.claim_id, detail);
           const detailContent = byId('detailContent');
           detailContent.innerHTML = '';
           const idP = document.createElement('p');
@@ -656,25 +831,35 @@
           byId('detailAssigned').textContent = assignedTo || 'Unassigned';
           byId('detailFlags').textContent = signalFlags.length ? signalFlags.join(', ') : 'None';
           byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
-          const internalNotes = (detail.messages || [])
-            .filter(item => item.visibility === 'internal_only' && item.content?.text)
-            .map(item => item.content.text);
-          const staffNotes = staffActions
-            .map(item => item.requested_outcome || item.result?.summary)
-            .filter(Boolean);
-          byId('detailInternalNotes').textContent = [...internalNotes, ...staffNotes].join('\n') || 'No internal notes available.';
+          renderContext(detail);
           byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
           byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
           byId('detailInternal').style.display = 'block';
           byId('detailNotes').style.display = 'block';
           byId('detailNextStep').style.display = 'block';
           populateStaffControls(detail);
+          if (!customerChatView.hidden) renderCustomerChat();
         })
         .catch(error => {
           activeClaimDetail = null;
           byId('detailStaffActions').style.display = 'none';
+          syncStaffControlState();
           setError(error.message);
         });
+    }
+
+    async function refreshDetail(claimId) {
+      const detail = await fetchClaimDetail(claimId);
+      detailCache.set(claimId, detail);
+      if (claimId === activeClaimId && detail.revision !== detailRevision) renderDetail(claimId, detail);
+      return detail;
+    }
+
+    async function refreshQueue() {
+      const view = byId('viewSelect').value;
+      const payload = await fetchClaims(view);
+      claims = payload.items || [];
+      renderClaims(claims);
     }
 
     async function loadClaims() {
@@ -687,13 +872,9 @@
         if (claims.length && !claims.some(item => item.claim_id === activeClaimId)) {
           activeClaimId = claims[0].claim_id;
         }
-        if (activeClaimId) {
-          await renderDetail(activeClaimId);
-        } else {
-          activeClaimDetail = null;
-          byId('detailStaffActions').style.display = 'none';
-        }
-        if (!customerChatView.hidden) renderCustomerChat();
+        if (activeClaimId) await renderDetail(activeClaimId);
+        else clearClaimDetail();
+        if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
         setError(error.message);
       }
@@ -701,15 +882,9 @@
 
     document.getElementById('viewSelect').addEventListener('change', loadClaims);
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
-    byId('createStaffActionBtn').addEventListener('click', event => {
-      runStaffMutation(event.currentTarget, createStaffActionFromForm);
-    });
-    byId('completeStaffActionBtn').addEventListener('click', event => {
-      runStaffMutation(event.currentTarget, completeStaffActionFromForm);
-    });
-    byId('decideSignalBtn').addEventListener('click', event => {
-      runStaffMutation(event.currentTarget, decideSignalFromForm);
-    });
+    byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
+    byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
+    byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
 
     loadClaims();
 
@@ -723,7 +898,6 @@
     const workbenchView = byId('workbenchView');
     const customerChatView = byId('customerChatView');
     let activeCustomerChatId = null;
-    const customerChatMessages = {};
     let assistantAttachments = [];
     let chatDrag = null;
 
@@ -797,7 +971,7 @@
       return claims.find(claim => claim.claim_id === activeCustomerChatId) || claims[0] || null;
     }
 
-    function renderCustomerChat() {
+    async function renderCustomerChat() {
       const claim = currentCustomerClaim();
       if (!claim) {
         byId('customerChatList').replaceChildren();
@@ -807,12 +981,6 @@
         return;
       }
       activeCustomerChatId = claim.claim_id;
-      if (!customerChatMessages[claim.claim_id]) {
-        customerChatMessages[claim.claim_id] = [{
-          role: 'customer',
-          text: `Conversation ready for ${claim.customer_reference}. Keep customer updates separate from the internal AI thread.`
-        }];
-      }
       const list = byId('customerChatList');
       list.replaceChildren();
       claims.forEach(item => {
@@ -830,13 +998,58 @@
       byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
       const history = byId('customerChatHistory');
       history.replaceChildren();
-      customerChatMessages[claim.claim_id].forEach(item => {
-        const message = document.createElement('div');
-        message.className = `customer-chat-message ${item.role}`;
-        message.textContent = item.text;
-        history.append(message);
-      });
-      history.scrollTop = history.scrollHeight;
+      history.textContent = 'Loading persisted communication...';
+      try {
+        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+        detailCache.set(claim.claim_id, detail);
+        history.replaceChildren();
+        const entries = [
+          ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
+            role: item.actor === 'claimant' ? 'customer' : 'staff',
+            actor: item.actor,
+            text: item.content.text,
+            createdAt: item.created_at,
+          })),
+          ...(detail.customer_updates || []).map(item => ({
+            role: 'staff',
+            actor: 'staff update',
+            text: item.summary,
+            createdAt: item.created_at,
+          })),
+        ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
+        entries.forEach(item => {
+          const message = document.createElement('div');
+          message.className = `customer-chat-message ${item.role}`;
+          const meta = document.createElement('strong');
+          meta.textContent = formatLabel(item.actor);
+          const body = document.createElement('div');
+          body.textContent = item.text;
+          message.append(meta, body);
+          history.append(message);
+        });
+        if (!entries.length) history.textContent = 'No persisted customer communication is available.';
+        const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
+        const input = byId('customerChatText');
+        const send = byId('customerChatSend');
+        if (!openHandoff) {
+          input.disabled = true;
+          send.disabled = true;
+          byId('customerChatStatus').textContent = 'No open handoff. Communication history is read-only.';
+        } else if (openHandoff.status === 'queued') {
+          input.disabled = true;
+          send.disabled = true;
+          byId('customerChatStatus').textContent = 'Accept the handoff before issuing a formal customer update.';
+        } else {
+          input.disabled = false;
+          send.disabled = false;
+          byId('customerChatStatus').textContent = openHandoff.status === 'in_progress'
+            ? `In progress with ${openHandoff.assigned_to}. Messages remain open until the handoff is resolved.`
+            : `Accepted by ${openHandoff.assigned_to}. Send a message to begin support.`;
+        }
+        history.scrollTop = history.scrollHeight;
+      } catch (error) {
+        history.textContent = error.message;
+      }
     }
 
     function openCustomerChat(claimId = activeClaimId) {
@@ -850,7 +1063,7 @@
       byId('customerChatText').focus();
     }
 
-    function sendCustomerChatMessage() {
+    async function sendCustomerChatMessage() {
       const input = byId('customerChatText');
       const text = input.value.trim();
       const claim = currentCustomerClaim();
@@ -859,18 +1072,64 @@
         byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
         return;
       }
-      customerChatMessages[claim.claim_id] ||= [];
-      customerChatMessages[claim.claim_id].push({ role: 'staff', text });
-      input.value = '';
-      renderCustomerChat();
-      window.setTimeout(() => {
-        customerChatMessages[claim.claim_id] ||= [];
-        customerChatMessages[claim.claim_id].push({
-          role: 'customer',
-          text: 'Thanks for the update. This prototype will show live customer replies once the chat service is connected.'
+      const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+      const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
+      if (!handoff) {
+        byId('customerChatStatus').textContent = 'Accept an open handoff before sending an update.';
+        return;
+      }
+      const button = byId('customerChatSend');
+      button.disabled = true;
+      try {
+        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/messages`, {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': requestKey('staff-message'),
+            'If-Match': String(detail.revision),
+          },
+          body: JSON.stringify({
+            content: { type: 'text', text },
+          }),
         });
-        if (activeCustomerChatId === claim.claim_id) renderCustomerChat();
-      }, 350);
+        input.value = '';
+        detailCache.delete(claim.claim_id);
+        await refreshQueue();
+        await refreshDetail(claim.claim_id);
+        await renderCustomerChat();
+      } catch (error) {
+        byId('customerChatStatus').textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function resolveCustomerHandoff() {
+      const claim = currentCustomerClaim();
+      if (!claim) return;
+      const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+      const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
+      if (!handoff) return;
+      const button = byId('customerChatResolve');
+      button.disabled = true;
+      try {
+        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/resolve`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': requestKey('resolve-handoff'), 'If-Match': String(detail.revision) },
+          body: JSON.stringify({
+            result: { outcome: 'support_completed', summary: 'The staff support conversation was completed.', reason_codes: ['HANDOFF_RESOLVED'], source_refs: [handoff.handoff_id] },
+            state_changes: [],
+            customer_update: { summary: 'Your Northwind support conversation is complete. You can continue your report or contact us again if needed.', responsible_party: 'claimant', related_refs: [handoff.handoff_id] },
+          }),
+        });
+        detailCache.delete(claim.claim_id);
+        await refreshQueue();
+        await refreshDetail(claim.claim_id);
+        await renderCustomerChat();
+      } catch (error) {
+        byId('customerChatStatus').textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function startChatDrag(event) {
@@ -929,6 +1188,7 @@
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
     byId('customerChatBack').addEventListener('click', () => setView('workbench'));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
+    byId('customerChatResolve').addEventListener('click', resolveCustomerHandoff);
     byId('customerChatText').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();

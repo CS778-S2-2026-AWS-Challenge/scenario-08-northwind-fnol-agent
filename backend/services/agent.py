@@ -65,6 +65,23 @@ HUMAN_REQUEST_PATTERNS = (
     ),
     re.compile(r'\bhuman\s+(?:help|support)\b', re.IGNORECASE),
 )
+PENDING_POLICE_REPORT_PATTERNS = (
+    re.compile(
+        r'\bpolice\s+(?:report|reference)\b.*\b(?:later|next\s+week|pending|not\s+ready)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\b(?:later|next\s+week|pending|not\s+ready)\b.*\bpolice\s+(?:report|reference)\b',
+        re.IGNORECASE,
+    ),
+)
+LOCATION_PATTERN = re.compile(
+    r'\b(?:at|on|in)\s+([A-Z][A-Za-z0-9 -]+?)(?=[,.]|\s+(?:when|while|and)\b|$)'
+)
+LOSS_PATTERN = re.compile(
+    r'([^.!?]*(?:damag(?:e|ed)|scratch(?:ed)?|dent(?:ed)?|broken|lost)[^.!?]*)',
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +98,7 @@ class AgentProposal:
     action: AgentAction
     reason_codes: list[str]
     customer_reason: str
+    customer_response: str
     customer_next_step: CustomerNextStep
     form_changes: list[ProposedFormChange]
     state_changes: list[StateChange]
@@ -89,6 +107,57 @@ class AgentProposal:
     next_action_requirements: list[str]
     handoff_priority: str | None = None
     controlled_rule_authorised: bool = False
+
+
+def _initial_form_changes(message_text: str) -> list[ProposedFormChange]:
+    changes = [
+        ProposedFormChange(
+            field_code='incident.description',
+            value=message_text,
+            source=FormSource.CLAIMANT,
+            status=FormStatus.PROPOSED,
+            needed_for=NeededFor.CURRENT_ACTION,
+            confidence=1.0,
+        )
+    ]
+    location = LOCATION_PATTERN.search(message_text)
+    if location is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.location',
+                value=location.group(1).strip(),
+                source=FormSource.INFERENCE,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.85,
+            )
+        )
+    loss = LOSS_PATTERN.search(message_text)
+    if loss is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='loss.description',
+                value=loss.group(1).strip(),
+                source=FormSource.INFERENCE,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.85,
+            )
+        )
+    return changes
+
+
+def _confirmation_response(changes: list[ProposedFormChange]) -> str:
+    labels = {
+        'incident.description': 'what happened',
+        'incident.location': 'where it happened',
+        'loss.description': 'what was damaged or lost',
+    }
+    understood = ', '.join(labels[change.field_code] for change in changes)
+    return (
+        f'I have structured {understood} from your description. '
+        'Please check the highlighted facts and correct anything that is not right.'
+    )
 
 
 class AgentTurnProvider(Protocol):
@@ -108,6 +177,11 @@ class ControlledAgent:
                 action=AgentAction.URGENT_HANDOFF,
                 reason_codes=['EXPLICIT_SAFETY_SIGNAL'],
                 customer_reason='You described an injury or continuing danger.',
+                customer_response=(
+                    'Your safety comes first. Move to a safer place if you can do so safely, '
+                    'and contact local emergency services yourself if immediate help is needed. '
+                    'I have kept the details you provided and requested urgent Northwind support.'
+                ),
                 customer_next_step=CustomerNextStep(
                     status='urgent_support_queued',
                     summary=(
@@ -133,6 +207,11 @@ class ControlledAgent:
                 action=AgentAction.HANDOFF,
                 reason_codes=['HUMAN_SUPPORT_REQUESTED'],
                 customer_reason='You asked to continue with a person.',
+                customer_response=(
+                    'I will transfer this report to a Northwind staff member. The facts, evidence '
+                    'status, and messages already recorded will go with it, so you should not need '
+                    'to start again.'
+                ),
                 customer_next_step=CustomerNextStep(
                     status='human_support_queued',
                     summary=(
@@ -157,6 +236,10 @@ class ControlledAgent:
                 action=AgentAction.UPDATE,
                 reason_codes=['HANDOFF_ALREADY_QUEUED'],
                 customer_reason='Your additional information has been kept with the report.',
+                customer_response=(
+                    'I have added that information to the report already waiting for Northwind '
+                    'support.'
+                ),
                 customer_next_step=context.claim.customer_next_step,
                 form_changes=[],
                 state_changes=[],
@@ -166,17 +249,10 @@ class ControlledAgent:
             )
         intake_field = next_controlled_intake_field(context.claim)
         if context.message_text is not None and intake_field is not None:
-            return AgentProposal(
-                action=AgentAction.CONFIRM,
-                reason_codes=['MATERIAL_FACTS_PROPOSED'],
-                customer_reason=intake_field.confirmation_prompt,
-                customer_next_step=CustomerNextStep(
-                    status='confirmation_required',
-                    summary=intake_field.confirmation_prompt,
-                    responsible_party=ResponsibleParty.CLAIMANT,
-                    required_items=[intake_field.field_code],
-                ),
-                form_changes=[
+            changes = (
+                _initial_form_changes(message_text)
+                if not context.claim.form and intake_field.field_code == 'incident.description'
+                else [
                     ProposedFormChange(
                         field_code=intake_field.field_code,
                         value=context.message_text,
@@ -185,11 +261,53 @@ class ControlledAgent:
                         needed_for=NeededFor.CURRENT_ACTION,
                         confidence=1.0,
                     )
-                ],
+                ]
+            )
+            return AgentProposal(
+                action=AgentAction.CONFIRM,
+                reason_codes=['MATERIAL_FACTS_PROPOSED'],
+                customer_reason=intake_field.confirmation_prompt,
+                customer_response=_confirmation_response(changes),
+                customer_next_step=CustomerNextStep(
+                    status='confirmation_required',
+                    summary=intake_field.confirmation_prompt,
+                    responsible_party=ResponsibleParty.CLAIMANT,
+                    required_items=[change.field_code for change in changes],
+                ),
+                form_changes=changes,
                 state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
                 proposed_signals=[],
                 required_tools=[],
-                next_action_requirements=[f'confirm:{intake_field.field_code}'],
+                next_action_requirements=[f'confirm:{change.field_code}' for change in changes],
+            )
+
+        if context.message_text is not None and any(
+            pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS
+        ):
+            return AgentProposal(
+                action=AgentAction.UPDATE,
+                reason_codes=['EVIDENCE_PENDING_GENERATION'],
+                customer_reason='The police report does not exist yet and is needed only later.',
+                customer_response=(
+                    'That is okay. I have recorded that the police report is expected later. '
+                    'It will not block the parts of your report that can safely continue now.'
+                ),
+                customer_next_step=CustomerNextStep(
+                    status='continue_current_report',
+                    summary='Continue now; add the police report when it becomes available.',
+                    responsible_party=ResponsibleParty.CLAIMANT,
+                ),
+                form_changes=[],
+                state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+                proposed_signals=[],
+                required_tools=[
+                    {
+                        'tool': 'evidence_registry',
+                        'operation': 'record_pending_generation',
+                        'kind': 'police_report',
+                    }
+                ],
+                next_action_requirements=[],
             )
 
         if context.message_text is not None:
@@ -197,6 +315,10 @@ class ControlledAgent:
                 action=AgentAction.UPDATE,
                 reason_codes=['CLAIMANT_CONFIRMED'],
                 customer_reason='I have kept that information with your report.',
+                customer_response=(
+                    'I have added that information to your report. You can continue with any '
+                    'available evidence or request human support.'
+                ),
                 customer_next_step=CustomerNextStep(
                     status='core_details_confirmed',
                     summary=(
@@ -215,6 +337,9 @@ class ControlledAgent:
             action=AgentAction.UPDATE,
             reason_codes=['EVIDENCE_INCOMPLETE'],
             customer_reason='The evidence reference was recorded for later processing.',
+            customer_response=(
+                'I have linked that evidence to your report and kept its current status.'
+            ),
             customer_next_step=context.claim.customer_next_step,
             form_changes=[],
             state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],

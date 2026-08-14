@@ -1,5 +1,6 @@
 import pytest
 
+from backend.domain.agent_actions import AGENT_ACTION_DEFINITIONS, action_definition
 from backend.domain.models import (
     AgentAction,
     AuthorityOutcome,
@@ -31,12 +32,29 @@ def make_claim() -> WorkingClaim:
     )
 
 
+def test_action_registry_defines_every_action_and_separates_tools_from_semantics() -> None:
+    assert set(AGENT_ACTION_DEFINITIONS) == set(AgentAction)
+    for action in AgentAction:
+        definition = action_definition(action)
+        assert definition.action is action
+        assert definition.purpose
+        assert definition.preconditions
+        assert definition.allowed_state_paths == ('claim_state.next_action',)
+        assert definition.tool_policy
+        assert definition.response_requirement
+        assert definition.prohibited_outcomes
+
+    assert action_definition(AgentAction.ASK).authority is AuthorityOutcome.AUTHORISED
+    assert action_definition(AgentAction.CREATE_CLAIM).authority is AuthorityOutcome.REVIEW_REQUIRED
+
+
 def proposal(action: AgentAction, state_change: StateChange) -> AgentProposal:
     claim = make_claim()
     return AgentProposal(
         action=action,
         reason_codes=['NEXT_ACTION_READY'],
         customer_reason='A controlled test proposal.',
+        customer_response='A controlled claimant response.',
         customer_next_step=claim.customer_next_step,
         form_changes=[],
         state_changes=[state_change],

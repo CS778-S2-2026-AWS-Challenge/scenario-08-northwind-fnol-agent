@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   confirmClaimFields,
   createClaim,
+  createExternalClaim,
   getClaim,
+  getClaimMessages,
   requestId,
   requestHumanSupport,
   submitClaimMessage,
@@ -23,8 +25,20 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const HANDOFF_STATUS_LABELS = {
+  queued: 'Queued',
+  accepted: 'Accepted by Northwind support',
+  in_progress: 'Support conversation in progress',
+}
+
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
+}
+
+function fieldStatusLabel(status) {
+  if (status === 'confirmed') return 'Confirmed'
+  if (status === 'pending_generation') return 'Pending'
+  return 'Check this'
 }
 
 function messageText(message) {
@@ -53,8 +67,18 @@ function App() {
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
+  const pendingClaimCreation = useRef(null)
+  const latestRevision = useRef(0)
 
-  const isBusy = ['starting', 'sending', 'confirming', 'saving', 'requesting-support'].includes(status)
+  const isBusy = [
+    'starting',
+    'sending',
+    'confirming',
+    'saving',
+    'requesting-support',
+    'refreshing',
+    'creating-claim',
+  ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
@@ -66,6 +90,12 @@ function App() {
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
 
+  useEffect(() => {
+    if (claim?.revision) {
+      latestRevision.current = Math.max(latestRevision.current, claim.revision)
+    }
+  }, [claim?.revision])
+
   async function refreshAfterConflict() {
     if (!claim) return
     const current = await getClaim(claim.claim_id)
@@ -73,6 +103,34 @@ function App() {
     setForm(current.form)
     setNextStep(current.customer_next_step)
   }
+
+  const refreshClaimStatus = useCallback(async ({ silent = false } = {}) => {
+    if (!claim) return
+    if (!silent) {
+      setError('')
+      setStatus('refreshing')
+    }
+    try {
+      const current = await getClaim(claim.claim_id)
+      if (current.revision < latestRevision.current) return
+      latestRevision.current = current.revision
+      setClaim(current)
+      setForm(current.form)
+      setNextStep(current.customer_next_step)
+      setHandoff(current.handoff || null)
+      if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
+      if (sessionId) {
+      const latest = await getClaimMessages(claim.claim_id, sessionId)
+        setMessages(latest.items)
+      }
+      if (!silent) setStatus('idle')
+    } catch (requestError) {
+      if (!silent) {
+        setError(requestError.message || 'We could not refresh your report. Please try again.')
+        setStatus('error')
+      }
+    }
+  }, [claim, sessionId])
 
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -121,11 +179,15 @@ function App() {
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
-      setMessages((current) => [...current, turn.claimant_message, turn.agent_message])
+      setMessages((current) => [
+        ...current,
+        turn.claimant_message,
+        ...(turn.agent_message ? [turn.agent_message] : []),
+      ])
       setForm((current) => mergeFields(current, turn.form_changes))
       setClaim((current) => ({ ...current, revision: turn.claim_revision }))
-      setNextStep(turn.decision.customer_next_step)
-      setHandoff(turn.handoff)
+      if (turn.decision) setNextStep(turn.decision.customer_next_step)
+      if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
       pendingSubmission.current = null
       setStatus('idle')
@@ -236,6 +298,32 @@ function App() {
     }
   }
 
+  async function createConfirmedClaim() {
+    if (!claim || isBusy || nextStep?.status !== 'ready_to_create') return
+    setError('')
+    setStatus('creating-claim')
+    try {
+      if (!pendingClaimCreation.current) {
+        pendingClaimCreation.current = { idempotencyKey: requestId('claim-creation') }
+      }
+      const response = await createExternalClaim({
+        claimId: claim.claim_id,
+        revision: claim.revision,
+        idempotencyKey: pendingClaimCreation.current.idempotencyKey,
+      })
+      setClaim((current) => ({
+        ...current,
+        revision: response.revision,
+        external_claim: response.external_claim,
+      }))
+      setNextStep(response.customer_next_step)
+      pendingClaimCreation.current = null
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -286,7 +374,7 @@ function App() {
             <div className="conversation-heading">
               <p className="eyebrow">Your report</p>
               <h1 id="conversation-title">Let&apos;s build the details together</h1>
-              <p>{nextStep?.summary}</p>
+              {handoff?.status !== 'in_progress' && <p>{nextStep?.summary}</p>}
             </div>
 
             <div className="message-list" aria-live="polite">
@@ -298,7 +386,7 @@ function App() {
               ))}
             </div>
 
-            {handoff && (
+            {handoff && ['queued', 'accepted'].includes(handoff.status) && (
               <section
                 className={`transfer-state ${handoff.priority === 'urgent' ? 'is-urgent' : ''}`}
                 aria-live="assertive"
@@ -310,8 +398,11 @@ function App() {
                 <h2 id="transfer-title">
                   {handoff.priority === 'urgent'
                     ? 'Normal intake has paused'
-                    : 'Your support request is queued'}
+                    : handoff.status === 'queued'
+                      ? 'Your support request is queued'
+                      : 'Northwind support is handling your request'}
                 </h2>
+                <p className="handoff-status">Status: {HANDOFF_STATUS_LABELS[handoff.status] || handoff.status}</p>
                 <p>{handoff.summary}</p>
                 <dl>
                   <div>
@@ -323,6 +414,44 @@ function App() {
                     <dd>Saved with the details already provided</dd>
                   </div>
                 </dl>
+                <p>Your message will be saved for Northwind support. Start with @agent when you need an Agent response.</p>
+                <button
+                  className="secondary-button refresh-button"
+                  type="button"
+                  onClick={() => refreshClaimStatus()}
+                  disabled={isBusy}
+                >
+                  {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}
+                </button>
+              </section>
+            )}
+
+            {handoff?.status === 'in_progress' && (
+              <div className="system-notice" role="status">
+                A Northwind staff member is now assisting you.
+              </div>
+            )}
+
+            {!handoff && nextStep?.status === 'staff_update' && (
+              <section className="staff-update" role="status" aria-labelledby="staff-update-title">
+                <p className="transfer-label">Northwind update</p>
+                <h2 id="staff-update-title">Your support request has been reviewed</h2>
+                <p>{nextStep.summary}</p>
+              </section>
+            )}
+
+            {claim.external_claim && (
+              <section className="claim-created" role="status" aria-labelledby="claim-created-title">
+                <p className="transfer-label">Claim created</p>
+                <h2 id="claim-created-title">{claim.external_claim.claim_number}</h2>
+                <dl>
+                  <div><dt>Route</dt><dd>{claim.external_claim.route}</dd></div>
+                  <div><dt>Next step</dt><dd>{claim.external_claim.next_step}</dd></div>
+                  <div>
+                    <dt>Expected by</dt>
+                    <dd>{new Date(claim.external_claim.expected_by).toLocaleString()}</dd>
+                  </div>
+                </dl>
               </section>
             )}
 
@@ -332,10 +461,10 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0 || Boolean(handoff)}
+              disabled={proposedFields.length > 0 && !handoff}
               disabledNote={
                 handoff
-                  ? 'Normal intake is paused while Northwind support takes ownership.'
+                  ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
                   : 'Confirm or correct the details before continuing.'
               }
               buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}
@@ -361,7 +490,7 @@ function App() {
                     <div className="field-heading">
                       <span>{fieldLabel(fieldCode)}</span>
                       <span className={`field-status status-${field.status}`}>
-                        {field.status === 'confirmed' ? 'Confirmed' : 'Check this'}
+                        {fieldStatusLabel(field.status)}
                       </span>
                     </div>
                     {editingField === fieldCode ? (
@@ -427,6 +556,16 @@ function App() {
               <div className="next-step" role="status">
                 <span>Next</span>
                 <p>{nextStep?.summary}</p>
+                {nextStep?.status === 'ready_to_create' && !claim.external_claim && (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={createConfirmedClaim}
+                    disabled={isBusy}
+                  >
+                    {status === 'creating-claim' ? 'Creating claim...' : 'Create claim'}
+                  </button>
+                )}
               </div>
             )}
           </aside>

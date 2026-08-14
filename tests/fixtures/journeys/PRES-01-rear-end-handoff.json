@@ -1,0 +1,45 @@
+{
+  "journey_id": "PRES-01-rear-end-handoff",
+  "description": "Typical rear-end report that preserves pending evidence through human handoff.",
+  "claim": {
+    "incident_type": "motor",
+    "locale": "en-NZ"
+  },
+  "turns": [
+    {
+      "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper. Nobody was injured and the scene is safe.",
+      "expected_action": "CONFIRM",
+      "expected_form_fields": [
+        "incident.description",
+        "incident.location",
+        "loss.description"
+      ],
+      "response_contains": ["structured", "check"],
+      "next_step_status": "confirmation_required"
+    },
+    {
+      "operation": "confirm_proposed_fields",
+      "expected_next_step_status": "ready_to_create"
+    },
+    {
+      "input": "Police said the police report will be ready next week.",
+      "expected_action": "UPDATE",
+      "expected_evidence_status": "pending_generation",
+      "response_contains": ["expected later", "not block"],
+      "next_step_status": "continue_current_report"
+    },
+    {
+      "input": "I want to speak with a person now.",
+      "expected_action": "HANDOFF",
+      "response_contains": ["transfer", "should not need to start again"],
+      "next_step_status": "human_support_queued"
+    }
+  ],
+  "expected_handoff": {
+    "priority": "standard",
+    "support_need": "human_requested",
+    "pending_evidence_kind": "police_report",
+    "requested_action_contains": "continue the report",
+    "minimum_prior_customer_updates": 2
+  }
+}
