@@ -139,3 +139,187 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
   })
   dom.window.close()
 })
+
+it('clears stale detail and keeps write-back controls disabled when a mutation empties the queue', async () => {
+  let queueIsEmpty = false
+  const listItem = {
+    claim_id: 'clm_review',
+    revision: 7,
+    customer_reference: 'customer-review',
+    incident_type: 'motor',
+    workflow_state: 'professional_review',
+    queue: 'professional_review',
+    priority: 'standard',
+    next_action: 'REVIEW',
+    evidence_summary: { received: 1, pending: 0, needs_attention: 0 },
+    open_handoff_count: 0,
+    assignee_id: 'stf_demo',
+    created_at: '2026-08-13T00:00:00Z',
+    updated_at: '2026-08-13T00:07:00Z',
+  }
+  const detail = {
+    ...listItem,
+    channel: 'web_agent',
+    locale: 'en-NZ',
+    claim_state: { workflow_state: 'professional_review' },
+    form: {},
+    route: null,
+    active_session_id: null,
+    evidence: [],
+    sessions: [],
+    messages: [],
+    decisions: [],
+    signals: [{ signal_id: 'sig_review', code: 'manual_review', status: 'review_required', decisions: [] }],
+    handoffs: [],
+    staff_actions: [{ action_id: 'act_review', action_type: 'professional_review', status: 'open', assigned_to: 'stf_demo' }],
+    customer_updates: [],
+    external_claim: null,
+    assessor_routing: null,
+    customer_next_step: { status: 'under_review', summary: 'A professional is reviewing the claim.', responsible_party: 'northwind' },
+  }
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (options.method === 'PATCH' && String(url).endsWith('/staff-actions/act_review')) {
+      queueIsEmpty = true
+      return response({ revision: 8 })
+    }
+    if (String(url).endsWith('/clm_review')) return response(detail)
+    return response({ items: queueIsEmpty ? [] : [listItem], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'mutation-test-key'
+    },
+  })
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_review')
+    expect(dom.window.document.querySelector('#signalDecisionSelect').value).toBe('sig_review')
+  })
+  dom.window.document.querySelector('#completeStaffActionBtn').click()
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/staff-actions/act_review'),
+      expect.objectContaining({ method: 'PATCH' }),
+    )
+    expect(dom.window.document.querySelector('#claimCount').textContent).toBe('0 claims')
+    expect(dom.window.document.querySelector('#detailContent').textContent).toContain('Select a claim')
+    expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('none')
+    expect(dom.window.document.querySelector('#createStaffActionBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+  })
+  dom.window.close()
+})
+
+it('disables exhausted action and signal controls when the claim remains in the queue', async () => {
+  let mutated = false
+  const listItem = {
+    claim_id: 'clm_same_queue', revision: 4, customer_reference: 'customer-same-queue',
+    incident_type: 'motor', workflow_state: 'professional_review', queue: 'professional_review',
+    priority: 'standard', next_action: 'REVIEW', evidence_summary: {}, open_handoff_count: 0,
+    assignee_id: 'stf_demo', created_at: '2026-08-13T00:00:00Z', updated_at: '2026-08-13T00:04:00Z',
+  }
+  const detail = () => ({
+    ...listItem,
+    revision: mutated ? 5 : 4,
+    channel: 'web_agent', locale: 'en-NZ', claim_state: { workflow_state: 'professional_review' },
+    form: {}, route: null, active_session_id: null, evidence: [], sessions: [], messages: [], decisions: [],
+    signals: [{
+      signal_id: 'sig_same_queue', code: 'manual_review', status: 'review_required',
+      decisions: mutated ? [{ decision: 'resolved' }] : [],
+    }],
+    handoffs: [],
+    staff_actions: [{
+      action_id: 'act_same_queue', action_type: 'professional_review',
+      status: mutated ? 'completed' : 'open', assigned_to: 'stf_demo',
+    }],
+    customer_updates: [], external_claim: null, assessor_routing: null,
+    customer_next_step: {
+      status: 'under_review', summary: 'A professional is reviewing the claim.', responsible_party: 'northwind',
+    },
+  })
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (options.method === 'PATCH' && String(url).endsWith('/staff-actions/act_same_queue')) {
+      mutated = true
+      listItem.revision = 5
+      return response({ revision: 5 })
+    }
+    if (String(url).endsWith('/clm_same_queue')) return response(detail())
+    return response({ items: [listItem], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'same-queue-key'
+    },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_same_queue'))
+  dom.window.document.querySelector('#completeStaffActionBtn').click()
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#claimCount').textContent).toBe('1 claim')
+    expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('block')
+    expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('')
+    expect(dom.window.document.querySelector('#signalDecisionSelect').value).toBe('')
+    expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#mutationStatus').textContent).toContain('persisted')
+  })
+  dom.window.close()
+})
+
+it('clears stale write-back state when the post-mutation refresh fails', async () => {
+  let mutated = false
+  const listItem = {
+    claim_id: 'clm_refresh_failure', revision: 2, customer_reference: 'customer-refresh-failure',
+    incident_type: 'motor', workflow_state: 'professional_review', queue: 'professional_review',
+    priority: 'standard', next_action: 'REVIEW', evidence_summary: {}, open_handoff_count: 0,
+    assignee_id: 'stf_demo', created_at: '2026-08-13T00:00:00Z', updated_at: '2026-08-13T00:02:00Z',
+  }
+  const detail = {
+    ...listItem,
+    channel: 'web_agent', locale: 'en-NZ', claim_state: { workflow_state: 'professional_review' },
+    form: {}, route: null, active_session_id: null, evidence: [], sessions: [], messages: [], decisions: [],
+    signals: [{ signal_id: 'sig_refresh_failure', decisions: [] }], handoffs: [],
+    staff_actions: [{ action_id: 'act_refresh_failure', action_type: 'professional_review', status: 'open' }],
+    customer_updates: [], external_claim: null, assessor_routing: null,
+    customer_next_step: {
+      status: 'under_review', summary: 'A professional is reviewing the claim.', responsible_party: 'northwind',
+    },
+  }
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (options.method === 'PATCH' && String(url).endsWith('/staff-actions/act_refresh_failure')) {
+      mutated = true
+      return response({ revision: 3 })
+    }
+    if (String(url).endsWith('/clm_refresh_failure')) return response(detail)
+    if (mutated) return response({ error: { message: 'Refresh unavailable' } }, 503)
+    return response({ items: [listItem], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'refresh-failure-key'
+    },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_refresh_failure'))
+  dom.window.document.querySelector('#completeStaffActionBtn').click()
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#errorBanner').textContent).toContain('Refresh unavailable')
+    expect(dom.window.document.querySelector('#detailContent').textContent).toContain('Select a claim')
+    expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('none')
+    expect(dom.window.document.querySelector('#createStaffActionBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+  })
+  dom.window.close()
+})

@@ -11,6 +11,8 @@ This static page provides the employee-facing workbench over the backend workben
   internal signals, and the complete handoff packet.
 - Lets authorised staff accept a queued handoff and resolve it with a persisted claimant-visible
   update.
+- Lets authorised staff create and complete audited staff actions, optionally update workflow
+  state with a claimant-safe summary, and record decisions on internal review signals.
 
 ## Local use
 
@@ -42,4 +44,6 @@ The page is hard-coded for the local prototype staff token.
 - The floating AI assistant remains a local, non-authoritative prototype interaction. It cannot
   change claim state.
 - The page derives internal flags from `signals` and assignment from open `handoffs`.
+- All write-back requests carry an idempotency key and the currently displayed claim revision;
+  the queue and detail are reloaded after each successful mutation.
 - It does not expose claimant-only private data.

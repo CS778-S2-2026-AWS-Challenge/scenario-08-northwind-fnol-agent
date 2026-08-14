@@ -99,6 +99,17 @@
 
     .empty-state { padding: 30px 20px; color: #334155; }
     .error { padding: 18px 20px; background: #fef2f2; color: #991b1b; border-radius: 14px; margin-bottom: 16px; }
+    .staff-controls { display:grid; gap:16px; }
+    .staff-control { padding:16px; border:1px solid #e2e8f0; border-radius:14px; background:#f8fafc; }
+    .staff-control h3 { margin:0 0 12px; font-size:14px; color:#0f172a; }
+    .staff-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .staff-control label { display:grid; gap:5px; color:#475569; font-size:12px; }
+    .staff-control input, .staff-control select, .staff-control textarea { width:100%; padding:9px 10px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#0f172a; font:inherit; }
+    .staff-control textarea { min-height:74px; resize:vertical; }
+    .staff-control .wide { grid-column:1 / -1; }
+    .staff-action-button { margin-top:12px; padding:10px 14px; border:0; border-radius:9px; background:#0369a1; color:#fff; font-weight:700; cursor:pointer; }
+    .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
+    .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
 
     @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
 
@@ -248,6 +259,45 @@
               <button id="toggleAssistantBtn" class="customer-chat-close" style="margin-left:8px">Open assistant</button>
             </div>
             </div>
+          <div class="detail-section" id="detailStaffActions" style="display:none">
+            <h2>Staff actions and write-back</h2>
+            <p class="muted">These controls persist audited staff decisions to the shared claim state. Internal reasons are never copied into the claimant update.</p>
+            <div class="staff-controls">
+              <section class="staff-control">
+                <h3>Create a staff action</h3>
+                <div class="staff-form-grid">
+                  <label>Action type<input id="createActionType" value="professional_review" maxlength="100"></label>
+                  <label>Source references<input id="createActionRefs" placeholder="pol_123, ev_456"></label>
+                  <label class="wide">Requested outcome<textarea id="createActionOutcome">Review the claim and record the authorised outcome.</textarea></label>
+                </div>
+                <button id="createStaffActionBtn" class="staff-action-button" type="button">Create action</button>
+              </section>
+              <section class="staff-control">
+                <h3>Complete an open action</h3>
+                <div class="staff-form-grid">
+                  <label class="wide">Open action<select id="completeActionSelect"></select></label>
+                  <label>Outcome code<input id="completeOutcomeCode" value="professional_review_completed" maxlength="100"></label>
+                  <label>Reason codes<input id="completeReasonCodes" value="STAFF_REVIEW_COMPLETED"></label>
+                  <label class="wide">Internal result summary<textarea id="completeResultSummary">The staff review is complete.</textarea></label>
+                  <label>New workflow state<select id="completeWorkflowState"><option value="">No workflow change</option><option value="ready_for_next">Ready for next action</option><option value="awaiting_evidence">Awaiting evidence</option><option value="professional_review">Professional review</option></select></label>
+                  <label>Customer responsible party<select id="customerResponsibleParty"><option value="northwind">Northwind</option><option value="claimant">Claimant</option><option value="claims_professional">Claims professional</option><option value="external_party">External party</option></select></label>
+                  <label class="wide">Claimant-safe update<textarea id="customerUpdateSummary">Your claim has been reviewed. We will guide you through the next step.</textarea></label>
+                </div>
+                <button id="completeStaffActionBtn" class="staff-action-button" type="button">Complete action and update claim</button>
+              </section>
+              <section class="staff-control">
+                <h3>Decide a review signal</h3>
+                <div class="staff-form-grid">
+                  <label class="wide">Review signal<select id="signalDecisionSelect"></select></label>
+                  <label>Decision<select id="signalDecisionValue"><option value="confirmed">Confirmed for review</option><option value="dismissed">Dismissed</option><option value="overridden">Overridden</option><option value="resolved">Resolved</option></select></label>
+                  <label>Reason codes<input id="signalReasonCodes" value="STAFF_SIGNAL_REVIEWED"></label>
+                  <label class="wide">Internal decision summary<textarea id="signalDecisionSummary">A staff member reviewed this signal against the available evidence.</textarea></label>
+                </div>
+                <button id="decideSignalBtn" class="staff-action-button" type="button">Record signal decision</button>
+              </section>
+            </div>
+            <div id="mutationStatus" class="mutation-status" aria-live="polite"></div>
+          </div>
         </section>
       </div>
       </section>
@@ -355,6 +405,119 @@
         throw new Error(payload?.error?.message || `The workbench request failed (${response.status}).`);
       }
       return payload;
+    }
+
+    function mutationHeaders(revision) {
+      return { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID(), 'If-Match': String(revision) };
+    }
+
+    function commaSeparatedValues(value) {
+      return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+
+    async function requestMutation(path, method, revision, payload) {
+      return apiRequest(`${API_BASE}/${encodeURIComponent(activeClaimId)}${path}`, {
+        method,
+        headers: mutationHeaders(revision),
+        body: JSON.stringify(payload),
+      });
+    }
+
+    function setMutationStatus(message, isError = false) {
+      const status = byId('mutationStatus');
+      status.textContent = message;
+      status.style.color = isError ? '#991b1b' : '#166534';
+    }
+
+    function syncStaffControlState() {
+      byId('createStaffActionBtn').disabled = !activeClaimDetail;
+      byId('completeStaffActionBtn').disabled = !activeClaimDetail || !byId('completeActionSelect').value;
+      byId('decideSignalBtn').disabled = !activeClaimDetail || !byId('signalDecisionSelect').value;
+    }
+
+    function populateStaffControls(detail) {
+      const openActions = (detail.staff_actions || []).filter(item => !['completed', 'cancelled'].includes(item.status));
+      const actionSelect = byId('completeActionSelect');
+      actionSelect.replaceChildren();
+      openActions.forEach(action => actionSelect.add(new Option(`${action.action_type} · ${action.status}`, action.action_id)));
+      if (!openActions.length) actionSelect.add(new Option('No open staff actions', ''));
+
+      const signalSelect = byId('signalDecisionSelect');
+      signalSelect.replaceChildren();
+      (detail.signals || []).filter(signal => !(signal.decisions || []).length).forEach(signal => {
+        const signalId = signal.signal_id || signal.code;
+        if (signalId) signalSelect.add(new Option(signal.code || signal.signal_id, signalId));
+      });
+      if (!signalSelect.options.length) signalSelect.add(new Option('No undecided review signals', ''));
+      byId('detailStaffActions').style.display = 'block';
+      syncStaffControlState();
+    }
+
+    function clearClaimDetail() {
+      activeClaimId = null;
+      activeClaimDetail = null;
+      detailRevision = null;
+      byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
+      ['detailInternal', 'detailNotes', 'detailNextStep', 'detailStaffActions'].forEach(id => { byId(id).style.display = 'none'; });
+      setMutationStatus('');
+      syncStaffControlState();
+    }
+
+    async function refreshAfterStaffMutation(message) {
+      if (activeClaimId) detailCache.delete(activeClaimId);
+      await loadClaims({ propagateError: true });
+      if (activeClaimDetail) setMutationStatus(message);
+    }
+
+    async function runStaffMutation(button, operation) {
+      button.disabled = true;
+      setMutationStatus('Saving audited staff operation...');
+      try {
+        await operation();
+      } catch (error) {
+        setMutationStatus(error.message, true);
+      } finally {
+        syncStaffControlState();
+      }
+    }
+
+    async function createStaffActionFromForm() {
+      if (!activeClaimDetail) throw new Error('Select a claim before creating an action.');
+      const actionType = byId('createActionType').value.trim();
+      const requestedOutcome = byId('createActionOutcome').value.trim();
+      if (!actionType || !requestedOutcome) throw new Error('Action type and outcome are required.');
+      await requestMutation('/staff-actions', 'POST', activeClaimDetail.revision, { action_type: actionType, requested_outcome: requestedOutcome, source_refs: commaSeparatedValues(byId('createActionRefs').value) });
+      await refreshAfterStaffMutation('Staff action created and recorded in the shared claim state.');
+    }
+
+    async function completeStaffActionFromForm() {
+      if (!activeClaimDetail) throw new Error('Select a claim before completing an action.');
+      const actionId = byId('completeActionSelect').value;
+      if (!actionId) throw new Error('Choose an open staff action.');
+      const reasonCodes = commaSeparatedValues(byId('completeReasonCodes').value);
+      const outcomeCode = byId('completeOutcomeCode').value.trim();
+      const resultSummary = byId('completeResultSummary').value.trim();
+      const customerSummary = byId('customerUpdateSummary').value.trim();
+      if (!outcomeCode || !reasonCodes.length || !resultSummary || !customerSummary) throw new Error('Outcome, result, reason code, and claimant-safe update are required.');
+      const workflowState = byId('completeWorkflowState').value;
+      await requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH', activeClaimDetail.revision, {
+        status: 'completed',
+        result: { outcome: outcomeCode, summary: resultSummary, reason_codes: reasonCodes, source_refs: [] },
+        state_changes: workflowState ? [{ path: 'claim_state.workflow_state', to: workflowState }] : [],
+        customer_update: { summary: customerSummary, responsible_party: byId('customerResponsibleParty').value, related_refs: [actionId] },
+      });
+      await refreshAfterStaffMutation('Action completed; claim state and claimant-safe update persisted.');
+    }
+
+    async function decideSignalFromForm() {
+      if (!activeClaimDetail) throw new Error('Select a claim before deciding a signal.');
+      const signalId = byId('signalDecisionSelect').value;
+      if (!signalId) throw new Error('Choose an undecided review signal.');
+      const reasonCodes = commaSeparatedValues(byId('signalReasonCodes').value);
+      const summary = byId('signalDecisionSummary').value.trim();
+      if (!reasonCodes.length || !summary) throw new Error('Decision reason and summary are required.');
+      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, { decision: byId('signalDecisionValue').value, reason_codes: reasonCodes, summary, evidence_refs: [] });
+      await refreshAfterStaffMutation('Review-signal decision recorded as an internal audited decision.');
     }
 
     async function fetchClaims(view) {
@@ -630,14 +793,11 @@
     function renderDetail(claimId, providedDetail = null) {
       const selected = claims.find(item => item.claim_id === claimId);
       if (!selected) {
-        byId('detailContent').innerHTML = '<p class="muted">Claim details are unavailable.</p>';
-        byId('detailInternal').style.display = 'none';
-        byId('detailNotes').style.display = 'none';
-        byId('detailNextStep').style.display = 'none';
-        return;
+        clearClaimDetail();
+        return Promise.resolve();
       }
 
-      (providedDetail ? Promise.resolve(providedDetail) : fetchClaimDetail(claimId))
+      return (providedDetail ? Promise.resolve(providedDetail) : fetchClaimDetail(claimId))
         .then(detail => {
           activeClaimDetail = detail;
           detailRevision = detail.revision;
@@ -677,9 +837,13 @@
           byId('detailInternal').style.display = 'block';
           byId('detailNotes').style.display = 'block';
           byId('detailNextStep').style.display = 'block';
+          populateStaffControls(detail);
           if (!customerChatView.hidden) renderCustomerChat();
         })
         .catch(error => {
+          activeClaimDetail = null;
+          byId('detailStaffActions').style.display = 'none';
+          syncStaffControlState();
           setError(error.message);
         });
     }
@@ -698,27 +862,31 @@
       renderClaims(claims);
     }
 
-    async function loadClaims() {
+    async function loadClaims({ propagateError = false } = {}) {
       setError('');
       const view = byId('viewSelect').value;
       try {
         const payload = await fetchClaims(view);
         claims = payload.items || [];
         renderClaims(claims);
-        if (claims.length && !activeClaimId) {
+        if (claims.length && !claims.some(item => item.claim_id === activeClaimId)) {
           activeClaimId = claims[0].claim_id;
-          renderDetail(activeClaimId);
-        } else if (activeClaimId) {
-          renderDetail(activeClaimId);
         }
-        if (!customerChatView.hidden) renderCustomerChat();
+        if (activeClaimId) await renderDetail(activeClaimId);
+        else clearClaimDetail();
+        if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
+        clearClaimDetail();
         setError(error.message);
+        if (propagateError) throw error;
       }
     }
 
     document.getElementById('viewSelect').addEventListener('change', loadClaims);
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
+    byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
+    byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
+    byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
 
     loadClaims();
 
