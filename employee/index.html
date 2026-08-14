@@ -465,7 +465,7 @@
 
     async function refreshAfterStaffMutation(message) {
       if (activeClaimId) detailCache.delete(activeClaimId);
-      await loadClaims();
+      await loadClaims({ propagateError: true });
       if (activeClaimDetail) setMutationStatus(message);
     }
 
@@ -862,7 +862,7 @@
       renderClaims(claims);
     }
 
-    async function loadClaims() {
+    async function loadClaims({ propagateError = false } = {}) {
       setError('');
       const view = byId('viewSelect').value;
       try {
@@ -876,7 +876,9 @@
         else clearClaimDetail();
         if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
+        clearClaimDetail();
         setError(error.message);
+        if (propagateError) throw error;
       }
     }
 
