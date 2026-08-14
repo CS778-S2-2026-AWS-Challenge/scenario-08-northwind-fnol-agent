@@ -192,7 +192,8 @@ def test_claim_creation_rejects_claimant_auth_stale_state_and_unauthorised_decis
         json={**payload, 'claim_revision': 2},
     )
 
-    assert claimant_auth.status_code == 401
+    assert claimant_auth.status_code == 403
+    assert claimant_auth.json()['error']['code'] == 'ACCESS_DENIED'
     assert unauthorised.status_code == 409
     assert unauthorised.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert stale.status_code == 409
