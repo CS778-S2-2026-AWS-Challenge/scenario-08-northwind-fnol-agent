@@ -104,3 +104,7 @@ is the clean fixture reset. The concrete API and logical DynamoDB mapping is
 `docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.
 
 The Day 3 claimant, Agent, API, fixture, and observable-state dependency map is [documented here](docs/day3-implementation-map.md). It is a planning contract, not a claim that full frontend-backend integration is complete.
+
+The assembled Sprint 1 shared-runtime baseline, including verified employee
+workbench write-back and the known claimant/Agent journey blockers, is recorded
+in the [Day 4 prototype integration baseline](docs/day4-assembled-prototype-integration-results.md).
