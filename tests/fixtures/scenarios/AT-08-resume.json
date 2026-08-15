@@ -1,6 +1,6 @@
 {
   "scenario_id": "AT-08-resume",
-  "description": "Synthetic claim resumed ten days after confirmed facts and a future-evidence promise were saved.",
+  "description": "Synthetic claim resumed in a second interaction session ten days after confirmed facts and a future-evidence promise were saved.",
   "claim": {
     "claim_id": "clm_fixture_at08",
     "customer_id": "cus_demo",
@@ -42,7 +42,7 @@
     },
     "evidence_summary": {"received": 0, "pending": 1, "needs_attention": 0},
     "route": "standard",
-    "active_session_id": "ses_fixture_at08",
+    "active_session_id": "ses_fixture_at08_resume",
     "external_claim": null,
     "customer_next_step": {
       "status": "confirm_future_evidence",
@@ -52,11 +52,25 @@
       "required_items": []
     },
     "created_at": "2026-08-02T02:00:00Z",
-    "updated_at": "2026-08-02T02:20:00Z"
+    "updated_at": "2026-08-12T02:20:00Z"
   },
   "sessions": [
     {
-      "session_id": "ses_fixture_at08",
+      "session_id": "ses_fixture_at08_original",
+      "claim_id": "clm_fixture_at08",
+      "customer_id": "cus_demo",
+      "status": "paused",
+      "summary": "Rear-end collision in Newmarket; incident and location are confirmed.",
+      "unresolved_questions": ["How should Northwind request the police report when it is ready?"],
+      "pending_items": ["Police report expected after the original session."],
+      "prior_commitments": ["The police report can be added later without restarting the claim."],
+      "context_revision": 6,
+      "started_at": "2026-08-02T02:00:00Z",
+      "last_active_at": "2026-08-02T02:20:00Z",
+      "closed_at": null
+    },
+    {
+      "session_id": "ses_fixture_at08_resume",
       "claim_id": "clm_fixture_at08",
       "customer_id": "cus_demo",
       "status": "active",
@@ -64,9 +78,9 @@
       "unresolved_questions": ["How should Northwind request the police report when it is ready?"],
       "pending_items": ["Police report expected after the original session."],
       "prior_commitments": ["The police report can be added later without restarting the claim."],
-      "context_revision": 7,
-      "started_at": "2026-08-02T02:00:00Z",
-      "last_active_at": "2026-08-02T02:20:00Z",
+      "context_revision": 6,
+      "started_at": "2026-08-12T02:20:00Z",
+      "last_active_at": "2026-08-12T02:20:00Z",
       "closed_at": null
     }
   ],
@@ -93,7 +107,7 @@
     {
       "message_id": "msg_at08_claimant",
       "claim_id": "clm_fixture_at08",
-      "session_id": "ses_fixture_at08",
+      "session_id": "ses_fixture_at08_original",
       "client_message_id": "at08-original-description",
       "actor": "claimant",
       "visibility": "shared",
@@ -105,7 +119,7 @@
     {
       "message_id": "msg_at08_agent",
       "claim_id": "clm_fixture_at08",
-      "session_id": "ses_fixture_at08",
+      "session_id": "ses_fixture_at08_original",
       "client_message_id": null,
       "actor": "agent",
       "visibility": "claimant_visible",
@@ -117,7 +131,7 @@
     {
       "message_id": "msg_at08_internal",
       "claim_id": "clm_fixture_at08",
-      "session_id": "ses_fixture_at08",
+      "session_id": "ses_fixture_at08_original",
       "client_message_id": null,
       "actor": "system",
       "visibility": "internal_only",
@@ -132,6 +146,9 @@
     "confirmed_fields_not_reasked": ["incident.description", "incident.location"],
     "pending_items": ["Police report expected after the original session."],
     "prior_commitments": ["The police report can be added later without restarting the claim."],
+    "historical_session_status": "paused",
+    "active_session_id": "ses_fixture_at08_resume",
+    "session_count": 2,
     "claimant_visible_messages": 2
   }
 }

@@ -9,6 +9,7 @@ from backend.domain.models import (
     EvidenceRecord,
     MessageRecord,
     SessionRecord,
+    SessionStatus,
     WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -35,6 +36,17 @@ class ScenarioFixture(ContractModel):
             for session in self.sessions
         ):
             raise ValueError('Every session must belong to the scenario claim and customer.')
+
+        active_sessions = [
+            session for session in self.sessions if session.status is SessionStatus.ACTIVE
+        ]
+        if len(active_sessions) != 1:
+            raise ValueError('A scenario claim must contain exactly one active session.')
+        if active_sessions[0].session_id != self.claim.active_session_id:
+            raise ValueError('The claim active_session_id must identify the active session.')
+        if any(session.context_revision > self.claim.revision for session in self.sessions):
+            raise ValueError('Session context_revision cannot exceed the claim revision.')
+
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
         if any(
