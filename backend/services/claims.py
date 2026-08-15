@@ -286,6 +286,16 @@ def start_session(
     active_session = repository.get_active_session(claim_id, principal.subject)
     if active_session is not None and active_session.status is SessionStatus.ACTIVE:
         session = active_session
+        repository.save_idempotency(
+            IdempotencyRecord(
+                actor_id=principal.subject,
+                route=route,
+                key=key,
+                request_fingerprint=fingerprint,
+                claim_id=claim_id,
+                session_id=session.session_id,
+            )
+        )
     else:
         previous_sessions = repository.list_sessions_for_claim(
             claim_id,
@@ -326,12 +336,7 @@ def start_session(
                 'updated_at': timestamp,
             }
         )
-        repository.save_claim(updated_claim, expected_revision=claim.revision)
-        repository.save_session(session)
-        claim = updated_claim
-
-    repository.save_idempotency(
-        IdempotencyRecord(
+        idempotency = IdempotencyRecord(
             actor_id=principal.subject,
             route=route,
             key=key,
@@ -339,7 +344,23 @@ def start_session(
             claim_id=claim_id,
             session_id=session.session_id,
         )
-    )
+        try:
+            repository.save_session_mutation(
+                updated_claim,
+                expected_revision=claim.revision,
+                session=session,
+                idempotency=idempotency,
+            )
+        except RevisionConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='REVISION_CONFLICT',
+                message='The claim changed while the session was being resumed.',
+                retryable=True,
+                current_revision=conflict.current_revision,
+            ) from conflict
+        claim = updated_claim
+
     return _claimant_session(session, claim.customer_next_step)
 
 

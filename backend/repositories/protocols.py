@@ -75,6 +75,16 @@ class ClaimRepository(Protocol):
     def save_session(self, session: SessionRecord) -> None:
         raise NotImplementedError
 
+    def save_session_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a resumed session, claim revision, and retry metadata."""
+        raise NotImplementedError
+
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         raise NotImplementedError
 
