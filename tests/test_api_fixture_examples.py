@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from backend.domain.models import (
-    ActorType,
     ClaimantClaim,
     ClaimantEvidence,
     ClaimantSession,
