@@ -17,6 +17,7 @@ from backend.domain.models import (
     WorkbenchClaimDetail,
     WorkbenchClaimListResponse,
 )
+from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.staff_actions import (
     accept_handoff,
@@ -46,7 +47,8 @@ def create_staff_message(
 
 
 def repository_for(request: Request) -> PersistenceRepository:
-    return cast(PersistenceRepository, request.app.state.claim_repository)
+    repository = cast(PersistenceRepository, request.app.state.claim_repository)
+    return guarded_handoff_repository(repository)
 
 
 @router.get('', response_model=WorkbenchClaimListResponse)

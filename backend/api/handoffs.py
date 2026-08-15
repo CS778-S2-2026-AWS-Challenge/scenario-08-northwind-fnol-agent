@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Header, Request, status
 
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import CreateSupportRequest, SupportRequestResponse
+from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.handoffs import create_support_request
 
@@ -11,7 +12,8 @@ router = APIRouter(prefix='/api/v1/claims', tags=['claimant-support'])
 
 
 def repository_for(request: Request) -> PersistenceRepository:
-    return cast(PersistenceRepository, request.app.state.claim_repository)
+    repository = cast(PersistenceRepository, request.app.state.claim_repository)
+    return guarded_handoff_repository(repository)
 
 
 @router.post(
