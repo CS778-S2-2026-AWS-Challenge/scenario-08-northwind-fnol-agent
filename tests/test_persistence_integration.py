@@ -84,8 +84,11 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     handoff_id = support_body['handoff']['handoff_id']
     assert isinstance(handoff_id, str)
     assert support_body['revision'] == 4
-    assert support_body['handoff']['claim_id'] == claim_id
     assert support_body['handoff']['status'] == 'queued'
+    requested_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert requested_handoff is not None
+    assert requested_handoff.claim_id == claim_id
+    assert requested_handoff.status is HandoffStatus.QUEUED
 
     accepted = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
