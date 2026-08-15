@@ -147,7 +147,9 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
             'Idempotency-Key': 'integration-current-message',
             'If-Match': '7',
         },
-        json={'content': {'type': 'text', 'text': 'I am continuing from the current claim revision.'}},
+        json={
+            'content': {'type': 'text', 'text': 'I am continuing from the current claim revision.'}
+        },
     )
     assert staff_write.status_code == 200
     assert staff_write.json()['claim_revision'] == 8
