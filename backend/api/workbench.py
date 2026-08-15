@@ -18,15 +18,18 @@ from backend.domain.models import (
     WorkbenchClaimListResponse,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.review_writeback import (
+    decide_review_signal,
+    get_review_connected_workbench_detail,
+)
 from backend.services.staff_actions import (
     accept_handoff,
     create_staff_action,
-    decide_signal,
     resolve_handoff,
     send_staff_message,
     update_staff_action,
 )
-from backend.services.workbench import get_workbench_claim_detail, list_workbench_claims
+from backend.services.workbench import list_workbench_claims
 
 router = APIRouter(prefix='/api/v1/workbench/claims', tags=['workbench'])
 
@@ -64,7 +67,7 @@ def read_workbench_claim(
     request: Request,
     principal: Principal = Depends(require_staff),
 ) -> WorkbenchClaimDetail:
-    return get_workbench_claim_detail(repository_for(request), principal, claim_id)
+    return get_review_connected_workbench_detail(repository_for(request), principal, claim_id)
 
 
 @router.post(
@@ -114,7 +117,7 @@ def create_signal_decision(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> SignalDecisionResponse:
-    return decide_signal(
+    return decide_review_signal(
         repository_for(request), principal, claim_id, signal_id, payload, idempotency_key, if_match
     )
 
