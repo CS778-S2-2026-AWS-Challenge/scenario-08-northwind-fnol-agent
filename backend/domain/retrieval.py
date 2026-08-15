@@ -1,0 +1,62 @@
+from datetime import datetime
+from enum import Enum
+from typing import Literal
+
+from pydantic import Field
+
+from backend.domain.models import ContractModel
+
+
+class RetrievalKind(str, Enum):
+    POLICY = 'policy'
+    CLAIM_HISTORY = 'claim_history'
+
+
+class RetrievalSource(ContractModel):
+    """Provider provenance retained after raw transport data is discarded."""
+
+    system: str = Field(min_length=1, max_length=100)
+    reference: str = Field(min_length=1, max_length=200)
+    retrieved_at: datetime
+
+
+class RetrievalUncertainty(ContractModel):
+    code: str = Field(min_length=1, max_length=100)
+    detail: str = Field(min_length=1, max_length=500)
+
+
+class PolicyFacts(ContractModel):
+    policy_reference: str = Field(min_length=1, max_length=200)
+    product: str | None = Field(default=None, max_length=100)
+    status: str | None = Field(default=None, max_length=100)
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    excess_amount: float | None = Field(default=None, ge=0.0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    coverage_sections: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ClaimHistoryFacts(ContractModel):
+    history_reference: str = Field(min_length=1, max_length=200)
+    incident_type: str | None = Field(default=None, max_length=100)
+    occurred_at: datetime | None = None
+    status: str | None = Field(default=None, max_length=100)
+    outcome: str | None = Field(default=None, max_length=200)
+
+
+class PolicyRetrievalRecord(ContractModel):
+    retrieval_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    kind: Literal[RetrievalKind.POLICY] = RetrievalKind.POLICY
+    source: RetrievalSource
+    facts: PolicyFacts
+    uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
+
+
+class ClaimHistoryRetrievalRecord(ContractModel):
+    retrieval_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    kind: Literal[RetrievalKind.CLAIM_HISTORY] = RetrievalKind.CLAIM_HISTORY
+    source: RetrievalSource
+    facts: ClaimHistoryFacts
+    uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
