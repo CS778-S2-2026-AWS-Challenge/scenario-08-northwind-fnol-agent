@@ -457,13 +457,12 @@ def complete_upload(
         **evidence.provenance,
         'storage_key': stored.storage_key,
         'upload_checksum': stored.checksum,
+        'processing_state': 'queued',
     }
-    if evidence.media_type.startswith('image/'):
-        provenance['extraction_state'] = 'proposed'
     completed = evidence.model_copy(
         update={
             'status': EvidenceStatus.RECEIVED,
-            'file_status': EvidenceFileStatus.READY,
+            'file_status': EvidenceFileStatus.PROCESSING,
             'provenance': provenance,
             'updated_at': timestamp,
         }
