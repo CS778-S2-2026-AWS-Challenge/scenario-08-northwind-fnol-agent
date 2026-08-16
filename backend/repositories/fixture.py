@@ -39,6 +39,32 @@ class FixtureRepository(PersistenceRepository):
     def claim_count(self) -> int:
         return len(self._claims)
 
+    def reset_demo_state(self) -> dict[str, int]:
+        """Clear only records owned by this in-memory prototype repository."""
+        cleared = {
+            'claims': len(self._claims),
+            'sessions': len(self._sessions),
+            'messages': len(self._messages),
+            'agent_decisions': len(self._decisions),
+            'evidence': len(self._evidence),
+            'staff_actions': len(self._staff_actions),
+            'customer_updates': len(self._customer_updates),
+            'signal_decisions': len(self._signal_decisions),
+            'handoffs': len(self._handoffs),
+            'idempotency_records': len(self._idempotency),
+        }
+        self._claims.clear()
+        self._sessions.clear()
+        self._messages.clear()
+        self._decisions.clear()
+        self._evidence.clear()
+        self._staff_actions.clear()
+        self._customer_updates.clear()
+        self._signal_decisions.clear()
+        self._handoffs.clear()
+        self._idempotency.clear()
+        return cleared
+
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
