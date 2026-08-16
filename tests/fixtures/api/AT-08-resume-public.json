@@ -46,10 +46,10 @@
       "required_items": []
     },
     "created_at": "2026-08-02T02:00:00Z",
-    "updated_at": "2026-08-02T02:20:00Z"
+    "updated_at": "2026-08-12T02:20:00Z"
   },
   "session": {
-    "session_id": "ses_fixture_at08",
+    "session_id": "ses_fixture_at08_resume",
     "claim_id": "clm_fixture_at08",
     "status": "active",
     "resume": {
@@ -71,35 +71,12 @@
         "required_items": []
       }
     },
-    "started_at": "2026-08-02T02:00:00Z",
-    "last_active_at": "2026-08-02T02:19:00Z",
+    "started_at": "2026-08-12T02:20:00Z",
+    "last_active_at": "2026-08-12T02:20:00Z",
     "closed_at": null
   },
   "messages": {
-    "items": [
-      {
-        "message_id": "msg_at08_claimant",
-        "actor": "claimant",
-        "content": {
-          "type": "text",
-          "text": "I was rear-ended in Newmarket."
-        },
-        "evidence_refs": [],
-        "in_reply_to": null,
-        "created_at": "2026-08-02T02:05:00Z"
-      },
-      {
-        "message_id": "msg_at08_agent",
-        "actor": "agent",
-        "content": {
-          "type": "text",
-          "text": "You can return later and add the police report without starting again."
-        },
-        "evidence_refs": ["evd_fixture_at08_police"],
-        "in_reply_to": "msg_at08_claimant",
-        "created_at": "2026-08-02T02:19:00Z"
-      }
-    ],
+    "items": [],
     "page": {
       "next_cursor": null
     }

@@ -1,7 +1,7 @@
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,6 +16,7 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import RevisionConflict
 from backend.repositories.scenario_loader import load_scenario, load_scenarios, seed_scenario
 from scripts.run_scenarios import run_scenarios
 
@@ -62,7 +63,12 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
         'AT-08-resume',
         'AT-12-signal-writeback',
     ]
-    assert all(result.sessions == 1 for result in results)
+    assert {result.scenario_id: result.sessions for result in results} == {
+        'AT-01-clear-motor': 1,
+        'AT-06-pending-evidence': 1,
+        'AT-08-resume': 2,
+        'AT-12-signal-writeback': 1,
+    }
     assert next(result for result in results if result.scenario_id == 'AT-08-resume').evidence == 1
 
 
@@ -111,25 +117,42 @@ def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() ->
 
 
 def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> None:
-    repository, claim_id, session_id = scenario('AT-08-resume')
+    loaded = load_scenario(SCENARIO_DIRECTORY / 'AT-08-resume.json')
+    repository = FixtureRepository()
+    seed_scenario(repository, loaded)
+
+    claim = repository.get_claim(loaded.claim.claim_id, 'cus_demo')
+    sessions = repository.list_sessions_for_claim(loaded.claim.claim_id, 'cus_demo')
+    active = next(item for item in sessions if item.status.value == 'active')
+    historical = next(item for item in sessions if item.session_id != active.session_id)
+
+    assert claim is not None
+    assert repository.claim_count == 1
+    assert len(sessions) == 2
+    assert historical.status.value == 'paused'
+    assert active.session_id == claim.active_session_id
+    assert active.claim_id == historical.claim_id == claim.claim_id
+    assert active.started_at - historical.last_active_at == timedelta(days=10)
+    assert active.context_revision <= claim.revision
+    assert historical.context_revision <= claim.revision
+    assert active.summary == historical.summary
+    assert active.unresolved_questions == historical.unresolved_questions
+    assert active.pending_items == historical.pending_items
+    assert active.prior_commitments == historical.prior_commitments
 
     with client_for(repository) as client:
-        resumed = client.post(
-            f'/api/v1/claims/{claim_id}/sessions',
-            headers={
-                'Authorization': 'Bearer synthetic-claimant',
-                'Idempotency-Key': 'resume-at08',
-            },
-            json={'intent': 'resume'},
+        resumed = client.get(
+            f'/api/v1/claims/{claim.claim_id}/sessions/{active.session_id}',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
         )
         messages = client.get(
-            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            f'/api/v1/claims/{claim.claim_id}/sessions/{historical.session_id}/messages',
             headers={'Authorization': 'Bearer synthetic-claimant'},
         )
 
-    assert resumed.status_code == 201
+    assert resumed.status_code == 200
     body = resumed.json()
-    assert body['session_id'] == session_id
+    assert body['session_id'] == active.session_id
     assert body['resume']['summary'].startswith('Rear-end collision')
     assert body['resume']['unresolved_questions'] == [
         'How should Northwind request the police report when it is ready?'
@@ -138,13 +161,32 @@ def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> Non
     assert body['resume']['prior_commitments'] == [
         'The police report can be added later without restarting the claim.'
     ]
-    confirmed = repository.get_claim(claim_id, 'cus_demo')
-    assert confirmed is not None
-    assert confirmed.form['incident.description'].status.value == 'confirmed'
-    assert confirmed.form['incident.location'].status.value == 'confirmed'
+    assert claim.form['incident.description'].status.value == 'confirmed'
+    assert claim.form['incident.location'].status.value == 'confirmed'
     assert messages.status_code == 200
     assert len(messages.json()['items']) == 2
     assert all(item['actor'] != 'system' for item in messages.json()['items'])
+
+
+def test_older_revision_cannot_overwrite_newer_claim_state() -> None:
+    loaded = load_scenario(SCENARIO_DIRECTORY / 'AT-08-resume.json')
+    repository = FixtureRepository()
+    seed_scenario(repository, loaded)
+    claim = repository.get_claim(loaded.claim.claim_id, 'cus_demo')
+    assert claim is not None
+
+    newer = claim.model_copy(update={'revision': claim.revision + 1, 'route': 'newer_state'})
+    repository.save_claim(newer, expected_revision=claim.revision)
+
+    stale = claim.model_copy(update={'revision': claim.revision + 1, 'route': 'stale_state'})
+    with pytest.raises(RevisionConflict) as conflict:
+        repository.save_claim(stale, expected_revision=claim.revision)
+
+    assert conflict.value.current_revision == newer.revision
+    stored = repository.get_claim(claim.claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.revision == newer.revision
+    assert stored.route == 'newer_state'
 
 
 def test_fixture_public_api_never_exposes_logical_storage_keys() -> None:
@@ -255,6 +297,9 @@ def test_loader_rejects_missing_active_session(tmp_path: Path) -> None:
         ('wrong_customer', 'scenario claim and customer'),
         ('wrong_evidence_claim', 'evidence item'),
         ('wrong_message_session', 'message must belong'),
+        ('multiple_active', 'exactly one active session'),
+        ('active_session_mismatch', 'must identify the active session'),
+        ('future_context_revision', 'context_revision cannot exceed'),
     ],
 )
 def test_loader_rejects_broken_record_links(
@@ -270,8 +315,14 @@ def test_loader_rejects_broken_record_links(
         payload['sessions'][0]['customer_id'] = 'cus_other'
     elif mutation == 'wrong_evidence_claim':
         payload['evidence'][0]['claim_id'] = 'clm_other'
-    else:
+    elif mutation == 'wrong_message_session':
         payload['messages'][0]['session_id'] = 'ses_other'
+    elif mutation == 'multiple_active':
+        payload['sessions'][0]['status'] = 'active'
+    elif mutation == 'active_session_mismatch':
+        payload['claim']['active_session_id'] = payload['sessions'][0]['session_id']
+    else:
+        payload['sessions'][0]['context_revision'] = payload['claim']['revision'] + 1
     invalid = tmp_path / 'AT-99-invalid.json'
     invalid.write_text(json.dumps(payload), encoding='utf-8')
 
