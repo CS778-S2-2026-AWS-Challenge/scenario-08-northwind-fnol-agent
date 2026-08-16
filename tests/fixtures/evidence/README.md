@@ -19,3 +19,19 @@ py -3.12 scripts/run_evidence_fixtures.py
 The catalogue defines lifecycle data only. Business-path entry scenarios and
 claimant/internal visibility projection tests belong to the separate scenario
 fixture work.
+
+## Path entry and visibility fixtures
+
+`path-entry-visibility.json` defines the entry state for the fast,
+professional-review, urgent, human-request, and pending-evidence paths. It uses
+the stable AT planning identifiers without claiming that each full journey is
+already implemented.
+
+Evidence is labelled `claimant_visible`, `shared`, or `internal_only`. The
+claimant fixture projection includes the first two classes, removes internal
+provenance, and always excludes internal-only evidence. Validate all five path
+entries with:
+
+```powershell
+py -3.12 scripts/run_evidence_visibility_fixtures.py
+```

@@ -6,7 +6,11 @@ from typing import Any
 from pydantic import Field, model_validator
 
 from backend.domain.models import (
+    AgentAction,
+    ClaimantEvidence,
+    ClaimState,
     ContractModel,
+    CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceState,
@@ -143,6 +147,74 @@ class EvidenceLifecycleFixtureSet(ContractModel):
         return self
 
 
+class EvidenceBusinessPath(str, Enum):
+    FAST = 'fast'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    URGENT = 'urgent'
+    HUMAN_REQUEST = 'human_request'
+    PENDING_EVIDENCE = 'pending_evidence'
+
+
+class VisibilityEvidenceFixture(ContractModel):
+    fixture_id: str = Field(pattern=r'^EV-VIS-\d{2}-[a-z0-9-]+$')
+    visibility: FixtureVisibility
+    evidence: EvidenceRecord
+
+
+class EvidencePathEntry(ContractModel):
+    scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
+    business_path: EvidenceBusinessPath
+    description: str = Field(min_length=1, max_length=500)
+    claim_id: str = Field(min_length=1, max_length=100)
+    claim_state: ClaimState
+    customer_next_step: CustomerNextStep
+    evidence: list[VisibilityEvidenceFixture] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_entry_state(self) -> 'EvidencePathEntry':
+        expected_action = {
+            EvidenceBusinessPath.FAST: AgentAction.CREATE_CLAIM,
+            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.URGENT: AgentAction.URGENT_HANDOFF,
+            EvidenceBusinessPath.HUMAN_REQUEST: AgentAction.HANDOFF,
+            EvidenceBusinessPath.PENDING_EVIDENCE: AgentAction.PROCEED,
+        }
+        if self.claim_state.next_action is not expected_action[self.business_path]:
+            raise ValueError(
+                f'{self.business_path.value} entry does not use its required next action.'
+            )
+        fixture_ids = {fixture.fixture_id for fixture in self.evidence}
+        if len(fixture_ids) != len(self.evidence):
+            raise ValueError('Path evidence fixture identifiers must be unique.')
+        evidence_ids = {fixture.evidence.evidence_id for fixture in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError('Path evidence identifiers must be unique.')
+        if any(fixture.evidence.claim_id != self.claim_id for fixture in self.evidence):
+            raise ValueError('Every path evidence item must belong to the entry claim.')
+        return self
+
+
+class EvidencePathFixtureSet(ContractModel):
+    fixture_set_id: str = Field(pattern=r'^evidence-path-visibility-v\d+$')
+    description: str = Field(min_length=1, max_length=500)
+    entries: list[EvidencePathEntry] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode='after')
+    def validate_fixture_set(self) -> 'EvidencePathFixtureSet':
+        paths = {entry.business_path for entry in self.entries}
+        if paths != set(EvidenceBusinessPath):
+            raise ValueError('The fixture set must contain every evidence business path once.')
+        scenario_ids = {entry.scenario_id for entry in self.entries}
+        if len(scenario_ids) != len(self.entries):
+            raise ValueError('Evidence path scenario identifiers must be unique.')
+        visibility_classes = {
+            fixture.visibility for entry in self.entries for fixture in entry.evidence
+        }
+        if visibility_classes != set(FixtureVisibility):
+            raise ValueError('The fixture set must contain every evidence visibility class.')
+        return self
+
+
 def load_scenario(path: Path) -> ScenarioFixture:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return ScenarioFixture.model_validate(payload)
@@ -155,6 +227,21 @@ def load_scenarios(directory: Path) -> list[ScenarioFixture]:
 def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return EvidenceLifecycleFixtureSet.model_validate(payload)
+
+
+def load_evidence_path_fixtures(path: Path) -> EvidencePathFixtureSet:
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    return EvidencePathFixtureSet.model_validate(payload)
+
+
+def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
+    return [
+        ClaimantEvidence.model_validate(
+            fixture.evidence.model_dump(exclude={'provenance'}, mode='json')
+        )
+        for fixture in entry.evidence
+        if fixture.visibility is not FixtureVisibility.INTERNAL_ONLY
+    ]
 
 
 def seed_scenario(
