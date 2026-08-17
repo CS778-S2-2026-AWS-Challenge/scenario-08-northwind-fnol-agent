@@ -29,7 +29,7 @@
     .field-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.field { padding:8px 9px; border:1px solid var(--line); border-radius:7px; }.field label { display:block; color:#98a2b3; font-size:10px; letter-spacing:.4px; text-transform:uppercase; }.field span { display:block; font-size:12px; font-weight:600; }.field small { color:var(--muted); font-size:10px; }.tag-list { display:flex; flex-wrap:wrap; gap:7px; }.tag { padding:7px 8px; border:1px solid var(--line); border-radius:6px; font-size:11px; }.tag strong,.tag small { display:block; }.tag small { color:var(--muted); font-size:10px; }.timeline { margin-left:5px; padding-left:13px; border-left:2px solid #d8e1e8; }.event { position:relative; padding:0 0 12px; font-size:12px; }.event::before { content:""; position:absolute; left:-18px; top:5px; width:7px; height:7px; border-radius:50%; background:#1d9b94; }.event small { display:block; color:var(--muted); }
     .simple-view { display:none; }.simple-view.active { display:block; }
     
-    /*与客户聊天功能样式*/
+    
     .customer-chat-shell { display:grid; grid-template-columns:260px 1fr; gap:16px; margin-top:16px; }
     .customer-chat-list { padding:18px; border:1px solid var(--line); border-radius:14px; background:#fff; }
     .customer-chat-list h3 { margin:0 0 12px; font-size:12px; color:#475467; letter-spacing:.5px; text-transform:uppercase; }
@@ -51,7 +51,7 @@
     #internalInfo label[for="internalAutoRefreshCb"] { font-size:13px; color:var(--muted); }
     .view-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.view-card { padding:17px; border:1px solid var(--line); border-radius:11px; background:#fff; box-shadow:0 2px 5px #102a4308; }.view-card h2 { margin:0 0 5px; font-size:18px; }.view-card p { margin:0 0 13px; color:var(--muted); }.task { padding:11px 0; border-top:1px solid #edf0f4; }.task:first-of-type { border-top:0; }.task b,.task small { display:block; }.task small { color:var(--muted); }.guide-step { display:flex; gap:12px; padding:14px 0; border-top:1px solid #edf0f4; }.step-number { display:grid; width:25px; height:25px; flex:none; place-items:center; border-radius:50%; background:#e7f7f5; color:#087b70; font-weight:800; }.toast { position:fixed; right:24px; bottom:24px; padding:12px 14px; border-radius:8px; background:var(--navy); color:#fff; box-shadow:0 8px 25px #102a4340; opacity:0; transform:translateY(80px); transition:.22s; }.toast.show { opacity:1; transform:translateY(0); }
     
-    /*员工AIchat窗口样式*/
+    
     .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
     .chat-widget.dragging { opacity:.96; transition:none; }
     .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
@@ -88,7 +88,7 @@
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar"> <!-- 侧边栏 -->
+    <aside class="sidebar">
       <div class="brand">Northwind<span>claims</span></div>
       <div class="nav-heading">Work</div>
       <ul class="nav">
@@ -120,7 +120,6 @@
     </div>
   </div>
   
-  <!-- AI聊天窗口 -->
   <div class="chat-widget closed" id="chatWidget">
     <div class="chat-header" id="chatHeader">
       <div>
@@ -164,7 +163,7 @@
     let chatMode = 'assistant';
     let chatAttachments = [];
     let customerChatMessages = {};
-    /*使AI chat拖拽功能生效*/
+    
     let chatDrag = { active:false, offsetX:0, offsetY:0 };
     let internalAutoRefreshTimer = null;
     const internalAutoRefreshInterval = 30000; // 30s default
@@ -172,9 +171,7 @@
     const byId = id => document.getElementById(id);
     const activeClaim = () => claims.find(claim => claim.id === activeClaimId);
     const statusClass = status => status.includes('Urgent') ? 'red' : status.includes('Evidence') ? 'blue' : status.includes('Ready') || status.includes('Handed') ? 'teal' : 'amber';
-    /*这个函数的作用是根据理赔单的状态字符串，返回一个更通用的状态标签，用于在界面上显示。
-    它将不同的状态映射为几个主要类别，如“Urgent”、“Awaiting evidence”、“Under review”、“Handed over”和“Ready to create”。
-    如果状态不匹配任何已知类别，则返回原始状态字符串。*/
+    
     function getSharedStatus(claim) {
       const s = (claim.status || '').toLowerCase();
       if (s.includes('urgent')) return 'Urgent';
@@ -191,8 +188,7 @@
     function renderQueues() { byId('queues').innerHTML = queues.map(queue => { const count = queue.key === 'all' ? claims.length : claims.filter(claim => claim.queue === queue.key).length; return `<button class="queue ${queue.key === 'urgent' ? 'urgent' : ''} ${queue.key === activeQueue ? 'active' : ''}" data-queue="${queue.key}"><span class="queue-title">${queue.title}</span><strong class="queue-count">${count}</strong><span class="queue-sub">${queue.sub}</span></button>`; }).join(''); document.querySelectorAll('[data-queue]').forEach(button => button.addEventListener('click', () => { activeQueue = button.dataset.queue; renderWorkbench(); })); }
     function renderRows() { const visible = filteredClaims(); byId('resultCount').textContent = visible.length; byId('claimRows').innerHTML = visible.map(claim => { const shared = getSharedStatus(claim); return `<tr data-claim="${claim.id}" class="${claim.id === activeClaimId ? 'selected' : ''}"><td><div class="case-id">${claim.id}</div><div class="muted">${claim.customer} · ${claim.product}</div></td><td><span class="badge ${statusClass(shared)}"><i class="dot"></i>${shared}</span></td><td><span class="badge ${priorityClass(claim.priority)}">${claim.priority}</span></td><td>${claim.next}</td></tr>` }).join('') || '<tr><td colspan="4" class="muted">No claims match this search.</td></tr>'; document.querySelectorAll('[data-claim]').forEach(row => row.addEventListener('click', () => { activeClaimId = row.dataset.claim; renderRows(); renderDetail(); })); }
     
-    /*这个函数的作用是生成并渲染当前选中案件的“右侧详情面板”。
-    它通过获取当前选中的理赔单数据，将案件的头部状态、四大切换选项卡（Tab）以及对应的详细内容动态填入页面。*/
+    
     function renderDetail() {
       const claim = activeClaim();
       byId('claimDetail').innerHTML = `
@@ -358,23 +354,22 @@
     function bindDetailEvents() { document.querySelectorAll('[data-chat]').forEach(button => button.addEventListener('click', () => openCustomerChat(button.dataset.chat))); document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => { if (button.dataset.action === 'complete') completeAction(); if (button.dataset.action === 'assign') assignToMe(); })); }
     function renderWorkbench() { renderQueues(); renderRows(); renderDetail(); const title = queues.find(queue => queue.key === activeQueue).title; byId('queueTitle').textContent = title; }
     
-    /*这个功能是：员工与客户聊天页面的视图渲染核心。
-    它的职责是：确定当前选中的客户、准备对话历史数据、动态拼接生成整个聊天界面的 HTML 结构，并为页面上的各种按钮绑定点击事件*/
+    
     function renderCustomerChat() {
-      /*如果当前没有选中的客户聊天 ID，就默认使用第一个案件的 ID，确保页面总是有一个聊天会话可显示。*/
+      
       if (!activeCustomerChatId) activeCustomerChatId = claims[0].id;
-      /*在所有案件中查找当前选中的客户聊天 ID 对应的案件对象，如果找不到，就退回使用第一个案件。*/
+      
       const claim = claims.find(claim => claim.id === activeCustomerChatId) || claims[0];
-      /*确保全局的 customerChatMessages 对象里有这个案件的聊天记录数组，如果没有，就初始化一个带有系统提示的数组，告诉用户可以开始与客户聊天。*/
+      
       if (!customerChatMessages[claim.id]) {
         customerChatMessages[claim.id] = [
           { role:'assistant', text:`Customer chat is ready for ${claim.customer}. Use this page to keep customer conversations separate from the staff AI thread.` }
         ];
       }
-      /*获取当前案件的聊天记录数组，用于在页面上显示历史消息。*/
+      
       const messages = customerChatMessages[claim.id];
 
-      /*通过byId(），动态生成整个客户聊天界面的 HTML 结构，包括左侧的客户列表和右侧的聊天框，并插入到页面中。*/
+      
       byId('customerChatView').innerHTML = `
         <div class="page-heading"><div><h1>Customer chat</h1><p>Direct customer communication, separate from the internal AI support chat.</p></div></div>
         <div class="customer-chat-shell">
@@ -403,35 +398,35 @@
         </div>
       `;
 
-      /*模板写入页面后，必须重新给新生成的元素绑定事件*/
-      /*为左侧客户列表的每个按钮绑定点击事件，当点击某个客户时，更新 activeCustomerChatId 并重新渲染聊天界面。*/
+      
+      
       document.querySelectorAll('[data-customer-chat]').forEach(button => button.addEventListener('click', () => { activeCustomerChatId = button.dataset.customerChat; renderCustomerChat(); }));
-      byId('customerChatSend').addEventListener('click', sendCustomerChatMessage); /*为发送按钮绑定点击事件，调用 sendCustomerChatMessage 函数发送消息。*/
-      byId('customerChatBack').addEventListener('click', () => activateView('workbench')); /*为“返回工作台”按钮绑定点击事件，切换回工作台视图。*/
+      byId('customerChatSend').addEventListener('click', sendCustomerChatMessage); 
+      byId('customerChatBack').addEventListener('click', () => activateView('workbench')); 
         // expose a hook so internal info can be refreshed after switching views
         if (typeof window.onCustomerChatRendered === 'function') window.onCustomerChatRendered(claim);
     }
 
-    /*与客户聊天功能*/
+    
     function sendCustomerChatMessage() {
-      /*抓取聊天输入框的 HTML 节点（即那个允许打字的 <textarea> 文本框），*/
+      
       const input = byId('customerChatText');
-      /*读取你输入的文字，并通过 .trim() 剔除首尾的空格/换行。防止误触发送全空格的无意义消息。*/
+      
       const text = input.value.trim();
-      /*拦截空消息：如果剔除空格后文本为空，直接终止函数，什么都不做。*/
+      
       if (!text) return;
-      /*确认当前是在跟哪位客户聊：优先使用当前选中的案件 ID（activeCustomerChatId）；如果还没选择，默认退回使用第一个案件的 ID。*/
+      
       const claimId = activeCustomerChatId || claims[0].id;
-      /*保障数据结构存在：检查全局消息记录对象里有没有这个案件的聊天记录列表。如果没有，就先给它初始化一个空数组 []，防止后续报“无法在 undefined 上 push”的错误。*/
+      
       customerChatMessages[claimId] = customerChatMessages[claimId] || [];
-      /*把你刚才输入的消息，作为一条“用户消息”，推入这个案件的聊天记录数组里。*/
+      
       customerChatMessages[claimId].push({ role:'user', text });
-      /*清空输入框：把 <textarea> 的 value 置空，让你可以继续输入下一条消息。*/
+      
       input.value = '';
-      /*重新渲染聊天记录：把最新的消息列表显示在页面上。*/
+      
       renderCustomerChat();
 
-      /*模拟客服回复：这里用 setTimeout 模拟了一个客服的自动回复，实际中可以替换为调用后端接口或 AI 服务。*/
+      
       setTimeout(() => {
         customerChatMessages[claimId].push({ role:'assistant', text:'Thanks for your message. This is a placeholder customer reply until the live chat service is connected.' });
         renderCustomerChat();
@@ -505,8 +500,8 @@
       // TODO: call API to persist internal notes
     }
     
-    /*AI聊天框的功能*/
-    /* updateAttachmentPreview() 选文件：通过文件框选择文件后，代码会把它们暂存起来*/
+    
+    
     function updateAttachmentPreview() {
       const container = byId('chatAttachments');
       container.innerHTML = '';
@@ -571,7 +566,7 @@
     function closeChat() { const widget = byId('chatWidget'); widget.classList.add('closed'); byId('chatToggle').textContent = 'Open'; }
     function toggleChat() { const widget = byId('chatWidget'); if (widget.classList.contains('closed')) openChat(); else closeChat(); }
     
-    /*实现AI聊天框的拖拽功能*/
+    
     function startChatDrag(event) {
       if (event.button !== 0) return;
       if (event.target.closest('button')) return;
@@ -670,9 +665,9 @@
     document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => activateView(button.dataset.view)));
     byId('searchInput').addEventListener('input', renderRows);
 
-    /*AI聊天框的功能*/
+    
     byId('chatToggle').addEventListener('click', toggleChat);
-    /*为聊天窗口的标题栏绑定拖拽事件，使用户可以通过鼠标拖动来移动聊天窗口的位置。*/
+    
     byId('chatHeader').addEventListener('pointerdown', startChatDrag);
     byId('chatSend').addEventListener('click', sendChatMessage);
     byId('chatFileBtn').addEventListener('click', () => byId('chatFileInput').click());
