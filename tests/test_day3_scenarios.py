@@ -39,6 +39,9 @@ def client_for(repository: FixtureRepository) -> TestClient:
     'scenario_id',
     [
         'AT-01-clear-motor',
+        'AT-02-coverage-ambiguity',
+        'AT-04-urgent',
+        'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
         'AT-12-signal-writeback',
@@ -59,17 +62,32 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
 
     assert [result.scenario_id for result in results] == [
         'AT-01-clear-motor',
+        'AT-02-coverage-ambiguity',
+        'AT-04-urgent',
+        'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
         'AT-12-signal-writeback',
     ]
     assert {result.scenario_id: result.sessions for result in results} == {
         'AT-01-clear-motor': 1,
+        'AT-02-coverage-ambiguity': 1,
+        'AT-04-urgent': 1,
+        'AT-05-human-request': 1,
         'AT-06-pending-evidence': 1,
         'AT-08-resume': 2,
         'AT-12-signal-writeback': 1,
     }
     assert next(result for result in results if result.scenario_id == 'AT-08-resume').evidence == 1
+    assert {
+        result.scenario_id: result.handoffs
+        for result in results
+        if result.scenario_id in {'AT-02-coverage-ambiguity', 'AT-04-urgent', 'AT-05-human-request'}
+    } == {
+        'AT-02-coverage-ambiguity': 1,
+        'AT-04-urgent': 1,
+        'AT-05-human-request': 1,
+    }
 
 
 def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
@@ -82,7 +100,7 @@ def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.count('PASS AT-') == 4
+    assert completed.stdout.count('PASS AT-') == 7
     assert 'PASS AT-06-pending-evidence' in completed.stdout
     assert 'PASS AT-08-resume' in completed.stdout
 

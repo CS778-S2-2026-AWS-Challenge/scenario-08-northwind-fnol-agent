@@ -19,6 +19,7 @@ class ScenarioResult:
     sessions: int
     evidence: int
     messages: int
+    handoffs: int
 
 
 def run_scenarios(directory: Path = SCENARIO_DIRECTORY) -> list[ScenarioResult]:
@@ -42,6 +43,7 @@ def run_scenarios(directory: Path = SCENARIO_DIRECTORY) -> list[ScenarioResult]:
                         claim.customer_id,
                     )
                 ),
+                handoffs=len(repository.list_handoffs(claim.claim_id, claim.customer_id)),
             )
         )
     return results
@@ -51,5 +53,6 @@ if __name__ == '__main__':
     for result in run_scenarios():
         print(
             f'PASS {result.scenario_id}: claim={result.claim_id} '
-            f'sessions={result.sessions} evidence={result.evidence} messages={result.messages}'
+            f'sessions={result.sessions} evidence={result.evidence} messages={result.messages} '
+            f'handoffs={result.handoffs}'
         )

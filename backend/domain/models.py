@@ -921,3 +921,9 @@ class ClaimCreationResponse(ContractModel):
 class DemoResetResponse(ContractModel):
     status: Literal['reset']
     cleared: dict[str, int]
+
+
+class DemoSeedResponse(ContractModel):
+    status: Literal['seeded']
+    scenario_ids: list[str]
+    claim_ids: list[str]

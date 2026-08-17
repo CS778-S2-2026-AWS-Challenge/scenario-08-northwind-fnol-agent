@@ -44,13 +44,23 @@
     .card dd { margin: 6px 0 0; font-size: 15px; color: #0f172a; }
 
     .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
-    .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; }
+    .panel { grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; }
+    .cards { grid-column: 1 / -1; }
+    .detail-panel { grid-column: 1 / -1; }
     .panel-header { padding: 18px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px; align-items: center; }
     .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
     .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
     .panel-body { padding: 20px; }
-    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-    .claim-list button { width: 100%; text-align: left; border: none; background: transparent; padding: 18px 20px; cursor: pointer; display: grid; gap: 6px; border-bottom: 1px solid #e2e8f0; }
+    .claim-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: row;   /* 横向排列 */ flex-wrap: wrap;       /* 超出宽度时自动换行 */gap: 12px; }
+    .claim-list button {width: 240px;          /* 给卡片设置固定宽度（也可用 flex: 1 适应宽度） */
+      text-align: left; 
+      border: 1px solid #e2e8f0; /* 从只画底边改为全边框 */
+      border-radius: 12px;   /* 圆角卡片样式 */
+      background: transparent; 
+      padding: 16px; 
+      cursor: pointer; 
+      display: grid; 
+      gap: 6px;}
     .claim-list button:hover { background: #f8fafc; }
     .claim-list button.active { background: #e0f2fe; }
     .claim-list .claim-id { font-weight: 700; color: #0f172a; }
@@ -110,7 +120,7 @@
     .staff-action-button { margin-top:12px; padding:10px 14px; border:0; border-radius:9px; background:#0369a1; color:#fff; font-weight:700; cursor:pointer; }
     .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
     .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
-
+    
     @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
 
     /* Assistant and customer conversation components */
@@ -209,6 +219,16 @@
         </div>
       </div>
 
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
+          <div class="panel-body">
+            <div id="errorBanner" class="error" style="display:none"></div>
+            <ul id="claimList" class="claim-list"></ul>
+            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
+          </div>
+        </section>
+
       <div class="cards">
         <div class="card">
           <h2>Internal view</h2>
@@ -220,15 +240,7 @@
         </div>
       </div>
 
-      <div class="workspace">
-        <section class="panel">
-          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
-          <div class="panel-body">
-            <div id="errorBanner" class="error" style="display:none"></div>
-            <ul id="claimList" class="claim-list"></ul>
-            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
-          </div>
-        </section>
+      
 
         <section class="detail-panel">
           <div class="detail-section" id="detailSummary">
@@ -862,6 +874,16 @@
       renderClaims(claims);
     }
 
+    async function ensureDemoQueueSeeded() {
+      try {
+        const payload = await fetchClaims('all');
+        if ((payload.items || []).length) return;
+        await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+      } catch (error) {
+        // The empty-state check or seeding failed; loadClaims still surfaces the real error.
+      }
+    }
+
     async function loadClaims({ propagateError = false } = {}) {
       setError('');
       const view = byId('viewSelect').value;
@@ -888,7 +910,7 @@
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
     byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
 
-    loadClaims();
+    ensureDemoQueueSeeded().then(loadClaims);
 
     // --- Internal AI assistant and customer conversation ---
     const chatWidget = byId('chatWidget');
