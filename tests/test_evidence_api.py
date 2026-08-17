@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import cast
 
 import pytest
@@ -188,6 +189,211 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert updated_claim.form == {}
     assert updated_claim.evidence_summary.received == 0
     assert updated_claim.evidence_summary.pending == 1
+
+
+@pytest.mark.parametrize(
+    ('media_type', 'filename', 'decision', 'expected_status', 'expected_source'),
+    [
+        ('image/jpeg', 'damage.jpg', 'confirmed', 'confirmed', 'image'),
+        ('application/pdf', 'statement.pdf', 'rejected', 'disputed', 'document'),
+    ],
+)
+def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    media_type: str,
+    filename: str,
+    decision: str,
+    expected_status: str,
+    expected_source: str,
+) -> None:
+    case = decision
+    created = create_claim(client, auth_headers, f'{case}-evidence-fact-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{case}-evidence-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_image' if expected_source == 'image' else 'claimant_statement',
+            'original_filename': filename,
+            'media_type': media_type,
+            'size_bytes': 512,
+        },
+    )
+    assert requested.status_code == 201
+    evidence_id = requested.json()['evidence_id']
+
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{case}-evidence-complete',
+            'If-Match': '2',
+        },
+        json={'upload_checksum': f'sha256:{"e" * 64}'},
+    )
+    assert completed.status_code == 202
+
+    processing_endpoint = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
+    processing_headers = {
+        'Authorization': 'Bearer synthetic-integration',
+        'Idempotency-Key': f'{case}-evidence-processing',
+        'If-Match': '3',
+    }
+    processing_payload = {
+        'facts': [
+            {
+                'field_code': 'incident.description',
+                'value': 'Rear panel damage shown in the supplied evidence.',
+                'confidence': 0.87,
+            }
+        ]
+    }
+    processed = client.post(
+        processing_endpoint,
+        headers=processing_headers,
+        json=processing_payload,
+    )
+    processing_replay = client.post(
+        processing_endpoint,
+        headers=processing_headers,
+        json=processing_payload,
+    )
+
+    assert processed.status_code == 200
+    assert processing_replay.json() == processed.json()
+    proposal = processed.json()['proposed_fields']['incident.description']
+    assert processed.json()['revision'] == 4
+    assert processed.json()['file_status'] == 'ready'
+    assert proposal['status'] == 'proposed'
+    assert proposal['source'] == expected_source
+    assert proposal['source_refs'] == [evidence_id]
+
+    before_decision = client.get(
+        f'/api/v1/claims/{claim_id}',
+        headers=auth_headers,
+    )
+    assert before_decision.status_code == 200
+    assert before_decision.json()['form']['incident.description']['status'] == 'proposed'
+
+    decision_endpoint = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    decision_headers = {
+        **auth_headers,
+        'Idempotency-Key': f'{case}-evidence-decision',
+        'If-Match': '4',
+    }
+    decision_payload = {
+        'field_codes': ['incident.description'],
+        'decision': decision,
+    }
+    decided = client.post(
+        decision_endpoint,
+        headers=decision_headers,
+        json=decision_payload,
+    )
+    decision_replay = client.post(
+        decision_endpoint,
+        headers=decision_headers,
+        json=decision_payload,
+    )
+
+    assert decided.status_code == 200
+    assert decision_replay.json() == decided.json()
+    updated = decided.json()['updated_fields']['incident.description']
+    assert decided.json()['revision'] == 5
+    assert updated['status'] == expected_status
+    assert updated['source'] == expected_source
+    assert updated['source_refs'] == [evidence_id]
+    assert updated['updated_at'] >= proposal['updated_at']
+
+    repeated_decision = client.post(
+        decision_endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{case}-second-evidence-decision',
+            'If-Match': '5',
+        },
+        json=decision_payload,
+    )
+    assert repeated_decision.status_code == 422
+    assert repeated_decision.json()['error']['code'] == 'VALIDATION_ERROR'
+
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert stored is not None
+    transitions = stored.provenance['transition_history']
+    assert isinstance(transitions, list)
+    assert [(entry['from'], entry['to']) for entry in transitions] == [
+        ('awaiting_upload', 'processing'),
+        ('processing', 'ready'),
+        ('processing', 'proposed'),
+        ('proposed', decision),
+    ]
+    fact_transition = transitions[-1]
+    assert fact_transition['source'] == expected_source
+    proposed_at = datetime.fromisoformat(str(fact_transition['proposed_at']))
+    decided_at = datetime.fromisoformat(str(fact_transition['at']))
+    assert proposed_at == datetime.fromisoformat(proposal['updated_at'].replace('Z', '+00:00'))
+    assert decided_at == datetime.fromisoformat(updated['updated_at'].replace('Z', '+00:00'))
+
+
+def test_fact_decisions_require_completed_processing_and_the_owning_claimant(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'guarded-evidence-fact-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'guarded-evidence-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_image',
+            'original_filename': 'guarded.jpg',
+            'media_type': 'image/jpeg',
+            'size_bytes': 512,
+        },
+    )
+    assert requested.status_code == 201
+    evidence_id = requested.json()['evidence_id']
+    endpoint = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    payload = {'field_codes': ['incident.description'], 'decision': 'confirmed'}
+
+    before_processing = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'early-evidence-decision',
+            'If-Match': '2',
+        },
+        json=payload,
+    )
+    integration_credential = client.post(
+        endpoint,
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'integration-evidence-decision',
+            'If-Match': '2',
+        },
+        json=payload,
+    )
+
+    assert before_processing.status_code == 409
+    assert before_processing.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert integration_credential.status_code == 403
+    assert integration_credential.json()['error']['code'] == 'ACCESS_DENIED'
 
 
 def test_evidence_mutations_enforce_headers_revision_media_and_state(

@@ -700,6 +700,21 @@ class CompleteEvidenceUploadRequest(ContractModel):
     upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
 
 
+class EvidenceFactProposal(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class CompleteEvidenceProcessingRequest(ContractModel):
+    facts: list[EvidenceFactProposal] = Field(min_length=1, max_length=50)
+
+
+class EvidenceFactDecisionRequest(ContractModel):
+    field_codes: list[str] = Field(min_length=1, max_length=50)
+    decision: Literal['confirmed', 'rejected']
+
+
 class CreateSupportRequest(ContractModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     support_need: SupportNeed
@@ -750,6 +765,20 @@ class EvidenceCompleteResponse(ContractModel):
     revision: int
     status_url: str
     customer_next_step: CustomerNextStep
+
+
+class EvidenceProcessingResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    file_status: EvidenceFileStatus
+    proposed_fields: dict[str, StructuredFormField]
+
+
+class EvidenceFactDecisionResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    decision: Literal['confirmed', 'rejected']
+    updated_fields: dict[str, StructuredFormField]
 
 
 class CreateClaimRequest(ContractModel):
