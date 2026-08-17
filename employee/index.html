@@ -721,7 +721,7 @@
       const heading = document.createElement('div');
       heading.className = 'handoff-heading';
       const title = document.createElement('strong');
-      title.textContent = `${formatLabel(handoff.support_need)} · ${formatLabel(handoff.status)}`;
+      title.textContent = `${formatLabel(handoff.trigger)} · ${formatLabel(handoff.status)}`;
       const priority = document.createElement('span');
       priority.className = `badge ${handoff.priority === 'urgent' ? 'urgent' : 'review'}`;
       priority.textContent = handoff.priority;

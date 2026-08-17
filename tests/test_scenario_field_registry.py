@@ -46,6 +46,7 @@ def test_scenario_loader_rejects_an_unregistered_handoff_packet_field() -> None:
             'priority': 'standard',
             'queue': 'claimant_support',
             'support_need': 'human_requested',
+            'trigger': 'claimant_support_request',
             'preferred_channel': None,
             'reason_codes': ['HUMAN_SUPPORT_REQUESTED'],
             'reason': 'Synthetic reason.',

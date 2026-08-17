@@ -1057,7 +1057,9 @@ and context revisions. `messages` includes the complete persisted communication 
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
 workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
-includes routing fields plus the complete transfer packet. Claimant routes return only the
+includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
+internal `professional_review_required` trigger does not set `support_need`: that field remains
+specific to claimant support intent. Claimant routes return only the
 separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
 action, applied rule, assignment, source message, or packet. `external_claim` and
 `assessor_routing` use the shared typed creation and routing results, including their status,

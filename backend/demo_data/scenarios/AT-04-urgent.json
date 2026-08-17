@@ -117,6 +117,7 @@
       "priority": "urgent",
       "queue": "urgent_support",
       "support_need": "urgent",
+      "trigger": "urgent_safety_risk",
       "preferred_channel": null,
       "reason_codes": ["URGENT_SAFETY_RISK"],
       "reason": "The claimant reported an injured, trapped passenger and an unsafe roadside location during intake.",

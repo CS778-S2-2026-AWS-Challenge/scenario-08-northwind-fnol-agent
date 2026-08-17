@@ -116,6 +116,7 @@
       "priority": "standard",
       "queue": "claimant_support",
       "support_need": "human_requested",
+      "trigger": "claimant_support_request",
       "preferred_channel": null,
       "reason_codes": ["HUMAN_SUPPORT_REQUESTED"],
       "reason": "The claimant asked to speak with a person after confirming the incident description.",

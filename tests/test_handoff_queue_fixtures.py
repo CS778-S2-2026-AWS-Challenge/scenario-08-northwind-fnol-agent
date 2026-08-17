@@ -85,6 +85,16 @@ def test_handoff_card_is_self_contained_without_reading_full_conversation(scenar
     assert 'promised_next_step' in packet
 
 
+def test_coverage_ambiguity_handoff_uses_a_staff_review_trigger_not_claimant_intent() -> None:
+    repository, claim_id = _load('AT-02-coverage-ambiguity')
+
+    card = _handoff_card(repository, claim_id)
+
+    assert card['queue'] == 'professional_review'
+    assert card['trigger'] == 'professional_review_required'
+    assert card['support_need'] is None
+
+
 def test_queue_list_surfaces_open_handoff_priority_per_claim() -> None:
     for scenario_id, expected_priority in (
         ('AT-04-urgent', 'urgent'),

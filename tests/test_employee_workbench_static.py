@@ -36,6 +36,7 @@ def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seed
     ]
 
     assert "{ label: 'Priority', value: handoff.priority }" in render_handoff
+    assert 'formatLabel(handoff.trigger)' in render_handoff
     assert "{ label: 'Reason', value: handoff.reason }" in render_handoff
     assert "{ label: 'Requested action', value: handoff.requested_action }" in render_handoff
     assert (
