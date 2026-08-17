@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from backend.repositories.scenario_loader import (
+    CANONICAL_SCENARIO_DIRECTORY,
     EvidenceBusinessPath,
     FixtureVisibility,
     claimant_evidence_for,
     load_evidence_path_fixtures,
+    load_scenario,
 )
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -27,6 +29,28 @@ def test_visibility_catalogue_loads_all_five_path_entries() -> None:
         'AT-05-human-request',
         'AT-06-pending-evidence',
     ]
+
+
+def test_visibility_entries_derive_state_from_canonical_scenarios() -> None:
+    fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
+
+    for entry in fixture_set.entries:
+        scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / f'{entry.scenario_id}.json')
+
+        assert entry.claim_id == scenario.claim.claim_id
+        assert entry.claim_state == scenario.claim.claim_state
+        assert entry.customer_next_step == scenario.claim.customer_next_step
+        assert {fixture.evidence.claim_id for fixture in entry.evidence} == {
+            scenario.claim.claim_id
+        }
+
+
+def test_visibility_source_does_not_duplicate_canonical_scenario_state() -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+
+    for entry in payload['entries']:
+        assert {'claim_id', 'claim_state', 'customer_next_step'}.isdisjoint(entry)
+        assert all('claim_id' not in fixture['evidence'] for fixture in entry['evidence'])
 
 
 def test_claimant_fixtures_exclude_internal_evidence_and_provenance() -> None:
@@ -68,6 +92,26 @@ def test_visibility_loader_rejects_internal_only_catalogue(tmp_path: Path) -> No
     invalid.write_text(json.dumps(payload), encoding='utf-8')
 
     with pytest.raises(ValueError, match='every evidence visibility class'):
+        load_evidence_path_fixtures(invalid)
+
+
+def test_visibility_loader_rejects_duplicate_scenario_state(tmp_path: Path) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+    payload['entries'][0]['claim_id'] = 'clm_duplicate_source'
+    invalid = tmp_path / 'path-entry-visibility.json'
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='derive canonical scenario fields: claim_id'):
+        load_evidence_path_fixtures(invalid)
+
+
+def test_visibility_loader_rejects_unknown_canonical_scenario(tmp_path: Path) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+    payload['entries'][0]['scenario_id'] = 'AT-99-unknown'
+    invalid = tmp_path / 'path-entry-visibility.json'
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='Unknown canonical scenario: AT-99-unknown'):
         load_evidence_path_fixtures(invalid)
 
 

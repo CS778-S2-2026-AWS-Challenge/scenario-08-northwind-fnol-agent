@@ -24,6 +24,9 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import PersistenceRepository
 
+CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
+SCENARIO_DERIVED_ENTRY_FIELDS = frozenset({'claim_id', 'claim_state', 'customer_next_step'})
+
 
 class ScenarioFixture(ContractModel):
     scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
@@ -264,8 +267,35 @@ def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
     return EvidenceLifecycleFixtureSet.model_validate(payload)
 
 
-def load_evidence_path_fixtures(path: Path) -> EvidencePathFixtureSet:
+def load_evidence_path_fixtures(
+    path: Path,
+    scenario_directory: Path = CANONICAL_SCENARIO_DIRECTORY,
+) -> EvidencePathFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
+    canonical_scenarios = {
+        scenario.scenario_id: scenario for scenario in load_scenarios(scenario_directory)
+    }
+    for entry in payload.get('entries', []):
+        duplicate_fields = SCENARIO_DERIVED_ENTRY_FIELDS.intersection(entry)
+        if duplicate_fields:
+            names = ', '.join(sorted(duplicate_fields))
+            raise ValueError(
+                f'Evidence path entries must derive canonical scenario fields: {names}.'
+            )
+
+        scenario_id = entry.get('scenario_id')
+        scenario = canonical_scenarios.get(scenario_id)
+        if scenario is None:
+            raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
+
+        entry['claim_id'] = scenario.claim.claim_id
+        entry['claim_state'] = scenario.claim.claim_state.model_dump(mode='json')
+        entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
+        for fixture in entry.get('evidence', []):
+            evidence = fixture.get('evidence', {})
+            if 'claim_id' in evidence:
+                raise ValueError('Evidence claim_id must derive from the canonical scenario claim.')
+            evidence['claim_id'] = scenario.claim.claim_id
     return EvidencePathFixtureSet.model_validate(payload)
 
 

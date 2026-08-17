@@ -6,31 +6,12 @@
       "scenario_id": "AT-01-clear-motor",
       "business_path": "fast",
       "description": "A clear lower-risk claim with received claimant evidence, ready for controlled creation.",
-      "claim_id": "clm_fixture_path_fast",
-      "claim_state": {
-        "severity": "fast_track",
-        "coverage": "clear",
-        "evidence": "received",
-        "fraud_signal": "none",
-        "customer_support": "self_service",
-        "urgency": "normal",
-        "workflow_state": "ready_for_next",
-        "next_action": "CREATE_CLAIM"
-      },
-      "customer_next_step": {
-        "status": "ready_to_create",
-        "summary": "Your confirmed report is ready for claim creation.",
-        "responsible_party": "northwind",
-        "can_resume": true,
-        "required_items": []
-      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-01-fast-claimant-image",
           "visibility": "claimant_visible",
           "evidence": {
             "evidence_id": "evd_fixture_path_fast_image",
-            "claim_id": "clm_fixture_path_fast",
             "kind": "incident_image",
             "status": "received",
             "file_status": "ready",
@@ -52,31 +33,12 @@
       "scenario_id": "AT-02-coverage-ambiguity",
       "business_path": "professional_review",
       "description": "A coverage ambiguity with shared source evidence and an internal review aid.",
-      "claim_id": "clm_fixture_path_review",
-      "claim_state": {
-        "severity": "complex",
-        "coverage": "review_required",
-        "evidence": "unofficial",
-        "fraud_signal": "none",
-        "customer_support": "guided",
-        "urgency": "normal",
-        "workflow_state": "professional_review",
-        "next_action": "HANDOFF"
-      },
-      "customer_next_step": {
-        "status": "professional_review",
-        "summary": "A claims professional needs to review how the supplied information applies.",
-        "responsible_party": "claims_professional",
-        "can_resume": true,
-        "required_items": []
-      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-02-review-shared-document",
           "visibility": "shared",
           "evidence": {
             "evidence_id": "evd_fixture_path_review_shared",
-            "claim_id": "clm_fixture_path_review",
             "kind": "other_document",
             "status": "unofficial",
             "file_status": "ready",
@@ -97,7 +59,6 @@
           "visibility": "internal_only",
           "evidence": {
             "evidence_id": "evd_fixture_path_review_internal",
-            "claim_id": "clm_fixture_path_review",
             "kind": "other_document",
             "status": "received",
             "file_status": "ready",
@@ -119,31 +80,12 @@
       "scenario_id": "AT-04-urgent",
       "business_path": "urgent",
       "description": "An explicit injury signal that requires urgent handoff regardless of later evidence work.",
-      "claim_id": "clm_fixture_path_urgent",
-      "claim_state": {
-        "severity": "complex",
-        "coverage": "not_assessed",
-        "evidence": "received",
-        "fraud_signal": "none",
-        "customer_support": "guided",
-        "urgency": "urgent",
-        "workflow_state": "professional_review",
-        "next_action": "URGENT_HANDOFF"
-      },
-      "customer_next_step": {
-        "status": "urgent_handoff",
-        "summary": "Northwind is transferring this report for urgent human support.",
-        "responsible_party": "claims_professional",
-        "can_resume": true,
-        "required_items": []
-      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-04-urgent-shared-image",
           "visibility": "shared",
           "evidence": {
             "evidence_id": "evd_fixture_path_urgent_image",
-            "claim_id": "clm_fixture_path_urgent",
             "kind": "incident_image",
             "status": "received",
             "file_status": "ready",
@@ -165,31 +107,12 @@
       "scenario_id": "AT-05-human-request",
       "business_path": "human_request",
       "description": "A claimant has requested a person and the known shared evidence travels with the handoff.",
-      "claim_id": "clm_fixture_path_human",
-      "claim_state": {
-        "severity": "standard",
-        "coverage": "not_assessed",
-        "evidence": "received",
-        "fraud_signal": "none",
-        "customer_support": "human_requested",
-        "urgency": "normal",
-        "workflow_state": "professional_review",
-        "next_action": "HANDOFF"
-      },
-      "customer_next_step": {
-        "status": "human_support_requested",
-        "summary": "Your request for a person has been recorded with the information already supplied.",
-        "responsible_party": "claims_professional",
-        "can_resume": true,
-        "required_items": []
-      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-05-human-shared-image",
           "visibility": "shared",
           "evidence": {
             "evidence_id": "evd_fixture_path_human_image",
-            "claim_id": "clm_fixture_path_human",
             "kind": "incident_image",
             "status": "received",
             "file_status": "ready",
@@ -211,31 +134,12 @@
       "scenario_id": "AT-06-pending-evidence",
       "business_path": "pending_evidence",
       "description": "A police report does not exist yet, while unrelated safe reporting work can continue.",
-      "claim_id": "clm_fixture_path_pending",
-      "claim_state": {
-        "severity": "standard",
-        "coverage": "clear",
-        "evidence": "pending_generation",
-        "fraud_signal": "none",
-        "customer_support": "guided",
-        "urgency": "normal",
-        "workflow_state": "ready_for_next",
-        "next_action": "PROCEED"
-      },
-      "customer_next_step": {
-        "status": "continue_current_report",
-        "summary": "Continue the report now and add the police document after it is issued.",
-        "responsible_party": "claimant",
-        "can_resume": true,
-        "required_items": []
-      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-06-pending-claimant-report",
           "visibility": "claimant_visible",
           "evidence": {
             "evidence_id": "evd_fixture_path_pending_report",
-            "claim_id": "clm_fixture_path_pending",
             "kind": "police_report",
             "status": "pending_generation",
             "file_status": "not_available",
