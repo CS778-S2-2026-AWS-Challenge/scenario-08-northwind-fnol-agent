@@ -73,6 +73,6 @@ class ReviewSignalRecord(ContractModel):
     review_type: Literal['professional_review'] = 'professional_review'
     code: str = Field(min_length=1, max_length=100)
     source_refs: list[str] = Field(min_length=1, max_length=100)
-    reason_codes: list[str] = Field(min_length=1, max_length=20)
+    reason_codes: list[str] = Field(min_length=1, max_length=100)
     summary: str = Field(min_length=1, max_length=1000)
     created_at: datetime
