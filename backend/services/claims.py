@@ -37,6 +37,7 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import (
     ClaimRepository,
+    IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
@@ -358,6 +359,12 @@ def start_session(
                 message='The claim changed while the session was being resumed.',
                 retryable=True,
                 current_revision=conflict.current_revision,
+            ) from conflict
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
         claim = updated_claim
 

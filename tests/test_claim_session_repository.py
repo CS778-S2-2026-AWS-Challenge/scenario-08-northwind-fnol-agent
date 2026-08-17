@@ -12,7 +12,11 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    IdempotencyRecord,
+    RevisionConflict,
+)
 
 FIXED_TIME = datetime(2026, 8, 18, 0, 0, tzinfo=UTC)
 
@@ -177,6 +181,70 @@ def test_session_mutation_rejects_stale_revision_without_partial_writes() -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ('case', 'expected_error'),
+    [
+        ('missing_claim', KeyError),
+        ('mismatched_link', KeyError),
+        ('duplicate_session', IdempotencyConflict),
+        ('existing_active_session', KeyError),
+        ('duplicate_key', IdempotencyConflict),
+    ],
+)
+def test_session_mutation_rejects_invalid_guards_without_partial_writes(
+    case: str,
+    expected_error: type[Exception],
+) -> None:
+    repository = FixtureRepository()
+    claim, paused_session = make_paused_claim()
+    updated_claim, resumed_session, idempotency = make_resume_mutation(claim)
+
+    if case != 'missing_claim':
+        repository.create_claim(claim, paused_session)
+
+    if case == 'mismatched_link':
+        resumed_session = resumed_session.model_copy(update={'customer_id': 'cus_other'})
+    elif case == 'duplicate_session':
+        repository.save_session(resumed_session)
+    elif case == 'existing_active_session':
+        already_active = paused_session.model_copy(
+            update={
+                'session_id': 'ses_already_active',
+                'status': SessionStatus.ACTIVE,
+            }
+        )
+        repository.save_session(already_active)
+    elif case == 'duplicate_key':
+        repository.save_idempotency(idempotency)
+
+    before_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+    before_sessions = repository.list_sessions_for_claim(claim.claim_id, claim.customer_id)
+    before_idempotency = repository.find_idempotency(
+        idempotency.actor_id,
+        idempotency.route,
+        idempotency.key,
+    )
+
+    with pytest.raises(expected_error):
+        repository.save_session_mutation(
+            updated_claim,
+            expected_revision=claim.revision,
+            session=resumed_session,
+            idempotency=idempotency,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == before_claim
+    assert repository.list_sessions_for_claim(claim.claim_id, claim.customer_id) == before_sessions
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == before_idempotency
+    )
+
+
 def test_start_session_reads_saved_claim_in_new_session(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -269,6 +337,53 @@ def test_start_session_surfaces_repository_revision_conflict(
             'cus_demo',
             f'/api/v1/claims/{claim_id}/sessions',
             'resume-conflict',
+        )
+        is None
+    )
+
+
+def test_start_session_surfaces_repository_idempotency_conflict_without_partial_writes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'claim-for-idempotency-conflict'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+    original_session_id = created.json()['session']['session_id']
+    paused_claim, paused_session = pause_created_claim(repository, claim_id, original_session_id)
+
+    def reject_session_mutation(
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        del claim, expected_revision, session
+        raise IdempotencyConflict(idempotency.key)
+
+    monkeypatch.setattr(repository, 'save_session_mutation', reject_session_mutation)
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'resume-idempotency-conflict'},
+        json={'intent': 'resume'},
+    )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert repository.get_claim(claim_id, 'cus_demo') == paused_claim
+    assert repository.list_sessions_for_claim(claim_id, 'cus_demo') == [paused_session]
+    assert (
+        repository.find_idempotency(
+            'cus_demo',
+            f'/api/v1/claims/{claim_id}/sessions',
+            'resume-idempotency-conflict',
         )
         is None
     )
