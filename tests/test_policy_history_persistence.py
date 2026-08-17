@@ -251,6 +251,77 @@ def test_retrieval_bundle_enforces_claim_ownership_and_signal_provenance(
     assert repository.list_review_signals(claim_id, 'cus_demo') == []
 
 
+def test_retrieval_uncertainty_capacity_is_preserved_in_review_signal(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id = create_claim(client, auth_headers, key='retrieval-uncertainty-capacity')
+    record = map_policy_provider_payload(
+        retrieval_id='ret_policy_capacity',
+        claim_id=claim_id,
+        envelope=ProviderLookupEnvelope(
+            provider='synthetic-policy-service',
+            provider_reference='pol-provider-capacity',
+            retrieved_at=datetime(2026, 8, 16, 1, 22, tzinfo=UTC),
+            payload={'policy_reference': 'POL-CAPACITY', 'status': 'active'},
+            uncertainty=[
+                ProviderUncertainty(
+                    code=f'UNCERTAINTY_{index:03d}',
+                    detail=f'Synthetic uncertainty boundary item {index}.',
+                )
+                for index in range(100)
+            ],
+        ),
+    )
+
+    signals = persist_retrieval_record(repository, record, 'cus_demo')
+
+    assert len(signals) == 1
+    assert signals[0].reason_codes == [f'UNCERTAINTY_{index:03d}' for index in range(100)]
+    assert repository.list_retrieval_records(claim_id, 'cus_demo') == [record]
+    assert repository.list_review_signals(claim_id, 'cus_demo') == signals
+
+
+def test_retrieval_bundle_rejects_conflicting_duplicate_signal_ids_before_writes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id = create_claim(client, auth_headers, key='retrieval-duplicate-signal-id')
+    record = map_policy_provider_payload(
+        retrieval_id='ret_policy_duplicate_signal',
+        claim_id=claim_id,
+        envelope=ProviderLookupEnvelope(
+            provider='synthetic-policy-service',
+            provider_reference='pol-provider-duplicate-signal',
+            retrieved_at=datetime(2026, 8, 16, 1, 23, tzinfo=UTC),
+            payload={'policy_reference': 'POL-DUPLICATE-SIGNAL', 'status': 'active'},
+        ),
+    )
+    first = ReviewSignalRecord(
+        signal_id='sig_conflicting_duplicate',
+        claim_id=claim_id,
+        code='POLICY_RETRIEVAL_UNCERTAINTY',
+        source_refs=[record.retrieval_id, record.source.reference],
+        reason_codes=['FIRST_REASON'],
+        summary='First incoming signal content.',
+        created_at=record.source.retrieved_at,
+    )
+    second = first.model_copy(
+        update={
+            'reason_codes': ['SECOND_REASON'],
+            'summary': 'Conflicting incoming signal content.',
+        }
+    )
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_retrieval_bundle(record, [first, second], 'cus_demo')
+
+    assert repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert repository.list_review_signals(claim_id, 'cus_demo') == []
+
+
 def test_demo_reset_clears_retrieval_and_review_signal_stores(
     client: TestClient,
     auth_headers: dict[str, str],
