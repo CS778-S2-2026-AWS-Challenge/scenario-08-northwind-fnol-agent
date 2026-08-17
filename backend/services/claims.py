@@ -75,7 +75,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         open_handoffs = [
             item
             for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
-            if item.status.value not in {'resolved', 'cancelled'}
+            if item.status.value not in {'resolved', 'cancelled'} and item.support_need is not None
         ]
         if open_handoffs:
             active = open_handoffs[-1]

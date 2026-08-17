@@ -46,3 +46,24 @@ def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'DEMO_SEED_REQUIRES_EMPTY_QUEUE'
+
+
+def test_claimant_reads_seeded_coverage_review_without_an_internal_handoff() -> None:
+    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+        seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
+        assert seeded.status_code == 200
+
+        response = client.get('/api/v1/claims/clm_fixture_at02', headers=CLAIMANT_AUTH)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['handoff'] is None
+    next_step = body['customer_next_step']
+    assert next_step['status'] == 'coverage_under_review'
+    assert next_step['summary'] == (
+        'Northwind is reviewing your policy coverage for this incident and will contact you '
+        'with a coverage decision.'
+    )
+    assert next_step['responsible_party'] == 'northwind'
+    assert next_step['can_resume'] is True
+    assert next_step['required_items'] == []
