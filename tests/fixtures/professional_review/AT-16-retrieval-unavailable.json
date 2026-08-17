@@ -1,0 +1,72 @@
+{
+  "scenario_id": "AT-16-retrieval-unavailable",
+  "description": "A required provider is temporarily unavailable, so the limitation is preserved and the claim moves to professional review.",
+  "claim": {
+    "claim_id": "clm_fixture_at16",
+    "customer_id": "cus_demo",
+    "revision": 2,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "coverage": "review_required",
+      "evidence": "not_started",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": "provider_unavailable_review",
+    "active_session_id": "ses_fixture_at16",
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "Northwind will review the available information while an external record is unavailable.",
+      "responsible_party": "claims_professional"
+    },
+    "created_at": "2026-08-19T03:00:00Z",
+    "updated_at": "2026-08-19T03:04:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at16",
+      "claim_id": "clm_fixture_at16",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "A required retrieval provider is unavailable and the limitation is recorded.",
+      "context_revision": 2,
+      "started_at": "2026-08-19T03:00:00Z",
+      "last_active_at": "2026-08-19T03:04:00Z"
+    }
+  ],
+  "evidence": [],
+  "messages": [
+    {
+      "message_id": "msg_at16_claimant",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-policy",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My policy number is available if you need it."},
+      "created_at": "2026-08-19T03:01:00Z"
+    },
+    {
+      "message_id": "msg_at16_internal",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "review_signal", "reason": "RETRIEVAL_UNAVAILABLE"},
+      "created_at": "2026-08-19T03:03:00Z"
+    }
+  ],
+  "expected": {
+    "action": "HANDOFF",
+    "evidence_state": "not_started",
+    "review_reason": "RETRIEVAL_UNAVAILABLE",
+    "visibility": {
+      "claimant_message_count": 1,
+      "staff_message_count": 2,
+      "internal_reason_hidden": true
+    }
+  }
+}

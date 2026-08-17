@@ -1,0 +1,101 @@
+{
+  "scenario_id": "AT-15-conflicting-evidence",
+  "description": "Two received documents disagree on a material incident detail and require a professional to resolve the conflict.",
+  "claim": {
+    "claim_id": "clm_fixture_at15",
+    "customer_id": "cus_demo",
+    "revision": 5,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "coverage": "review_required",
+      "evidence": "inconsistent",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 2},
+    "route": "evidence_conflict_review",
+    "active_session_id": "ses_fixture_at15",
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "A claims professional will compare the information supplied and explain the next step.",
+      "responsible_party": "claims_professional"
+    },
+    "created_at": "2026-08-19T02:00:00Z",
+    "updated_at": "2026-08-19T02:06:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at15",
+      "claim_id": "clm_fixture_at15",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Two evidence records disagree on the incident time.",
+      "context_revision": 5,
+      "started_at": "2026-08-19T02:00:00Z",
+      "last_active_at": "2026-08-19T02:06:00Z"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at15_statement",
+      "claim_id": "clm_fixture_at15",
+      "kind": "claimant_statement",
+      "status": "inconsistent",
+      "file_status": "ready",
+      "source": "claimant",
+      "related_fields": ["incident.occurred_at"],
+      "needed_for": ["professional_review"],
+      "provenance": {"conflict_basis": "reported_time"},
+      "created_at": "2026-08-19T02:02:00Z",
+      "updated_at": "2026-08-19T02:05:00Z"
+    },
+    {
+      "evidence_id": "evd_fixture_at15_report",
+      "claim_id": "clm_fixture_at15",
+      "kind": "incident_report",
+      "status": "inconsistent",
+      "file_status": "ready",
+      "source": "external_system",
+      "related_fields": ["incident.occurred_at"],
+      "needed_for": ["professional_review"],
+      "provenance": {"conflict_basis": "recorded_time"},
+      "created_at": "2026-08-19T02:03:00Z",
+      "updated_at": "2026-08-19T02:05:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at15_claimant",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "client_message_id": "at15-time",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I believe the incident happened shortly after 8 pm."},
+      "evidence_refs": ["evd_fixture_at15_statement"],
+      "created_at": "2026-08-19T02:01:00Z"
+    },
+    {
+      "message_id": "msg_at15_internal",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "review_signal", "reason": "EVIDENCE_CONFLICT"},
+      "evidence_refs": ["evd_fixture_at15_statement", "evd_fixture_at15_report"],
+      "created_at": "2026-08-19T02:05:00Z"
+    }
+  ],
+  "expected": {
+    "action": "HANDOFF",
+    "evidence_state": "inconsistent",
+    "review_reason": "EVIDENCE_CONFLICT",
+    "visibility": {
+      "claimant_message_count": 1,
+      "staff_message_count": 2,
+      "internal_reason_hidden": true
+    }
+  }
+}

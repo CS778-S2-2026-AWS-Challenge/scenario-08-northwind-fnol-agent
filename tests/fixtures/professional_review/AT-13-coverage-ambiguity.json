@@ -1,0 +1,87 @@
+{
+  "scenario_id": "AT-13-coverage-ambiguity",
+  "description": "Policy wording is available but requires professional interpretation before the claim can proceed.",
+  "claim": {
+    "claim_id": "clm_fixture_at13",
+    "customer_id": "cus_demo",
+    "revision": 3,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "coverage": "ambiguous",
+      "evidence": "received",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "route": "coverage_review",
+    "active_session_id": "ses_fixture_at13",
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "A claims professional will review the relevant policy wording.",
+      "responsible_party": "claims_professional"
+    },
+    "created_at": "2026-08-19T00:00:00Z",
+    "updated_at": "2026-08-19T00:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at13",
+      "claim_id": "clm_fixture_at13",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Coverage wording is ambiguous and queued for professional review.",
+      "context_revision": 3,
+      "started_at": "2026-08-19T00:00:00Z",
+      "last_active_at": "2026-08-19T00:05:00Z"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at13_policy",
+      "claim_id": "clm_fixture_at13",
+      "kind": "policy_wording",
+      "status": "received",
+      "file_status": "ready",
+      "source": "external_system",
+      "related_fields": ["policy.policy_number"],
+      "needed_for": ["coverage_review"],
+      "provenance": {"provider_reference": "synthetic-policy-ambiguity"},
+      "created_at": "2026-08-19T00:03:00Z",
+      "updated_at": "2026-08-19T00:03:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at13_claimant",
+      "claim_id": "clm_fixture_at13",
+      "session_id": "ses_fixture_at13",
+      "client_message_id": "at13-question",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "Can you check whether this damage is covered?"},
+      "created_at": "2026-08-19T00:01:00Z"
+    },
+    {
+      "message_id": "msg_at13_internal",
+      "claim_id": "clm_fixture_at13",
+      "session_id": "ses_fixture_at13",
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "review_signal", "reason": "COVERAGE_AMBIGUOUS"},
+      "evidence_refs": ["evd_fixture_at13_policy"],
+      "created_at": "2026-08-19T00:04:00Z"
+    }
+  ],
+  "expected": {
+    "action": "HANDOFF",
+    "evidence_state": "received",
+    "review_reason": "COVERAGE_AMBIGUOUS",
+    "visibility": {
+      "claimant_message_count": 1,
+      "staff_message_count": 2,
+      "internal_reason_hidden": true
+    }
+  }
+}
