@@ -1,0 +1,151 @@
+{
+  "fixture_set_id": "evidence-lifecycle-v1",
+  "description": "Synthetic evidence records covering the five reusable Sprint 2 lifecycle entry states.",
+  "fixtures": [
+    {
+      "fixture_id": "EV-01-pending-upload",
+      "lifecycle_stage": "pending",
+      "visibility": "claimant_visible",
+      "next_requirement": "Complete the issued upload before this image can be treated as received.",
+      "evidence": {
+        "evidence_id": "evd_fixture_lifecycle_pending",
+        "claim_id": "clm_fixture_lifecycle",
+        "kind": "incident_image",
+        "status": "incomplete",
+        "file_status": "awaiting_upload",
+        "original_filename": "incident-front.jpg",
+        "media_type": "image/jpeg",
+        "size_bytes": 245760,
+        "source": "claimant",
+        "related_fields": ["vehicle.damage_description"],
+        "needed_for": ["current_action"],
+        "provenance": {"upload_target_state": "issued"},
+        "claimant_note": "The image is selected but has not been uploaded yet.",
+        "created_at": "2026-08-17T00:00:00Z",
+        "updated_at": "2026-08-17T00:00:00Z"
+      },
+      "expected_state_change": {
+        "trigger": "upload_completed",
+        "evidence_status": "received",
+        "file_status": "ready",
+        "claim_evidence_state": "received"
+      }
+    },
+    {
+      "fixture_id": "EV-02-unofficial-document",
+      "lifecycle_stage": "unofficial",
+      "visibility": "shared",
+      "next_requirement": "Provide an official repair quote or obtain an authorised staff decision on the provisional document.",
+      "evidence": {
+        "evidence_id": "evd_fixture_lifecycle_unofficial",
+        "claim_id": "clm_fixture_lifecycle",
+        "kind": "repair_quote",
+        "status": "unofficial",
+        "file_status": "ready",
+        "original_filename": "garage-estimate.pdf",
+        "media_type": "application/pdf",
+        "size_bytes": 98304,
+        "source": "claimant",
+        "related_fields": ["vehicle.damage_description"],
+        "needed_for": ["repair_authorisation"],
+        "provenance": {"document_classification": "synthetic_unofficial_estimate"},
+        "claimant_note": "This estimate is from a local garage and is not an authorised assessment.",
+        "created_at": "2026-08-17T00:01:00Z",
+        "updated_at": "2026-08-17T00:01:00Z"
+      },
+      "expected_state_change": {
+        "trigger": "official_copy_received",
+        "evidence_status": "received",
+        "file_status": "ready",
+        "claim_evidence_state": "received"
+      }
+    },
+    {
+      "fixture_id": "EV-03-incomplete-document",
+      "lifecycle_stage": "incomplete",
+      "visibility": "claimant_visible",
+      "next_requirement": "Provide the missing final page before the document can be treated as complete.",
+      "evidence": {
+        "evidence_id": "evd_fixture_lifecycle_incomplete",
+        "claim_id": "clm_fixture_lifecycle",
+        "kind": "other_document",
+        "status": "incomplete",
+        "file_status": "ready",
+        "original_filename": "witness-statement-page-1.pdf",
+        "media_type": "application/pdf",
+        "size_bytes": 65536,
+        "source": "claimant",
+        "related_fields": ["incident.description"],
+        "needed_for": ["liability_review"],
+        "provenance": {"completeness_check": "final_page_missing"},
+        "claimant_note": "Only the first page is currently available.",
+        "created_at": "2026-08-17T00:02:00Z",
+        "updated_at": "2026-08-17T00:02:00Z"
+      },
+      "expected_state_change": {
+        "trigger": "missing_content_received",
+        "evidence_status": "received",
+        "file_status": "ready",
+        "claim_evidence_state": "received"
+      }
+    },
+    {
+      "fixture_id": "EV-04-not-yet-generated",
+      "lifecycle_stage": "not_yet_generated",
+      "visibility": "claimant_visible",
+      "next_requirement": "Upload the police report after the issuing authority makes it available.",
+      "evidence": {
+        "evidence_id": "evd_fixture_lifecycle_not_generated",
+        "claim_id": "clm_fixture_lifecycle",
+        "kind": "police_report",
+        "status": "pending_generation",
+        "file_status": "not_available",
+        "original_filename": null,
+        "media_type": null,
+        "size_bytes": null,
+        "source": "claimant",
+        "related_fields": ["authorities.police_report_reference"],
+        "needed_for": ["later_action"],
+        "provenance": {"availability_state": "awaiting_external_generation"},
+        "claimant_note": "Police advised that the report will be issued next week.",
+        "created_at": "2026-08-17T00:03:00Z",
+        "updated_at": "2026-08-17T00:03:00Z"
+      },
+      "expected_state_change": {
+        "trigger": "generated_document_uploaded",
+        "evidence_status": "received",
+        "file_status": "ready",
+        "claim_evidence_state": "received"
+      }
+    },
+    {
+      "fixture_id": "EV-05-received-image",
+      "lifecycle_stage": "received",
+      "visibility": "shared",
+      "next_requirement": "No further evidence action is required for this image.",
+      "evidence": {
+        "evidence_id": "evd_fixture_lifecycle_received",
+        "claim_id": "clm_fixture_lifecycle",
+        "kind": "incident_image",
+        "status": "received",
+        "file_status": "ready",
+        "original_filename": "rear-damage.jpg",
+        "media_type": "image/jpeg",
+        "size_bytes": 327680,
+        "source": "claimant",
+        "related_fields": ["vehicle.damage_description"],
+        "needed_for": ["current_action"],
+        "provenance": {"fixture_storage_ref": "fixture://evidence/rear-damage"},
+        "claimant_note": "The rear damage image was received successfully.",
+        "created_at": "2026-08-17T00:04:00Z",
+        "updated_at": "2026-08-17T00:04:00Z"
+      },
+      "expected_state_change": {
+        "trigger": "none",
+        "evidence_status": "received",
+        "file_status": "ready",
+        "claim_evidence_state": "received"
+      }
+    }
+  ]
+}
