@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from backend.domain.models import CustomerNextStep, FormStatus, ResponsibleParty, WorkingClaim
@@ -34,12 +35,36 @@ CONTROLLED_INTAKE_FIELDS = (
     ),
 )
 
+INCIDENT_TYPE_INTAKE_FIELD = ControlledIntakeField(
+    field_code='incident.type',
+    prompt='What type of incident is this: motor, home, or contents?',
+    confirmation_prompt='Please check the incident type before I continue.',
+    status='identify_incident_type',
+)
+
+MOTOR_INCIDENT_PATTERN = re.compile(
+    r'\b(?:car|vehicle|motorcycle|motorbike|truck|van|ute|bumper|windscreen)\b',
+    re.IGNORECASE,
+)
+
+
+def infer_controlled_incident_type(message_text: str) -> str | None:
+    """Classify only the explicit motor vocabulary supported by the prototype."""
+    if MOTOR_INCIDENT_PATTERN.search(message_text) is not None:
+        return 'motor'
+    return None
+
 
 def next_controlled_intake_field(claim: WorkingClaim) -> ControlledIntakeField | None:
     for intake_field in CONTROLLED_INTAKE_FIELDS:
         field = claim.form.get(intake_field.field_code)
         if field is None or field.status is not FormStatus.CONFIRMED:
             return intake_field
+    incident_type_field = claim.form.get(INCIDENT_TYPE_INTAKE_FIELD.field_code)
+    if claim.incident_type is None and (
+        incident_type_field is None or incident_type_field.status is not FormStatus.CONFIRMED
+    ):
+        return INCIDENT_TYPE_INTAKE_FIELD
     return None
 
 

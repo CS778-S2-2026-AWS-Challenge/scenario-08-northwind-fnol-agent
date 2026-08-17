@@ -1,0 +1,157 @@
+{
+  "scenario_id": "AT-02-coverage-ambiguity",
+  "description": "Synthetic ambiguous-coverage claim routed to professional review instead of an automatic decision.",
+  "claim": {
+    "claim_id": "clm_fixture_at02",
+    "customer_id": "cus_demo",
+    "revision": 4,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "property",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "ambiguous",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "form": {
+      "incident.description": {
+        "value": "Water entered the ground floor after several days of heavy rain.",
+        "source": "claimant",
+        "source_refs": ["msg_at02_claimant_1"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.cause": {
+        "value": "gradual_water_ingress",
+        "source": "inference",
+        "source_refs": ["msg_at02_claimant_1"],
+        "status": "disputed",
+        "needed_for": "current_action",
+        "confidence": 0.55,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 1},
+    "route": "professional_review",
+    "active_session_id": "ses_fixture_at02",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "coverage_under_review",
+      "summary": "Northwind is reviewing your policy coverage for this incident and will contact you with a coverage decision.",
+      "responsible_party": "northwind",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-13T11:00:00Z",
+    "updated_at": "2026-08-13T11:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at02",
+      "claim_id": "clm_fixture_at02",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "The claimant confirmed water damage to the ground floor after heavy rain; the cause of ingress is disputed.",
+      "unresolved_questions": ["confirm:incident.cause"],
+      "pending_items": [],
+      "prior_commitments": [],
+      "context_revision": 4,
+      "started_at": "2026-08-13T11:00:00Z",
+      "last_active_at": "2026-08-13T11:05:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [],
+  "messages": [
+    {
+      "message_id": "msg_at02_claimant_1",
+      "claim_id": "clm_fixture_at02",
+      "session_id": "ses_fixture_at02",
+      "client_message_id": "at02-incident",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {
+        "type": "text",
+        "text": "Water entered the ground floor after several days of heavy rain."
+      },
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-13T11:02:00Z"
+    }
+  ],
+  "handoffs": [
+    {
+      "handoff_id": "hnd_fixture_at02",
+      "claim_id": "clm_fixture_at02",
+      "type": "human_support",
+      "status": "queued",
+      "priority": "high",
+      "queue": "professional_review",
+      "support_need": null,
+      "trigger": "professional_review_required",
+      "preferred_channel": null,
+      "reason_codes": ["COVERAGE_AMBIGUITY_REVIEW"],
+      "reason": "Policy coverage for gradual water ingress is ambiguous and requires professional judgment before the claim can proceed.",
+      "requested_action": "Review the cited policy clause and confirm whether the reported peril is covered before the claim is created.",
+      "applied_rule": "prototype_professional_review",
+      "packet": {
+        "incident_summary": "Water entered the ground floor after several days of heavy rain.",
+        "form_revision": 4,
+        "form_snapshot": {
+          "incident.description": {
+            "value": "Water entered the ground floor after several days of heavy rain.",
+            "source": "claimant",
+            "source_refs": ["msg_at02_claimant_1"],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+          },
+          "incident.cause": {
+            "value": "gradual_water_ingress",
+            "source": "inference",
+            "source_refs": ["msg_at02_claimant_1"],
+            "status": "disputed",
+            "needed_for": "current_action",
+            "confidence": 0.55,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          }
+        },
+        "evidence_refs": [],
+        "missing_items": [],
+        "pending_items": [],
+        "conflicts": ["incident.cause"],
+        "low_confidence_items": ["incident.cause"],
+        "policy_citation_refs": ["pol_fixture_at02_gradual_damage_exclusion"],
+        "history_evidence_refs": [],
+        "source_refs": ["msg_at02_claimant_1"],
+        "prior_customer_updates": [],
+        "promised_next_step": "Northwind is reviewing your policy coverage for this incident and will contact you with a coverage decision."
+      },
+      "source_message_id": "msg_at02_claimant_1",
+      "assigned_to": null,
+      "created_at": "2026-08-13T11:05:00Z",
+      "accepted_at": null,
+      "resolved_at": null
+    }
+  ],
+  "expected": {
+    "workflow_state": "professional_review",
+    "customer_status": "coverage_under_review",
+    "confirmed_fields": ["incident.description"],
+    "handoff_priority": "high",
+    "handoff_queue": "professional_review",
+    "handoff_gaps": ["incident.cause"]
+  }
+}

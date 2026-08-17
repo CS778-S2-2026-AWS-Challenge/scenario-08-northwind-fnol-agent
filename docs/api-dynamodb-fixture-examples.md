@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-`tests/fixtures/scenarios/AT-08-resume.json` is the concrete synthetic example
+`backend/demo_data/scenarios/AT-08-resume.json` is the concrete synthetic example
 for a working claim, session, messages, structured form, and evidence record.
 The fixture is validated by the same Pydantic contract models used by the API
 and is loaded only through the provider-neutral `PersistenceRepository`.

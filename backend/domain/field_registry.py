@@ -8,9 +8,11 @@ REGISTERED_FIELD_CODES = frozenset(
         'incident.location',
         'incident.description',
         'incident.injury_or_danger',
+        'incident.cause',
         'loss.description',
         'parties.other_parties',
         'authorities.police_report_reference',
+        'authorities.emergency_services_notified',
         'vehicle.registration',
         'vehicle.damage_description',
         'vehicle.drivable',
@@ -19,4 +21,4 @@ REGISTERED_FIELD_CODES = frozenset(
     }
 )
 
-FIELD_REGISTRY_VERSION = '1'
+FIELD_REGISTRY_VERSION = '2'
