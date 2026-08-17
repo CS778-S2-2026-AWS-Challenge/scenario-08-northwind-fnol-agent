@@ -1,6 +1,7 @@
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -18,7 +19,7 @@ def test_checked_in_scenarios_only_use_registered_form_field_codes() -> None:
             assert set(handoff.packet.form_snapshot) <= REGISTERED_FIELD_CODES
 
 
-def _at01_payload() -> dict:
+def _at01_payload() -> dict[str, Any]:
     payload = json.loads((SCENARIO_DIRECTORY / 'AT-01-clear-motor.json').read_text())
     return copy.deepcopy(payload)
 
