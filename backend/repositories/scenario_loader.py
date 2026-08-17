@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     ContractModel,
     EvidenceRecord,
@@ -57,6 +58,13 @@ class ScenarioFixture(ContractModel):
         ):
             raise ValueError('Every message must belong to a scenario session.')
 
+        unregistered_form_fields = set(self.claim.form) - REGISTERED_FIELD_CODES
+        if unregistered_form_fields:
+            raise ValueError(
+                'Unregistered form field codes on the scenario claim: '
+                f'{sorted(unregistered_form_fields)}. Add them to backend/domain/field_registry.py.'
+            )
+
         message_ids = {message.message_id for message in self.messages}
         handoff_ids = {handoff.handoff_id for handoff in self.handoffs}
         if len(handoff_ids) != len(self.handoffs):
@@ -68,6 +76,19 @@ class ScenarioFixture(ContractModel):
             for handoff in self.handoffs
         ):
             raise ValueError('A handoff source_message_id must reference a scenario message.')
+
+        unregistered_packet_fields = {
+            field_code
+            for handoff in self.handoffs
+            for field_code in handoff.packet.form_snapshot
+            if field_code not in REGISTERED_FIELD_CODES
+        }
+        if unregistered_packet_fields:
+            raise ValueError(
+                'Unregistered form field codes in a handoff packet snapshot: '
+                f'{sorted(unregistered_packet_fields)}. '
+                'Add them to backend/domain/field_registry.py.'
+            )
         return self
 
 

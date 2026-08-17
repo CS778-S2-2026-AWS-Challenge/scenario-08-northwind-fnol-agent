@@ -57,9 +57,7 @@ def test_handoff_card_exposes_priority_facts_gaps_reason_and_requested_action(
     assert isinstance(packet, dict)
     assert packet['missing_items'] == expected_gaps
     confirmed_fields = [
-        code
-        for code, field in packet['form_snapshot'].items()
-        if field['status'] == 'confirmed'
+        code for code, field in packet['form_snapshot'].items() if field['status'] == 'confirmed'
     ]
     assert confirmed_fields
     assert packet['incident_summary']

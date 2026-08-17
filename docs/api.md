@@ -359,9 +359,11 @@ Initial common field codes:
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
+| `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | array | Other involved parties when known |
 | `authorities.police_report_reference` | string | Reference if already issued |
+| `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
