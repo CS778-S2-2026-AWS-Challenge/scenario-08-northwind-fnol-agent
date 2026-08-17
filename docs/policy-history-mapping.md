@@ -57,9 +57,51 @@ The current synthetic history example maps:
 Provider-only notes, risk scores, fraud labels, AWS/storage identifiers, and
 other raw payload fields are deliberately not mapped.
 
+## Retrieval persistence and professional-review signals
+
+Issue #126 persists the provider-neutral retrieval records from #108 together
+with any review-only signal derived from their explicit uncertainty.
+
+A retrieval bundle contains one `PolicyRetrievalRecord` or
+`ClaimHistoryRetrievalRecord` and zero or more `ReviewSignalRecord` values. The
+fixture repository writes the bundle as one persistence operation and future
+adapters must preserve the same all-or-nothing relationship.
+
+A persisted review signal contains:
+
+- a stable `signal_id`;
+- the parent `claim_id`;
+- `review_type=professional_review`;
+- a supported signal code;
+- one or more `source_refs`, including the retrieval record that produced it;
+- one or more reason codes copied from explicit retrieval uncertainty;
+- a bounded staff-facing summary;
+- the retrieval timestamp used as the signal creation time.
+
+The current supported mappings are deliberately narrow:
+
+- policy retrieval uncertainty -> `POLICY_RETRIEVAL_UNCERTAINTY`;
+- claim-history retrieval uncertainty ->
+  `CLAIM_HISTORY_RETRIEVAL_UNCERTAINTY`.
+
+No uncertainty means no review signal. Provider-only risk scores, fraud labels,
+notes, or other discarded raw payload fields cannot create a signal because
+they never cross the #108 mapping boundary.
+
+Retrieval persistence is evidence/audit persistence, not a material Claim State
+write. Saving a retrieval bundle does not increment `WorkingClaim.revision`,
+change workflow state, set `fraud_signal`, approve or reject a claim, or block a
+claim. Any later staff decision about a persisted signal remains an authorised
+professional action and belongs to the Day 4 integration path.
+
+Retrieval and review records are claim/customer scoped. Repeating an identical
+retrieval bundle is idempotent; attempting to reuse a retrieval or signal ID
+for different content is a persistence conflict. Every persisted review signal
+must identify its parent retrieval record in `source_refs`.
+
 ## Public API boundary
 
-Issue #108 does not add retrieval records to `ClaimantClaim` or another
+Issue #108 and #126 do not add retrieval records to `ClaimantClaim` or another
 claimant response model. Raw provider payloads therefore remain behind the
 adapter boundary. A later public projection may expose customer-relevant,
 contract-approved facts or uncertainty, but must never return the adapter
@@ -70,6 +112,9 @@ contract-approved facts or uncertainty, but must never return the adapter
 - Issue #107 owns verification of actual AWS access, schemas, permissions, API
   boundaries, and fallbacks. The synthetic envelope in #108 must not be read as
   a statement of available AWS capability.
-- Issue #126 owns persistence of retrieval records, evidence provenance, and
-  supported professional-review signal mappings. It should reuse these domain
-  records rather than introduce a second provider-specific state model.
+- Issue #108 owns provider-neutral retrieval mapping and intentionally excludes
+  persistence and professional-review signal generation.
+- Issue #126 owns persistence of retrieval records, evidence provenance,
+  uncertainty, and supported review-only signal mappings.
+- Issue #136 owns connecting these persisted retrieval/review records into the
+  staff workbench, staff review decisions, and revision-aware integration flow.
