@@ -57,6 +57,7 @@ def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
         priority=handoff.priority,
         queue=handoff.queue,
         support_need=handoff.support_need,
+        trigger=handoff.trigger,
         preferred_channel=handoff.preferred_channel,
         reason_codes=handoff.reason_codes,
         reason=handoff.reason,
