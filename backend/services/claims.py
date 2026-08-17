@@ -518,11 +518,21 @@ def confirm_form_fields(
         )
         for field_code in payload.field_codes
     }
-    projected_claim = claim.model_copy(update={'form': {**claim.form, **confirmed_fields}})
+    incident_type = claim.incident_type
+    confirmed_incident_type = confirmed_fields.get('incident.type')
+    if confirmed_incident_type is not None and isinstance(confirmed_incident_type.value, str):
+        incident_type = confirmed_incident_type.value.strip().lower()
+    projected_claim = claim.model_copy(
+        update={
+            'form': {**claim.form, **confirmed_fields},
+            'incident_type': incident_type,
+        }
+    )
     next_step = next_controlled_intake_step(projected_claim)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
+            'incident_type': incident_type,
             'claim_state': claim.claim_state.model_copy(update={'next_action': AgentAction.ASK}),
             'customer_next_step': next_step,
             'revision': claim.revision + 1,
