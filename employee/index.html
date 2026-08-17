@@ -51,11 +51,11 @@
     .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
     .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
     .panel-body { padding: 20px; }
-    .claim-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: row;   /* 横向排列 */ flex-wrap: wrap;       /* 超出宽度时自动换行 */gap: 12px; }
-    .claim-list button {width: 240px;          /* 给卡片设置固定宽度（也可用 flex: 1 适应宽度） */
+    .claim-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: row; flex-wrap: wrap; gap: 12px; }
+    .claim-list button {width: 240px;
       text-align: left; 
-      border: 1px solid #e2e8f0; /* 从只画底边改为全边框 */
-      border-radius: 12px;   /* 圆角卡片样式 */
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
       background: transparent; 
       padding: 16px; 
       cursor: pointer; 
@@ -200,6 +200,7 @@
       </nav>
 
       <button id="refreshClaims">Refresh claims</button>
+      <button id="loadDemoQueue" type="button">Load demo handoff queue</button>
 
       <div class="help">
         <b>Need a hand?</b>
@@ -727,6 +728,7 @@
       heading.append(title, priority);
       wrapper.append(heading);
       wrapper.append(definitionList([
+        { label: 'Priority', value: handoff.priority },
         { label: 'Reason', value: handoff.reason },
         { label: 'Requested action', value: handoff.requested_action },
         { label: 'Promised next step', value: handoff.packet?.promised_next_step },
@@ -874,13 +876,17 @@
       renderClaims(claims);
     }
 
-    async function ensureDemoQueueSeeded() {
+    async function loadDemoQueue() {
+      setError('');
+      const button = byId('loadDemoQueue');
+      button.disabled = true;
       try {
-        const payload = await fetchClaims('all');
-        if ((payload.items || []).length) return;
         await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+        await loadClaims({ propagateError: true });
       } catch (error) {
-        // The empty-state check or seeding failed; loadClaims still surfaces the real error.
+        setError(error.message);
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -906,11 +912,12 @@
 
     document.getElementById('viewSelect').addEventListener('change', loadClaims);
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
+    byId('loadDemoQueue').addEventListener('click', loadDemoQueue);
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
     byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
 
-    ensureDemoQueueSeeded().then(loadClaims);
+    loadClaims();
 
     // --- Internal AI assistant and customer conversation ---
     const chatWidget = byId('chatWidget');

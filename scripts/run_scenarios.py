@@ -9,7 +9,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from backend.repositories.fixture import FixtureRepository  # noqa: E402
 from backend.repositories.scenario_loader import load_scenarios, seed_scenario  # noqa: E402
 
-SCENARIO_DIRECTORY = REPOSITORY_ROOT / 'tests' / 'fixtures' / 'scenarios'
+SCENARIO_DIRECTORY = REPOSITORY_ROOT / 'backend' / 'demo_data' / 'scenarios'
 
 
 @dataclass(frozen=True, slots=True)

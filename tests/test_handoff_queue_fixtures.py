@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,8 +5,7 @@ from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
-
-SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
+from backend.services.demo_seed import SCENARIO_DIRECTORY
 
 
 def _load(scenario_id: str) -> tuple[FixtureRepository, str]:

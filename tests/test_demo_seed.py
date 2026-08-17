@@ -34,3 +34,15 @@ def test_seed_scenarios_rejects_non_staff_credentials() -> None:
         response = client.post('/api/v1/workbench/demo/seed-scenarios', headers=CLAIMANT_AUTH)
 
     assert response.status_code == 403
+
+
+def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
+    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+        assert (
+            client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH).status_code
+            == 200
+        )
+        response = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'DEMO_SEED_REQUIRES_EMPTY_QUEUE'

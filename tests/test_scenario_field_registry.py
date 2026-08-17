@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.repositories.scenario_loader import ScenarioFixture, load_scenarios
 
-SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 
 
 def test_checked_in_scenarios_only_use_registered_form_field_codes() -> None:

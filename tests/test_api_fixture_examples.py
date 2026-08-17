@@ -16,7 +16,9 @@ from backend.repositories.scenario_loader import load_scenario
 
 FIXTURE_DIRECTORY = Path(__file__).parent / 'fixtures'
 PUBLIC_FIXTURE_PATH = FIXTURE_DIRECTORY / 'api' / 'AT-08-resume-public.json'
-DOMAIN_FIXTURE_PATH = FIXTURE_DIRECTORY / 'scenarios' / 'AT-08-resume.json'
+DOMAIN_FIXTURE_PATH = (
+    Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios' / 'AT-08-resume.json'
+)
 
 STORAGE_SPECIFIC_KEYS = {
     'aws_object_key',

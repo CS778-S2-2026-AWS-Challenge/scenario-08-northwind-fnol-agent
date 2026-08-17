@@ -20,7 +20,7 @@ from backend.repositories.protocols import RevisionConflict
 from backend.repositories.scenario_loader import load_scenario, load_scenarios, seed_scenario
 from scripts.run_scenarios import run_scenarios
 
-SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 

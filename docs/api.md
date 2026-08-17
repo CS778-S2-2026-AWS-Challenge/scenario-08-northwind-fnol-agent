@@ -1173,6 +1173,25 @@ Resolve request:
 
 Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
 
+### `POST /api/v1/workbench/demo/seed-scenarios`
+
+Loads the bounded local demonstration queue containing the canonical AT-02, AT-04, and AT-05
+scenario records. This is an explicit staff action: the workbench never calls it during page load.
+The route requires the synthetic staff credential, is available only in development and test
+environments, and returns `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the
+local demo before loading this set again. Runtime demo records are maintained under
+`backend/demo_data/scenarios/`, not under the test fixture tree.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": ["AT-02-coverage-ambiguity", "AT-04-urgent", "AT-05-human-request"],
+  "claim_ids": ["clm_fixture_at02", "clm_fixture_at04", "clm_fixture_at05"]
+}
+```
+
 ### `POST /api/v1/workbench/demo/reset`
 
 Resets the running local demonstration state. The route requires the synthetic
