@@ -455,13 +455,21 @@ class FixtureRepository(PersistenceRepository):
         existing_record = self._retrievals.get(record.retrieval_id)
         if existing_record is not None and existing_record != record:
             raise IdempotencyConflict(record.retrieval_id)
+
+        incoming_signals: dict[str, ReviewSignalRecord] = {}
         for signal in review_signals:
+            incoming_signal = incoming_signals.get(signal.signal_id)
+            if incoming_signal is not None and incoming_signal != signal:
+                raise IdempotencyConflict(signal.signal_id)
+            incoming_signals[signal.signal_id] = signal
+
+        for signal in incoming_signals.values():
             existing_signal = self._review_signals.get(signal.signal_id)
             if existing_signal is not None and existing_signal != signal:
                 raise IdempotencyConflict(signal.signal_id)
 
         self._retrievals[record.retrieval_id] = deepcopy(record)
-        for signal in review_signals:
+        for signal in incoming_signals.values():
             self._review_signals[signal.signal_id] = deepcopy(signal)
 
     def list_retrieval_records(
