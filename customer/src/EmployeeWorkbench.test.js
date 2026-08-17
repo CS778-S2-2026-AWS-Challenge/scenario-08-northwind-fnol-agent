@@ -79,6 +79,7 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
       priority: 'standard',
       queue: 'claimant_support',
       support_need: 'human_requested',
+      trigger: 'claimant_support_request',
       reason: 'The claimant requested a person.',
       requested_action: 'Continue with the saved report.',
       assigned_to: handoffStatus === 'accepted' ? 'stf_demo' : null,
@@ -135,7 +136,7 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
       expect.stringContaining('/handoffs/hnd_employee/accept'),
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(dom.window.document.body.textContent).toContain('Human Requested · Accepted')
+    expect(dom.window.document.body.textContent).toContain('Claimant Support Request · Accepted')
   })
   dom.window.close()
 })

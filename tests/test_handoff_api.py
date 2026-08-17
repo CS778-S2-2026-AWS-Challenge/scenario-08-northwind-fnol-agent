@@ -87,6 +87,10 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
         'Nobody was injured. A synthetic rear bumper was damaged.',
         'I was not hurt.',
         'I hurt the bumper.',
+        (
+            'My parked car was hit from behind on Queen Street at 10:30 this morning. '
+            'No one was injured and there is no continuing danger. The rear bumper is damaged.'
+        ),
     ],
 )
 def test_non_injury_wording_does_not_trigger_urgent_handoff(

@@ -359,9 +359,11 @@ Initial common field codes:
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
+| `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | array | Other involved parties when known |
 | `authorities.police_report_reference` | string | Reference if already issued |
+| `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
@@ -1055,7 +1057,9 @@ and context revisions. `messages` includes the complete persisted communication 
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
 workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
-includes routing fields plus the complete transfer packet. Claimant routes return only the
+includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
+internal `professional_review_required` trigger does not set `support_need`: that field remains
+specific to claimant support intent. Claimant routes return only the
 separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
 action, applied rule, assignment, source message, or packet. `external_claim` and
 `assessor_routing` use the shared typed creation and routing results, including their status,
@@ -1170,6 +1174,25 @@ Resolve request:
 ```
 
 Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
+
+### `POST /api/v1/workbench/demo/seed-scenarios`
+
+Loads the bounded local demonstration queue containing the canonical AT-02, AT-04, and AT-05
+scenario records. This is an explicit staff action: the workbench never calls it during page load.
+The route requires the synthetic staff credential, is available only in development and test
+environments, and returns `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the
+local demo before loading this set again. Runtime demo records are maintained under
+`backend/demo_data/scenarios/`, not under the test fixture tree.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": ["AT-02-coverage-ambiguity", "AT-04-urgent", "AT-05-human-request"],
+  "claim_ids": ["clm_fixture_at02", "clm_fixture_at04", "clm_fixture_at05"]
+}
+```
 
 ### `POST /api/v1/workbench/demo/reset`
 
