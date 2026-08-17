@@ -5,12 +5,14 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     ContractModel,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceState,
     EvidenceStatus,
+    HandoffRecord,
     MessageRecord,
     SessionRecord,
     SessionStatus,
@@ -26,6 +28,7 @@ class ScenarioFixture(ContractModel):
     sessions: list[SessionRecord] = Field(min_length=1)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     messages: list[MessageRecord] = Field(default_factory=list)
+    handoffs: list[HandoffRecord] = Field(default_factory=list)
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -58,6 +61,38 @@ class ScenarioFixture(ContractModel):
             for message in self.messages
         ):
             raise ValueError('Every message must belong to a scenario session.')
+
+        unregistered_form_fields = set(self.claim.form) - REGISTERED_FIELD_CODES
+        if unregistered_form_fields:
+            raise ValueError(
+                'Unregistered form field codes on the scenario claim: '
+                f'{sorted(unregistered_form_fields)}. Add them to backend/domain/field_registry.py.'
+            )
+
+        message_ids = {message.message_id for message in self.messages}
+        handoff_ids = {handoff.handoff_id for handoff in self.handoffs}
+        if len(handoff_ids) != len(self.handoffs):
+            raise ValueError('Scenario handoff identifiers must be unique.')
+        if any(handoff.claim_id != self.claim.claim_id for handoff in self.handoffs):
+            raise ValueError('Every handoff must belong to the scenario claim.')
+        if any(
+            handoff.source_message_id is not None and handoff.source_message_id not in message_ids
+            for handoff in self.handoffs
+        ):
+            raise ValueError('A handoff source_message_id must reference a scenario message.')
+
+        unregistered_packet_fields = {
+            field_code
+            for handoff in self.handoffs
+            for field_code in handoff.packet.form_snapshot
+            if field_code not in REGISTERED_FIELD_CODES
+        }
+        if unregistered_packet_fields:
+            raise ValueError(
+                'Unregistered form field codes in a handoff packet snapshot: '
+                f'{sorted(unregistered_packet_fields)}. '
+                'Add them to backend/domain/field_registry.py.'
+            )
         return self
 
 
@@ -174,3 +209,5 @@ def seed_scenario(
         repository.save_evidence(evidence, scenario.claim.customer_id)
     for message in scenario.messages:
         repository.save_message(message, scenario.claim.customer_id)
+    for handoff in scenario.handoffs:
+        repository.save_handoff(handoff, scenario.claim.customer_id)
