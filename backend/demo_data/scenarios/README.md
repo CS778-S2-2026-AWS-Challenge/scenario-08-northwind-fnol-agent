@@ -1,9 +1,10 @@
-# Day 3 Scenario Fixtures
+# Day 3 Runtime Demo Scenarios
 
-These fixtures contain synthetic data only and exercise the stable scenario
-identifiers from `docs/day3-implementation-map.md`.
+These canonical runtime demo-data records contain synthetic data only and
+exercise the stable scenario identifiers from `docs/day3-implementation-map.md`.
+They are the source used by the development/test demo seeding workflow.
 
-| Fixture | Coverage |
+| Scenario | Coverage |
 |---|---|
 | `AT-01-clear-motor.json` | Fast journey with confirmed material facts |
 | `AT-02-coverage-ambiguity.json` | Ambiguous coverage routed to a professional-review handoff card |
@@ -13,7 +14,7 @@ identifiers from `docs/day3-implementation-map.md`.
 | `AT-08-resume.json` | Cross-session summary, unresolved work, pending evidence, and prior commitment |
 | `AT-12-signal-writeback.json` | Shared claim state with an internal-only review signal |
 
-Run the reusable fixture check from the repository root:
+Validate the reusable scenario records from the repository root:
 
 ```powershell
 python scripts/run_scenarios.py
