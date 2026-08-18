@@ -106,7 +106,7 @@ def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.count('PASS AT-') == 8
+    assert completed.stdout.count('PASS AT-') == 9
     assert 'PASS AT-06-pending-evidence' in completed.stdout
     assert 'PASS AT-08-resume' in completed.stdout
 
