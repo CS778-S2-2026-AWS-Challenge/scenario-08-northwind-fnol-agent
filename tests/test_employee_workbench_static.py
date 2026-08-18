@@ -44,7 +44,7 @@ def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seed
     )
     assert "contextBlock('Structured facts and provenance'" in render_context
     assert 'Status: ${formatLabel(field.status)}' in render_context
-    assert 'Load demo handoff queue' in page
+    assert 'Load workbench demo queue' in page
     assert 'ensureDemoQueueSeeded' not in page
     assert 'loadClaims();' in page
 

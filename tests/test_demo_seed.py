@@ -8,7 +8,7 @@ STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
 
-def test_seed_scenarios_populates_the_urgent_human_request_and_review_queues() -> None:
+def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> None:
     with TestClient(create_app(Settings(), FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
@@ -18,7 +18,7 @@ def test_seed_scenarios_populates_the_urgent_human_request_and_review_queues() -
             'AT-02-coverage-ambiguity',
             'AT-04-urgent',
             'AT-05-human-request',
-            'AT-13-staff-action-lifecycle',
+            'AT-10-controlled-assessor',
         }
         assert len(body['claim_ids']) == 4
 

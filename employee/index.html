@@ -74,6 +74,8 @@
     .claim-list .claim-assignment { display:flex; align-items:center; gap:6px; color:#475569; font-size:12px; }
     .claim-list .claim-assignment::before { width:7px; height:7px; border-radius:50%; background:#cbd5e1; content:''; }
     .claim-list .claim-assignment.is-assigned::before { background:#14b8a6; }
+    .claim-list .claim-queue-meta { display:flex; flex-wrap:wrap; gap:6px; }
+    .claim-list .claim-queue-meta span { padding:4px 7px; border-radius:7px; background:#f8fafc; color:#475569; font-size:10px; font-weight:650; }
     .claim-list .claim-hover-details { position:absolute; top:calc(100% - 3px); left:7px; right:7px; display:grid; padding:8px 13px 12px; border:1px solid #ccfbf1; border-radius:0 0 13px 13px; background:#fff; box-shadow:0 18px 35px rgba(15,23,42,.16); opacity:0; visibility:hidden; transform:translateY(-5px); pointer-events:none; transition:opacity .16s ease, transform .16s ease, visibility .16s ease; }
     .claim-list button:hover .claim-hover-details, .claim-list button:focus .claim-hover-details { opacity:1; visibility:visible; transform:translateY(0); }
     .claim-list .claim-preview-row { display:grid; grid-template-columns:66px 1fr; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; }
@@ -111,7 +113,7 @@
     .context-row dt, .context-row dd { margin:0; overflow-wrap:anywhere; }
     .context-row dt { color:#64748b; font-size:12px; }
     .context-row dd { color:#0f172a; font-size:14px; line-height:1.5; }
-/* 1. 集中管理 Teal 品牌色系 */
+/* Shared teal palette for the operational summary. */
 .operational-summary {
   --teal-50: #f0fdfa;
   --teal-100: #ccfbf1;
@@ -145,14 +147,14 @@
   text-transform: uppercase;
 }
 
-/* 2. 响应式 Grid：最小 180px 自动折行 */
+/* Responsive cards wrap once they reach their readable minimum width. */
 .operational-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
-/* 3. 卡片增加微柔和阴影与悬浮过渡 */
+/* A subtle elevation change keeps hover feedback calm. */
 .operational-summary-card {
   min-width: 0;
   padding: 14px;
@@ -167,7 +169,7 @@
   box-shadow: 0 4px 12px rgba(15, 118, 110, 0.08);
 }
 
-/* 4. 重点卡片添加 overflow 规避圆角裁切问题 */
+/* Keep the highlighted next-action card inside its rounded boundary. */
 .operational-summary-card.next {
   grid-column: 1 / -1;
   display: grid;
@@ -178,7 +180,7 @@
   overflow: hidden;
 }
 
-/* 5. 标准化 Label 字号与字重 */
+/* Summary labels share one compact typographic treatment. */
 .operational-summary-label {
   display: block;
   margin-bottom: 4px;
@@ -315,7 +317,7 @@
       </nav>
 
       <button id="refreshClaims">Refresh claims</button>
-      <button id="loadDemoQueue" type="button">Load demo handoff queue</button>
+      <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
 
       <div class="help">
         <b>Need a hand?</b>
@@ -773,6 +775,13 @@
         assignment.className = `claim-assignment${item.assignee_id ? ' is-assigned' : ''}`;
         assignment.textContent = item.assignee_id ? `Assigned to ${item.assignee_id}` : 'Not assigned';
 
+        const queueMeta = document.createElement('div');
+        queueMeta.className = 'claim-queue-meta';
+        queueMeta.append(
+          previewText(`Priority: ${formatLabel(item.priority)}`),
+          previewText(`${item.open_handoff_count} open handoff${item.open_handoff_count === 1 ? '' : 's'}`),
+        );
+
         const hoverDetails = document.createElement('div');
         hoverDetails.className = 'claim-hover-details';
         hoverDetails.id = `claim-preview-${item.claim_id}`;
@@ -786,8 +795,11 @@
           ),
         );
         button.setAttribute('aria-describedby', hoverDetails.id);
-        button.setAttribute('aria-label', `${item.customer_reference}, ${stateMap[item.queue] || item.queue}, ${assignment.textContent}`);
-        button.append(header, assignment, hoverDetails);
+        button.setAttribute(
+          'aria-label',
+          `${item.customer_reference}, ${stateMap[item.queue] || item.queue}, ${assignment.textContent}, priority ${item.priority}, ${item.open_handoff_count} open handoffs`,
+        );
+        button.append(header, assignment, queueMeta, hoverDetails);
         button.classList.toggle('active', item.claim_id === activeClaimId);
         button.addEventListener('click', () => {
           activeClaimId = item.claim_id;
@@ -809,7 +821,7 @@
     function changeQueuePage(change) {
       queuePage += change;
       renderClaims(claims);
-      byId('claimList').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      byId('claimList').scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     }
 
     function evidencePreview(item) {
@@ -831,6 +843,12 @@
       valueSpan.textContent = value;
       row.append(labelSpan, valueSpan);
       return row;
+    }
+
+    function previewText(value) {
+      const span = document.createElement('span');
+      span.textContent = value;
+      return span;
     }
 
     function renderContext(detail) {
