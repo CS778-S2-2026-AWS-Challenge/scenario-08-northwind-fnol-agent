@@ -1,0 +1,186 @@
+{
+  "scenario_id": "AT-05-human-request",
+  "description": "Synthetic explicit human-support request after the incident description is confirmed.",
+  "claim": {
+    "claim_id": "clm_fixture_at05",
+    "customer_id": "cus_demo",
+    "revision": 3,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "not_assessed",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "human_requested",
+      "urgency": "normal",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "form": {
+      "incident.description": {
+        "value": "A synthetic vehicle hit my parked car. Nobody was injured.",
+        "source": "claimant",
+        "source_refs": ["msg_at05_claimant_1"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T10:05:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.location": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "current_action",
+        "confidence": null,
+        "updated_at": "2026-08-13T10:05:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "vehicle.damage_description": {
+        "value": "Minor scrape on the rear bumper.",
+        "source": "inference",
+        "source_refs": ["msg_at05_claimant_1"],
+        "status": "proposed",
+        "needed_for": "later_action",
+        "confidence": 0.6,
+        "updated_at": "2026-08-13T10:05:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": null,
+    "active_session_id": "ses_fixture_at05",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "human_support_queued",
+      "summary": "A Northwind support request has been queued with the details already provided. You do not need to restart your report.",
+      "responsible_party": "northwind",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-13T10:00:00Z",
+    "updated_at": "2026-08-13T10:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at05",
+      "claim_id": "clm_fixture_at05",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "The claimant confirmed a synthetic parked-car incident, then asked to speak with a person.",
+      "unresolved_questions": ["confirm:incident.location"],
+      "pending_items": [],
+      "prior_commitments": [],
+      "context_revision": 3,
+      "started_at": "2026-08-13T10:00:00Z",
+      "last_active_at": "2026-08-13T10:05:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [],
+  "messages": [
+    {
+      "message_id": "msg_at05_claimant_1",
+      "claim_id": "clm_fixture_at05",
+      "session_id": "ses_fixture_at05",
+      "client_message_id": "at05-incident",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "A synthetic vehicle hit my parked car. Nobody was injured."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-13T10:01:00Z"
+    },
+    {
+      "message_id": "msg_at05_claimant_2",
+      "claim_id": "clm_fixture_at05",
+      "session_id": "ses_fixture_at05",
+      "client_message_id": "at05-human-request",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I want to speak to a person now."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-13T10:05:00Z"
+    }
+  ],
+  "handoffs": [
+    {
+      "handoff_id": "hnd_fixture_at05",
+      "claim_id": "clm_fixture_at05",
+      "type": "human_support",
+      "status": "queued",
+      "priority": "standard",
+      "queue": "claimant_support",
+      "support_need": "human_requested",
+      "trigger": "claimant_support_request",
+      "preferred_channel": null,
+      "reason_codes": ["HUMAN_SUPPORT_REQUESTED"],
+      "reason": "The claimant asked to speak with a person after confirming the incident description.",
+      "requested_action": "Contact the claimant and continue the report from the preserved context.",
+      "applied_rule": "prototype_immediate_transfer",
+      "packet": {
+        "incident_summary": "A synthetic vehicle hit my parked car. Nobody was injured.",
+        "form_revision": 3,
+        "form_snapshot": {
+          "incident.description": {
+            "value": "A synthetic vehicle hit my parked car. Nobody was injured.",
+            "source": "claimant",
+            "source_refs": ["msg_at05_claimant_1"],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T10:05:00Z",
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+          },
+          "incident.location": {
+            "value": null,
+            "source": "claimant",
+            "source_refs": [],
+            "status": "missing",
+            "needed_for": "current_action",
+            "confidence": null,
+            "updated_at": "2026-08-13T10:05:00Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          },
+          "vehicle.damage_description": {
+            "value": "Minor scrape on the rear bumper.",
+            "source": "inference",
+            "source_refs": ["msg_at05_claimant_1"],
+            "status": "proposed",
+            "needed_for": "later_action",
+            "confidence": 0.6,
+            "updated_at": "2026-08-13T10:05:00Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          }
+        },
+        "evidence_refs": [],
+        "missing_items": ["incident.location"],
+        "pending_items": [],
+        "conflicts": [],
+        "low_confidence_items": ["vehicle.damage_description"],
+        "policy_citation_refs": [],
+        "history_evidence_refs": [],
+        "source_refs": ["msg_at05_claimant_1"],
+        "prior_customer_updates": [],
+        "promised_next_step": "A Northwind support request has been queued with the details already provided. You do not need to restart your report."
+      },
+      "source_message_id": "msg_at05_claimant_2",
+      "assigned_to": null,
+      "created_at": "2026-08-13T10:05:00Z",
+      "accepted_at": null,
+      "resolved_at": null
+    }
+  ],
+  "expected": {
+    "workflow_state": "professional_review",
+    "customer_status": "human_support_queued",
+    "confirmed_fields": ["incident.description"],
+    "handoff_priority": "standard",
+    "handoff_queue": "claimant_support",
+    "handoff_gaps": ["incident.location"]
+  }
+}

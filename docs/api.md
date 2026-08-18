@@ -359,9 +359,11 @@ Initial common field codes:
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
+| `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | array | Other involved parties when known |
 | `authorities.police_report_reference` | string | Reference if already issued |
+| `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
@@ -841,6 +843,7 @@ Response `201`:
     "creation_status": "created",
     "route": "standard_motor_intake",
     "next_step": "Claims intake review",
+    "source": "fixture",
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
@@ -955,6 +958,11 @@ fields remain proposed until a claimant or authorised staff member confirms
 them; completion never silently writes extracted values into the confirmed
 form.
 
+The Sprint 2 mock adapter returns `202` and records the public `file_status` as
+`processing` after an image or PDF upload is accepted. Filename, media type,
+size, and processing status can be read back from the evidence list. Storage
+keys, checksums, processing references, and file contents remain internal.
+
 ### `POST /api/v1/claims/{claim_id}/support-requests`
 
 Request:
@@ -1008,13 +1016,19 @@ Supported filters:
 | `tag` | Registered internal tag code |
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
 
-Each item includes claim ID, safe display reference, state dimensions, priority, queue, next action, evidence summary, open handoff summary, assignee, service timing, and update time. It is a projection of shared claim state, not a separately editable board record.
+Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
+next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
+service timing, and update time. It is a projection of shared claim state, not a separately
+editable board record.
 
 The response is shaped as `{ "items": [...], "page": { "next_cursor": null } }`. Each item
 contains `claim_id`, `revision`, `customer_reference`, `incident_type`, `workflow_state`,
-`queue`, `priority`, `next_action`, `evidence_summary`, `open_handoff_count`, `assignee_id`,
-`created_at`, and `updated_at`. Queue assignment, priority, and assignee are derived from
-the shared claim state and active persisted handoffs.
+`queue`, `priority`, `next_action`, `route`, `evidence_state`, `evidence_summary`,
+`next_action_summary`, `responsible_party`, `claim_creation_status`,
+`assessor_routing_status`, `open_handoff_count`, `assignee_id`, `created_at`, and `updated_at`.
+Queue assignment, priority, and assignee are derived from the shared claim state and active
+persisted handoffs. Creation and assessor-routing statuses are nullable until those integrations
+have produced a result.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
@@ -1055,7 +1069,9 @@ and context revisions. `messages` includes the complete persisted communication 
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
 workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
-includes routing fields plus the complete transfer packet. Claimant routes return only the
+includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
+internal `professional_review_required` trigger does not set `support_need`: that field remains
+specific to claimant support intent. Claimant routes return only the
 separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
 action, applied rule, assignment, source message, or packet. `external_claim` and
 `assessor_routing` use the shared typed creation and routing results, including their status,
@@ -1170,6 +1186,37 @@ Resolve request:
 ```
 
 Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
+
+### `POST /api/v1/workbench/demo/seed-scenarios`
+
+Loads a bounded, mixed local workbench demonstration queue. AT-02, AT-04, and AT-05 exercise
+professional-review and human-handoff work, while AT-10 exercises a created claim routed to an
+assessor. This endpoint is not a handoff-only seed boundary. It is an explicit staff action: the
+workbench never calls it during page load. The route requires the synthetic staff credential, is
+available only in development and test environments, and returns
+`409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the local demo before loading
+this set again. Runtime demo records are maintained under `backend/demo_data/scenarios/`, not
+under the test fixture tree.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": [
+    "AT-02-coverage-ambiguity",
+    "AT-04-urgent",
+    "AT-05-human-request",
+    "AT-10-controlled-assessor"
+  ],
+  "claim_ids": [
+    "clm_fixture_at02",
+    "clm_fixture_at04",
+    "clm_fixture_at05",
+    "clm_fixture_at10"
+  ]
+}
+```
 
 ### `POST /api/v1/workbench/demo/reset`
 
@@ -1423,12 +1470,18 @@ Response `201` or `200` for an idempotent replay:
   "creation_status": "created",
   "route": "standard_motor_intake",
   "next_step": "Claims intake review",
+  "source": "fixture",
   "expected_by": "2026-08-11T05:00:00Z",
   "created_at": "2026-08-10T03:55:00Z"
 }
 ```
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
+
+`source` is `fixture` for the deterministic fallback or `configured_service` for a
+confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
+an AWS integration is planned. Current AWS claims-service availability is
+`pending_confirmation`; the fixture remains the active fallback under the same contract.
 
 The request and response above are the provider-neutral boundary. AWS table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
@@ -1554,6 +1607,7 @@ Returns readiness without secrets or private configuration:
     "policy": "using_fixture",
     "claim_history": "using_fixture",
     "claims_service": "using_fixture",
+    "aws_claims_service": "pending_confirmation",
     "evidence_storage": "ok"
   },
   "checked_at": "2026-08-10T03:58:00Z"

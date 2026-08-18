@@ -14,5 +14,11 @@ def test_readiness_reports_unconfigured_dependencies_honestly(client: TestClient
     assert response.status_code == 200
     payload = response.json()
     assert payload['status'] == 'degraded'
-    assert set(payload['checks'].values()) == {'not_configured'}
+    assert payload['checks']['claims_service'] == 'using_fixture'
+    assert payload['checks']['aws_claims_service'] == 'pending_confirmation'
+    assert {
+        value
+        for name, value in payload['checks'].items()
+        if name not in {'claims_service', 'aws_claims_service'}
+    } == {'not_configured'}
     assert datetime.fromisoformat(payload['checked_at'])

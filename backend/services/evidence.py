@@ -6,6 +6,7 @@ from backend.adapters.evidence_storage import (
 )
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.ids import new_id
 from backend.domain.models import (
     ClaimantEvidence,
@@ -16,9 +17,7 @@ from backend.domain.models import (
     EvidenceMutationResponse,
     EvidenceRecord,
     EvidenceSource,
-    EvidenceState,
     EvidenceStatus,
-    EvidenceSummary,
     EvidenceUploadResponse,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
@@ -75,47 +74,6 @@ def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
     )
 
 
-def _evidence_summary(records: list[EvidenceRecord]) -> EvidenceSummary:
-    received = 0
-    pending = 0
-    needs_attention = 0
-    for record in records:
-        if record.status is EvidenceStatus.PENDING_GENERATION or record.file_status in {
-            EvidenceFileStatus.AWAITING_UPLOAD,
-            EvidenceFileStatus.UPLOADING,
-            EvidenceFileStatus.UPLOADED,
-            EvidenceFileStatus.PROCESSING,
-        }:
-            pending += 1
-        elif (
-            record.status is EvidenceStatus.RECEIVED
-            and record.file_status is EvidenceFileStatus.READY
-        ):
-            received += 1
-        else:
-            needs_attention += 1
-    return EvidenceSummary(
-        received=received,
-        pending=pending,
-        needs_attention=needs_attention,
-    )
-
-
-def _evidence_state(records: list[EvidenceRecord]) -> EvidenceState:
-    statuses = {record.status for record in records}
-    if EvidenceStatus.INCONSISTENT in statuses:
-        return EvidenceState.INCONSISTENT
-    if EvidenceStatus.INCOMPLETE in statuses:
-        return EvidenceState.INCOMPLETE
-    if EvidenceStatus.UNOFFICIAL in statuses:
-        return EvidenceState.UNOFFICIAL
-    if EvidenceStatus.PENDING_GENERATION in statuses:
-        return EvidenceState.PENDING_GENERATION
-    if records and statuses == {EvidenceStatus.RECEIVED}:
-        return EvidenceState.RECEIVED
-    return EvidenceState.NOT_STARTED
-
-
 def _updated_claim(
     claim: WorkingClaim,
     records: list[EvidenceRecord],
@@ -125,9 +83,9 @@ def _updated_claim(
         update={
             'revision': claim.revision + 1,
             'updated_at': timestamp,
-            'evidence_summary': _evidence_summary(records),
+            'evidence_summary': evidence_summary_for(records),
             'claim_state': claim.claim_state.model_copy(
-                update={'evidence': _evidence_state(records)}
+                update={'evidence': evidence_state_for(records)}
             ),
         }
     )
@@ -457,13 +415,12 @@ def complete_upload(
         **evidence.provenance,
         'storage_key': stored.storage_key,
         'upload_checksum': stored.checksum,
+        'processing_state': 'queued',
     }
-    if evidence.media_type.startswith('image/'):
-        provenance['extraction_state'] = 'proposed'
     completed = evidence.model_copy(
         update={
             'status': EvidenceStatus.RECEIVED,
-            'file_status': EvidenceFileStatus.READY,
+            'file_status': EvidenceFileStatus.PROCESSING,
             'provenance': provenance,
             'updated_at': timestamp,
         }

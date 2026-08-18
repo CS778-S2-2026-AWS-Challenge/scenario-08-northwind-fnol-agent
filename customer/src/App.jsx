@@ -41,6 +41,16 @@ function fieldStatusLabel(status) {
   return 'Check this'
 }
 
+function fieldValueText(field) {
+  if (
+    field.status === 'pending_generation'
+    && (field.value === null || field.value === undefined || field.value === '')
+  ) {
+    return 'Expected later'
+  }
+  return String(field.value ?? '')
+}
+
 function messageText(message) {
   return message?.content?.type === 'text' ? message.content.text : ''
 }
@@ -522,7 +532,7 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <p className="field-value">{String(field.value)}</p>
+                        <p className="field-value">{fieldValueText(field)}</p>
                         <button
                           className="text-button"
                           type="button"

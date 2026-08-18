@@ -13,6 +13,10 @@
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #f1f5f9; }
     button, select, textarea, input { font: inherit; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(56, 189, 248, .55);
+      outline-offset: 2px;
+    }
     a { color: inherit; text-decoration: none; }
 
     .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
@@ -44,17 +48,51 @@
     .card dd { margin: 6px 0 0; font-size: 15px; color: #0f172a; }
 
     .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
-    .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden; }
+    .panel { grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: visible; }
+    .cards { grid-column: 1 / -1; }
+    .detail-panel { grid-column: 1 / -1; }
     .panel-header { padding: 18px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px; align-items: center; }
     .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
     .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
     .panel-body { padding: 20px; }
-    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-    .claim-list button { width: 100%; text-align: left; border: none; background: transparent; padding: 18px 20px; cursor: pointer; display: grid; gap: 6px; border-bottom: 1px solid #e2e8f0; }
-    .claim-list button:hover { background: #f8fafc; }
-    .claim-list button.active { background: #e0f2fe; }
-    .claim-list .claim-id { font-weight: 700; color: #0f172a; }
-    .claim-list .claim-meta { display: flex; gap: 8px; flex-wrap: wrap; color: #64748b; font-size: 13px; }
+    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap: 12px; }
+    .claim-list button {width: 100%; min-height:96px;
+      position:relative;
+      text-align: left;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #fff;
+      padding: 14px 15px;
+      cursor: pointer;
+      display: grid;
+      align-content:start;
+      gap: 10px;
+      box-shadow:0 4px 14px rgba(15,23,42,.035);
+      transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease;}
+    .claim-list button:hover, .claim-list button:focus { z-index:10; border-color:#5eead4; box-shadow:0 10px 26px rgba(15,23,42,.1); transform:translateY(-1px); outline:none; }
+    .claim-list button:focus-visible { box-shadow:0 0 0 3px rgba(15,118,110,.18),0 10px 26px rgba(15,23,42,.1); }
+    .claim-list button.active { border-color:#0f766e; box-shadow:0 0 0 2px rgba(15,118,110,.12),0 12px 28px rgba(15,23,42,.08); }
+    .claim-list .claim-card-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .claim-list .claim-id { margin-top:3px; color:#94a3b8; font-size:10px; font-weight:650; letter-spacing:.03em; }
+    .claim-list .claim-customer { color:#0f172a; font-size:15px; font-weight:750; }
+    .claim-list .claim-assignment { display:flex; align-items:center; gap:6px; color:#475569; font-size:12px; }
+    .claim-list .claim-assignment::before { width:7px; height:7px; border-radius:50%; background:#cbd5e1; content:''; }
+    .claim-list .claim-assignment.is-assigned::before { background:#14b8a6; }
+    .claim-list .claim-queue-meta { display:flex; flex-wrap:wrap; gap:6px; }
+    .claim-list .claim-queue-meta span { padding:4px 7px; border-radius:7px; background:#f8fafc; color:#475569; font-size:10px; font-weight:650; }
+    .claim-list .claim-hover-details { position:absolute; top:calc(100% - 3px); left:7px; right:7px; display:grid; padding:8px 13px 12px; border:1px solid #ccfbf1; border-radius:0 0 13px 13px; background:#fff; box-shadow:0 18px 35px rgba(15,23,42,.16); opacity:0; visibility:hidden; transform:translateY(-5px); pointer-events:none; transition:opacity .16s ease, transform .16s ease, visibility .16s ease; }
+    .claim-list button:hover .claim-hover-details, .claim-list button:focus .claim-hover-details { opacity:1; visibility:visible; transform:translateY(0); }
+    .claim-list .claim-preview-row { display:grid; grid-template-columns:66px 1fr; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; }
+    .claim-list .claim-preview-row:last-child { border-bottom:0; }
+    .claim-list .claim-preview-label { color:#64748b; font-size:11px; font-weight:700; }
+    .claim-list .claim-preview-value { min-width:0; color:#1e293b; font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
+    .claim-list .claim-preview-row.next { display:block; margin-top:3px; padding:10px 11px; border:0; border-radius:9px; background:#f0fdfa; }
+    .claim-list .claim-preview-row.next .claim-preview-label { display:block; margin-bottom:4px; color:#0f766e; }
+    .queue-pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:18px; padding-top:14px; border-top:1px solid #e2e8f0; }
+    .queue-pagination button { min-width:88px; padding:8px 12px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#334155; cursor:pointer; }
+    .queue-pagination button:hover:not(:disabled) { border-color:#0f766e; color:#0f766e; }
+    .queue-pagination button:disabled { opacity:.45; cursor:not-allowed; }
+    .queue-pagination span { min-width:92px; color:#64748b; font-size:12px; text-align:center; }
     .claim-list .badge { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
     .badge.urgent { background: #fee2e2; color: #991b1b; }
     .badge.review { background: #e0f2fe; color: #075985; }
@@ -79,6 +117,98 @@
     .context-row dt, .context-row dd { margin:0; overflow-wrap:anywhere; }
     .context-row dt { color:#64748b; font-size:12px; }
     .context-row dd { color:#0f172a; font-size:14px; line-height:1.5; }
+/* Shared teal palette for the operational summary. */
+.operational-summary {
+  --teal-50: #f0fdfa;
+  --teal-100: #ccfbf1;
+  --teal-700: #0f766e;
+  --teal-900: #134e4a;
+  --text-primary: #0f172a;
+  --text-muted: #64748b;
+
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--teal-50) 0%, #f8fafc 72%);
+  border: 1px solid var(--teal-100);
+}
+
+.operational-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operational-summary-head h3 {
+  margin: 0;
+  color: var(--teal-900);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Responsive cards wrap once they reach their readable minimum width. */
+.operational-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+/* A subtle elevation change keeps hover feedback calm. */
+.operational-summary-card {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.operational-summary-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.08);
+}
+
+/* Keep the highlighted next-action card inside its rounded boundary. */
+.operational-summary-card.next {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 18px;
+  border-left: 4px solid var(--teal-700);
+  overflow: hidden;
+}
+
+/* Summary labels share one compact typographic treatment. */
+.operational-summary-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.operational-summary-value {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.operational-summary-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+}
     .inline-meta { display:flex; flex-wrap:wrap; gap:7px; margin-top:5px; color:#64748b; font-size:11px; }
     .plain-list { margin:0; padding-left:18px; color:#475569; line-height:1.7; }
     .handoff-panel { padding:16px; border:1px solid #bae6fd; border-left:4px solid #0284c7; border-radius:8px; background:#f0f9ff; }
@@ -110,8 +240,9 @@
     .staff-action-button { margin-top:12px; padding:10px 14px; border:0; border-radius:9px; background:#0369a1; color:#fff; font-weight:700; cursor:pointer; }
     .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
     .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
-
+    
     @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
+    @media (max-width: 680px) { .claim-list { grid-template-columns:1fr; } .operational-summary-grid { grid-template-columns:1fr; } .operational-summary-card.next { grid-column:auto; grid-template-columns:1fr; } }
 
     /* Assistant and customer conversation components */
     .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
@@ -161,9 +292,22 @@
     .customer-chat-button { border:0; border-radius:10px; padding:10px 14px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
     .customer-chat-close { border:0; border-radius:8px; padding:8px 10px; background:#f1f5f9; color:#334155; cursor:pointer; }
     @media(max-width:900px) { .chat-widget { right:12px; bottom:12px; width:300px; } }
-    @media(max-width:680px) { .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; } }
+    @media(max-width:680px) {
+      .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; }
+      .chat-widget.closed { left:auto; right:12px; width:178px; }
+    }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
-    @media(max-width:720px) { .customer-chat-content { grid-template-columns:1fr; } .customer-chat-list { display:none; } }
+    @media(max-width:1024px) {
+      .sidebar { width:100%; }
+      .cards { grid-template-columns:1fr; }
+    }
+    @media(max-width:720px) {
+      .content { min-width:0; padding:16px; }
+      .detail-grid, .staff-form-grid, .context-row { grid-template-columns:1fr; }
+      .claim-list button { width:100%; }
+      .customer-chat-content { grid-template-columns:1fr; }
+      .customer-chat-list { display:none; }
+    }
   </style>
 </head>
 <body>
@@ -189,7 +333,8 @@
         <button id="customerChatNav" type="button">Customer chat</button>
       </nav>
 
-      <button id="refreshClaims">Refresh claims</button>
+      <button id="refreshClaims" type="button">Refresh claims</button>
+      <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
 
       <div class="help">
         <b>Need a hand?</b>
@@ -201,13 +346,28 @@
     </aside>
 
     <main class="content">
-      <section id="workbenchView">
+      <section id="workbenchView" aria-busy="false">
       <div class="header">
         <div>
           <h1>Employee workbench</h1>
           <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
         </div>
       </div>
+
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
+          <div class="panel-body">
+            <div id="errorBanner" class="error" role="alert" style="display:none"></div>
+            <ul id="claimList" class="claim-list"></ul>
+            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
+            <nav id="queuePagination" class="queue-pagination" aria-label="Claim queue pages" hidden>
+              <button id="previousQueuePage" type="button">Previous</button>
+              <span id="queuePageStatus" aria-live="polite"></span>
+              <button id="nextQueuePage" type="button">Next</button>
+            </nav>
+          </div>
+        </section>
 
       <div class="cards">
         <div class="card">
@@ -220,15 +380,7 @@
         </div>
       </div>
 
-      <div class="workspace">
-        <section class="panel">
-          <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
-          <div class="panel-body">
-            <div id="errorBanner" class="error" style="display:none"></div>
-            <ul id="claimList" class="claim-list"></ul>
-            <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
-          </div>
-        </section>
+      
 
         <section class="detail-panel">
           <div class="detail-section" id="detailSummary">
@@ -255,8 +407,8 @@
             <p id="detailNextStepSummary"></p>
             <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
             <div style="margin-top:12px">
-              <button id="openCustomerChatBtn" class="customer-chat-button">View customer communication</button>
-              <button id="toggleAssistantBtn" class="customer-chat-close" style="margin-left:8px">Open assistant</button>
+              <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
+              <button id="toggleAssistantBtn" class="customer-chat-close" type="button" style="margin-left:8px">Open assistant</button>
             </div>
             </div>
           <div class="detail-section" id="detailStaffActions" style="display:none">
@@ -322,7 +474,7 @@
               </div>
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
               <div class="customer-chat-input">
-                <textarea id="customerChatText" placeholder="Write a message to the claimant..."></textarea>
+                <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
                 <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
                 <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
               </div>
@@ -340,17 +492,17 @@
         <strong id="chatHeaderTitle">Aurora Assistant</strong>
         <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
       </div>
-      <button class="chat-toggle" id="chatToggle">Open</button>
+      <button class="chat-toggle" id="chatToggle" type="button">Open</button>
     </div>
     <div class="chat-body" id="chatBody">
       <div class="chat-message assistant">Hi! I can help with claim next steps, policy checks, and process guidance.</div>
     </div>
     <div class="chat-attachments" id="chatAttachments"></div>
     <div class="chat-input-bar" id="chatInputBar">
-      <button type="button" class="chat-file-btn" id="chatFileBtn">+</button>
-      <textarea id="chatInput" class="chat-input" placeholder="Type a question..." rows="1"></textarea>
-      <button class="chat-send" id="chatSend">Send</button>
-      <input id="chatFileInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
+      <button type="button" class="chat-file-btn" id="chatFileBtn" aria-label="Attach files">+</button>
+      <textarea id="chatInput" class="chat-input" aria-label="Assistant question" placeholder="Type a question..." rows="1"></textarea>
+      <button class="chat-send" id="chatSend" type="button">Send</button>
+      <input id="chatFileInput" type="file" aria-label="Assistant attachments" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
     </div>
   </div>
 
@@ -364,6 +516,8 @@
     let activeClaimDetail = null;
     const detailCache = new Map();
     let detailRevision = null;
+    const CLAIMS_PER_PAGE = 6;
+    let queuePage = 1;
 
     const stateMap = {
       professional_review: 'Professional review',
@@ -384,6 +538,13 @@
       banner.textContent = message;
     }
 
+    function setQueueLoading(loading) {
+      const button = byId('refreshClaims');
+      button.disabled = loading;
+      button.textContent = loading ? 'Refreshing...' : 'Refresh claims';
+      byId('workbenchView').setAttribute('aria-busy', String(loading));
+    }
+
     function getHeaders() {
       return {
         'Content-Type': 'application/json',
@@ -396,10 +557,18 @@
     }
 
     async function apiRequest(url, options = {}) {
-      const response = await fetch(url, {
-        ...options,
-        headers: { ...getHeaders(), ...options.headers },
-      });
+      let response;
+      try {
+        response = await fetch(url, {
+          ...options,
+          headers: { ...getHeaders(), ...options.headers },
+        });
+      } catch (error) {
+        throw new Error(
+          'Cannot reach the Workbench API at http://127.0.0.1:8000. '
+          + 'Start the backend and keep it running, then refresh this page.'
+        );
+      }
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(payload?.error?.message || `The workbench request failed (${response.status}).`);
@@ -413,6 +582,10 @@
 
     function commaSeparatedValues(value) {
       return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+
+    function normaliseCustomerText(value) {
+      return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
     }
 
     async function requestMutation(path, method, revision, payload) {
@@ -499,6 +672,12 @@
       const resultSummary = byId('completeResultSummary').value.trim();
       const customerSummary = byId('customerUpdateSummary').value.trim();
       if (!outcomeCode || !reasonCodes.length || !resultSummary || !customerSummary) throw new Error('Outcome, result, reason code, and claimant-safe update are required.');
+      const duplicateUpdate = (activeClaimDetail.customer_updates || []).some(
+        update => normaliseCustomerText(update.summary) === normaliseCustomerText(customerSummary)
+      );
+      if (duplicateUpdate) {
+        throw new Error('This claimant update has already been recorded. Change the update before completing another action.');
+      }
       const workflowState = byId('completeWorkflowState').value;
       await requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH', activeClaimDetail.revision, {
         status: 'completed',
@@ -603,43 +782,66 @@
       if (!list.length) {
         byId('emptyState').style.display = 'block';
         byId('claimCount').textContent = '0 claims';
+        byId('queuePagination').hidden = true;
         return;
       }
       byId('emptyState').style.display = 'none';
-      byId('claimCount').textContent = `${list.length} claim${list.length === 1 ? '' : 's'}`;
+      const totalPages = Math.ceil(list.length / CLAIMS_PER_PAGE);
+      queuePage = Math.min(queuePage, totalPages);
+      const firstItem = (queuePage - 1) * CLAIMS_PER_PAGE;
+      const visibleClaims = list.slice(firstItem, firstItem + CLAIMS_PER_PAGE);
 
-      list.forEach(item => {
+      const claimLabel = list.length === 1 ? '1 claim' : `${list.length} claims`;
+      const visibleRange = `${firstItem + 1}–${firstItem + visibleClaims.length} of ${list.length}`;
+      byId('claimCount').textContent = totalPages === 1 ? claimLabel : visibleRange;
+      renderQueuePagination(totalPages);
+
+      visibleClaims.forEach(item => {
         const button = document.createElement('button');
+        const header = document.createElement('div');
+        header.className = 'claim-card-header';
+        const identity = document.createElement('div');
         const claimIdDiv = document.createElement('div');
         claimIdDiv.className = 'claim-id';
         claimIdDiv.textContent = item.claim_id;
-        
-        const metaDiv = document.createElement('div');
-        metaDiv.className = 'claim-meta';
-        
-        const refSpan = document.createElement('span');
-        refSpan.textContent = item.customer_reference;
-        metaDiv.appendChild(refSpan);
-        
-        const stateSpan = document.createElement('span');
-        stateSpan.textContent = stateMap[item.queue] || item.queue;
-        metaDiv.appendChild(stateSpan);
-
-        const handoffSpan = document.createElement('span');
-        handoffSpan.textContent = `${item.open_handoff_count} open handoff${item.open_handoff_count === 1 ? '' : 's'}`;
-        metaDiv.appendChild(handoffSpan);
-
-        const assigneeSpan = document.createElement('span');
-        assigneeSpan.textContent = item.assignee_id ? `Assigned: ${item.assignee_id}` : 'Unassigned';
-        metaDiv.appendChild(assigneeSpan);
-        
+        const customerDiv = document.createElement('div');
+        customerDiv.className = 'claim-customer';
+        customerDiv.textContent = item.customer_reference;
+        identity.append(customerDiv, claimIdDiv);
         const badgeSpan = document.createElement('span');
         badgeSpan.className = `badge ${highlightQueueLabel(item.queue)}`;
-        badgeSpan.textContent = item.priority || 'standard';
-        metaDiv.appendChild(badgeSpan);
-        
-        button.appendChild(claimIdDiv);
-        button.appendChild(metaDiv);
+        badgeSpan.textContent = stateMap[item.queue] || item.queue;
+        header.append(identity, badgeSpan);
+
+        const assignment = document.createElement('div');
+        assignment.className = `claim-assignment${item.assignee_id ? ' is-assigned' : ''}`;
+        assignment.textContent = item.assignee_id ? `Assigned to ${item.assignee_id}` : 'Not assigned';
+
+        const queueMeta = document.createElement('div');
+        queueMeta.className = 'claim-queue-meta';
+        queueMeta.append(
+          previewText(`Priority: ${formatLabel(item.priority)}`),
+          previewText(`${item.open_handoff_count} open handoff${item.open_handoff_count === 1 ? '' : 's'}`),
+        );
+
+        const hoverDetails = document.createElement('div');
+        hoverDetails.className = 'claim-hover-details';
+        hoverDetails.id = `claim-preview-${item.claim_id}`;
+        hoverDetails.append(
+          previewRow('Route', formatLabel(item.route || 'Not assigned')),
+          previewRow('Evidence', evidencePreview(item)),
+          previewRow(
+            `Next · ${formatLabel(item.responsible_party)}`,
+            textOrEmpty(item.next_action_summary, formatLabel(item.next_action)),
+            'next',
+          ),
+        );
+        button.setAttribute('aria-describedby', hoverDetails.id);
+        button.setAttribute(
+          'aria-label',
+          `${item.customer_reference}, ${stateMap[item.queue] || item.queue}, ${assignment.textContent}, priority ${item.priority}, ${item.open_handoff_count} open handoffs`,
+        );
+        button.append(header, assignment, queueMeta, hoverDetails);
         button.classList.toggle('active', item.claim_id === activeClaimId);
         button.addEventListener('click', () => {
           activeClaimId = item.claim_id;
@@ -648,6 +850,47 @@
         });
         listEl.appendChild(button);
       });
+    }
+
+    function renderQueuePagination(totalPages) {
+      const pagination = byId('queuePagination');
+      pagination.hidden = totalPages <= 1;
+      byId('queuePageStatus').textContent = `Page ${queuePage} of ${totalPages}`;
+      byId('previousQueuePage').disabled = queuePage === 1;
+      byId('nextQueuePage').disabled = queuePage === totalPages;
+    }
+
+    function changeQueuePage(change) {
+      queuePage += change;
+      renderClaims(claims);
+      byId('claimList').scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    }
+
+    function evidencePreview(item) {
+      const summary = item.evidence_summary || {};
+      const waiting = (summary.pending || 0) + (summary.needs_attention || 0);
+      const parts = [formatLabel(item.evidence_state), `${summary.received || 0} ready`];
+      if (waiting) parts.push(`${waiting} waiting`);
+      return parts.join(' · ');
+    }
+
+    function previewRow(label, value, modifier = '') {
+      const row = document.createElement('div');
+      row.className = `claim-preview-row ${modifier}`.trim();
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'claim-preview-label';
+      labelSpan.textContent = label;
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'claim-preview-value';
+      valueSpan.textContent = value;
+      row.append(labelSpan, valueSpan);
+      return row;
+    }
+
+    function previewText(value) {
+      const span = document.createElement('span');
+      span.textContent = value;
+      return span;
     }
 
     function renderContext(detail) {
@@ -708,13 +951,14 @@
       const heading = document.createElement('div');
       heading.className = 'handoff-heading';
       const title = document.createElement('strong');
-      title.textContent = `${formatLabel(handoff.support_need)} · ${formatLabel(handoff.status)}`;
+      title.textContent = `${formatLabel(handoff.trigger)} · ${formatLabel(handoff.status)}`;
       const priority = document.createElement('span');
       priority.className = `badge ${handoff.priority === 'urgent' ? 'urgent' : 'review'}`;
       priority.textContent = handoff.priority;
       heading.append(title, priority);
       wrapper.append(heading);
       wrapper.append(definitionList([
+        { label: 'Priority', value: handoff.priority },
         { label: 'Reason', value: handoff.reason },
         { label: 'Requested action', value: handoff.requested_action },
         { label: 'Promised next step', value: handoff.packet?.promised_next_step },
@@ -790,6 +1034,78 @@
       }
     }
 
+    function operationalSummary(detail) {
+      const section = document.createElement('section');
+      section.className = 'operational-summary';
+      section.setAttribute('aria-label', 'Operational summary');
+
+      const heading = document.createElement('div');
+      heading.className = 'operational-summary-head';
+      const title = document.createElement('h3');
+      title.textContent = 'What happens next';
+      const status = document.createElement('span');
+      status.className = `badge ${highlightQueueLabel(detail.claim_state.workflow_state === 'created' ? 'created_routed' : detail.claim_state.workflow_state)}`;
+      status.textContent = formatLabel(detail.claim_state.workflow_state);
+      heading.append(title, status);
+
+      const grid = document.createElement('div');
+      grid.className = 'operational-summary-grid';
+      const evidence = detail.evidence_summary || {};
+      grid.append(
+        summaryCard('Route', formatLabel(detail.route || 'Not assigned')),
+        summaryCard('Evidence', formatLabel(detail.claim_state.evidence), `${evidence.received || 0} ready · ${(evidence.pending || 0) + (evidence.needs_attention || 0)} waiting`),
+        summaryCard('Responsible', formatLabel(detail.customer_next_step.responsible_party)),
+        summaryCard(
+          'Next action',
+          detail.customer_next_step.summary,
+          detail.customer_next_step.expected_by ? `Due ${new Date(detail.customer_next_step.expected_by).toLocaleString()}` : 'No due date set',
+          'next',
+        ),
+      );
+
+      const supporting = [];
+      if (detail.external_claim) {
+        supporting.push(`Claim ${detail.external_claim.claim_number || detail.external_claim.external_claim_id || ''} is ${formatLabel(detail.external_claim.creation_status)}.`);
+      }
+      if (detail.assessor_routing) {
+        const destination = detail.assessor_routing.queue_reference || detail.assessor_routing.assessor_reference;
+        supporting.push(`Assessor routing is ${formatLabel(detail.assessor_routing.routing_status)}${destination ? ` in ${formatLabel(destination)}` : ''}.`);
+      }
+      const latestSession = (detail.sessions || []).reduce((latest, session) =>
+        !latest || new Date(session.last_active_at) > new Date(latest.last_active_at) ? session : latest, null);
+      if (latestSession?.summary) supporting.push(latestSession.summary);
+      if (supporting.length) {
+        const note = document.createElement('p');
+        note.className = 'operational-summary-note';
+        note.textContent = supporting.join(' ');
+        section.append(heading, grid, note);
+      } else {
+        section.append(heading, grid);
+      }
+      return section;
+    }
+
+    function summaryCard(label, value, note = '', modifier = '') {
+      const card = document.createElement('div');
+      card.className = `operational-summary-card ${modifier}`.trim();
+      const content = document.createElement('div');
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'operational-summary-label';
+      labelSpan.textContent = label;
+      const valueDiv = document.createElement('div');
+      valueDiv.className = 'operational-summary-value';
+      valueDiv.textContent = value;
+      content.append(labelSpan, valueDiv);
+      card.appendChild(content);
+      if (note) {
+        const noteSpan = document.createElement('span');
+        noteSpan.className = 'muted';
+        noteSpan.textContent = note;
+        card.appendChild(noteSpan);
+      }
+      return card;
+    }
+
     function renderDetail(claimId, providedDetail = null) {
       const selected = claims.find(item => item.claim_id === claimId);
       if (!selected) {
@@ -819,6 +1135,8 @@
           noteP.className = 'note';
           noteP.textContent = `Claim revision ${detail.revision} · Updated ${new Date(detail.updated_at).toLocaleString()}`;
           detailContent.appendChild(noteP);
+
+          detailContent.append(operationalSummary(detail));
 
           byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
           byId('detailCustomerReference').textContent = detail.customer_reference;
@@ -862,8 +1180,23 @@
       renderClaims(claims);
     }
 
+    async function loadDemoQueue() {
+      setError('');
+      const button = byId('loadDemoQueue');
+      button.disabled = true;
+      try {
+        await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+        await loadClaims({ propagateError: true });
+      } catch (error) {
+        setError(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     async function loadClaims({ propagateError = false } = {}) {
       setError('');
+      setQueueLoading(true);
       const view = byId('viewSelect').value;
       try {
         const payload = await fetchClaims(view);
@@ -879,11 +1212,19 @@
         clearClaimDetail();
         setError(error.message);
         if (propagateError) throw error;
+      } finally {
+        setQueueLoading(false);
       }
     }
 
-    document.getElementById('viewSelect').addEventListener('change', loadClaims);
+    document.getElementById('viewSelect').addEventListener('change', () => {
+      queuePage = 1;
+      loadClaims();
+    });
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
+    byId('loadDemoQueue').addEventListener('click', loadDemoQueue);
+    byId('previousQueuePage').addEventListener('click', () => changeQueuePage(-1));
+    byId('nextQueuePage').addEventListener('click', () => changeQueuePage(1));
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
     byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
@@ -902,14 +1243,38 @@
     let activeCustomerChatId = null;
     let assistantAttachments = [];
     let chatDrag = null;
+    let pendingCustomerMessage = null;
+    let customerChatHistoryEntryCreated = false;
 
-    function setView(view) {
+    function workbenchUrl() {
+      return `${window.location.pathname}${window.location.search}`;
+    }
+
+    function setView(view, { updateHistory = true } = {}) {
       const showCustomerChat = view === 'customer-chat';
       workbenchView.hidden = showCustomerChat;
       customerChatView.hidden = !showCustomerChat;
       byId('workbenchNav').classList.toggle('active', !showCustomerChat);
       byId('customerChatNav').classList.toggle('active', showCustomerChat);
       if (showCustomerChat) renderCustomerChat();
+      if (!updateHistory) return;
+      if (showCustomerChat && window.location.hash !== '#customer-chat') {
+        window.history.pushState({ workbenchView: 'customer-chat' }, '', '#customer-chat');
+        customerChatHistoryEntryCreated = true;
+      } else if (!showCustomerChat && window.location.hash === '#customer-chat') {
+        if (customerChatHistoryEntryCreated) {
+          customerChatHistoryEntryCreated = false;
+          window.history.back();
+        } else {
+          window.history.replaceState({ workbenchView: 'workbench' }, '', workbenchUrl());
+        }
+      }
+    }
+
+    function restoreViewFromHistory() {
+      setView(window.location.hash === '#customer-chat' ? 'customer-chat' : 'workbench', {
+        updateHistory: false,
+      });
     }
 
     function setAssistantOpen(open) {
@@ -1007,19 +1372,29 @@
         history.replaceChildren();
         const entries = [
           ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
+            kind: 'message',
             role: item.actor === 'claimant' ? 'customer' : 'staff',
             actor: item.actor,
             text: item.content.text,
             createdAt: item.created_at,
           })),
           ...(detail.customer_updates || []).map(item => ({
+            kind: 'customer-update',
             role: 'staff',
             actor: 'staff update',
             text: item.summary,
             createdAt: item.created_at,
           })),
         ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
-        entries.forEach(item => {
+        const displayedUpdates = new Set();
+        const uniqueEntries = entries.filter(item => {
+          if (item.kind !== 'customer-update') return true;
+          const signature = normaliseCustomerText(item.text);
+          if (displayedUpdates.has(signature)) return false;
+          displayedUpdates.add(signature);
+          return true;
+        });
+        uniqueEntries.forEach(item => {
           const message = document.createElement('div');
           message.className = `customer-chat-message ${item.role}`;
           const meta = document.createElement('strong');
@@ -1029,7 +1404,7 @@
           message.append(meta, body);
           history.append(message);
         });
-        if (!entries.length) history.textContent = 'No persisted customer communication is available.';
+        if (!uniqueEntries.length) history.textContent = 'No persisted customer communication is available.';
         const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
         const input = byId('customerChatText');
         const send = byId('customerChatSend');
@@ -1060,7 +1435,6 @@
         return;
       }
       activeCustomerChatId = claimId;
-      renderCustomerChat();
       setView('customer-chat');
       byId('customerChatText').focus();
     }
@@ -1074,19 +1448,29 @@
         byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
         return;
       }
-      const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
-      const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
-      if (!handoff) {
-        byId('customerChatStatus').textContent = 'Accept an open handoff before sending an update.';
-        return;
-      }
       const button = byId('customerChatSend');
+      if (button.disabled) return;
       button.disabled = true;
       try {
+        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+        const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
+        if (!handoff) {
+          byId('customerChatStatus').textContent = 'Accept an open handoff before sending an update.';
+          return;
+        }
+        if (!pendingCustomerMessage
+          || pendingCustomerMessage.claimId !== claim.claim_id
+          || pendingCustomerMessage.text !== text) {
+          pendingCustomerMessage = {
+            claimId: claim.claim_id,
+            text,
+            key: requestKey('staff-message'),
+          };
+        }
         await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/messages`, {
           method: 'POST',
           headers: {
-            'Idempotency-Key': requestKey('staff-message'),
+            'Idempotency-Key': pendingCustomerMessage.key,
             'If-Match': String(detail.revision),
           },
           body: JSON.stringify({
@@ -1094,6 +1478,7 @@
           }),
         });
         input.value = '';
+        pendingCustomerMessage = null;
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
@@ -1197,6 +1582,9 @@
         sendCustomerChatMessage();
       }
     });
+    window.addEventListener('popstate', restoreViewFromHistory);
+    window.addEventListener('hashchange', restoreViewFromHistory);
+    restoreViewFromHistory();
   </script>
 </body>
 </html>
