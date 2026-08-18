@@ -182,6 +182,25 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Continue claim' })).toBeEnabled()
   })
 
+  it('keeps the claimant entry path operable by keyboard', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.tab()
+    expect(screen.getByRole('link', { name: 'Northwind home' })).toHaveFocus()
+    await user.tab()
+    const description = screen.getByLabelText('Incident description')
+    expect(description).toHaveFocus()
+    await user.type(description, 'Another vehicle hit my parked car.')
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Continue claim' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
+  })
+
   it('reuses the claim idempotency key when a failed submission is retried', async () => {
     fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Response lost')))
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
