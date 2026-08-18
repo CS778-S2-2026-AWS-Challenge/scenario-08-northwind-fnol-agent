@@ -15,7 +15,7 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
-SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
 
