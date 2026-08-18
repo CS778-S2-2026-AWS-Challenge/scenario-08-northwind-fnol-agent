@@ -118,9 +118,7 @@ def _resolved_confirmation_question_texts(
 ) -> set[str]:
     if source is None or claim.revision <= source.context_revision or not requirements:
         return set()
-    if any(
-        _confirmation_field_code(requirement) is None for requirement in requirements
-    ):
+    if any(_confirmation_field_code(requirement) is None for requirement in requirements):
         return set()
     if not all(
         _confirmation_requirement_is_resolved(claim, requirement)
