@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from backend.core.auth import Principal
 from backend.domain.models import (
+    ActorType,
     ClaimantSession,
     EvidenceFileStatus,
     EvidenceStatus,
@@ -95,18 +96,30 @@ def _unresolved_questions(
     return _dedupe(questions)
 
 
+def _evidence_is_resolved(status: EvidenceStatus, file_status: EvidenceFileStatus) -> bool:
+    return status is EvidenceStatus.RECEIVED and file_status is EvidenceFileStatus.READY
+
+
 def _pending_items(
     repository: PersistenceRepository,
     claim: WorkingClaim,
     source: SessionRecord | None,
 ) -> list[str]:
-    items = list(source.pending_items) if source is not None else []
-    for evidence in repository.list_evidence(claim.claim_id, claim.customer_id):
-        resolved = (
-            evidence.status is EvidenceStatus.RECEIVED
-            and evidence.file_status is EvidenceFileStatus.READY
-        )
-        if resolved:
+    evidence_records = repository.list_evidence(claim.claim_id, claim.customer_id)
+    if not evidence_records:
+        return _dedupe(list(source.pending_items) if source is not None else [])
+
+    has_resolved_evidence = any(
+        _evidence_is_resolved(evidence.status, evidence.file_status)
+        for evidence in evidence_records
+    )
+    items = (
+        []
+        if has_resolved_evidence
+        else list(source.pending_items) if source is not None else []
+    )
+    for evidence in evidence_records:
+        if _evidence_is_resolved(evidence.status, evidence.file_status):
             continue
         if evidence.claimant_note and evidence.claimant_note.strip():
             items.append(evidence.claimant_note.strip())
@@ -122,10 +135,49 @@ def _prior_commitments(
     claim: WorkingClaim,
     source: SessionRecord | None,
 ) -> list[str]:
-    commitments = list(source.prior_commitments) if source is not None else []
+    evidence_records = repository.list_evidence(claim.claim_id, claim.customer_id)
+    if not evidence_records:
+        return _dedupe(list(source.prior_commitments) if source is not None else [])
+
+    unresolved_evidence_ids = {
+        evidence.evidence_id
+        for evidence in evidence_records
+        if not _evidence_is_resolved(evidence.status, evidence.file_status)
+    }
+    if not unresolved_evidence_ids:
+        return []
+
+    has_resolved_evidence = len(unresolved_evidence_ids) != len(evidence_records)
+    messages = {}
+    commitments = (
+        []
+        if has_resolved_evidence
+        else list(source.prior_commitments) if source is not None else []
+    )
+    for session in repository.list_sessions_for_claim(claim.claim_id, claim.customer_id):
+        for message in repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        ):
+            messages[message.message_id] = message
+            if (
+                message.actor in {ActorType.AGENT, ActorType.STAFF}
+                and unresolved_evidence_ids.intersection(message.evidence_refs)
+            ):
+                text = message.content.get('text')
+                if isinstance(text, str) and text.strip():
+                    commitments.append(text.strip())
+
     for decision in repository.list_agent_decisions(claim.claim_id, claim.customer_id):
-        if 'EVIDENCE_PENDING_GENERATION' in decision.reason_codes:
-            commitments.append(decision.customer_response)
+        if 'EVIDENCE_PENDING_GENERATION' not in decision.reason_codes:
+            continue
+        trigger = messages.get(decision.trigger_message_id)
+        if trigger is not None and trigger.evidence_refs:
+            if not unresolved_evidence_ids.intersection(trigger.evidence_refs):
+                continue
+        commitments.append(decision.customer_response)
+
     return _dedupe(commitments)
 
 
