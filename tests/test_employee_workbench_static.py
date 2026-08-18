@@ -95,6 +95,8 @@ def test_employee_queue_uses_simple_bounded_pagination() -> None:
     assert 'function changeQueuePage(change)' in page
     assert 'aria-label="Claim queue pages"' in page
     assert 'queuePage = 1;\n      loadClaims();' in page
+
+
 def test_employee_workbench_explains_when_the_local_api_cannot_be_reached() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
