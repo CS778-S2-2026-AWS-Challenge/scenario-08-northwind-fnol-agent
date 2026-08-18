@@ -8,6 +8,7 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
     WorkingClaim,
@@ -110,6 +111,47 @@ class FixtureRepository(PersistenceRepository):
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
         self._sessions[session.session_id] = deepcopy(session)
+
+    def save_session_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        records_match = (
+            stored_claim.customer_id == claim.customer_id
+            and claim.revision == expected_revision + 1
+            and claim.active_session_id == session.session_id
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.status is SessionStatus.ACTIVE
+            and session.context_revision == expected_revision
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+        )
+        if not records_match:
+            raise KeyError(claim.claim_id)
+        if session.session_id in self._sessions:
+            raise IdempotencyConflict(session.session_id)
+        if any(
+            existing.claim_id == claim.claim_id and existing.status is SessionStatus.ACTIVE
+            for existing in self._sessions.values()
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        if self._idempotency.get(lookup) is not None:
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         claim = self.get_claim(claim_id, customer_id)
