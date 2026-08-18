@@ -47,3 +47,21 @@ def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seed
     assert 'Load demo handoff queue' in page
     assert 'ensureDemoQueueSeeded' not in page
     assert 'loadClaims();' in page
+
+
+def test_employee_workbench_explains_when_the_local_api_cannot_be_reached() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'Cannot reach the Workbench API at http://127.0.0.1:8000.' in page
+    assert 'Start the backend and keep it running, then refresh this page.' in page
+
+
+def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigation() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'This claimant update has already been recorded.' in page
+    assert 'pendingCustomerMessage' in page
+    assert "window.location.hash !== '#customer-chat'" in page
+    assert "window.addEventListener('popstate', restoreViewFromHistory)" in page
+    assert "window.addEventListener('hashchange', restoreViewFromHistory)" in page
+    assert 'customerChatHistoryEntryCreated' in page

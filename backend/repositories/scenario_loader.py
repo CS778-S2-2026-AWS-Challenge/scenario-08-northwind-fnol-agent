@@ -13,6 +13,7 @@ from backend.domain.models import (
     ClaimState,
     ContractModel,
     CustomerNextStep,
+    CustomerUpdateRecord,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceState,
@@ -22,9 +23,11 @@ from backend.domain.models import (
     MessageRecord,
     SessionRecord,
     SessionStatus,
+    StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
@@ -40,6 +43,8 @@ class ScenarioFixture(ContractModel):
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     messages: list[MessageRecord] = Field(default_factory=list)
     handoffs: list[HandoffRecord] = Field(default_factory=list)
+    staff_actions: list[StaffActionRecord] = Field(default_factory=list)
+    customer_updates: list[CustomerUpdateRecord] = Field(default_factory=list)
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -92,6 +97,27 @@ class ScenarioFixture(ContractModel):
         ):
             raise ValueError('A handoff source_message_id must reference a scenario message.')
 
+        action_ids = {action.action_id for action in self.staff_actions}
+        if len(action_ids) != len(self.staff_actions):
+            raise ValueError('Scenario staff action identifiers must be unique.')
+        if any(action.claim_id != self.claim.claim_id for action in self.staff_actions):
+            raise ValueError('Every staff action must belong to the scenario claim.')
+        if any(
+            action.status is StaffActionStatus.COMPLETED
+            and (
+                action.result is None or action.completed_by is None or action.completed_at is None
+            )
+            for action in self.staff_actions
+        ):
+            raise ValueError(
+                'Completed staff actions require an actor, result, and completion time.'
+            )
+
+        update_ids = {update.update_id for update in self.customer_updates}
+        if len(update_ids) != len(self.customer_updates):
+            raise ValueError('Scenario customer update identifiers must be unique.')
+        if any(update.claim_id != self.claim.claim_id for update in self.customer_updates):
+            raise ValueError('Every customer update must belong to the scenario claim.')
         unregistered_packet_fields = {
             field_code
             for handoff in self.handoffs
@@ -347,3 +373,34 @@ def seed_scenario(
         repository.save_message(message, scenario.claim.customer_id)
     for handoff in scenario.handoffs:
         repository.save_handoff(handoff, scenario.claim.customer_id)
+    # Scenario records represent already-audited staff history.  They are seeded
+    # without changing the fixture claim revision, while retaining ordinary
+    # repository ownership and idempotency checks.
+    for action in scenario.staff_actions:
+        repository.save_staff_mutation(
+            scenario.claim,
+            scenario.claim.revision,
+            IdempotencyRecord(
+                actor_id=action.completed_by or action.assigned_to,
+                route='fixture://staff-actions',
+                key=action.action_id,
+                request_fingerprint=f'fixture-staff-action:{action.action_id}',
+                claim_id=scenario.claim.claim_id,
+                session_id=scenario.claim.active_session_id or '',
+            ),
+            staff_action=action,
+        )
+    for update in scenario.customer_updates:
+        repository.save_staff_mutation(
+            scenario.claim,
+            scenario.claim.revision,
+            IdempotencyRecord(
+                actor_id=update.created_by,
+                route='fixture://customer-updates',
+                key=update.update_id,
+                request_fingerprint=f'fixture-customer-update:{update.update_id}',
+                claim_id=scenario.claim.claim_id,
+                session_id=scenario.claim.active_session_id or '',
+            ),
+            customer_update=update,
+        )
