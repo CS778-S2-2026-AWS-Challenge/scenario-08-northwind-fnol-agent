@@ -39,6 +39,7 @@
       "creation_status": "created",
       "route": "motor_assessment",
       "next_step": "Route the vehicle damage assessment to the Auckland assessor queue.",
+      "source": "fixture",
       "expected_by": "2026-08-14T02:15:00Z",
       "created_at": "2026-08-13T02:12:00Z"
     },
