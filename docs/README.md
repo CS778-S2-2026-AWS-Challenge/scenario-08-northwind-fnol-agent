@@ -9,7 +9,9 @@ This directory contains engineering guidance, API information, and user-research
 - [Claim creation and AWS adapter boundary](claim-creation-boundary.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 - [Day 4 API, data boundary, and adapter verification](day4-api-data-boundary-verification.md)
+- [D4-T02 journey test records](d4-t02-test-records.md)
 - [Day 4 verified demonstration evidence](demo-evidence/README.md)
+- [Day 4 technical demo runbook](day4-technical-demo-runbook.md)
 
 ## User Research
 
