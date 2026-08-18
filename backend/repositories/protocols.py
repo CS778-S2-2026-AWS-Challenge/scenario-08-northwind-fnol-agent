@@ -12,6 +12,7 @@ from backend.domain.models import (
     StaffActionRecord,
     WorkingClaim,
 )
+from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 
 
 class RepositoryConflict(Exception):
@@ -220,6 +221,29 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
+        raise NotImplementedError
+
+    def save_retrieval_bundle(
+        self,
+        record: RetrievalRecord,
+        review_signals: list[ReviewSignalRecord],
+        customer_id: str,
+    ) -> None:
+        """Atomically persist one retrieval record and its review-only signals."""
+        raise NotImplementedError
+
+    def list_retrieval_records(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[RetrievalRecord]:
+        raise NotImplementedError
+
+    def list_review_signals(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[ReviewSignalRecord]:
         raise NotImplementedError
 
     def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
