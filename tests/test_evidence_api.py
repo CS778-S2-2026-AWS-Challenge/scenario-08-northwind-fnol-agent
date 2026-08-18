@@ -396,6 +396,240 @@ def test_fact_decisions_require_completed_processing_and_the_owning_claimant(
     assert integration_credential.json()['error']['code'] == 'ACCESS_DENIED'
 
 
+def upload_evidence(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    case: str,
+    revision: int,
+) -> str:
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{case}-upload',
+            'If-Match': str(revision),
+        },
+        json={
+            'kind': 'incident_image',
+            'original_filename': f'{case}.jpg',
+            'media_type': 'image/jpeg',
+            'size_bytes': 512,
+        },
+    )
+    assert requested.status_code == 201
+    return cast(str, requested.json()['evidence_id'])
+
+
+def complete_upload(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    evidence_id: str,
+    case: str,
+    revision: int,
+) -> None:
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{case}-complete',
+            'If-Match': str(revision),
+        },
+        json={'upload_checksum': f'sha256:{"e" * 64}'},
+    )
+    assert completed.status_code == 202
+
+
+def integration_headers(key: str, revision: int) -> dict[str, str]:
+    return {
+        'Authorization': 'Bearer synthetic-integration',
+        'Idempotency-Key': key,
+        'If-Match': str(revision),
+    }
+
+
+def test_processing_rejects_unknown_targets_reused_keys_and_unregistered_facts(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'processing-guard-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    facts = {
+        'facts': [
+            {
+                'field_code': 'incident.description',
+                'value': 'Rear panel damage shown in the supplied evidence.',
+                'confidence': 0.8,
+            }
+        ]
+    }
+
+    missing_claim = client.post(
+        '/internal/v1/claims/clm_missing/evidence/evd_missing/processing',
+        headers=integration_headers('guard-missing-claim', 1),
+        json=facts,
+    )
+
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'processing-guard', 1)
+    endpoint = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
+
+    before_upload = client.post(
+        endpoint,
+        headers=integration_headers('guard-before-upload', 2),
+        json=facts,
+    )
+    missing_evidence = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/evd_missing/processing',
+        headers=integration_headers('guard-missing-evidence', 2),
+        json=facts,
+    )
+
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'processing-guard', 2)
+
+    unregistered = client.post(
+        endpoint,
+        headers=integration_headers('guard-unregistered', 3),
+        json={'facts': [{'field_code': 'incident.unregistered_code', 'value': 'Unknown field.'}]},
+    )
+    duplicated = client.post(
+        endpoint,
+        headers=integration_headers('guard-duplicated', 3),
+        json={
+            'facts': [
+                {'field_code': 'incident.description', 'value': 'First reading.'},
+                {'field_code': 'incident.description', 'value': 'Second reading.'},
+            ]
+        },
+    )
+    accepted = client.post(
+        endpoint,
+        headers=integration_headers('guard-accepted', 3),
+        json=facts,
+    )
+    reused_key = client.post(
+        endpoint,
+        headers=integration_headers('guard-accepted', 4),
+        json={'facts': [{'field_code': 'incident.cause', 'value': 'A different reading.'}]},
+    )
+
+    assert missing_claim.status_code == 404
+    assert missing_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+    assert before_upload.status_code == 409
+    assert before_upload.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert missing_evidence.status_code == 404
+    assert missing_evidence.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+    assert unregistered.status_code == 422
+    assert unregistered.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert [detail['field'] for detail in unregistered.json()['error']['details']] == [
+        'incident.unregistered_code'
+    ]
+    assert duplicated.status_code == 422
+    assert [detail['field'] for detail in duplicated.json()['error']['details']] == ['facts']
+    assert accepted.status_code == 200
+    assert reused_key.status_code == 409
+    assert reused_key.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+def test_fact_decisions_reject_unknown_targets_duplicates_and_confirmed_overwrites(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, 'decision-guard-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'decision-guard', 1)
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'decision-guard', 2)
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers('decision-guard-processing', 3),
+        json={
+            'facts': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Rear panel damage shown in the supplied evidence.',
+                    'confidence': 0.9,
+                }
+            ]
+        },
+    )
+    assert processed.status_code == 200
+    endpoint = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    payload = {'field_codes': ['incident.description'], 'decision': 'confirmed'}
+
+    missing_claim = client.post(
+        f'/api/v1/claims/clm_missing/evidence/{evidence_id}/fact-decisions',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'decision-missing-claim',
+            'If-Match': '4',
+        },
+        json=payload,
+    )
+    missing_evidence = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/evd_missing/fact-decisions',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'decision-missing-evidence',
+            'If-Match': '4',
+        },
+        json=payload,
+    )
+    duplicated = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'decision-duplicated',
+            'If-Match': '4',
+        },
+        json={
+            'field_codes': ['incident.description', 'incident.description'],
+            'decision': 'confirmed',
+        },
+    )
+    confirmed = client.post(
+        endpoint,
+        headers={**auth_headers, 'Idempotency-Key': 'decision-confirmed', 'If-Match': '4'},
+        json=payload,
+    )
+    reused_key = client.post(
+        endpoint,
+        headers={**auth_headers, 'Idempotency-Key': 'decision-confirmed', 'If-Match': '5'},
+        json={'field_codes': ['incident.description'], 'decision': 'rejected'},
+    )
+
+    second_evidence_id = upload_evidence(client, auth_headers, claim_id, 'decision-overwrite', 5)
+    complete_upload(client, auth_headers, claim_id, second_evidence_id, 'decision-overwrite', 6)
+    overwrite = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{second_evidence_id}/processing',
+        headers=integration_headers('decision-overwrite-processing', 7),
+        json={
+            'facts': [
+                {'field_code': 'incident.description', 'value': 'A conflicting later reading.'}
+            ]
+        },
+    )
+
+    assert missing_claim.status_code == 404
+    assert missing_claim.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+    assert missing_evidence.status_code == 404
+    assert missing_evidence.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+    assert duplicated.status_code == 422
+    assert [detail['field'] for detail in duplicated.json()['error']['details']] == ['field_codes']
+    assert confirmed.status_code == 200
+    assert confirmed.json()['updated_fields']['incident.description']['status'] == 'confirmed'
+    assert reused_key.status_code == 409
+    assert reused_key.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert overwrite.status_code == 409
+    assert overwrite.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert [detail['field'] for detail in overwrite.json()['error']['details']] == [
+        'incident.description'
+    ]
+
+
 def test_evidence_mutations_enforce_headers_revision_media_and_state(
     client: TestClient,
     auth_headers: dict[str, str],
