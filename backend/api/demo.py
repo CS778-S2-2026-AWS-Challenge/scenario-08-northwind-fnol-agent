@@ -4,7 +4,10 @@ from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
 from backend.domain.models import DemoResetResponse, DemoSeedResponse
 from backend.services.demo_reset import reset_demo_components
-from backend.services.demo_seed import HANDOFF_QUEUE_SCENARIO_IDS, seed_handoff_queue_scenarios
+from backend.services.demo_seed import (
+    WORKBENCH_DEMO_SCENARIO_IDS,
+    seed_workbench_demo_scenarios,
+)
 
 router = APIRouter(prefix='/api/v1/workbench/demo', tags=['workbench-demo'])
 
@@ -41,9 +44,9 @@ def seed_scenarios(
     _principal: Principal = Depends(require_staff),
 ) -> DemoSeedResponse:
     require_local_demo(request)
-    claim_ids = seed_handoff_queue_scenarios(request.app.state.claim_repository)
+    claim_ids = seed_workbench_demo_scenarios(request.app.state.claim_repository)
     return DemoSeedResponse(
         status='seeded',
-        scenario_ids=list(HANDOFF_QUEUE_SCENARIO_IDS),
+        scenario_ids=list(WORKBENCH_DEMO_SCENARIO_IDS),
         claim_ids=claim_ids,
     )

@@ -1,5 +1,6 @@
 import datetime
 import json
+from pathlib import Path
 
 RETRIEVED_AT = datetime.datetime(2026, 8, 17, 0, 15, tzinfo=datetime.UTC)
 
@@ -139,6 +140,45 @@ def test_mapping_rejects_provider_payload_without_required_domain_reference() ->
     except ValueError:
         return
     raise AssertionError('Mapping must reject a provider payload without a policy reference.')
+
+
+def test_drive_history_fixture_maps_allow_list_and_discards_source_only_fields() -> None:
+    import backend.adapters.policy_history as policy_history
+
+    fixture_path = (
+        Path(__file__).parent / 'fixtures' / 'policy_history' / 'drive-source-history-example.json'
+    )
+    fixture = json.loads(fixture_path.read_text(encoding='utf-8'))
+    envelope = policy_history.ProviderLookupEnvelope.model_validate(fixture['provider_envelope'])
+
+    record = policy_history.map_history_provider_payload(
+        retrieval_id=fixture['retrieval_id'],
+        claim_id=fixture['claim_id'],
+        envelope=envelope,
+    )
+
+    assert record.source.system == 'drive_claims_lifecycle_ifrs_synthetic'
+    assert record.source.reference.endswith('#CLM-IFRS-2024012')
+    assert record.facts.history_reference == 'CLM-IFRS-2024012'
+    assert record.facts.incident_type == 'motor'
+    assert record.facts.occurred_at == datetime.datetime(2025, 11, 1, tzinfo=datetime.UTC)
+    assert record.facts.status == 'reported'
+    assert record.facts.outcome is None
+    assert {item.code for item in record.uncertainty} == {
+        'HISTORY_OUTCOME_PENDING',
+        'SYNTHETIC_HISTORY_CONTEXT',
+    }
+
+    mapped_keys = collect_keys(record.model_dump(mode='json'))
+    source_only_keys = {
+        'source_policy_number',
+        'source_claim_amount',
+        'source_reserve_amount',
+        'source_ifrs17_cohort',
+        'source_discount_rate',
+        'source_risk_adjustment',
+    }
+    assert mapped_keys.isdisjoint(source_only_keys)
 
 
 def test_issue_108_does_not_expand_claimant_api_with_provider_records() -> None:

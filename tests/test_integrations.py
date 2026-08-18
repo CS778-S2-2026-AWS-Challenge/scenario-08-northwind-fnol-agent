@@ -21,6 +21,7 @@ from backend.domain.models import (
     CreateExternalClaimRequest,
     CustomerNextStep,
     ExternalClaimResult,
+    IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
 )
@@ -435,6 +436,7 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
                 creation_status=ClaimCreationStatus.PENDING,
                 route='provider_neutral_pending',
                 next_step='Wait for the claims service confirmation.',
+                source=IntegrationSource.CONFIGURED_SERVICE,
                 expected_by=timestamp + timedelta(hours=2),
                 created_at=timestamp,
             ),
@@ -473,6 +475,7 @@ def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() 
     assert response.json()['creation_status'] == 'pending'
     assert response.json()['external_claim_id'] is None
     assert response.json()['claim_number'] is None
+    assert response.json()['source'] == 'configured_service'
 
 
 def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() -> None:
