@@ -287,16 +287,23 @@ def start_session(
     active_session = repository.get_active_session(claim_id, principal.subject)
     if active_session is not None and active_session.status is SessionStatus.ACTIVE:
         session = active_session
-        repository.save_idempotency(
-            IdempotencyRecord(
-                actor_id=principal.subject,
-                route=route,
-                key=key,
-                request_fingerprint=fingerprint,
-                claim_id=claim_id,
-                session_id=session.session_id,
+        try:
+            repository.save_idempotency(
+                IdempotencyRecord(
+                    actor_id=principal.subject,
+                    route=route,
+                    key=key,
+                    request_fingerprint=fingerprint,
+                    claim_id=claim_id,
+                    session_id=session.session_id,
+                )
             )
-        )
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The session resume request conflicted with an existing retry or session.',
+            ) from conflict
     else:
         previous_sessions = repository.list_sessions_for_claim(
             claim_id,
