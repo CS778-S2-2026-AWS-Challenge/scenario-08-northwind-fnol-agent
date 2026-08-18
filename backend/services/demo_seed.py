@@ -7,11 +7,12 @@ from backend.repositories.scenario_loader import load_scenario, seed_scenario
 SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 
 # Stable identifiers from the canonical scenario catalog for the bounded handoff queue.
-# AT-02, AT-04, and AT-05 deliberately share the same records used by scenario validation.
+# These deliberately share the same records used by scenario validation.
 HANDOFF_QUEUE_SCENARIO_IDS = (
     'AT-02-coverage-ambiguity',
     'AT-04-urgent',
     'AT-05-human-request',
+    'AT-13-staff-action-lifecycle',
 )
 
 

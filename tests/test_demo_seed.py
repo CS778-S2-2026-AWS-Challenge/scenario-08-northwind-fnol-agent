@@ -18,8 +18,9 @@ def test_seed_scenarios_populates_the_urgent_human_request_and_review_queues() -
             'AT-02-coverage-ambiguity',
             'AT-04-urgent',
             'AT-05-human-request',
+            'AT-13-staff-action-lifecycle',
         }
-        assert len(body['claim_ids']) == 3
+        assert len(body['claim_ids']) == 4
 
         listing = client.get('/api/v1/workbench/claims', headers=STAFF_AUTH)
         assert listing.status_code == 200

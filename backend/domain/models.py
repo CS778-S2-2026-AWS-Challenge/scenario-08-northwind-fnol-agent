@@ -635,7 +635,13 @@ class WorkbenchClaimListItem(ContractModel):
     queue: str
     priority: HandoffPriority
     next_action: AgentAction
+    route: str | None = None
+    evidence_state: EvidenceState
     evidence_summary: EvidenceSummary
+    next_action_summary: str
+    responsible_party: ResponsibleParty
+    claim_creation_status: ClaimCreationStatus | None = None
+    assessor_routing_status: AssessorRoutingStatus | None = None
     open_handoff_count: int = Field(ge=0)
     assignee_id: str | None = None
     created_at: datetime
