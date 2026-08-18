@@ -1,109 +1,50 @@
 # D4-T02 Journey Test Records
 
-## Scope and limitations
+These records close the verification scope for issue [#41](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/41) against `main` candidate `20a10e8de0ceb0ebfd9ffbd5ef8e5a6a763d9995`.
 
-These records distinguish controlled API and fixture-based checks from the
-claimant-client journey. A passing automated check proves only its stated
-boundary; it does not override a reproduced claimant-client failure.
+## Commands and results
 
-Known claimant journey blockers are tracked in
-[#47](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/47).
-This record supports, but does not close,
-[#41](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/41).
+```text
+py -3.12 -m pytest tests/test_claim_creation_journey.py tests/test_claim_api.py::test_confirmed_intake_field_is_not_asked_again tests/test_handoff_api.py tests/test_workbench_api.py tests/test_integrations.py tests/test_day3_scenarios.py::test_claimant_and_staff_projections_share_state_without_leaking_internal_signal -q
+33 passed in 4.76s
 
-## T02-01A: Clear journey — controlled API path
+py -3.12 -m pytest -q --cov=backend --cov-report=term-missing
+181 passed in 32.76s
+Total coverage: 90.64%
+```
 
-- **Input:** Create a working claim through `POST /api/v1/claims` with
-  `incident_type: "motor"`. Submit: "Another car hit the rear of mine at
-  Queen Street and damaged the rear bumper." Confirm
-  `incident.description`, `incident.location`, and `loss.description`, then
-  request claim creation.
-- **Response:** The Agent returns `CONFIRM` and asks the claimant to check the
-  structured facts. After confirmation, claim creation returns a claim number,
-  `standard_motor_intake` route, next step, and expected timing.
-- **State change:** Proposed form fields become confirmed and the workflow
-  state becomes `created`.
-- **Result:** PASS for the controlled API path.
-- **Defect:** This path supplies `incident_type: "motor"` while creating the
-  working claim. It does not verify that the claimant client supplies that
-  value.
-- **Evidence:** `.venv/bin/python -m pytest tests/test_claim_creation_journey.py -v`
-  completed with `3 passed`, including
-  `test_at01_natural_intake_confirms_then_creates_mock_claim`.
+## T02-01: Clear motor journey
 
-## T02-01B: Clear journey — claimant-client path
+- **Input:** Create a working claim without `incident_type`, then submit the clear rear-end motor description from `AT-01-clear-motor-creation`.
+- **Response:** The Agent returns `CONFIRM` and proposes `incident.description`, `incident.location`, `loss.description`, and `incident.type=motor`. After confirmation, the next step is `ready_to_create`; controlled claim creation returns a claim number, route, next step, and expected timing.
+- **State change:** All proposed material facts become confirmed, the claim incident type becomes `motor`, and successful creation changes the workflow state to `created`.
+- **Result:** PASS. This includes the claimant-client regression fixed by PR #170; the path no longer depends on supplying `incident_type` when the working claim is created.
+- **Defect:** None reproduced on the tested candidate.
 
-- **Input:** In the claimant client, submit: "Another car hit the rear of mine
-  at Queen Street and damaged the rear bumper." Confirm the incident, loss,
-  and Queen Street location, and select **Create claim**.
-- **Response:** Claim creation fails with: "Controlled claim creation is
-  currently available only for the motor fixture path."
-- **State change:** The claim is not created and the staff workbench displays
-  `Incident type: Not set`.
-- **Result:** FAIL.
-- **Defect:** The claimant client does not preserve or submit the motor incident
-  type for this journey, preventing controlled claim creation. See
-  [#47](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/47).
-- **Evidence:** The reproduced live result is recorded in
-  [Day 4 assembled prototype integration baseline](day4-assembled-prototype-integration-results.md#known-live-journey-blockers).
+## T02-02: Guided clarification journey
 
-## T02-02: Clarification journey
+- **Input:** Submit a synthetic incident description, confirm it, then provide `A synthetic car park in Auckland.` and `A synthetic rear bumper was scratched.` in response to the next required fields.
+- **Response:** The next step advances from incident description to `incident.location`, then to `loss.description`. After all three are confirmed, an additional note produces `UPDATE` rather than asking for a confirmed field again.
+- **State change:** Description, location, and loss are persisted as separately confirmed fields with their source references. The final confirmation reaches `ready_to_create`.
+- **Result:** PASS. The controlled guided flow requests the next missing material fact and does not re-ask a confirmed one.
+- **Defect:** None reproduced within this deterministic guided-intake scope.
 
-- **Input:** Create a motor working claim and submit: "I had an accident, but
-  I am not sure what happened or whether my policy covers it."
-- **Response:** The current controlled Agent returns `CONFIRM`: "I have
-  structured what happened from your description. Please check the highlighted
-  facts and correct anything that is not right." It does not ask a focused
-  clarification question.
-- **State change:** `incident.description` is stored as `proposed`,
-  `claim_state.next_action` becomes `CONFIRM`, and coverage remains
-  `not_assessed`.
-- **Result:** FAIL.
-- **Defect:** The controlled Agent has no executable `CLARIFY` branch for this
-  material ambiguity. It should name the uncertainty in claimant-safe language
-  and request focused clarification before a high-impact decision.
-- **Evidence:** `backend/services/agent.py` routes a fresh claim with text input
-  through the material-fact confirmation branch; no `AgentAction.CLARIFY`
-  proposal is produced by `ControlledAgent`.
+## T02-03: Professional-review handoff context
 
-## T02-03: Coverage-boundary record
+- **Input:** Submit an explicit injury or continuing-danger report, or explicitly request a person after confirming an incident description.
+- **Response:** The Agent selects `URGENT_HANDOFF` for the explicit safety case or `HANDOFF` for the human request. Staff receive the incident summary, confirmed form snapshot, pending items, source references, reason, priority, and requested action. Claimant responses expose only the safe handoff status and next step.
+- **State change:** One persisted handoff is created, urgency and workflow state are updated where applicable, and the workbench projects the same shared claim state in the professional-review path.
+- **Result:** PASS. The receiving staff view has the context required to continue without reconstructing the report.
+- **Defect:** None reproduced. Production urgency thresholds and staffing rules remain outside the prototype contract.
 
-- **Input:** "I am not sure whether my policy covers this accident."
-- **Response:** The system returns: "I have structured what happened from your
-  description. Please check the highlighted facts and correct anything that is
-  not right." It does not state that the incident is covered, not covered,
-  approved, or declined.
-- **State change:** Coverage remains `not_assessed`; no coverage decision is
-  persisted.
-- **Result:** PASS for the no-unsupported-conclusion boundary.
-- **Defect:** The response is safe but insufficient as a clarification journey:
-  it should ask a focused clarification question. This is the defect recorded
-  in T02-02.
-- **Evidence:** The controlled Agent confirmation branch has no state-change
-  permission for `claim_state.coverage`; its state change is limited to
-  `claim_state.next_action`.
+## T02-04: Coverage boundary
 
-## T02-04: Professional-review staff-context projection
+- **Input:** Load the synthetic `AT-02-coverage-ambiguity` scenario and read its claimant and staff projections.
+- **Response:** The claimant receives a plain-language professional-review next step. Staff receive the internal review context and source references. Neither projection states that coverage is approved, declined, or finally determined.
+- **State change:** Coverage remains `needs_review`; the internal signal remains evidence for staff review rather than a coverage or fraud conclusion.
+- **Result:** PASS for the no-unsupported-conclusion and role-visibility boundary.
+- **Defect:** The scenario starts from controlled synthetic review state; it does not prove a production policy decision or unrestricted natural-language coverage classifier.
 
-- **Input:** Load the pre-seeded professional-review claim created by the
-  `_create_claim_with_context` test helper, then retrieve it through the staff
-  workbench and claimant projection.
-- **Response:** Staff can view the shared claim state, structured form,
-  evidence, pending items, review signal, internal messages, handoff packet,
-  and professional-review queue. The claimant projection does not expose
-  internal signals, staff actions, internal messages, or evidence provenance.
-- **State change:** The pre-seeded claim is projected in the
-  `professional_review` queue. Staff write-back is applied to the shared claim
-  state.
-- **Result:** PASS for staff-context projection and the claimant visibility
-  boundary.
-- **Defect:** This is not an end-to-end natural-language professional-review
-  journey. `_create_claim_with_context` directly seeds
-  `route=professional_review`, `fraud_signal=review_required`, and the internal
-  review signal. An executable input-to-Agent-to-professional-review transition
-  is still required.
-- **Evidence:** `.venv/bin/python -m pytest tests/test_workbench_api.py -v`
-  completed with `9 passed`, including:
-  - `test_staff_reads_complete_claim_detail_from_shared_state`
-  - `test_staff_receives_complete_handoff_packet_while_claimant_projection_is_safe`
-  - `test_claimant_projections_do_not_expose_workbench_only_data`
+## Evidence boundary
+
+All data is synthetic. These records verify the current deterministic prototype, shared-state projections, and authority boundaries. They do not establish Northwind production coverage rules, emergency processes, provider schemas, or model-level semantic intent recognition.
