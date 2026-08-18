@@ -843,6 +843,7 @@ Response `201`:
     "creation_status": "created",
     "route": "standard_motor_intake",
     "next_step": "Claims intake review",
+    "source": "fixture",
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
@@ -1446,12 +1447,18 @@ Response `201` or `200` for an idempotent replay:
   "creation_status": "created",
   "route": "standard_motor_intake",
   "next_step": "Claims intake review",
+  "source": "fixture",
   "expected_by": "2026-08-11T05:00:00Z",
   "created_at": "2026-08-10T03:55:00Z"
 }
 ```
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
+
+`source` is `fixture` for the deterministic fallback or `configured_service` for a
+confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
+an AWS integration is planned. Current AWS claims-service availability is
+`pending_confirmation`; the fixture remains the active fallback under the same contract.
 
 The request and response above are the provider-neutral boundary. AWS table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
@@ -1577,6 +1584,7 @@ Returns readiness without secrets or private configuration:
     "policy": "using_fixture",
     "claim_history": "using_fixture",
     "claims_service": "using_fixture",
+    "aws_claims_service": "pending_confirmation",
     "evidence_storage": "ok"
   },
   "checked_at": "2026-08-10T03:58:00Z"
