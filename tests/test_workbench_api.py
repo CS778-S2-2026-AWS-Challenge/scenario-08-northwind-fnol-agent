@@ -200,6 +200,10 @@ def test_staff_lists_claims_for_workbench_queue(
     assert item['queue'] == 'professional_review'
     assert item['priority'] == 'standard'
     assert item['next_action'] == 'CONFIRM'
+    assert item['route'] == 'professional_review'
+    assert item['evidence_state'] == 'pending_generation'
+    assert item['next_action_summary']
+    assert item['responsible_party'] == 'claimant'
     assert item['evidence_summary']['pending'] == 1
 
 

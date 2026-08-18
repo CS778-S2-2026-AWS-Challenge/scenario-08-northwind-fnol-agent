@@ -6,25 +6,25 @@ from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
 SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 
-# Stable identifiers from the canonical scenario catalog for the bounded handoff queue.
-# AT-02, AT-04, and AT-05 deliberately share the same records used by scenario validation.
-HANDOFF_QUEUE_SCENARIO_IDS = (
+# Stable canonical scenarios for the mixed staff-workbench demonstration queue.
+WORKBENCH_DEMO_SCENARIO_IDS = (
     'AT-02-coverage-ambiguity',
     'AT-04-urgent',
     'AT-05-human-request',
+    'AT-10-controlled-assessor',
 )
 
 
-def seed_handoff_queue_scenarios(repository: PersistenceRepository) -> list[str]:
+def seed_workbench_demo_scenarios(repository: PersistenceRepository) -> list[str]:
     if repository.list_claims_internal():
         raise ApiError(
             status_code=409,
             code='DEMO_SEED_REQUIRES_EMPTY_QUEUE',
-            message='Reset the local demo before loading the bounded handoff queue.',
+            message='Reset the local demo before loading the workbench scenario queue.',
         )
 
     claim_ids: list[str] = []
-    for scenario_id in HANDOFF_QUEUE_SCENARIO_IDS:
+    for scenario_id in WORKBENCH_DEMO_SCENARIO_IDS:
         scenario = load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json')
         seed_scenario(repository, scenario)
         claim_ids.append(scenario.claim.claim_id)

@@ -44,6 +44,7 @@ def client_for(repository: FixtureRepository) -> TestClient:
         'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
+        'AT-10-controlled-assessor',
         'AT-12-signal-writeback',
         'AT-13-staff-action-lifecycle',
     ],
@@ -68,6 +69,7 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
         'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
+        'AT-10-controlled-assessor',
         'AT-12-signal-writeback',
         'AT-13-staff-action-lifecycle',
     ]
@@ -78,6 +80,7 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
         'AT-05-human-request': 1,
         'AT-06-pending-evidence': 1,
         'AT-08-resume': 2,
+        'AT-10-controlled-assessor': 1,
         'AT-12-signal-writeback': 1,
         'AT-13-staff-action-lifecycle': 1,
     }
@@ -135,6 +138,35 @@ def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() ->
     assert pending.json()['evidence_summary']['pending'] == 1
     assert evidence.json()['items'][0]['status'] == 'pending_generation'
     assert 'provenance' not in evidence.json()['items'][0]
+
+
+def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None:
+    repository, claim_id, _ = scenario('AT-10-controlled-assessor')
+
+    with client_for(repository) as client:
+        listing = client.get(
+            '/api/v1/workbench/claims?view=created_routed',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        detail = client.get(
+            f'/api/v1/workbench/claims/{claim_id}',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+
+    assert listing.status_code == 200
+    item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
+    assert item['queue'] == 'created_routed'
+    assert item['route'] == 'motor_assessment'
+    assert item['evidence_state'] == 'received'
+    assert item['evidence_summary'] == {'received': 1, 'pending': 0, 'needs_attention': 0}
+    assert item['next_action_summary'].startswith('Assign the next available motor assessor')
+    assert item['responsible_party'] == 'external_party'
+    assert item['claim_creation_status'] == 'created'
+    assert item['assessor_routing_status'] == 'queued'
+
+    assert detail.status_code == 200
+    assert detail.json()['sessions'][0]['summary'].startswith('The motor claim was created')
+    assert detail.json()['messages']
 
 
 def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> None:
