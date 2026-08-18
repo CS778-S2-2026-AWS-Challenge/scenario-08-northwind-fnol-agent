@@ -113,11 +113,9 @@ def _pending_items(
         _evidence_is_resolved(evidence.status, evidence.file_status)
         for evidence in evidence_records
     )
-    items = (
-        []
-        if has_resolved_evidence
-        else list(source.pending_items) if source is not None else []
-    )
+    items: list[str] = []
+    if not has_resolved_evidence and source is not None:
+        items.extend(source.pending_items)
     for evidence in evidence_records:
         if _evidence_is_resolved(evidence.status, evidence.file_status):
             continue
@@ -149,11 +147,9 @@ def _prior_commitments(
 
     has_resolved_evidence = len(unresolved_evidence_ids) != len(evidence_records)
     messages = {}
-    commitments = (
-        []
-        if has_resolved_evidence
-        else list(source.prior_commitments) if source is not None else []
-    )
+    commitments: list[str] = []
+    if not has_resolved_evidence and source is not None:
+        commitments.extend(source.prior_commitments)
     for session in repository.list_sessions_for_claim(claim.claim_id, claim.customer_id):
         for message in repository.list_messages(
             claim.claim_id,
