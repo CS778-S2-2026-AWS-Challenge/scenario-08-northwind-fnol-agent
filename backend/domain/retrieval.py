@@ -60,3 +60,19 @@ class ClaimHistoryRetrievalRecord(ContractModel):
     source: RetrievalSource
     facts: ClaimHistoryFacts
     uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
+
+
+type RetrievalRecord = PolicyRetrievalRecord | ClaimHistoryRetrievalRecord
+
+
+class ReviewSignalRecord(ContractModel):
+    """Staff-only evidence for professional review, never an automatic finding."""
+
+    signal_id: str = Field(min_length=1, max_length=120)
+    claim_id: str = Field(min_length=1, max_length=100)
+    review_type: Literal['professional_review'] = 'professional_review'
+    code: str = Field(min_length=1, max_length=100)
+    source_refs: list[str] = Field(min_length=1, max_length=100)
+    reason_codes: list[str] = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+    created_at: datetime
