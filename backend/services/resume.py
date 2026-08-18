@@ -5,8 +5,10 @@ from backend.domain.models import (
     ActorType,
     ClaimantSession,
     EvidenceFileStatus,
+    EvidenceRecord,
     EvidenceStatus,
     FormStatus,
+    MessageRecord,
     ResumePackage,
     SessionRecord,
     StartSessionRequest,
@@ -100,6 +102,19 @@ def _evidence_is_resolved(status: EvidenceStatus, file_status: EvidenceFileStatu
     return status is EvidenceStatus.RECEIVED and file_status is EvidenceFileStatus.READY
 
 
+def _source_evidence_context_is_current(
+    source: SessionRecord | None,
+    evidence_records: list[EvidenceRecord],
+) -> bool:
+    if source is None:
+        return False
+    return all(
+        not _evidence_is_resolved(evidence.status, evidence.file_status)
+        and evidence.updated_at <= source.last_active_at
+        for evidence in evidence_records
+    )
+
+
 def _pending_items(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -109,12 +124,8 @@ def _pending_items(
     if not evidence_records:
         return _dedupe(list(source.pending_items) if source is not None else [])
 
-    has_resolved_evidence = any(
-        _evidence_is_resolved(evidence.status, evidence.file_status)
-        for evidence in evidence_records
-    )
     items: list[str] = []
-    if not has_resolved_evidence and source is not None:
+    if _source_evidence_context_is_current(source, evidence_records) and source is not None:
         items.extend(source.pending_items)
     for evidence in evidence_records:
         if _evidence_is_resolved(evidence.status, evidence.file_status):
@@ -145,10 +156,10 @@ def _prior_commitments(
     if not unresolved_evidence_ids:
         return []
 
-    has_resolved_evidence = len(unresolved_evidence_ids) != len(evidence_records)
-    messages = {}
+    source_context_is_current = _source_evidence_context_is_current(source, evidence_records)
+    messages: dict[str, MessageRecord] = {}
     commitments: list[str] = []
-    if not has_resolved_evidence and source is not None:
+    if source_context_is_current and source is not None:
         commitments.extend(source.prior_commitments)
     for session in repository.list_sessions_for_claim(claim.claim_id, claim.customer_id):
         for message in repository.list_messages(
@@ -157,10 +168,10 @@ def _prior_commitments(
             claim.customer_id,
         ):
             messages[message.message_id] = message
-            if (
-                message.actor in {ActorType.AGENT, ActorType.STAFF}
-                and unresolved_evidence_ids.intersection(message.evidence_refs)
-            ):
+            if message.actor in {
+                ActorType.AGENT,
+                ActorType.STAFF,
+            } and not unresolved_evidence_ids.isdisjoint(message.evidence_refs):
                 text = message.content.get('text')
                 if isinstance(text, str) and text.strip():
                     commitments.append(text.strip())
@@ -170,8 +181,10 @@ def _prior_commitments(
             continue
         trigger = messages.get(decision.trigger_message_id)
         if trigger is not None and trigger.evidence_refs:
-            if not unresolved_evidence_ids.intersection(trigger.evidence_refs):
+            if unresolved_evidence_ids.isdisjoint(trigger.evidence_refs):
                 continue
+        elif not source_context_is_current:
+            continue
         commitments.append(decision.customer_response)
 
     return _dedupe(commitments)
