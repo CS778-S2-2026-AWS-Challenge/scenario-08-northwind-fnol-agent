@@ -158,6 +158,11 @@ class ClaimCreationStatus(str, Enum):
     FAILED = 'failed'
 
 
+class IntegrationSource(str, Enum):
+    FIXTURE = 'fixture'
+    CONFIGURED_SERVICE = 'configured_service'
+
+
 class AssessorRoutingStatus(str, Enum):
     ASSIGNED = 'assigned'
     QUEUED = 'queued'
@@ -260,6 +265,7 @@ class ExternalClaimResult(ContractModel):
     creation_status: ClaimCreationStatus
     route: str
     next_step: str
+    source: IntegrationSource
     expected_by: datetime | None = None
     created_at: datetime
 

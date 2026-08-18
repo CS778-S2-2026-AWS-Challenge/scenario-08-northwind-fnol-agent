@@ -13,6 +13,10 @@
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #f1f5f9; }
     button, select, textarea, input { font: inherit; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(56, 189, 248, .55);
+      outline-offset: 2px;
+    }
     a { color: inherit; text-decoration: none; }
 
     .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
@@ -288,9 +292,22 @@
     .customer-chat-button { border:0; border-radius:10px; padding:10px 14px; background:#157f79; color:#fff; font-weight:700; cursor:pointer; }
     .customer-chat-close { border:0; border-radius:8px; padding:8px 10px; background:#f1f5f9; color:#334155; cursor:pointer; }
     @media(max-width:900px) { .chat-widget { right:12px; bottom:12px; width:300px; } }
-    @media(max-width:680px) { .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; } }
+    @media(max-width:680px) {
+      .chat-widget { left:12px; right:12px; bottom:12px; width:auto; border-radius:18px; }
+      .chat-widget.closed { left:auto; right:12px; width:178px; }
+    }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
-    @media(max-width:720px) { .customer-chat-content { grid-template-columns:1fr; } .customer-chat-list { display:none; } }
+    @media(max-width:1024px) {
+      .sidebar { width:100%; }
+      .cards { grid-template-columns:1fr; }
+    }
+    @media(max-width:720px) {
+      .content { min-width:0; padding:16px; }
+      .detail-grid, .staff-form-grid, .context-row { grid-template-columns:1fr; }
+      .claim-list button { width:100%; }
+      .customer-chat-content { grid-template-columns:1fr; }
+      .customer-chat-list { display:none; }
+    }
   </style>
 </head>
 <body>
@@ -316,7 +333,7 @@
         <button id="customerChatNav" type="button">Customer chat</button>
       </nav>
 
-      <button id="refreshClaims">Refresh claims</button>
+      <button id="refreshClaims" type="button">Refresh claims</button>
       <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
 
       <div class="help">
@@ -329,7 +346,7 @@
     </aside>
 
     <main class="content">
-      <section id="workbenchView">
+      <section id="workbenchView" aria-busy="false">
       <div class="header">
         <div>
           <h1>Employee workbench</h1>
@@ -341,7 +358,7 @@
         <section class="panel">
           <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
           <div class="panel-body">
-            <div id="errorBanner" class="error" style="display:none"></div>
+            <div id="errorBanner" class="error" role="alert" style="display:none"></div>
             <ul id="claimList" class="claim-list"></ul>
             <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
             <nav id="queuePagination" class="queue-pagination" aria-label="Claim queue pages" hidden>
@@ -390,8 +407,8 @@
             <p id="detailNextStepSummary"></p>
             <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
             <div style="margin-top:12px">
-              <button id="openCustomerChatBtn" class="customer-chat-button">View customer communication</button>
-              <button id="toggleAssistantBtn" class="customer-chat-close" style="margin-left:8px">Open assistant</button>
+              <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
+              <button id="toggleAssistantBtn" class="customer-chat-close" type="button" style="margin-left:8px">Open assistant</button>
             </div>
             </div>
           <div class="detail-section" id="detailStaffActions" style="display:none">
@@ -457,7 +474,7 @@
               </div>
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
               <div class="customer-chat-input">
-                <textarea id="customerChatText" placeholder="Write a message to the claimant..."></textarea>
+                <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
                 <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
                 <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
               </div>
@@ -475,17 +492,17 @@
         <strong id="chatHeaderTitle">Aurora Assistant</strong>
         <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
       </div>
-      <button class="chat-toggle" id="chatToggle">Open</button>
+      <button class="chat-toggle" id="chatToggle" type="button">Open</button>
     </div>
     <div class="chat-body" id="chatBody">
       <div class="chat-message assistant">Hi! I can help with claim next steps, policy checks, and process guidance.</div>
     </div>
     <div class="chat-attachments" id="chatAttachments"></div>
     <div class="chat-input-bar" id="chatInputBar">
-      <button type="button" class="chat-file-btn" id="chatFileBtn">+</button>
-      <textarea id="chatInput" class="chat-input" placeholder="Type a question..." rows="1"></textarea>
-      <button class="chat-send" id="chatSend">Send</button>
-      <input id="chatFileInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
+      <button type="button" class="chat-file-btn" id="chatFileBtn" aria-label="Attach files">+</button>
+      <textarea id="chatInput" class="chat-input" aria-label="Assistant question" placeholder="Type a question..." rows="1"></textarea>
+      <button class="chat-send" id="chatSend" type="button">Send</button>
+      <input id="chatFileInput" type="file" aria-label="Assistant attachments" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" style="display:none">
     </div>
   </div>
 
@@ -519,6 +536,13 @@
       }
       banner.style.display = 'block';
       banner.textContent = message;
+    }
+
+    function setQueueLoading(loading) {
+      const button = byId('refreshClaims');
+      button.disabled = loading;
+      button.textContent = loading ? 'Refreshing...' : 'Refresh claims';
+      byId('workbenchView').setAttribute('aria-busy', String(loading));
     }
 
     function getHeaders() {
@@ -1154,6 +1178,7 @@
 
     async function loadClaims({ propagateError = false } = {}) {
       setError('');
+      setQueueLoading(true);
       const view = byId('viewSelect').value;
       try {
         const payload = await fetchClaims(view);
@@ -1169,6 +1194,8 @@
         clearClaimDetail();
         setError(error.message);
         if (propagateError) throw error;
+      } finally {
+        setQueueLoading(false);
       }
     }
 

@@ -420,3 +420,48 @@ it('clears stale write-back state when the post-mutation refresh fails', async (
   })
   dom.window.close()
 })
+
+it('announces queue failures and exposes named keyboard controls', async () => {
+  let releaseRequest
+  const pendingResponse = new Promise((resolve) => {
+    releaseRequest = resolve
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => pendingResponse)
+    },
+  })
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#refreshClaims').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#refreshClaims').textContent).toBe('Refreshing...')
+    expect(dom.window.document.querySelector('#workbenchView').getAttribute('aria-busy')).toBe('true')
+  })
+
+  releaseRequest(new Response(JSON.stringify({ error: { message: 'Queue unavailable' } }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json' },
+  }))
+
+  await waitFor(() => {
+    const alert = dom.window.document.querySelector('#errorBanner')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.textContent).toContain('Queue unavailable')
+    expect(dom.window.document.querySelector('#refreshClaims').disabled).toBe(false)
+    expect(dom.window.document.querySelector('#workbenchView').getAttribute('aria-busy')).toBe('false')
+  })
+  expect(dom.window.document.querySelector('#customerChatText').getAttribute('aria-label')).toBe('Message to claimant')
+  expect(dom.window.document.querySelector('#chatInput').getAttribute('aria-label')).toBe('Assistant question')
+  expect(dom.window.document.querySelector('#chatFileBtn').getAttribute('aria-label')).toBe('Attach files')
+  const attachmentInput = dom.window.document.querySelector('#chatFileInput')
+  Object.defineProperty(attachmentInput, 'files', {
+    configurable: true,
+    value: [new dom.window.File(['synthetic'], 'evidence.txt', { type: 'text/plain' })],
+  })
+  attachmentInput.dispatchEvent(new dom.window.Event('change'))
+  expect(dom.window.document.querySelector('#chatAttachments').textContent).toContain('evidence.txt')
+  expect(dom.window.document.querySelector('[aria-label="Remove evidence.txt"]')).not.toBeNull()
+  dom.window.close()
+})
