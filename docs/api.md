@@ -975,6 +975,11 @@ fields remain proposed until a claimant or authorised staff member confirms
 them; completion never silently writes extracted values into the confirmed
 form.
 
+The Sprint 2 mock adapter returns `202` and records the public `file_status` as
+`processing` after an image or PDF upload is accepted. Filename, media type,
+size, and processing status can be read back from the evidence list. Storage
+keys, checksums, processing references, and file contents remain internal.
+
 ### `POST /api/v1/claims/{claim_id}/support-requests`
 
 Request:
