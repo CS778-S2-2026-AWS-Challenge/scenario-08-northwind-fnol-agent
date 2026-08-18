@@ -557,10 +557,18 @@
     }
 
     async function apiRequest(url, options = {}) {
-      const response = await fetch(url, {
-        ...options,
-        headers: { ...getHeaders(), ...options.headers },
-      });
+      let response;
+      try {
+        response = await fetch(url, {
+          ...options,
+          headers: { ...getHeaders(), ...options.headers },
+        });
+      } catch (error) {
+        throw new Error(
+          'Cannot reach the Workbench API at http://127.0.0.1:8000. '
+          + 'Start the backend and keep it running, then refresh this page.'
+        );
+      }
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(payload?.error?.message || `The workbench request failed (${response.status}).`);
@@ -574,6 +582,10 @@
 
     function commaSeparatedValues(value) {
       return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+
+    function normaliseCustomerText(value) {
+      return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
     }
 
     async function requestMutation(path, method, revision, payload) {
@@ -660,6 +672,12 @@
       const resultSummary = byId('completeResultSummary').value.trim();
       const customerSummary = byId('customerUpdateSummary').value.trim();
       if (!outcomeCode || !reasonCodes.length || !resultSummary || !customerSummary) throw new Error('Outcome, result, reason code, and claimant-safe update are required.');
+      const duplicateUpdate = (activeClaimDetail.customer_updates || []).some(
+        update => normaliseCustomerText(update.summary) === normaliseCustomerText(customerSummary)
+      );
+      if (duplicateUpdate) {
+        throw new Error('This claimant update has already been recorded. Change the update before completing another action.');
+      }
       const workflowState = byId('completeWorkflowState').value;
       await requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH', activeClaimDetail.revision, {
         status: 'completed',
@@ -1225,14 +1243,38 @@
     let activeCustomerChatId = null;
     let assistantAttachments = [];
     let chatDrag = null;
+    let pendingCustomerMessage = null;
+    let customerChatHistoryEntryCreated = false;
 
-    function setView(view) {
+    function workbenchUrl() {
+      return `${window.location.pathname}${window.location.search}`;
+    }
+
+    function setView(view, { updateHistory = true } = {}) {
       const showCustomerChat = view === 'customer-chat';
       workbenchView.hidden = showCustomerChat;
       customerChatView.hidden = !showCustomerChat;
       byId('workbenchNav').classList.toggle('active', !showCustomerChat);
       byId('customerChatNav').classList.toggle('active', showCustomerChat);
       if (showCustomerChat) renderCustomerChat();
+      if (!updateHistory) return;
+      if (showCustomerChat && window.location.hash !== '#customer-chat') {
+        window.history.pushState({ workbenchView: 'customer-chat' }, '', '#customer-chat');
+        customerChatHistoryEntryCreated = true;
+      } else if (!showCustomerChat && window.location.hash === '#customer-chat') {
+        if (customerChatHistoryEntryCreated) {
+          customerChatHistoryEntryCreated = false;
+          window.history.back();
+        } else {
+          window.history.replaceState({ workbenchView: 'workbench' }, '', workbenchUrl());
+        }
+      }
+    }
+
+    function restoreViewFromHistory() {
+      setView(window.location.hash === '#customer-chat' ? 'customer-chat' : 'workbench', {
+        updateHistory: false,
+      });
     }
 
     function setAssistantOpen(open) {
@@ -1330,19 +1372,29 @@
         history.replaceChildren();
         const entries = [
           ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
+            kind: 'message',
             role: item.actor === 'claimant' ? 'customer' : 'staff',
             actor: item.actor,
             text: item.content.text,
             createdAt: item.created_at,
           })),
           ...(detail.customer_updates || []).map(item => ({
+            kind: 'customer-update',
             role: 'staff',
             actor: 'staff update',
             text: item.summary,
             createdAt: item.created_at,
           })),
         ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
-        entries.forEach(item => {
+        const displayedUpdates = new Set();
+        const uniqueEntries = entries.filter(item => {
+          if (item.kind !== 'customer-update') return true;
+          const signature = normaliseCustomerText(item.text);
+          if (displayedUpdates.has(signature)) return false;
+          displayedUpdates.add(signature);
+          return true;
+        });
+        uniqueEntries.forEach(item => {
           const message = document.createElement('div');
           message.className = `customer-chat-message ${item.role}`;
           const meta = document.createElement('strong');
@@ -1352,7 +1404,7 @@
           message.append(meta, body);
           history.append(message);
         });
-        if (!entries.length) history.textContent = 'No persisted customer communication is available.';
+        if (!uniqueEntries.length) history.textContent = 'No persisted customer communication is available.';
         const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
         const input = byId('customerChatText');
         const send = byId('customerChatSend');
@@ -1383,7 +1435,6 @@
         return;
       }
       activeCustomerChatId = claimId;
-      renderCustomerChat();
       setView('customer-chat');
       byId('customerChatText').focus();
     }
@@ -1397,19 +1448,29 @@
         byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
         return;
       }
-      const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
-      const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
-      if (!handoff) {
-        byId('customerChatStatus').textContent = 'Accept an open handoff before sending an update.';
-        return;
-      }
       const button = byId('customerChatSend');
+      if (button.disabled) return;
       button.disabled = true;
       try {
+        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+        const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
+        if (!handoff) {
+          byId('customerChatStatus').textContent = 'Accept an open handoff before sending an update.';
+          return;
+        }
+        if (!pendingCustomerMessage
+          || pendingCustomerMessage.claimId !== claim.claim_id
+          || pendingCustomerMessage.text !== text) {
+          pendingCustomerMessage = {
+            claimId: claim.claim_id,
+            text,
+            key: requestKey('staff-message'),
+          };
+        }
         await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/messages`, {
           method: 'POST',
           headers: {
-            'Idempotency-Key': requestKey('staff-message'),
+            'Idempotency-Key': pendingCustomerMessage.key,
             'If-Match': String(detail.revision),
           },
           body: JSON.stringify({
@@ -1417,6 +1478,7 @@
           }),
         });
         input.value = '';
+        pendingCustomerMessage = null;
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
@@ -1520,6 +1582,9 @@
         sendCustomerChatMessage();
       }
     });
+    window.addEventListener('popstate', restoreViewFromHistory);
+    window.addEventListener('hashchange', restoreViewFromHistory);
+    restoreViewFromHistory();
   </script>
 </body>
 </html>
