@@ -9,6 +9,7 @@ from backend.domain.models import (
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     ExternalClaimResult,
+    IntegrationSource,
     RouteAssessorRequest,
 )
 from backend.services.support import now_utc
@@ -83,6 +84,7 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
             creation_status=ClaimCreationStatus.CREATED,
             route=command.route,
             next_step='Claims intake review',
+            source=IntegrationSource.FIXTURE,
             expected_by=timestamp + timedelta(hours=24),
             created_at=timestamp,
         )
