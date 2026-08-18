@@ -359,9 +359,11 @@ Initial common field codes:
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
+| `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
 | `parties.other_parties` | array | Other involved parties when known |
 | `authorities.police_report_reference` | string | Reference if already issued |
+| `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
 | `vehicle.damage_description` | string | Motor-specific damage account |
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
@@ -841,6 +843,7 @@ Response `201`:
     "creation_status": "created",
     "route": "standard_motor_intake",
     "next_step": "Claims intake review",
+    "source": "fixture",
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
@@ -1055,7 +1058,9 @@ and context revisions. `messages` includes the complete persisted communication 
 including internal-only staff or system records. `decisions` includes internal authority,
 tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
 workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
-includes routing fields plus the complete transfer packet. Claimant routes return only the
+includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
+internal `professional_review_required` trigger does not set `support_need`: that field remains
+specific to claimant support intent. Claimant routes return only the
 separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
 action, applied rule, assignment, source message, or packet. `external_claim` and
 `assessor_routing` use the shared typed creation and routing results, including their status,
@@ -1170,6 +1175,57 @@ Resolve request:
 ```
 
 Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
+
+### `POST /api/v1/workbench/demo/seed-scenarios`
+
+Loads the bounded local demonstration queue containing the canonical AT-02, AT-04, and AT-05
+scenario records. This is an explicit staff action: the workbench never calls it during page load.
+The route requires the synthetic staff credential, is available only in development and test
+environments, and returns `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the
+local demo before loading this set again. Runtime demo records are maintained under
+`backend/demo_data/scenarios/`, not under the test fixture tree.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": ["AT-02-coverage-ambiguity", "AT-04-urgent", "AT-05-human-request"],
+  "claim_ids": ["clm_fixture_at02", "clm_fixture_at04", "clm_fixture_at05"]
+}
+```
+
+### `POST /api/v1/workbench/demo/reset`
+
+Resets the running local demonstration state. The route requires the synthetic
+staff credential and is therefore unavailable outside the development and test
+environments. It clears claims, sessions, messages, decisions, evidence,
+handoffs, staff records, idempotency records, and mock integration results.
+
+Every runtime component must explicitly implement the demo-reset boundary. If
+the repository or any adapter does not opt in, the server returns `409
+DEMO_RESET_UNAVAILABLE` before clearing any component. This prevents the local
+command from deleting data through a future production persistence or provider
+adapter.
+
+Response `200`:
+
+```json
+{
+  "status": "reset",
+  "cleared": {
+    "claims": 2,
+    "evidence": 1,
+    "handoffs": 1,
+    "idempotency_records": 6,
+    "mock_claim_results": 1
+  }
+}
+```
+
+Use `py -3.12 scripts/reset_demo.py` while the local backend is running. The
+command prints the cleared record counts and exits non-zero for connection,
+authentication, unsupported-component, or invalid-response failures.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/updates`
 
@@ -1391,12 +1447,18 @@ Response `201` or `200` for an idempotent replay:
   "creation_status": "created",
   "route": "standard_motor_intake",
   "next_step": "Claims intake review",
+  "source": "fixture",
   "expected_by": "2026-08-11T05:00:00Z",
   "created_at": "2026-08-10T03:55:00Z"
 }
 ```
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
+
+`source` is `fixture` for the deterministic fallback or `configured_service` for a
+confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
+an AWS integration is planned. Current AWS claims-service availability is
+`pending_confirmation`; the fixture remains the active fallback under the same contract.
 
 The request and response above are the provider-neutral boundary. AWS table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
@@ -1522,6 +1584,7 @@ Returns readiness without secrets or private configuration:
     "policy": "using_fixture",
     "claim_history": "using_fixture",
     "claims_service": "using_fixture",
+    "aws_claims_service": "pending_confirmation",
     "evidence_storage": "ok"
   },
   "checked_at": "2026-08-10T03:58:00Z"

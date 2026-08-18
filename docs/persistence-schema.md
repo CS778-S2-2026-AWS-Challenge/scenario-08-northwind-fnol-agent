@@ -67,6 +67,35 @@ part of HTTP request or response models.
   proposed form changes, and resulting revision. A review-required or blocked
   high-impact proposal is recorded without applying its high-impact state change.
 
+## Session snapshots, resume, and revision invariants
+
+- `WorkingClaim` is the authoritative current FNOL state. Session records do
+  not own a private copy of Claim State and must not overwrite newer claim
+  state during resume.
+- A `SessionRecord` stores bounded interaction context: its compact summary,
+  unresolved questions, pending items, prior commitments, and the claim
+  revision represented by that context. Complete messages remain durable
+  records outside the bounded session snapshot.
+- `SessionRecord.context_revision` is the `WorkingClaim.revision` from which
+  the bounded session context was captured or last synchronised. It may lag
+  the current claim revision, but it must never be greater than the current
+  claim revision.
+- `context_revision` is provenance for resume context, not an optimistic-lock
+  token. Material Claim State writes use `WorkingClaim.revision` and the
+  repository expected-revision check.
+- Resuming an existing working claim continues the same `claim_id`. A new
+  interaction session may be created, but resume must not create a duplicate
+  working claim or replace confirmed claim facts with an older session
+  snapshot.
+- At most one claimant session for a working claim is active at a time, and
+  `WorkingClaim.active_session_id` identifies that active interaction.
+- Historical paused or closed sessions may retain an older
+  `context_revision`. Recovery logic may use their bounded context as input,
+  but the current `WorkingClaim` remains authoritative when the two differ.
+- Future persistence adapters must preserve these invariants without exposing
+  provider keys or creating a second concurrency model beside
+  `WorkingClaim.revision`.
+
 ## Unknowns and Next Decision Points
 
 - AWS identity provider, table/index availability, region, throughput model,

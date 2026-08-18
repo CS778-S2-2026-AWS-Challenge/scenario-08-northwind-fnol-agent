@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from backend.domain.models import (
-    ActorType,
     ClaimantClaim,
     ClaimantEvidence,
     ClaimantSession,
@@ -17,7 +16,9 @@ from backend.repositories.scenario_loader import load_scenario
 
 FIXTURE_DIRECTORY = Path(__file__).parent / 'fixtures'
 PUBLIC_FIXTURE_PATH = FIXTURE_DIRECTORY / 'api' / 'AT-08-resume-public.json'
-DOMAIN_FIXTURE_PATH = FIXTURE_DIRECTORY / 'scenarios' / 'AT-08-resume.json'
+DOMAIN_FIXTURE_PATH = (
+    Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios' / 'AT-08-resume.json'
+)
 
 STORAGE_SPECIFIC_KEYS = {
     'aws_object_key',
@@ -156,25 +157,21 @@ def test_api_fixture_reuses_canonical_at08_records_and_relationships() -> None:
     assert session.resume.prior_commitments == canonical_session.prior_commitments
     assert session.resume.customer_next_step == scenario.claim.customer_next_step
     assert session.started_at == canonical_session.started_at
+    assert session.last_active_at == canonical_session.last_active_at
     assert session.closed_at == canonical_session.closed_at
-    assert canonical_session.context_revision == scenario.claim.revision
-    assert canonical_session.context_revision == claim.revision
+    assert canonical_session.context_revision <= scenario.claim.revision
+    assert canonical_session.context_revision < claim.revision
 
-    accepted_messages = [
-        message
-        for message in messages.items
-        if message.actor in {ActorType.CLAIMANT, ActorType.AGENT}
-    ]
-    assert accepted_messages
-    assert session.last_active_at == max(message.created_at for message in accepted_messages)
+    assert messages.items == []
+    assert session.last_active_at == session.started_at
     assert claim.created_at <= session.started_at <= session.last_active_at <= claim.updated_at
-    assert all(message.created_at >= session.started_at for message in messages.items)
 
     public_message_ids = [message.message_id for message in messages.items]
     canonical_public_messages = [
         message
         for message in scenario.messages
-        if message.visibility is not MessageVisibility.INTERNAL_ONLY
+        if message.session_id == canonical_session.session_id
+        and message.visibility is not MessageVisibility.INTERNAL_ONLY
     ]
     assert public_message_ids == [message.message_id for message in canonical_public_messages]
     canonical_messages_by_id = {
@@ -198,10 +195,15 @@ def test_api_fixture_reuses_canonical_at08_records_and_relationships() -> None:
     assert evidence.customer_next_step == scenario.claim.customer_next_step
     messages_by_id = {message.message_id: message for message in messages.items}
     evidence_by_id = {item.evidence_id: item for item in evidence.items}
+    canonical_public_history_by_id = {
+        message.message_id: message
+        for message in scenario.messages
+        if message.visibility is not MessageVisibility.INTERNAL_ONLY
+    }
     for field in form.updated_fields.values():
-        assert set(field.source_refs) <= set(public_message_ids)
+        assert set(field.source_refs) <= set(canonical_public_history_by_id)
         assert all(
-            messages_by_id[source_ref].created_at <= field.updated_at
+            canonical_public_history_by_id[source_ref].created_at <= field.updated_at
             for source_ref in field.source_refs
         )
     for message in messages.items:

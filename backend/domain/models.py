@@ -158,6 +158,11 @@ class ClaimCreationStatus(str, Enum):
     FAILED = 'failed'
 
 
+class IntegrationSource(str, Enum):
+    FIXTURE = 'fixture'
+    CONFIGURED_SERVICE = 'configured_service'
+
+
 class AssessorRoutingStatus(str, Enum):
     ASSIGNED = 'assigned'
     QUEUED = 'queued'
@@ -166,10 +171,22 @@ class AssessorRoutingStatus(str, Enum):
 
 
 class SupportNeed(str, Enum):
+    """Claimant-requested support need, used only by claimant support APIs."""
+
     HUMAN_REQUESTED = 'human_requested'
     ACCESSIBILITY_REQUIRED = 'accessibility_required'
     DISTRESS = 'distress'
     URGENT = 'urgent'
+
+
+class HandoffTrigger(str, Enum):
+    """Staff-visible reason an internal handoff was created."""
+
+    CLAIMANT_SUPPORT_REQUEST = 'claimant_support_request'
+    ACCESSIBILITY_NEED = 'accessibility_need'
+    DISTRESS_SIGNAL = 'distress_signal'
+    URGENT_SAFETY_RISK = 'urgent_safety_risk'
+    PROFESSIONAL_REVIEW_REQUIRED = 'professional_review_required'
 
 
 class PreferredChannel(str, Enum):
@@ -248,6 +265,7 @@ class ExternalClaimResult(ContractModel):
     creation_status: ClaimCreationStatus
     route: str
     next_step: str
+    source: IntegrationSource
     expected_by: datetime | None = None
     created_at: datetime
 
@@ -406,7 +424,10 @@ class HandoffRecord(ContractModel):
     status: HandoffStatus
     priority: HandoffPriority
     queue: str
-    support_need: SupportNeed
+    # This is populated only for claimant-created support requests. Internal
+    # professional-review handoffs use ``trigger`` without asserting claimant intent.
+    support_need: SupportNeed | None = None
+    trigger: HandoffTrigger
     preferred_channel: PreferredChannel | None = None
     reason_codes: list[str] = Field(min_length=1)
     reason: str = Field(min_length=1, max_length=1000)
@@ -544,7 +565,8 @@ class WorkbenchHandoff(ContractModel):
     status: HandoffStatus
     priority: HandoffPriority
     queue: str
-    support_need: SupportNeed
+    support_need: SupportNeed | None = None
+    trigger: HandoffTrigger
     preferred_channel: PreferredChannel | None = None
     reason_codes: list[str]
     reason: str
@@ -916,3 +938,14 @@ class ClaimCreationResponse(ContractModel):
     decision: ClaimantDecision
     external_claim: ExternalClaimResult
     customer_next_step: CustomerNextStep
+
+
+class DemoResetResponse(ContractModel):
+    status: Literal['reset']
+    cleared: dict[str, int]
+
+
+class DemoSeedResponse(ContractModel):
+    status: Literal['seeded']
+    scenario_ids: list[str]
+    claim_ids: list[str]

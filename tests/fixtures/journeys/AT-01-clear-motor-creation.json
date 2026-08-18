@@ -8,5 +8,6 @@
     "loss.description"
   ],
   "expected_route": "standard_motor_intake",
-  "expected_creation_status": "created"
+  "expected_creation_status": "created",
+  "expected_source": "fixture"
 }
