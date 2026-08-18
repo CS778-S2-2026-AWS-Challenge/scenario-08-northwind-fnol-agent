@@ -399,6 +399,23 @@ class EvidenceRecord(ContractModel):
     updated_at: datetime
 
 
+class HandoffEvidenceItem(ContractModel):
+    """Staff handoff projection of evidence without copying storage provenance."""
+
+    evidence_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    source: EvidenceSource
+    visibility: MessageVisibility
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+
+
 class HandoffPacket(ContractModel):
     """Staff-only transfer context built from the authoritative working claim."""
 
@@ -406,6 +423,7 @@ class HandoffPacket(ContractModel):
     form_revision: int = Field(ge=1)
     form_snapshot: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list)
+    evidence: list[HandoffEvidenceItem] = Field(default_factory=list)
     missing_items: list[str] = Field(default_factory=list)
     pending_items: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)

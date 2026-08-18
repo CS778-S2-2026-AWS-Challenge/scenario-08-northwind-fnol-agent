@@ -29,6 +29,10 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.evidence_handoff import (
+    assemble_evidence_handoff_packet,
+    default_handoff_visibility,
+)
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -162,37 +166,45 @@ def build_handoff(
         {source_ref for field in claim.form.values() for source_ref in field.source_refs}
         | ({source_message_id} if source_message_id else set())
     )
-    packet = HandoffPacket(
-        incident_summary=(
-            str(incident_field.value)
-            if incident_field is not None and incident_field.status is FormStatus.CONFIRMED
-            else None
+    packet = assemble_evidence_handoff_packet(
+        HandoffPacket(
+            incident_summary=(
+                str(incident_field.value)
+                if incident_field is not None and incident_field.status is FormStatus.CONFIRMED
+                else None
+            ),
+            form_revision=claim.revision,
+            form_snapshot=claim.form,
+            evidence_refs=[record.evidence_id for record in evidence],
+            missing_items=[
+                code for code, field in form_values if field.status is FormStatus.MISSING
+            ],
+            pending_items=[
+                code for code, field in form_values if field.status is FormStatus.PENDING_GENERATION
+            ]
+            + [
+                record.evidence_id
+                for record in evidence
+                if record.status.value == 'pending_generation'
+            ],
+            conflicts=[code for code, field in form_values if field.status is FormStatus.DISPUTED],
+            low_confidence_items=[
+                code
+                for code, field in form_values
+                if field.confidence is not None and field.confidence < 0.8
+            ],
+            source_refs=source_refs,
+            prior_customer_updates=[
+                str(message.content.get('text'))
+                for message in messages
+                if message.actor.value in {'agent', 'staff'}
+                and message.visibility is not MessageVisibility.INTERNAL_ONLY
+                and message.content.get('text')
+            ],
+            promised_next_step=promised_next_step,
         ),
-        form_revision=claim.revision,
-        form_snapshot=claim.form,
-        evidence_refs=[record.evidence_id for record in evidence],
-        missing_items=[code for code, field in form_values if field.status is FormStatus.MISSING],
-        pending_items=[
-            code for code, field in form_values if field.status is FormStatus.PENDING_GENERATION
-        ]
-        + [
-            record.evidence_id for record in evidence if record.status.value == 'pending_generation'
-        ],
-        conflicts=[code for code, field in form_values if field.status is FormStatus.DISPUTED],
-        low_confidence_items=[
-            code
-            for code, field in form_values
-            if field.confidence is not None and field.confidence < 0.8
-        ],
-        source_refs=source_refs,
-        prior_customer_updates=[
-            str(message.content.get('text'))
-            for message in messages
-            if message.actor.value in {'agent', 'staff'}
-            and message.visibility is not MessageVisibility.INTERNAL_ONLY
-            and message.content.get('text')
-        ],
-        promised_next_step=promised_next_step,
+        claim.claim_id,
+        ((record, default_handoff_visibility(record)) for record in evidence),
     )
     handoff = HandoffRecord(
         handoff_id=new_id('hnd'),
