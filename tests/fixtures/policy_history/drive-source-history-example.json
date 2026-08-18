@@ -1,0 +1,49 @@
+{
+  "fixture_id": "DRIVE-HISTORY-001",
+  "source_case_id": "NW-SRC-001",
+  "source_file": "claims_lifecycle_ifrs_synthetic.csv",
+  "source_row": {
+    "claim_id": "CLM-IFRS-2024012",
+    "policy_number": "POL-539166",
+    "incident_date": "2025-11-01",
+    "claim_amount": 121676.53,
+    "claim_type": "Motor Comprehensive",
+    "claim_status": "Reported",
+    "paid_amount": 0,
+    "reserve_amount": 121676.53,
+    "ifrs17_cohort": "2023-Q3",
+    "discount_rate": 0.0398,
+    "risk_adjustment": 18093.74,
+    "settlement_date": "Pending"
+  },
+  "retrieval_id": "ret_drive_history_001",
+  "claim_id": "clm_src_001",
+  "provider_envelope": {
+    "provider": "drive_claims_lifecycle_ifrs_synthetic",
+    "provider_reference": "claims_lifecycle_ifrs_synthetic.csv#CLM-IFRS-2024012",
+    "retrieved_at": "2026-08-18T02:32:10Z",
+    "payload": {
+      "history_reference": "CLM-IFRS-2024012",
+      "incident_type": "motor",
+      "occurred_at": "2025-11-01T00:00:00Z",
+      "status": "reported",
+      "outcome": null,
+      "source_policy_number": "POL-539166",
+      "source_claim_amount": 121676.53,
+      "source_reserve_amount": 121676.53,
+      "source_ifrs17_cohort": "2023-Q3",
+      "source_discount_rate": 0.0398,
+      "source_risk_adjustment": 18093.74
+    },
+    "uncertainty": [
+      {
+        "code": "SYNTHETIC_HISTORY_CONTEXT",
+        "detail": "This source row is synthetic demonstration context and is not evidence about the current claimant."
+      },
+      {
+        "code": "HISTORY_OUTCOME_PENDING",
+        "detail": "The source settlement state is pending, so no claim outcome was mapped."
+      }
+    ]
+  }
+}
