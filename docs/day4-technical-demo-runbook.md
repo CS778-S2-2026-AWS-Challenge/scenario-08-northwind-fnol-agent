@@ -2,45 +2,46 @@
 
 ## Purpose and status
 
-This Draft runbook records the technical order, tested evidence, safety boundaries,
-and remaining readiness gates for the Sprint 1 demonstration under D4-T10 (#49).
-It does not define product narrative or speaking roles.
+This runbook records the final technical order, tested evidence, safety boundaries,
+and fallback for the Sprint 1 demonstration under D4-T10 (#49). It defines the
+technical sequence rather than the complete speaker script. Narrative owner
+`Ysoseri1224` has confirmed the short primary order recorded below.
 
-The primary technical path is now green on the current assembled baseline, including
-the two claimant/Agent defects previously tracked by #47. The runbook must still
-remain Draft until the remaining shared delivery gates are complete, especially
-#48 shared-owner closure, #56 tested-candidate visual fallback captures, and final
-speaking-order confirmation from the narrative owner.
+The primary technical path is green on the final tested implementation baseline.
+Issues #47, #48, #56, and #57 are complete, and the approved visual fallback is
+available in the repository.
 
 Status terms:
 
 - **Verified**: exercised against the named repository baseline or by the named test.
-- **Pending dependency**: owned work or shared acceptance evidence that is not yet complete.
+- **Operational check**: a repeatable check that must still be performed before each live run.
 - **Optional technical evidence**: verified capability outside the short primary live path.
 
 ## Working baseline
 
 | Item | Status | Record |
 |---|---|---|
-| Current `main` | **Tested working baseline; not yet declared final demo candidate** | `76d15fd78eb1418b7d44e6f49c910b0dbbf64892` |
+| Current `main` | **Final tested implementation candidate** | `777c13004bb9c37a2ce4e0fd2a20573042f0e6bc` |
 | Shared runtime baseline | **Verified** | PR #95 merged; Issue #40 completed. |
 | Claimant/Agent blockers | **Resolved and re-tested** | PR #170 merged; Issue #47 completed. |
+| Backend/workbench integration closure | **Resolved and verified** | Issue #48 completed. |
 | Pending-evidence presentation | **Resolved** | PR #163 merged. |
 | Canonical handoff scenarios | **Verified on baseline** | PR #169 merged. |
 | Live demo reset | **Verified** | PR #100 merged; Issue #57 completed. |
+| Visual fallback | **Verified** | PR #178 merged; Issue #56 completed. |
 | Demonstration data | **Verified boundary** | Synthetic fixtures only; no real claimant or policy data. |
 
 Current result references recorded against this exact `main` baseline:
 
-- full backend suite: **166 passed**, **90.52% coverage**;
+- full backend suite: **189 passed**, **90.76% coverage**;
 - canonical scenario runner: **7 passed**;
-- claimant UI suite: **14 passed**;
+- claimant UI suite: **16 passed**;
 - claimant lint: **passed**;
 - claimant production build: **passed**;
 - Employee Workbench static checks: included in the passing backend suite.
 
-The final demo candidate SHA should be confirmed only after the remaining #48/#56
-shared gates are reconciled and the narrative owner confirms the speaking order.
+The runbook PR changes documentation only. The implementation candidate above is
+therefore the exact code and fixture tree exercised by these commands.
 
 ## Local start sequence
 
@@ -89,6 +90,17 @@ sequence; they remain optional technical evidence.
 | 4 | Request a person and create the context-preserving handoff. | Confirmed facts and pending evidence remain attached to the same claim/handoff context. |
 | 5 | Open the employee workbench against the same backend. | Staff sees the same claim and enough context to continue without making the claimant restart. |
 
+### Speaking focus
+
+- Lead with the claimant describing the incident in their own words and confirming
+  the structured facts, rather than with API or architecture details.
+- Use the pending police report to show that expected later evidence remains visible
+  without blocking unrelated next-step-ready work.
+- Use the human-support request and staff view to show that context travels with the
+  claim and the claimant does not need to restart.
+- Keep claim creation, assessor routing, internal signals, and implementation details
+  outside the timed narrative; use them only as optional technical evidence.
+
 ### Primary-path regression gate — verified
 
 The two defects that previously blocked this path were fixed by PR #170 and
@@ -100,9 +112,10 @@ re-tested after merge on `main`:
   `incident.type=motor`, persists the confirmed classification, reaches
   `ready_to_create`, and can create the controlled mock claim.
 
-Post-merge focused verification across claim creation, handoff, workbench, and
-integration suites produced **31 passing tests** with no #41/#47-scoped blocker
-reproduced.
+The final full backend run includes the focused claim creation, handoff, workbench,
+and integration regressions and produced **189 passing tests** with no
+#41/#47-scoped blocker reproduced. The separate #41 record retains its reproducible
+**33-test** focused command.
 
 ## Optional technical evidence
 
@@ -132,10 +145,10 @@ and revision boundaries.
 
 Canonical fixture locations:
 
-- `tests/fixtures/scenarios/AT-01-clear-motor.json`
-- `tests/fixtures/scenarios/AT-06-pending-evidence.json`
-- `tests/fixtures/scenarios/AT-08-resume.json`
-- `tests/fixtures/scenarios/AT-12-signal-writeback.json`
+- `backend/demo_data/scenarios/AT-01-clear-motor.json`
+- `backend/demo_data/scenarios/AT-06-pending-evidence.json`
+- `backend/demo_data/scenarios/AT-08-resume.json`
+- `backend/demo_data/scenarios/AT-12-signal-writeback.json`
 - `tests/fixtures/journeys/PRES-01-rear-end-handoff.json`
 
 Run isolated scenario verification with:
@@ -167,7 +180,7 @@ Verified properties recorded for #57:
 Do not substitute hidden-data editing, manual repository repair, or an archived
 presentation runtime for this command.
 
-## Remaining blockers and limitations
+## Completed dependencies and limitations
 
 ### #47 claimant / Agent blockers — resolved
 
@@ -175,31 +188,25 @@ PR #170 is merged and Issue #47 is closed. Both formerly blocking claimant paths
 have passed targeted post-merge verification. #47 is no longer a reason to exclude
 the short claimant-to-handoff path from the tested technical candidate.
 
-### #48 backend / workbench / integration closure — shared acceptance still open
+### #48 backend / workbench / integration closure — resolved
 
-`jxu316-arch` completed the required post-#170 regression on merged `main` with
-**31 passing focused tests** and no new backend/workbench/integration defect.
+The post-#170 regression found no new backend/workbench/integration defect, and
+Issue #48 is closed. The final candidate also passes the complete 189-test backend
+suite.
 
-No further #48 code is currently required from `jxu316-arch`. The issue remains
-open only for remaining shared-owner acceptance/closure evidence, so this runbook
-does not mark #48 globally complete.
+### #56 visual fallback captures — complete
 
-### #56 visual fallback captures — pending dependency
+PR #178 supplies three approved PRES-01 captures from tested candidate
+`c8b4c3427f3e53eb53b58f6616400f6ffe97e18`:
 
-Fixture/result references have been refreshed against `main` `76d15fd`, including:
+- [claimant handoff queued](demo-evidence/PRES-01-claimant-handoff-queued.png);
+- [staff handoff accepted](demo-evidence/PRES-01-staff-handoff-accepted.png);
+- [claimant staff-assisting state](demo-evidence/PRES-01-claimant-staff-assisting.png).
 
-- AT-01 clear motor;
-- AT-02 coverage ambiguity;
-- AT-04 urgent;
-- AT-05 human request;
-- AT-06 pending evidence;
-- AT-08 resume;
-- AT-12 signal write-back;
-- PRES-01 rear-end handoff.
-
-The required claimant/staff screenshots or short recordings are still not attached.
-That capture work is owned by #56 assignees, not `jxu316-arch`. Fixed fixtures,
-pytest output, or this document do **not** satisfy the visual fallback requirement.
+The [evidence index](demo-evidence/README.md) records the fixture, expected results,
+SHA-256 values, and synthetic-data boundary. These static captures demonstrate that
+named tested candidate; they are fallback evidence, not a claim that they were
+recaptured from the final implementation SHA above.
 
 ## Demo safety rules
 
@@ -215,7 +222,7 @@ pytest output, or this document do **not** satisfy the visual fallback requireme
 
 1. **Primary live path:** rear-end intake -> confirmed facts -> pending evidence -> context-preserving handoff -> staff view.
 2. **Executable/fixed evidence:** AT-01, AT-06, AT-08, AT-12, and PRES-01 outputs.
-3. **Visual fallback:** **Pending #56** tested-candidate claimant/staff captures.
+3. **Visual fallback:** **Verified #56** PRES-01 claimant/staff captures linked above.
 4. **Environment recovery:** **Verified #57** live reset with `py -3.12 scripts/reset_demo.py`.
 
 A fallback must not require live coding, unreviewed source edits, manual state repair,
@@ -223,25 +230,25 @@ or claimant exposure of internal-only information.
 
 ## Final readiness gate
 
-Do not mark this runbook Ready or close #49 until all unchecked items are complete.
+All delivery gates required to mark this runbook Ready are complete.
 
 - [x] #47 fixes are merged into the tested baseline.
 - [x] Exact safety-negation input remains on the normal intake path after merge.
 - [x] Clear motor journey derives/persists `incident_type` and no longer reaches the creation dead end.
 - [x] `jxu316-arch` post-#170 #48 regression is complete with no new scoped blocker.
-- [ ] #48 shared-owner acceptance/closure is complete.
+- [x] #48 shared-owner acceptance/closure is complete.
 - [x] #57 supported live reset is merged and independently verified.
 - [x] Reset failure is visible/actionable and reset scope is synthetic/opt-in.
 - [x] #56 fixture/result references are refreshed against the tested baseline.
-- [ ] #56 claimant/staff visual fallback captures are attached to the tested candidate.
-- [ ] Final candidate SHA is confirmed after remaining shared dependency/evidence closure.
-- [ ] Narrative owner confirms the final speaking order.
+- [x] #56 claimant/staff visual fallback captures are attached to a named tested candidate.
+- [x] Final implementation candidate SHA is confirmed after dependency/evidence closure.
+- [x] Narrative owner `Ysoseri1224` confirms the final speaking order.
 
 ## Final technical checklist
 
 ### Before the session
 
-- [ ] Confirm final candidate SHA and remaining shared dependency closure.
+- [ ] Confirm the checkout matches the tested implementation candidate or a separately approved successor.
 - [ ] Run repository validation required by any changes after the tested baseline.
 - [ ] Run `py -3.12 scripts/reset_demo.py` and verify the starting state.
 - [ ] Start backend, claimant, and employee surfaces in the documented order.
