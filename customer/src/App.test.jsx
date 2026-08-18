@@ -356,7 +356,7 @@ describe('claimant intake', () => {
         field_code: 'authorities.police_report_reference',
         field: {
           ...firstTurn().form_changes[0].field,
-          value: 'Expected next week',
+          value: null,
           status: 'pending_generation',
         },
       }],
@@ -370,6 +370,8 @@ describe('claimant intake', () => {
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
 
     expect(await screen.findByText('Pending')).toBeVisible()
+    expect(screen.getByText('Expected later')).toBeVisible()
+    expect(screen.queryByText('null')).not.toBeInTheDocument()
   })
 
   it('creates a mock claim only after all proposed facts are confirmed', async () => {

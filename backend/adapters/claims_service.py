@@ -58,6 +58,11 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
     def __init__(self) -> None:
         self._created: dict[str, tuple[str, ExternalClaimResult]] = {}
 
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {'mock_claim_results': len(self._created)}
+        self._created.clear()
+        return cleared
+
     def create_claim(
         self,
         command: CreateExternalClaimRequest,
@@ -90,6 +95,11 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
 
     def __init__(self) -> None:
         self._routed: dict[str, tuple[str, AssessorRoutingResult]] = {}
+
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {'mock_assessor_results': len(self._routed)}
+        self._routed.clear()
+        return cleared
 
     def route_assessor(
         self,
