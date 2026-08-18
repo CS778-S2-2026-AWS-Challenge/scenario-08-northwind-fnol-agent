@@ -950,6 +950,11 @@
     let assistantAttachments = [];
     let chatDrag = null;
     let pendingCustomerMessage = null;
+    let customerChatHistoryEntryCreated = false;
+
+    function workbenchUrl() {
+      return `${window.location.pathname}${window.location.search}`;
+    }
 
     function setView(view, { updateHistory = true } = {}) {
       const showCustomerChat = view === 'customer-chat';
@@ -961,8 +966,14 @@
       if (!updateHistory) return;
       if (showCustomerChat && window.location.hash !== '#customer-chat') {
         window.history.pushState({ workbenchView: 'customer-chat' }, '', '#customer-chat');
+        customerChatHistoryEntryCreated = true;
       } else if (!showCustomerChat && window.location.hash === '#customer-chat') {
-        window.history.back();
+        if (customerChatHistoryEntryCreated) {
+          customerChatHistoryEntryCreated = false;
+          window.history.back();
+        } else {
+          window.history.replaceState({ workbenchView: 'workbench' }, '', workbenchUrl());
+        }
       }
     }
 

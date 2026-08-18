@@ -64,3 +64,4 @@ def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigat
     assert "window.location.hash !== '#customer-chat'" in page
     assert "window.addEventListener('popstate', restoreViewFromHistory)" in page
     assert "window.addEventListener('hashchange', restoreViewFromHistory)" in page
+    assert 'customerChatHistoryEntryCreated' in page
