@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,10 @@ from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     ContractModel,
     CustomerUpdateRecord,
+    EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceState,
+    EvidenceStatus,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
@@ -105,7 +109,6 @@ class ScenarioFixture(ContractModel):
             raise ValueError('Scenario customer update identifiers must be unique.')
         if any(update.claim_id != self.claim.claim_id for update in self.customer_updates):
             raise ValueError('Every customer update must belong to the scenario claim.')
-
         unregistered_packet_fields = {
             field_code
             for handoff in self.handoffs
@@ -121,6 +124,88 @@ class ScenarioFixture(ContractModel):
         return self
 
 
+class EvidenceLifecycleStage(str, Enum):
+    PENDING = 'pending'
+    UNOFFICIAL = 'unofficial'
+    INCOMPLETE = 'incomplete'
+    NOT_YET_GENERATED = 'not_yet_generated'
+    RECEIVED = 'received'
+
+
+class FixtureVisibility(str, Enum):
+    CLAIMANT_VISIBLE = 'claimant_visible'
+    SHARED = 'shared'
+    INTERNAL_ONLY = 'internal_only'
+
+
+class ExpectedEvidenceStateChange(ContractModel):
+    trigger: str = Field(min_length=1, max_length=100)
+    evidence_status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    claim_evidence_state: EvidenceState
+
+
+class EvidenceLifecycleCase(ContractModel):
+    fixture_id: str = Field(pattern=r'^EV-\d{2}-[a-z0-9-]+$')
+    lifecycle_stage: EvidenceLifecycleStage
+    visibility: FixtureVisibility
+    next_requirement: str = Field(min_length=1, max_length=500)
+    evidence: EvidenceRecord
+    expected_state_change: ExpectedEvidenceStateChange
+
+    @model_validator(mode='after')
+    def validate_lifecycle_stage(self) -> 'EvidenceLifecycleCase':
+        pending_file_states = {
+            EvidenceFileStatus.AWAITING_UPLOAD,
+            EvidenceFileStatus.UPLOADING,
+            EvidenceFileStatus.UPLOADED,
+            EvidenceFileStatus.PROCESSING,
+        }
+        valid_start = {
+            EvidenceLifecycleStage.UNOFFICIAL: self.evidence.status is EvidenceStatus.UNOFFICIAL,
+            EvidenceLifecycleStage.NOT_YET_GENERATED: (
+                self.evidence.status is EvidenceStatus.PENDING_GENERATION
+                and self.evidence.file_status is EvidenceFileStatus.NOT_AVAILABLE
+            ),
+            EvidenceLifecycleStage.RECEIVED: (
+                self.evidence.status is EvidenceStatus.RECEIVED
+                and self.evidence.file_status is EvidenceFileStatus.READY
+            ),
+            EvidenceLifecycleStage.PENDING: (
+                self.evidence.status is EvidenceStatus.INCOMPLETE
+                and self.evidence.file_status in pending_file_states
+            ),
+            EvidenceLifecycleStage.INCOMPLETE: (
+                self.evidence.status is EvidenceStatus.INCOMPLETE
+                and self.evidence.file_status not in pending_file_states
+            ),
+        }
+        if not valid_start[self.lifecycle_stage]:
+            raise ValueError(
+                f'{self.lifecycle_stage.value} fixture does not match its contract state.'
+            )
+        return self
+
+
+class EvidenceLifecycleFixtureSet(ContractModel):
+    fixture_set_id: str = Field(pattern=r'^evidence-lifecycle-v\d+$')
+    description: str = Field(min_length=1, max_length=500)
+    fixtures: list[EvidenceLifecycleCase] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode='after')
+    def validate_fixture_set(self) -> 'EvidenceLifecycleFixtureSet':
+        stages = {fixture.lifecycle_stage for fixture in self.fixtures}
+        if stages != set(EvidenceLifecycleStage):
+            raise ValueError('The fixture set must contain every evidence lifecycle stage once.')
+        fixture_ids = {fixture.fixture_id for fixture in self.fixtures}
+        if len(fixture_ids) != len(self.fixtures):
+            raise ValueError('Evidence lifecycle fixture identifiers must be unique.')
+        evidence_ids = {fixture.evidence.evidence_id for fixture in self.fixtures}
+        if len(evidence_ids) != len(self.fixtures):
+            raise ValueError('Evidence lifecycle evidence identifiers must be unique.')
+        return self
+
+
 def load_scenario(path: Path) -> ScenarioFixture:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return ScenarioFixture.model_validate(payload)
@@ -128,6 +213,11 @@ def load_scenario(path: Path) -> ScenarioFixture:
 
 def load_scenarios(directory: Path) -> list[ScenarioFixture]:
     return [load_scenario(path) for path in sorted(directory.glob('AT-*.json'))]
+
+
+def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    return EvidenceLifecycleFixtureSet.model_validate(payload)
 
 
 def seed_scenario(

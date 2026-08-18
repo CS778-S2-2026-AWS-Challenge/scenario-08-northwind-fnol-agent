@@ -47,8 +47,6 @@ def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seed
     assert 'Load demo handoff queue' in page
     assert 'ensureDemoQueueSeeded' not in page
     assert 'loadClaims();' in page
-
-
 def test_employee_workbench_explains_when_the_local_api_cannot_be_reached() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
