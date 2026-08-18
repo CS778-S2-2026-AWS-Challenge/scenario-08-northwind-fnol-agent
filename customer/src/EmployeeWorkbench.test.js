@@ -16,6 +16,102 @@ function response(body, status = 200) {
   )
 }
 
+function queueItem(number, overrides = {}) {
+  return {
+    claim_id: `clm_page_${number}`,
+    revision: 1,
+    customer_reference: `customer-${number}`,
+    incident_type: 'motor',
+    workflow_state: 'professional_review',
+    queue: 'professional_review',
+    priority: 'standard',
+    next_action: 'HANDOFF',
+    route: 'motor_review',
+    evidence_state: 'received',
+    evidence_summary: { received: 1, pending: 0, needs_attention: 0 },
+    next_action_summary: 'Review the saved claim.',
+    responsible_party: 'claims_professional',
+    claim_creation_status: null,
+    assessor_routing_status: null,
+    open_handoff_count: 0,
+    assignee_id: null,
+    created_at: '2026-08-13T00:00:00Z',
+    updated_at: '2026-08-13T00:01:00Z',
+    ...overrides,
+  }
+}
+
+function queueDetail(item) {
+  return {
+    ...item,
+    channel: 'web_agent',
+    locale: 'en-NZ',
+    claim_state: { workflow_state: item.workflow_state, evidence: item.evidence_state },
+    form: {},
+    active_session_id: null,
+    evidence: [],
+    sessions: [],
+    messages: [],
+    decisions: [],
+    signals: [],
+    handoffs: [],
+    staff_actions: [],
+    customer_updates: [],
+    external_claim: null,
+    assessor_routing: null,
+    customer_next_step: {
+      status: 'review',
+      summary: item.next_action_summary,
+      responsible_party: item.responsible_party,
+      required_items: [],
+    },
+  }
+}
+
+it('paginates a large queue, resets on filter change, and keeps handoff facts visible', async () => {
+  const items = Array.from({ length: 8 }, (_, index) => queueItem(index + 1))
+  items[0] = queueItem(1, { priority: 'high', open_handoff_count: 2 })
+
+  const fetchMock = vi.fn((url) => {
+    const claim = items.find((item) => String(url).endsWith(`/${item.claim_id}`))
+    if (claim) return response(queueDetail(claim))
+    return response({ items, page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+    },
+  })
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelectorAll('#claimList > button')).toHaveLength(6)
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 2')
+  })
+  const firstCard = dom.window.document.querySelector('#claimList > button')
+  expect(firstCard.textContent).toContain('Priority: High')
+  expect(firstCard.textContent).toContain('2 open handoffs')
+  expect(firstCard.getAttribute('aria-label')).toContain('priority high, 2 open handoffs')
+
+  dom.window.document.querySelector('#nextQueuePage').click()
+  await waitFor(() => {
+    const cards = dom.window.document.querySelectorAll('#claimList > button')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].textContent).toContain('customer-7')
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 2 of 2')
+  })
+
+  const filter = dom.window.document.querySelector('#viewSelect')
+  filter.value = 'professional_review'
+  filter.dispatchEvent(new dom.window.Event('change'))
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 2')
+    expect(dom.window.document.querySelector('#claimList').textContent).toContain('customer-1')
+  })
+  dom.window.close()
+})
+
 it('renders persisted claim context and uses the handoff accept endpoint', async () => {
   let handoffStatus = 'queued'
   let claimRevision = 4
@@ -322,5 +418,50 @@ it('clears stale write-back state when the post-mutation refresh fails', async (
     expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
     expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
   })
+  dom.window.close()
+})
+
+it('announces queue failures and exposes named keyboard controls', async () => {
+  let releaseRequest
+  const pendingResponse = new Promise((resolve) => {
+    releaseRequest = resolve
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => pendingResponse)
+    },
+  })
+
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#refreshClaims').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#refreshClaims').textContent).toBe('Refreshing...')
+    expect(dom.window.document.querySelector('#workbenchView').getAttribute('aria-busy')).toBe('true')
+  })
+
+  releaseRequest(new Response(JSON.stringify({ error: { message: 'Queue unavailable' } }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json' },
+  }))
+
+  await waitFor(() => {
+    const alert = dom.window.document.querySelector('#errorBanner')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.textContent).toContain('Queue unavailable')
+    expect(dom.window.document.querySelector('#refreshClaims').disabled).toBe(false)
+    expect(dom.window.document.querySelector('#workbenchView').getAttribute('aria-busy')).toBe('false')
+  })
+  expect(dom.window.document.querySelector('#customerChatText').getAttribute('aria-label')).toBe('Message to claimant')
+  expect(dom.window.document.querySelector('#chatInput').getAttribute('aria-label')).toBe('Assistant question')
+  expect(dom.window.document.querySelector('#chatFileBtn').getAttribute('aria-label')).toBe('Attach files')
+  const attachmentInput = dom.window.document.querySelector('#chatFileInput')
+  Object.defineProperty(attachmentInput, 'files', {
+    configurable: true,
+    value: [new dom.window.File(['synthetic'], 'evidence.txt', { type: 'text/plain' })],
+  })
+  attachmentInput.dispatchEvent(new dom.window.Event('change'))
+  expect(dom.window.document.querySelector('#chatAttachments').textContent).toContain('evidence.txt')
+  expect(dom.window.document.querySelector('[aria-label="Remove evidence.txt"]')).not.toBeNull()
   dom.window.close()
 })

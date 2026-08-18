@@ -5,22 +5,36 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
+    AgentAction,
+    ClaimantEvidence,
+    ClaimState,
     ContractModel,
+    CustomerNextStep,
+    CustomerUpdateRecord,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceState,
     EvidenceStatus,
+    EvidenceSummary,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
     SessionStatus,
+    StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord
-from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.retrieval_review import persist_retrieval_record
+
+CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
+SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
+    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}
+)
 
 
 class ScenarioFixture(ContractModel):
@@ -32,6 +46,8 @@ class ScenarioFixture(ContractModel):
     retrievals: list[RetrievalRecord] = Field(default_factory=list)
     messages: list[MessageRecord] = Field(default_factory=list)
     handoffs: list[HandoffRecord] = Field(default_factory=list)
+    staff_actions: list[StaffActionRecord] = Field(default_factory=list)
+    customer_updates: list[CustomerUpdateRecord] = Field(default_factory=list)
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -89,6 +105,27 @@ class ScenarioFixture(ContractModel):
         ):
             raise ValueError('A handoff source_message_id must reference a scenario message.')
 
+        action_ids = {action.action_id for action in self.staff_actions}
+        if len(action_ids) != len(self.staff_actions):
+            raise ValueError('Scenario staff action identifiers must be unique.')
+        if any(action.claim_id != self.claim.claim_id for action in self.staff_actions):
+            raise ValueError('Every staff action must belong to the scenario claim.')
+        if any(
+            action.status is StaffActionStatus.COMPLETED
+            and (
+                action.result is None or action.completed_by is None or action.completed_at is None
+            )
+            for action in self.staff_actions
+        ):
+            raise ValueError(
+                'Completed staff actions require an actor, result, and completion time.'
+            )
+
+        update_ids = {update.update_id for update in self.customer_updates}
+        if len(update_ids) != len(self.customer_updates):
+            raise ValueError('Scenario customer update identifiers must be unique.')
+        if any(update.claim_id != self.claim.claim_id for update in self.customer_updates):
+            raise ValueError('Every customer update must belong to the scenario claim.')
         unregistered_packet_fields = {
             field_code
             for handoff in self.handoffs
@@ -186,6 +223,82 @@ class EvidenceLifecycleFixtureSet(ContractModel):
         return self
 
 
+class EvidenceBusinessPath(str, Enum):
+    FAST = 'fast'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    URGENT = 'urgent'
+    HUMAN_REQUEST = 'human_request'
+    PENDING_EVIDENCE = 'pending_evidence'
+
+
+class VisibilityEvidenceFixture(ContractModel):
+    fixture_id: str = Field(pattern=r'^EV-VIS-\d{2}-[a-z0-9-]+$')
+    visibility: FixtureVisibility
+    evidence: EvidenceRecord
+
+
+class EvidencePathEntry(ContractModel):
+    """A path entry whose evidence list is the complete effective evidence set."""
+
+    scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
+    business_path: EvidenceBusinessPath
+    description: str = Field(min_length=1, max_length=500)
+    claim_id: str = Field(min_length=1, max_length=100)
+    claim_state: ClaimState
+    evidence_summary: EvidenceSummary
+    customer_next_step: CustomerNextStep
+    evidence: list[VisibilityEvidenceFixture] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_entry_state(self) -> 'EvidencePathEntry':
+        expected_action = {
+            EvidenceBusinessPath.FAST: AgentAction.CREATE_CLAIM,
+            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.URGENT: AgentAction.URGENT_HANDOFF,
+            EvidenceBusinessPath.HUMAN_REQUEST: AgentAction.HANDOFF,
+            EvidenceBusinessPath.PENDING_EVIDENCE: AgentAction.PROCEED,
+        }
+        if self.claim_state.next_action is not expected_action[self.business_path]:
+            raise ValueError(
+                f'{self.business_path.value} entry does not use its required next action.'
+            )
+        fixture_ids = {fixture.fixture_id for fixture in self.evidence}
+        if len(fixture_ids) != len(self.evidence):
+            raise ValueError('Path evidence fixture identifiers must be unique.')
+        evidence_ids = {fixture.evidence.evidence_id for fixture in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError('Path evidence identifiers must be unique.')
+        if any(fixture.evidence.claim_id != self.claim_id for fixture in self.evidence):
+            raise ValueError('Every path evidence item must belong to the entry claim.')
+        records = [fixture.evidence for fixture in self.evidence]
+        if self.claim_state.evidence is not evidence_state_for(records):
+            raise ValueError('Path evidence state must derive from the complete evidence set.')
+        if self.evidence_summary != evidence_summary_for(records):
+            raise ValueError('Path evidence summary must derive from the complete evidence set.')
+        return self
+
+
+class EvidencePathFixtureSet(ContractModel):
+    fixture_set_id: str = Field(pattern=r'^evidence-path-visibility-v\d+$')
+    description: str = Field(min_length=1, max_length=500)
+    entries: list[EvidencePathEntry] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode='after')
+    def validate_fixture_set(self) -> 'EvidencePathFixtureSet':
+        paths = {entry.business_path for entry in self.entries}
+        if paths != set(EvidenceBusinessPath):
+            raise ValueError('The fixture set must contain every evidence business path once.')
+        scenario_ids = {entry.scenario_id for entry in self.entries}
+        if len(scenario_ids) != len(self.entries):
+            raise ValueError('Evidence path scenario identifiers must be unique.')
+        visibility_classes = {
+            fixture.visibility for entry in self.entries for fixture in entry.evidence
+        }
+        if visibility_classes != set(FixtureVisibility):
+            raise ValueError('The fixture set must contain every evidence visibility class.')
+        return self
+
+
 def load_scenario(path: Path) -> ScenarioFixture:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return ScenarioFixture.model_validate(payload)
@@ -198,6 +311,55 @@ def load_scenarios(directory: Path) -> list[ScenarioFixture]:
 def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return EvidenceLifecycleFixtureSet.model_validate(payload)
+
+
+def load_evidence_path_fixtures(
+    path: Path,
+    scenario_directory: Path = CANONICAL_SCENARIO_DIRECTORY,
+) -> EvidencePathFixtureSet:
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    canonical_scenarios = {
+        scenario.scenario_id: scenario for scenario in load_scenarios(scenario_directory)
+    }
+    for entry in payload.get('entries', []):
+        duplicate_fields = SCENARIO_DERIVED_ENTRY_FIELDS.intersection(entry)
+        if duplicate_fields:
+            names = ', '.join(sorted(duplicate_fields))
+            raise ValueError(
+                f'Evidence path entries must derive canonical scenario fields: {names}.'
+            )
+
+        scenario_id = entry.get('scenario_id')
+        scenario = canonical_scenarios.get(scenario_id)
+        if scenario is None:
+            raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
+
+        entry['claim_id'] = scenario.claim.claim_id
+        for fixture in entry.get('evidence', []):
+            evidence = fixture.get('evidence', {})
+            if 'claim_id' in evidence:
+                raise ValueError('Evidence claim_id must derive from the canonical scenario claim.')
+            evidence['claim_id'] = scenario.claim.claim_id
+        records = [
+            EvidenceRecord.model_validate(fixture['evidence'])
+            for fixture in entry.get('evidence', [])
+        ]
+        entry['claim_state'] = scenario.claim.claim_state.model_copy(
+            update={'evidence': evidence_state_for(records)}
+        ).model_dump(mode='json')
+        entry['evidence_summary'] = evidence_summary_for(records).model_dump(mode='json')
+        entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
+    return EvidencePathFixtureSet.model_validate(payload)
+
+
+def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
+    return [
+        ClaimantEvidence.model_validate(
+            fixture.evidence.model_dump(exclude={'provenance'}, mode='json')
+        )
+        for fixture in entry.evidence
+        if fixture.visibility is not FixtureVisibility.INTERNAL_ONLY
+    ]
 
 
 def seed_scenario(
@@ -221,3 +383,34 @@ def seed_scenario(
         repository.save_message(message, scenario.claim.customer_id)
     for handoff in scenario.handoffs:
         repository.save_handoff(handoff, scenario.claim.customer_id)
+    # Scenario records represent already-audited staff history.  They are seeded
+    # without changing the fixture claim revision, while retaining ordinary
+    # repository ownership and idempotency checks.
+    for action in scenario.staff_actions:
+        repository.save_staff_mutation(
+            scenario.claim,
+            scenario.claim.revision,
+            IdempotencyRecord(
+                actor_id=action.completed_by or action.assigned_to,
+                route='fixture://staff-actions',
+                key=action.action_id,
+                request_fingerprint=f'fixture-staff-action:{action.action_id}',
+                claim_id=scenario.claim.claim_id,
+                session_id=scenario.claim.active_session_id or '',
+            ),
+            staff_action=action,
+        )
+    for update in scenario.customer_updates:
+        repository.save_staff_mutation(
+            scenario.claim,
+            scenario.claim.revision,
+            IdempotencyRecord(
+                actor_id=update.created_by,
+                route='fixture://customer-updates',
+                key=update.update_id,
+                request_fingerprint=f'fixture-customer-update:{update.update_id}',
+                claim_id=scenario.claim.claim_id,
+                session_id=scenario.claim.active_session_id or '',
+            ),
+            customer_update=update,
+        )

@@ -13,6 +13,8 @@ They are the source used by the development/test demo seeding workflow.
 | `AT-06-pending-evidence.json` | Future evidence that does not block unrelated work |
 | `AT-08-resume.json` | Cross-session summary, unresolved work, pending evidence, and prior commitment |
 | `AT-12-signal-writeback.json` | Shared claim state with an internal-only review signal |
+| `AT-10-controlled-assessor.json` | Created claim, assessor route, evidence state, and next responsible action |
+| `AT-13-staff-action-lifecycle.json` | Completed assign, review, resolve, and claimant-safe write-back audit trail |
 
 Validate the reusable scenario records from the repository root:
 

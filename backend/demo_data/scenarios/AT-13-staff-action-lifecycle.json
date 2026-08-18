@@ -1,0 +1,178 @@
+{
+  "scenario_id": "AT-13-staff-action-lifecycle",
+  "description": "Synthetic completed staff-action lifecycle with claimant-safe write-back.",
+  "claim": {
+    "claim_id": "clm_fixture_at13",
+    "customer_id": "cus_demo",
+    "revision": 10,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "complex",
+      "coverage": "clear",
+      "evidence": "received",
+      "fraud_signal": "review_required",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "ready_for_next",
+      "next_action": "PROCEED"
+    },
+    "form": {
+      "incident.description": {
+        "value": "The vehicle was damaged overnight while parked.",
+        "source": "claimant",
+        "source_refs": ["msg_at13_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-12T03:10:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "route": "professional_review",
+    "active_session_id": "ses_fixture_at13",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "review_completed",
+      "summary": "A claims professional has completed the review and your claim can continue.",
+      "responsible_party": "northwind",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-12T03:00:00Z",
+    "updated_at": "2026-08-12T03:30:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at13",
+      "claim_id": "clm_fixture_at13",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Parked vehicle damage reviewed by a claims professional.",
+      "unresolved_questions": [],
+      "pending_items": [],
+      "prior_commitments": ["Northwind will provide a claimant-safe review update."],
+      "context_revision": 10,
+      "started_at": "2026-08-12T03:00:00Z",
+      "last_active_at": "2026-08-12T03:30:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at13_image",
+      "claim_id": "clm_fixture_at13",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "synthetic-damage.png",
+      "media_type": "image/png",
+      "size_bytes": 1200,
+      "source": "claimant",
+      "related_fields": ["vehicle.damage_description"],
+      "needed_for": ["current_action"],
+      "provenance": {"storage_key": "fixture/at13", "extraction_state": "proposed"},
+      "claimant_note": null,
+      "created_at": "2026-08-12T03:08:00Z",
+      "updated_at": "2026-08-12T03:08:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at13_claimant",
+      "claim_id": "clm_fixture_at13",
+      "session_id": "ses_fixture_at13",
+      "client_message_id": "at13-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My car was damaged overnight while parked."},
+      "evidence_refs": ["evd_fixture_at13_image"],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T03:05:00Z"
+    },
+    {
+      "message_id": "msg_at13_internal_signal",
+      "claim_id": "clm_fixture_at13",
+      "session_id": "ses_fixture_at13",
+      "client_message_id": null,
+      "actor": "system",
+      "visibility": "internal_only",
+      "content": {"type": "review_signal", "code": "HISTORY-REVIEW-01", "outcome": "review_required"},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-12T03:12:00Z"
+    }
+  ],
+  "staff_actions": [
+    {
+      "action_id": "act_at13_assign",
+      "claim_id": "clm_fixture_at13",
+      "action_type": "assign_review",
+      "status": "completed",
+      "assigned_to": "stf_casey",
+      "requested_outcome": "Assign the professional review to a claims professional.",
+      "source_refs": ["msg_at13_internal_signal"],
+      "result": {"outcome": "assigned", "summary": "The review was assigned.", "reason_codes": ["REVIEW_QUEUE_ASSIGNED"], "source_refs": []},
+      "completed_by": "stf_team_lead",
+      "created_at": "2026-08-12T03:16:00Z",
+      "completed_at": "2026-08-12T03:16:00Z"
+    },
+    {
+      "action_id": "act_at13_review",
+      "claim_id": "clm_fixture_at13",
+      "action_type": "professional_review",
+      "status": "completed",
+      "assigned_to": "stf_casey",
+      "requested_outcome": "Review the case information.",
+      "source_refs": ["evd_fixture_at13_image"],
+      "result": {"outcome": "review_completed", "summary": "The professional review was completed.", "reason_codes": ["REVIEW_COMPLETED"], "source_refs": ["evd_fixture_at13_image"]},
+      "completed_by": "stf_casey",
+      "created_at": "2026-08-12T03:17:00Z",
+      "completed_at": "2026-08-12T03:22:00Z"
+    },
+    {
+      "action_id": "act_at13_resolve",
+      "claim_id": "clm_fixture_at13",
+      "action_type": "resolve_review",
+      "status": "completed",
+      "assigned_to": "stf_casey",
+      "requested_outcome": "Resolve the professional review outcome.",
+      "source_refs": ["evd_fixture_at13_image"],
+      "result": {"outcome": "resolved", "summary": "The review outcome was resolved for claim processing.", "reason_codes": ["REVIEW_OUTCOME_RESOLVED"], "source_refs": ["evd_fixture_at13_image"]},
+      "completed_by": "stf_casey",
+      "created_at": "2026-08-12T03:22:00Z",
+      "completed_at": "2026-08-12T03:25:00Z"
+    },
+    {
+      "action_id": "act_at13_write_back",
+      "claim_id": "clm_fixture_at13",
+      "action_type": "claimant_write_back",
+      "status": "completed",
+      "assigned_to": "stf_casey",
+      "requested_outcome": "Record a claimant-safe next-step update.",
+      "source_refs": ["act_at13_resolve"],
+      "result": {"outcome": "claimant_update_written", "summary": "A claimant-safe review completion update was recorded.", "reason_codes": ["CLAIMANT_UPDATE_REQUIRED"], "source_refs": ["act_at13_resolve"]},
+      "completed_by": "stf_casey",
+      "created_at": "2026-08-12T03:25:00Z",
+      "completed_at": "2026-08-12T03:30:00Z"
+    }
+  ],
+  "customer_updates": [
+    {
+      "update_id": "upd_at13_review_complete",
+      "claim_id": "clm_fixture_at13",
+      "summary": "A claims professional has completed the review and your claim can continue.",
+      "responsible_party": "northwind",
+      "related_refs": [],
+      "created_by": "stf_casey",
+      "created_at": "2026-08-12T03:30:00Z"
+    }
+  ],
+  "expected": {
+    "staff_action_types": ["assign_review", "professional_review", "resolve_review", "claimant_write_back"],
+    "claimant_status": "review_completed",
+    "internal_signal_hidden": true
+  }
+}
