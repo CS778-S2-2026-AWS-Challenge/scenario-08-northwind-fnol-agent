@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from backend.core.auth import Principal
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     ActorType,
     ClaimantSession,
@@ -86,6 +87,47 @@ def _summary(claim: WorkingClaim, source: SessionRecord | None) -> str | None:
     return claim.customer_next_step.summary or None
 
 
+def _confirmation_field_code(requirement: str) -> str | None:
+    prefix = 'confirm:'
+    if not requirement.startswith(prefix):
+        return None
+    field_code = requirement[len(prefix) :].strip()
+    return field_code if field_code in REGISTERED_FIELD_CODES else None
+
+
+def _confirmation_requirement_is_resolved(
+    claim: WorkingClaim,
+    requirement: str,
+) -> bool:
+    field_code = _confirmation_field_code(requirement)
+    if field_code is None:
+        return False
+    field = claim.form.get(field_code)
+    return field is not None and field.status is FormStatus.CONFIRMED
+
+
+def _normalise_question(value: str) -> str:
+    return ' '.join(value.split()).casefold()
+
+
+def _resolved_confirmation_question_texts(
+    claim: WorkingClaim,
+    source: SessionRecord | None,
+    requirements: list[str],
+    candidates: list[str],
+) -> set[str]:
+    if source is None or claim.revision <= source.context_revision or not requirements:
+        return set()
+    if any(_confirmation_field_code(requirement) is None for requirement in requirements):
+        return set()
+    if not all(
+        _confirmation_requirement_is_resolved(claim, requirement)
+        for requirement in requirements
+    ):
+        return set()
+    return {_normalise_question(candidate) for candidate in candidates if candidate}
+
+
 def _unresolved_questions(
     repository: PersistenceRepository,
     claim: WorkingClaim,
@@ -93,8 +135,36 @@ def _unresolved_questions(
 ) -> list[str]:
     questions = list(source.unresolved_questions) if source is not None else []
     decisions = repository.list_agent_decisions(claim.claim_id, claim.customer_id)
-    if decisions and decisions[-1].next_action_requirements:
-        questions.append(decisions[-1].customer_next_step.summary)
+    if not decisions:
+        return _dedupe(questions)
+
+    latest = decisions[-1]
+    requirements = latest.next_action_requirements
+    if not requirements:
+        return _dedupe(questions)
+
+    stale_question_texts = _resolved_confirmation_question_texts(
+        claim,
+        source,
+        requirements,
+        [
+            latest.customer_reason,
+            latest.customer_response,
+            latest.customer_next_step.summary,
+        ],
+    )
+    if stale_question_texts:
+        questions = [
+            question
+            for question in questions
+            if _normalise_question(question) not in stale_question_texts
+        ]
+
+    if any(
+        not _confirmation_requirement_is_resolved(claim, requirement)
+        for requirement in requirements
+    ):
+        questions.append(latest.customer_next_step.summary)
     return _dedupe(questions)
 
 
