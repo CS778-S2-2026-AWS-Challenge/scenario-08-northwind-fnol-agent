@@ -1,6 +1,6 @@
 # Day 4 Responsive, Accessibility, and Error-State Verification
 
-This record closes the verification scope for issue [#45](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/45). The tested baseline is `main` candidate `c8b4c3427f3e53eb53b58f6616400f6ffe97e18`, plus the bounded accessibility and responsive fixes in this pull request.
+This record closes the verification scope for issue [#45](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/45). The tested baseline is `main` candidate `fdeecfa1da7f084b80c6833dd0447ddba05dabd3`, plus the bounded accessibility and responsive fixes in this pull request.
 
 ## Checks and results
 
@@ -27,7 +27,7 @@ npm run build
 passed
 
 py -3.12 -m pytest tests/test_employee_workbench_static.py tests/test_evidence_api.py tests/test_handoff_api.py tests/test_workbench_api.py -q
-29 passed in 3.68s
+29 passed in 7.78s
 ```
 
 ## Boundary
