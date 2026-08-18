@@ -94,9 +94,7 @@ class ScenarioFixture(ContractModel):
         if any(
             action.status is StaffActionStatus.COMPLETED
             and (
-                action.result is None
-                or action.completed_by is None
-                or action.completed_at is None
+                action.result is None or action.completed_by is None or action.completed_at is None
             )
             for action in self.staff_actions
         ):
