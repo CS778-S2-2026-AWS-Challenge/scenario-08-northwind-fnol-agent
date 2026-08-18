@@ -18,5 +18,9 @@ if __name__ == '__main__':
     for entry in fixture_set.entries:
         print(
             f'PASS {entry.scenario_id}: path={entry.business_path.value} '
-            f'evidence={len(entry.evidence)} claimant={len(claimant_evidence_for(entry))}'
+            f'evidence={len(entry.evidence)} state={entry.claim_state.evidence.value} '
+            f'received={entry.evidence_summary.received} '
+            f'pending={entry.evidence_summary.pending} '
+            f'attention={entry.evidence_summary.needs_attention} '
+            f'claimant={len(claimant_evidence_for(entry))}'
         )

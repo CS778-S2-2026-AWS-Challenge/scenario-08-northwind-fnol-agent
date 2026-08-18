@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
+from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     AgentAction,
@@ -16,6 +17,7 @@ from backend.domain.models import (
     EvidenceRecord,
     EvidenceState,
     EvidenceStatus,
+    EvidenceSummary,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
@@ -25,7 +27,9 @@ from backend.domain.models import (
 from backend.repositories.protocols import PersistenceRepository
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
-SCENARIO_DERIVED_ENTRY_FIELDS = frozenset({'claim_id', 'claim_state', 'customer_next_step'})
+SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
+    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}
+)
 
 
 class ScenarioFixture(ContractModel):
@@ -200,11 +204,14 @@ class VisibilityEvidenceFixture(ContractModel):
 
 
 class EvidencePathEntry(ContractModel):
+    """A path entry whose evidence list is the complete effective evidence set."""
+
     scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
     business_path: EvidenceBusinessPath
     description: str = Field(min_length=1, max_length=500)
     claim_id: str = Field(min_length=1, max_length=100)
     claim_state: ClaimState
+    evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
     evidence: list[VisibilityEvidenceFixture] = Field(min_length=1)
 
@@ -229,6 +236,11 @@ class EvidencePathEntry(ContractModel):
             raise ValueError('Path evidence identifiers must be unique.')
         if any(fixture.evidence.claim_id != self.claim_id for fixture in self.evidence):
             raise ValueError('Every path evidence item must belong to the entry claim.')
+        records = [fixture.evidence for fixture in self.evidence]
+        if self.claim_state.evidence is not evidence_state_for(records):
+            raise ValueError('Path evidence state must derive from the complete evidence set.')
+        if self.evidence_summary != evidence_summary_for(records):
+            raise ValueError('Path evidence summary must derive from the complete evidence set.')
         return self
 
 
@@ -289,13 +301,20 @@ def load_evidence_path_fixtures(
             raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
 
         entry['claim_id'] = scenario.claim.claim_id
-        entry['claim_state'] = scenario.claim.claim_state.model_dump(mode='json')
-        entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
         for fixture in entry.get('evidence', []):
             evidence = fixture.get('evidence', {})
             if 'claim_id' in evidence:
                 raise ValueError('Evidence claim_id must derive from the canonical scenario claim.')
             evidence['claim_id'] = scenario.claim.claim_id
+        records = [
+            EvidenceRecord.model_validate(fixture['evidence'])
+            for fixture in entry.get('evidence', [])
+        ]
+        entry['claim_state'] = scenario.claim.claim_state.model_copy(
+            update={'evidence': evidence_state_for(records)}
+        ).model_dump(mode='json')
+        entry['evidence_summary'] = evidence_summary_for(records).model_dump(mode='json')
+        entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
     return EvidencePathFixtureSet.model_validate(payload)
 
 

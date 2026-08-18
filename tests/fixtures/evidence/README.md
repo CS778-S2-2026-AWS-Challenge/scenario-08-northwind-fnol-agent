@@ -22,12 +22,15 @@ fixture work.
 
 ## Path entry and visibility fixtures
 
-`path-entry-visibility.json` defines evidence overlays for the fast,
+`path-entry-visibility.json` defines complete effective evidence sets for the fast,
 professional-review, urgent, human-request, and pending-evidence paths. Each
 entry references the canonical catalogue in `backend/demo_data/scenarios` by
-`scenario_id`; the loader derives the claim identifier, claim state, customer
-next step, and evidence claim links from that record. The overlay must not copy
-those fields, so scenario-facing state has one runtime source.
+`scenario_id`; the loader derives the claim identifier, non-evidence Claim State,
+customer next step, and evidence claim links from that record. It then derives
+the effective Evidence State and Evidence Summary from the entry's complete
+evidence set using the same precedence as the runtime evidence service. The
+fixture source must not copy those derived fields, so scenario-facing state has
+one runtime source and cannot contradict its evidence records.
 
 Evidence is labelled `claimant_visible`, `shared`, or `internal_only`. The
 claimant fixture projection includes the first two classes, removes internal

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.domain.evidence import evidence_state_for, evidence_summary_for
+from backend.domain.models import EvidenceState
 from backend.repositories.scenario_loader import (
     CANONICAL_SCENARIO_DIRECTORY,
     EvidenceBusinessPath,
@@ -31,14 +33,18 @@ def test_visibility_catalogue_loads_all_five_path_entries() -> None:
     ]
 
 
-def test_visibility_entries_derive_state_from_canonical_scenarios() -> None:
+def test_visibility_entries_derive_canonical_and_effective_evidence_state() -> None:
     fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
 
     for entry in fixture_set.entries:
         scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / f'{entry.scenario_id}.json')
 
         assert entry.claim_id == scenario.claim.claim_id
-        assert entry.claim_state == scenario.claim.claim_state
+        records = [fixture.evidence for fixture in entry.evidence]
+        assert entry.claim_state == scenario.claim.claim_state.model_copy(
+            update={'evidence': evidence_state_for(records)}
+        )
+        assert entry.evidence_summary == evidence_summary_for(records)
         assert entry.customer_next_step == scenario.claim.customer_next_step
         assert {fixture.evidence.claim_id for fixture in entry.evidence} == {
             scenario.claim.claim_id
@@ -49,7 +55,9 @@ def test_visibility_source_does_not_duplicate_canonical_scenario_state() -> None
     payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
 
     for entry in payload['entries']:
-        assert {'claim_id', 'claim_state', 'customer_next_step'}.isdisjoint(entry)
+        assert {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}.isdisjoint(
+            entry
+        )
         assert all('claim_id' not in fixture['evidence'] for fixture in entry['evidence'])
 
 
@@ -81,6 +89,20 @@ def test_visibility_catalogue_loads_repeatably_without_manual_edits() -> None:
 
     assert first == second
     assert all(entry.evidence for entry in first.entries)
+
+
+def test_visibility_loader_corrects_canonical_not_started_state_from_evidence() -> None:
+    scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-01-clear-motor.json')
+    fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
+    fast_entry = next(
+        entry for entry in fixture_set.entries if entry.business_path is EvidenceBusinessPath.FAST
+    )
+
+    assert scenario.claim.claim_state.evidence is EvidenceState.NOT_STARTED
+    assert fast_entry.claim_state.evidence is EvidenceState.RECEIVED
+    assert fast_entry.evidence_summary.received == 1
+    assert fast_entry.evidence_summary.pending == 0
+    assert fast_entry.evidence_summary.needs_attention == 0
 
 
 def test_visibility_loader_rejects_internal_only_catalogue(tmp_path: Path) -> None:
