@@ -121,8 +121,7 @@ def _resolved_confirmation_question_texts(
     if any(_confirmation_field_code(requirement) is None for requirement in requirements):
         return set()
     if not all(
-        _confirmation_requirement_is_resolved(claim, requirement)
-        for requirement in requirements
+        _confirmation_requirement_is_resolved(claim, requirement) for requirement in requirements
     ):
         return set()
     return {_normalise_question(candidate) for candidate in candidates if candidate}
