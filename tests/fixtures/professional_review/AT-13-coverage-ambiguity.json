@@ -37,19 +37,29 @@
       "last_active_at": "2026-08-19T00:05:00Z"
     }
   ],
-  "evidence": [
+  "evidence": [],
+  "retrievals": [
     {
-      "evidence_id": "evd_fixture_at13_policy",
+      "retrieval_id": "ret_fixture_at13_policy",
       "claim_id": "clm_fixture_at13",
-      "kind": "policy_wording",
-      "status": "received",
-      "file_status": "ready",
-      "source": "external_system",
-      "related_fields": ["policy.policy_number"],
-      "needed_for": ["coverage_review"],
-      "provenance": {"provider_reference": "synthetic-policy-ambiguity"},
-      "created_at": "2026-08-19T00:03:00Z",
-      "updated_at": "2026-08-19T00:03:00Z"
+      "kind": "policy",
+      "source": {
+        "system": "synthetic-policy-adapter",
+        "reference": "policy-at13",
+        "retrieved_at": "2026-08-19T00:03:00Z"
+      },
+      "facts": {
+        "policy_reference": "POL-AT13",
+        "product": "Comprehensive Motor",
+        "status": "active",
+        "coverage_sections": ["collision"]
+      },
+      "uncertainty": [
+        {
+          "code": "COVERAGE_AMBIGUOUS",
+          "detail": "The retrieved collision wording requires professional interpretation for this incident."
+        }
+      ]
     }
   ],
   "messages": [
@@ -62,16 +72,6 @@
       "visibility": "shared",
       "content": {"type": "text", "text": "Can you check whether this damage is covered?"},
       "created_at": "2026-08-19T00:01:00Z"
-    },
-    {
-      "message_id": "msg_at13_internal",
-      "claim_id": "clm_fixture_at13",
-      "session_id": "ses_fixture_at13",
-      "actor": "system",
-      "visibility": "internal_only",
-      "content": {"type": "review_signal", "reason": "COVERAGE_AMBIGUOUS"},
-      "evidence_refs": ["evd_fixture_at13_policy"],
-      "created_at": "2026-08-19T00:04:00Z"
     }
   ],
   "expected": {
@@ -80,7 +80,8 @@
     "review_reason": "COVERAGE_AMBIGUOUS",
     "visibility": {
       "claimant_message_count": 1,
-      "staff_message_count": 2,
+      "staff_message_count": 1,
+      "staff_review_signal_count": 1,
       "internal_reason_hidden": true
     }
   }

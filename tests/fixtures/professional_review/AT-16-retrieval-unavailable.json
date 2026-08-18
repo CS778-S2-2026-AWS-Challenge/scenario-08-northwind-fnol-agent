@@ -9,7 +9,7 @@
     "locale": "en-NZ",
     "incident_type": "motor",
     "claim_state": {
-      "coverage": "review_required",
+      "coverage": "not_assessed",
       "evidence": "not_started",
       "workflow_state": "professional_review",
       "next_action": "HANDOFF"
@@ -38,6 +38,27 @@
     }
   ],
   "evidence": [],
+  "retrievals": [
+    {
+      "retrieval_id": "ret_fixture_at16_policy",
+      "claim_id": "clm_fixture_at16",
+      "kind": "policy",
+      "source": {
+        "system": "synthetic-policy-adapter",
+        "reference": "lookup-attempt-at16",
+        "retrieved_at": "2026-08-19T03:02:00Z"
+      },
+      "facts": {
+        "policy_reference": "POLICY-REFERENCE-UNRESOLVED"
+      },
+      "uncertainty": [
+        {
+          "code": "RETRIEVAL_UNAVAILABLE",
+          "detail": "The policy provider was temporarily unavailable and returned no coverage facts."
+        }
+      ]
+    }
+  ],
   "messages": [
     {
       "message_id": "msg_at16_claimant",
@@ -48,15 +69,6 @@
       "visibility": "shared",
       "content": {"type": "text", "text": "My policy number is available if you need it."},
       "created_at": "2026-08-19T03:01:00Z"
-    },
-    {
-      "message_id": "msg_at16_internal",
-      "claim_id": "clm_fixture_at16",
-      "session_id": "ses_fixture_at16",
-      "actor": "system",
-      "visibility": "internal_only",
-      "content": {"type": "review_signal", "reason": "RETRIEVAL_UNAVAILABLE"},
-      "created_at": "2026-08-19T03:03:00Z"
     }
   ],
   "expected": {
@@ -65,7 +77,8 @@
     "review_reason": "RETRIEVAL_UNAVAILABLE",
     "visibility": {
       "claimant_message_count": 1,
-      "staff_message_count": 2,
+      "staff_message_count": 1,
+      "staff_review_signal_count": 1,
       "internal_reason_hidden": true
     }
   }

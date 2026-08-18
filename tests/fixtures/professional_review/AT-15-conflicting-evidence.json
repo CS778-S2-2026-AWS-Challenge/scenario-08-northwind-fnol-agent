@@ -95,6 +95,7 @@
     "visibility": {
       "claimant_message_count": 1,
       "staff_message_count": 2,
+      "staff_review_signal_count": 0,
       "internal_reason_hidden": true
     }
   }

@@ -6,6 +6,7 @@ This directory contains engineering guidance, API information, and user-research
 
 - [Current API](api.md)
 - [Development Conventions](development-conventions.md)
+- [Claim creation and AWS adapter boundary](claim-creation-boundary.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 - [Day 4 API, data boundary, and adapter verification](day4-api-data-boundary-verification.md)
 

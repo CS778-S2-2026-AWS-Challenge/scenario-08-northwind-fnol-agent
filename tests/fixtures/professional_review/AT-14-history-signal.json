@@ -9,9 +9,8 @@
     "locale": "en-NZ",
     "incident_type": "motor",
     "claim_state": {
-      "coverage": "review_required",
+      "coverage": "not_assessed",
       "evidence": "received",
-      "fraud_signal": "review_required",
       "workflow_state": "professional_review",
       "next_action": "HANDOFF"
     },
@@ -38,18 +37,29 @@
       "last_active_at": "2026-08-19T01:05:00Z"
     }
   ],
-  "evidence": [
+  "evidence": [],
+  "retrievals": [
     {
-      "evidence_id": "evd_fixture_at14_history",
+      "retrieval_id": "ret_fixture_at14_history",
       "claim_id": "clm_fixture_at14",
-      "kind": "claim_history_record",
-      "status": "received",
-      "file_status": "ready",
-      "source": "external_system",
-      "needed_for": ["professional_review"],
-      "provenance": {"provider_reference": "synthetic-history-014"},
-      "created_at": "2026-08-19T01:03:00Z",
-      "updated_at": "2026-08-19T01:03:00Z"
+      "kind": "claim_history",
+      "source": {
+        "system": "synthetic-history-adapter",
+        "reference": "history-at14",
+        "retrieved_at": "2026-08-19T01:03:00Z"
+      },
+      "facts": {
+        "history_reference": "HIST-AT14",
+        "incident_type": "motor",
+        "status": "closed",
+        "outcome": "withdrawn"
+      },
+      "uncertainty": [
+        {
+          "code": "RELEVANT_HISTORY_REVIEW",
+          "detail": "A claims professional must decide whether the retrieved history is relevant to this incident."
+        }
+      ]
     }
   ],
   "messages": [
@@ -62,16 +72,6 @@
       "visibility": "shared",
       "content": {"type": "text", "text": "The vehicle was damaged while parked overnight."},
       "created_at": "2026-08-19T01:01:00Z"
-    },
-    {
-      "message_id": "msg_at14_internal",
-      "claim_id": "clm_fixture_at14",
-      "session_id": "ses_fixture_at14",
-      "actor": "system",
-      "visibility": "internal_only",
-      "content": {"type": "review_signal", "reason": "RELEVANT_HISTORY_REVIEW"},
-      "evidence_refs": ["evd_fixture_at14_history"],
-      "created_at": "2026-08-19T01:04:00Z"
     }
   ],
   "expected": {
@@ -80,7 +80,8 @@
     "review_reason": "RELEVANT_HISTORY_REVIEW",
     "visibility": {
       "claimant_message_count": 1,
-      "staff_message_count": 2,
+      "staff_message_count": 1,
+      "staff_review_signal_count": 1,
       "internal_reason_hidden": true
     }
   }
