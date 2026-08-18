@@ -47,6 +47,6 @@ The page is hard-coded for the local prototype staff token.
 - All write-back requests carry an idempotency key and the currently displayed claim revision;
   the queue and detail are reloaded after each successful mutation.
 - The queue is never populated automatically. For a local walkthrough, staff must explicitly use
-  **Load demo handoff queue** while the queue is empty. The action is available only in development
+  **Load workbench demo queue** while the queue is empty. The action is available only in development
   and test environments and loads the bounded AT-02, AT-04, and AT-05 demo set.
 - It does not expose claimant-only private data.
