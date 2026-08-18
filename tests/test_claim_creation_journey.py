@@ -131,6 +131,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert result['decision']['reason_codes'] == ['CLAIM_CREATION_AUTHORISED']
     assert result['external_claim']['creation_status'] == journey['expected_creation_status']
     assert result['external_claim']['route'] == journey['expected_route']
+    assert result['external_claim']['source'] == journey['expected_source']
     assert result['external_claim']['claim_number']
     assert result['external_claim']['next_step']
     assert result['external_claim']['expected_by']
