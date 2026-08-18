@@ -1,16 +1,16 @@
 # D4-T02 Journey Test Records
 
-These records close the verification scope for issue [#41](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/41) against `main` candidate `20a10e8de0ceb0ebfd9ffbd5ef8e5a6a763d9995`.
+These records close the verification scope for issue [#41](https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/issues/41) against `main` candidate `fdeecfa1da7f084b80c6833dd0447ddba05dabd3`.
 
 ## Commands and results
 
 ```text
 py -3.12 -m pytest tests/test_claim_creation_journey.py tests/test_claim_api.py::test_confirmed_intake_field_is_not_asked_again tests/test_handoff_api.py tests/test_workbench_api.py tests/test_integrations.py tests/test_day3_scenarios.py::test_claimant_and_staff_projections_share_state_without_leaking_internal_signal -q
-33 passed in 4.76s
+33 passed in 9.84s
 
 py -3.12 -m pytest -q --cov=backend --cov-report=term-missing
-181 passed in 32.76s
-Total coverage: 90.64%
+189 passed in 45.99s
+Total coverage: 90.76%
 ```
 
 ## T02-01: Clear motor journey
@@ -41,7 +41,7 @@ Total coverage: 90.64%
 
 - **Input:** Load the synthetic `AT-02-coverage-ambiguity` scenario and read its claimant and staff projections.
 - **Response:** The claimant receives a plain-language professional-review next step. Staff receive the internal review context and source references. Neither projection states that coverage is approved, declined, or finally determined.
-- **State change:** Coverage remains `needs_review`; the internal signal remains evidence for staff review rather than a coverage or fraud conclusion.
+- **State change:** Coverage remains `ambiguous` and workflow state remains `professional_review`; the internal signal remains evidence for staff review rather than a coverage or fraud conclusion.
 - **Result:** PASS for the no-unsupported-conclusion and role-visibility boundary.
 - **Defect:** The scenario starts from controlled synthetic review state; it does not prove a production policy decision or unrestricted natural-language coverage classifier.
 
