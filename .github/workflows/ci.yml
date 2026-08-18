@@ -27,12 +27,7 @@ jobs:
         run: python -m pip install -r backend/requirements-dev.txt
 
       - name: Check backend formatting
-        run: |
-          if ! python -m ruff format --check .; then
-            python -m ruff format backend/services/resume.py
-            git diff -- backend/services/resume.py
-            exit 1
-          fi
+        run: python -m ruff format --check .
 
       - name: Lint backend
         run: python -m ruff check .
