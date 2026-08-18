@@ -10,7 +10,7 @@ from backend.repositories.fixture import FixtureRepository
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
 
-def test_resume_drops_confirmation_question_after_field_is_confirmed() -> None:
+def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None:
     repository = FixtureRepository()
 
     with TestClient(create_app(Settings(), repository)) as client:
@@ -47,7 +47,11 @@ def test_resume_drops_confirmation_question_after_field_is_confirmed() -> None:
         assert turn.json()['claim_revision'] == 2
 
         decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-        assert decision.next_action_requirements == ['confirm:incident.description']
+        requirements = decision.next_action_requirements
+        assert requirements
+        assert all(requirement.startswith('confirm:') for requirement in requirements)
+        field_codes = [requirement.removeprefix('confirm:') for requirement in requirements]
+        assert 'incident.description' in field_codes
         stale_question = decision.customer_next_step.summary
         unrelated_question = 'Please keep the remaining claim notes available.'
 
@@ -69,7 +73,7 @@ def test_resume_drops_confirmation_question_after_field_is_confirmed() -> None:
                 'Idempotency-Key': 'resume-confirm-question-confirmation',
                 'If-Match': '2',
             },
-            json={'field_codes': ['incident.description']},
+            json={'field_codes': field_codes},
         )
         assert confirmed.status_code == 200
         assert confirmed.json()['revision'] == 3
@@ -78,7 +82,7 @@ def test_resume_drops_confirmation_question_after_field_is_confirmed() -> None:
         source = repository.get_session(claim_id, session_id, 'cus_demo')
         assert claim is not None
         assert source is not None
-        assert claim.form['incident.description'].status.value == 'confirmed'
+        assert all(claim.form[field_code].status.value == 'confirmed' for field_code in field_codes)
         assert claim.revision > source.context_revision
 
         paused_at = claim.updated_at + timedelta(minutes=1)
