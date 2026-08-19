@@ -31,6 +31,11 @@
     .sidebar-nav { display:grid; gap:8px; }
     .sidebar-nav button { width:100%; border:1px solid #334155; border-radius:10px; padding:12px 14px; background:#0f172a; color:#f8fafc; text-align:left; cursor:pointer; }
     .sidebar-nav button:hover, .sidebar-nav button.active { border-color:#38bdf8; background:#172b45; }
+    .demo-controls { display:grid; gap:8px; padding-top:14px; border-top:1px solid #334155; }
+    .demo-controls button { width:100%; border:1px solid #334155; border-radius:10px; padding:10px 12px; background:#172033; color:#e2e8f0; text-align:left; cursor:pointer; }
+    .demo-controls button:hover { border-color:#38bdf8; }
+    .demo-controls button.danger { border-color:#7f1d1d; background:#3f1d26; color:#fecaca; }
+    .demo-status { margin:0; color:#94a3b8; font-size:11px; line-height:1.45; }
     .status-bar { margin-top: auto; font-size: 12px; color: #94a3b8; line-height: 1.7; }
 
     .help { margin-top:auto; padding:17px 12px 0; border-top:1px solid #29475f; color:#aac0d1; font-size:12px; }.help b { display:block; color:#fff; margin-bottom:3px; }
@@ -40,22 +45,14 @@
     .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
     .header h1 { margin: 0; font-size: 28px; }
     .header p { margin: 0; color: #475569; max-width: 650px; }
-    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
-    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 20px; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.04); }
-    .card h2 { margin: 0 0 12px; font-size: 16px; color: #0f172a; }
-    .card dl { margin: 0; }
-    .card dt { margin-top: 14px; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .08em; }
-    .card dd { margin: 6px 0 0; font-size: 15px; color: #0f172a; }
-
     .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
     .panel { grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: visible; }
-    .cards { grid-column: 1 / -1; }
     .detail-panel { grid-column: 1 / -1; }
     .panel-header { padding: 18px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px; align-items: center; }
     .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
     .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
     .panel-body { padding: 20px; }
-    .claim-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap: 12px; }
+    .claim-list { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
     .claim-list button {width: 100%; min-height:96px;
       position:relative;
       text-align: left;
@@ -102,6 +99,18 @@
     .detail-panel { display: grid; gap: 16px; }
     .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
     .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
+    details.detail-section { padding:0; overflow:hidden; }
+    details.detail-section > summary { display:flex; align-items:center; gap:12px; padding:17px 20px; color:#0f172a; font-size:15px; font-weight:750; cursor:pointer; list-style:none; }
+    details.detail-section > summary::-webkit-details-marker { display:none; }
+    details.detail-section > summary::after { margin-left:auto; color:#64748b; content:'+'; font-size:20px; font-weight:400; line-height:1; }
+    details.detail-section[open] > summary { border-bottom:1px solid #e2e8f0; }
+    details.detail-section[open] > summary::after { content:'−'; }
+    .detail-section-body { padding:20px; }
+    .detail-section-hint { color:#64748b; font-size:12px; font-weight:400; }
+    .claim-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+    .claim-actions .action-copy { min-width:220px; margin-right:auto; }
+    .claim-actions .action-copy strong { display:block; margin-bottom:4px; color:#0f172a; font-size:14px; }
+    .claim-actions .action-copy span { color:#64748b; font-size:12px; }
     .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .detail-item { background: #f8fafc; padding: 14px 16px; border-radius: 14px; }
     .detail-item strong { display: block; margin-bottom: 8px; color: #0f172a; }
@@ -241,7 +250,7 @@
     .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
     .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
     
-    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } }
+    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } .claim-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     @media (max-width: 680px) { .claim-list { grid-template-columns:1fr; } .operational-summary-grid { grid-template-columns:1fr; } .operational-summary-card.next { grid-column:auto; grid-template-columns:1fr; } }
 
     /* Assistant and customer conversation components */
@@ -299,7 +308,6 @@
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
     @media(max-width:1024px) {
       .sidebar { width:100%; }
-      .cards { grid-template-columns:1fr; }
     }
     @media(max-width:720px) {
       .content { min-width:0; padding:16px; }
@@ -330,11 +338,16 @@
 
       <nav class="sidebar-nav" aria-label="Workbench navigation">
         <button id="workbenchNav" class="active" type="button">Claim workbench</button>
+        <button id="pendingEvidenceNav" type="button">Pending evidence</button>
         <button id="customerChatNav" type="button">Customer chat</button>
       </nav>
 
       <button id="refreshClaims" type="button">Refresh claims</button>
-      <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
+      <div class="demo-controls">
+        <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
+        <button id="resetDemoQueue" class="danger" type="button" hidden>Reset and load demo queue</button>
+        <p id="demoStatus" class="demo-status" aria-live="polite">Demo data is only available in the local development environment.</p>
+      </div>
 
       <div class="help">
         <b>Need a hand?</b>
@@ -349,7 +362,7 @@
       <section id="workbenchView" aria-busy="false">
       <div class="header">
         <div>
-          <h1>Employee workbench</h1>
+          <h1 id="queueTitle">Employee workbench</h1>
           <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
         </div>
       </div>
@@ -369,50 +382,33 @@
           </div>
         </section>
 
-      <div class="cards">
-        <div class="card">
-          <h2>Internal view</h2>
-          <p class="note">This page is staff-only. It queries the backend workbench API and exposes internal fields that must not be rendered in the claimant interface.</p>
-        </div>
-        <div class="card">
-          <h2>Shared state</h2>
-          <p class="note">Customer-visible next steps are shown alongside internal review tags and staff notes. The data comes from the same backend claim state.</p>
-        </div>
-      </div>
-
-      
-
         <section class="detail-panel">
           <div class="detail-section" id="detailSummary">
             <h2>Claim detail</h2>
             <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
           </div>
-          <div class="detail-section" id="detailInternal" style="display:none">
-            <h2>Internal information</h2>
-            <div class="detail-grid">
-              <div class="detail-item"><strong>Customer</strong><span id="detailCustomer"></span></div>
-              <div class="detail-item"><strong>Customer reference</strong><span id="detailCustomerReference"></span></div>
-              <div class="detail-item"><strong>Current state</strong><span id="detailState"></span></div>
-              <div class="detail-item"><strong>Assigned to</strong><span id="detailAssigned"></span></div>
-              <div class="detail-item"><strong>Internal flags</strong><span id="detailFlags"></span></div>
-              <div class="detail-item"><strong>Last updated</strong><span id="detailUpdated"></span></div>
-            </div>
-          </div>
-          <div class="detail-section" id="detailNotes" style="display:none">
-            <h2>Claim context</h2>
-            <div id="detailContext"></div>
-          </div>
           <div class="detail-section" id="detailNextStep" style="display:none">
-            <h2>Customer next step</h2>
-            <p id="detailNextStepSummary"></p>
-            <p class="muted"><strong>Responsible:</strong> <span id="detailResponsible"></span></p>
-            <div style="margin-top:12px">
+            <div class="claim-actions">
+              <div class="action-copy"><strong>Continue this claim</strong><span>Communication and guidance tools</span></div>
               <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
-              <button id="toggleAssistantBtn" class="customer-chat-close" type="button" style="margin-left:8px">Open assistant</button>
+              <button id="toggleAssistantBtn" class="customer-chat-close" type="button">Open assistant</button>
             </div>
-            </div>
-          <div class="detail-section" id="detailStaffActions" style="display:none">
-            <h2>Staff actions and write-back</h2>
+          </div>
+          <details class="detail-section" id="detailEvidence" style="display:none" open>
+            <summary>Evidence and claim facts <span class="detail-section-hint">What we know and what is still pending</span></summary>
+            <div id="detailEvidenceContext" class="detail-section-body"></div>
+          </details>
+          <details class="detail-section" id="detailReview" style="display:none">
+            <summary>Handoffs and internal review <span class="detail-section-hint">Assignments, signals and review context</span></summary>
+            <div id="detailReviewContext" class="detail-section-body"></div>
+          </details>
+          <details class="detail-section" id="detailHistory" style="display:none">
+            <summary>History and continuity <span class="detail-section-hint">Previous sessions and communication</span></summary>
+            <div id="detailHistoryContext" class="detail-section-body"></div>
+          </details>
+          <details class="detail-section" id="detailStaffActions" style="display:none">
+            <summary>Staff actions and write-back <span class="detail-section-hint">Audited workflow controls</span></summary>
+            <div class="detail-section-body">
             <p class="muted">These controls persist audited staff decisions to the shared claim state. Internal reasons are never copied into the claimant update.</p>
             <div class="staff-controls">
               <section class="staff-control">
@@ -449,7 +445,8 @@
               </section>
             </div>
             <div id="mutationStatus" class="mutation-status" aria-live="polite"></div>
-          </div>
+            </div>
+          </details>
         </section>
       </div>
       </section>
@@ -489,7 +486,7 @@
   <div class="chat-widget closed" id="chatWidget">
     <div class="chat-header" id="chatHeader">
       <div>
-        <strong id="chatHeaderTitle">Aurora Assistant</strong>
+        <strong id="chatHeaderTitle">Northwind Assistant</strong>
         <div class="chat-header-meta" id="chatHeaderMeta">Your support companion for claim reviews.</div>
       </div>
       <button class="chat-toggle" id="chatToggle" type="button">Open</button>
@@ -516,7 +513,7 @@
     let activeClaimDetail = null;
     const detailCache = new Map();
     let detailRevision = null;
-    const CLAIMS_PER_PAGE = 6;
+    const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
     const stateMap = {
@@ -525,6 +522,12 @@
       ready_to_progress: 'Ready to progress',
       created_routed: 'Created / routed',
       new_untriaged: 'New and untriaged',
+    };
+
+    const evidenceWaitLabels = {
+      claimant: 'Waiting on claimant',
+      external_agency: 'Waiting on external agency',
+      internal: 'Waiting on Northwind',
     };
 
     function setError(message) {
@@ -571,7 +574,12 @@
       }
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(payload?.error?.message || `The workbench request failed (${response.status}).`);
+        const requestError = new Error(
+          payload?.error?.message || `The workbench request failed (${response.status}).`
+        );
+        requestError.code = payload?.error?.code;
+        requestError.status = response.status;
+        throw requestError;
       }
       return payload;
     }
@@ -631,7 +639,8 @@
       activeClaimDetail = null;
       detailRevision = null;
       byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
-      ['detailInternal', 'detailNotes', 'detailNextStep', 'detailStaffActions'].forEach(id => { byId(id).style.display = 'none'; });
+      ['detailNextStep', 'detailEvidence', 'detailReview', 'detailHistory', 'detailStaffActions']
+        .forEach(id => { byId(id).style.display = 'none'; });
       setMutationStatus('');
       syncStaffControlState();
     }
@@ -822,6 +831,9 @@
         queueMeta.append(
           previewText(`Priority: ${formatLabel(item.priority)}`),
           previewText(`${item.open_handoff_count} open handoff${item.open_handoff_count === 1 ? '' : 's'}`),
+          ...(item.pending_evidence_count
+            ? [previewText(`${item.pending_evidence_count} pending evidence`)]
+            : []),
         );
 
         const hoverDetails = document.createElement('div');
@@ -830,6 +842,7 @@
         hoverDetails.append(
           previewRow('Route', formatLabel(item.route || 'Not assigned')),
           previewRow('Evidence', evidencePreview(item)),
+          ...pendingEvidencePreviewRows(item.pending_evidence || []),
           previewRow(
             `Next · ${formatLabel(item.responsible_party)}`,
             textOrEmpty(item.next_action_summary, formatLabel(item.next_action)),
@@ -874,6 +887,18 @@
       return parts.join(' · ');
     }
 
+    function pendingEvidencePreviewRows(items) {
+      return items.map(item => previewRow(
+        evidenceWaitLabels[item.wait_type] || 'Responsibility not recorded',
+        `${formatLabel(item.kind)} · ${evidenceExpectedTiming(item)}`,
+      ));
+    }
+
+    function evidenceExpectedTiming(item) {
+      if (item.expected_by) return `Expected ${new Date(item.expected_by).toLocaleDateString()}`;
+      return item.expected_timing || 'Timing not provided';
+    }
+
     function previewRow(label, value, modifier = '') {
       const row = document.createElement('div');
       row.className = `claim-preview-row ${modifier}`.trim();
@@ -894,9 +919,13 @@
     }
 
     function renderContext(detail) {
-      const container = byId('detailContext');
-      container.replaceChildren();
-      container.className = 'context-stack';
+      const evidenceContainer = byId('detailEvidenceContext');
+      const reviewContainer = byId('detailReviewContext');
+      const historyContainer = byId('detailHistoryContext');
+      [evidenceContainer, reviewContainer, historyContainer].forEach(container => {
+        container.replaceChildren();
+        container.classList.add('context-stack');
+      });
 
       const fields = Object.entries(detail.form || {}).map(([code, field]) => ({
         label: formatLabel(code),
@@ -908,18 +937,24 @@
           field.confidence === null || field.confidence === undefined ? '' : `Confidence: ${field.confidence}`,
         ],
       }));
-      container.append(contextBlock('Structured facts and provenance', definitionList(fields)));
+      evidenceContainer.append(contextBlock('Structured facts and provenance', definitionList(fields)));
 
       const evidenceRows = (detail.evidence || []).map(item => ({
         label: formatLabel(item.kind),
         value: formatLabel(item.status),
         meta: [
           `Source: ${formatLabel(item.source)}`,
+          item.wait_type ? evidenceWaitLabels[item.wait_type] : '',
+          item.responsible_party ? `Responsible: ${formatLabel(item.responsible_party)}` : '',
+          item.status === 'pending_generation' || item.file_status !== 'ready'
+            ? evidenceExpectedTiming(item)
+            : '',
+          item.context_summary,
           item.claimant_note,
           item.needed_for?.length ? `Needed for: ${item.needed_for.join(', ')}` : '',
         ],
       }));
-      container.append(contextBlock('Evidence', definitionList(evidenceRows)));
+      evidenceContainer.append(contextBlock('Evidence', definitionList(evidenceRows)));
 
       const continuityItems = (detail.sessions || []).flatMap(session => [
         ...(session.summary ? [`Summary: ${session.summary}`] : []),
@@ -927,22 +962,27 @@
         ...session.pending_items.map(item => `Pending: ${item}`),
         ...session.prior_commitments.map(item => `Commitment: ${item}`),
       ]);
-      container.append(contextBlock('Session continuity', bulletList(continuityItems)));
+      historyContainer.append(contextBlock('Session continuity', bulletList(continuityItems)));
 
       const signalRows = (detail.signals || []).map(signal => ({
         label: textOrEmpty(signal.code || signal.signal_id, 'Internal signal'),
         value: formatLabel(signal.status || 'review required'),
         meta: [signal.reason, signal.decisions?.length ? `${signal.decisions.length} staff decision(s)` : ''],
       }));
-      container.append(contextBlock('Internal signals', definitionList(signalRows)));
+      reviewContainer.append(contextBlock('Internal signals', definitionList(signalRows)));
 
       const handoffContainer = document.createElement('div');
       handoffContainer.className = 'context-stack';
       (detail.handoffs || []).forEach(handoff => handoffContainer.append(renderHandoff(detail, handoff)));
       if (!detail.handoffs?.length) handoffContainer.append(bulletList([]));
-      container.append(contextBlock('Human handoff', handoffContainer));
+      reviewContainer.append(contextBlock('Human handoff', handoffContainer));
 
-      container.append(contextBlock('Communication history', communicationHistory(detail)));
+      historyContainer.append(contextBlock('Communication history', communicationHistory(detail)));
+
+      const hasReviewWork = signalRows.length > 0 || (detail.handoffs || []).some(
+        handoff => !['resolved', 'cancelled'].includes(handoff.status)
+      );
+      byId('detailReview').open = hasReviewWork;
     }
 
     function renderHandoff(detail, handoff) {
@@ -1138,23 +1178,11 @@
 
           detailContent.append(operationalSummary(detail));
 
-          byId('detailCustomer').textContent = detail.customer_reference.replace('customer-', '');
-          byId('detailCustomerReference').textContent = detail.customer_reference;
-          byId('detailState').textContent = detail.claim_state.workflow_state.replace('_', ' ');
-          const openHandoffs = (detail.handoffs || []).filter(item => !['resolved', 'cancelled'].includes(item.status));
-          const staffActions = detail.staff_actions || [];
-          const assignedTo = openHandoffs.find(item => item.assigned_to)?.assigned_to
-            || staffActions.find(item => item.assigned_to)?.assigned_to;
-          const signalFlags = (detail.signals || []).map(item => item.code || item.signal_id).filter(Boolean);
-          byId('detailAssigned').textContent = assignedTo || 'Unassigned';
-          byId('detailFlags').textContent = signalFlags.length ? signalFlags.join(', ') : 'None';
-          byId('detailUpdated').textContent = new Date(detail.updated_at).toLocaleString();
           renderContext(detail);
-          byId('detailNextStepSummary').textContent = detail.customer_next_step.summary;
-          byId('detailResponsible').textContent = detail.customer_next_step.responsible_party;
-          byId('detailInternal').style.display = 'block';
-          byId('detailNotes').style.display = 'block';
           byId('detailNextStep').style.display = 'block';
+          byId('detailEvidence').style.display = 'block';
+          byId('detailReview').style.display = 'block';
+          byId('detailHistory').style.display = 'block';
           populateStaffControls(detail);
           if (!customerChatView.hidden) renderCustomerChat();
         })
@@ -1180,12 +1208,61 @@
       renderClaims(claims);
     }
 
+    function setDemoStatus(message) {
+      byId('demoStatus').textContent = message;
+    }
+
+    function syncQueueNavigation() {
+      const pendingSelected = byId('viewSelect').value === 'awaiting_evidence';
+      const workbenchVisible = !byId('workbenchView').hidden;
+      byId('pendingEvidenceNav').classList.toggle('active', workbenchVisible && pendingSelected);
+      byId('workbenchNav').classList.toggle('active', workbenchVisible && !pendingSelected);
+      byId('queueTitle').textContent = pendingSelected ? 'Pending evidence queue' : 'Employee workbench';
+    }
+
+    async function selectQueue(view) {
+      byId('viewSelect').value = view;
+      queuePage = 1;
+      setView('workbench');
+      syncQueueNavigation();
+      await loadClaims();
+    }
+
     async function loadDemoQueue() {
       setError('');
       const button = byId('loadDemoQueue');
       button.disabled = true;
       try {
-        await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+        const seeded = await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+        setDemoStatus(`${seeded.claim_ids.length} demo claims loaded, including pending evidence.`);
+        byId('resetDemoQueue').hidden = true;
+        await loadClaims({ propagateError: true });
+      } catch (error) {
+        if (error.code === 'DEMO_SEED_REQUIRES_EMPTY_QUEUE') {
+          setDemoStatus('The local queue already contains data. Reset it to load the bounded demo scenarios.');
+          byId('resetDemoQueue').hidden = false;
+          await loadClaims();
+        } else {
+          setError(error.message);
+        }
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function resetAndLoadDemoQueue() {
+      if (!window.confirm('Reset all local demo claims and load the bounded workbench scenarios?')) return;
+      const button = byId('resetDemoQueue');
+      button.disabled = true;
+      setError('');
+      try {
+        await apiRequest(`${API_BASE.replace('/claims', '/demo/reset')}`, { method: 'POST' });
+        const seeded = await apiRequest(`${API_BASE.replace('/claims', '/demo/seed-scenarios')}`, { method: 'POST' });
+        detailCache.clear();
+        activeClaimId = null;
+        activeClaimDetail = null;
+        setDemoStatus(`${seeded.claim_ids.length} demo claims loaded, including pending evidence.`);
+        button.hidden = true;
         await loadClaims({ propagateError: true });
       } catch (error) {
         setError(error.message);
@@ -1220,9 +1297,11 @@
     document.getElementById('viewSelect').addEventListener('change', () => {
       queuePage = 1;
       loadClaims();
+      syncQueueNavigation();
     });
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
     byId('loadDemoQueue').addEventListener('click', loadDemoQueue);
+    byId('resetDemoQueue').addEventListener('click', resetAndLoadDemoQueue);
     byId('previousQueuePage').addEventListener('click', () => changeQueuePage(-1));
     byId('nextQueuePage').addEventListener('click', () => changeQueuePage(1));
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
@@ -1254,8 +1333,10 @@
       const showCustomerChat = view === 'customer-chat';
       workbenchView.hidden = showCustomerChat;
       customerChatView.hidden = !showCustomerChat;
-      byId('workbenchNav').classList.toggle('active', !showCustomerChat);
       byId('customerChatNav').classList.toggle('active', showCustomerChat);
+      const pendingSelected = byId('viewSelect').value === 'awaiting_evidence';
+      byId('pendingEvidenceNav').classList.toggle('active', !showCustomerChat && pendingSelected);
+      byId('workbenchNav').classList.toggle('active', !showCustomerChat && !pendingSelected);
       if (showCustomerChat) renderCustomerChat();
       if (!updateHistory) return;
       if (showCustomerChat && window.location.hash !== '#customer-chat') {
@@ -1571,7 +1652,8 @@
       renderAttachmentPreview();
     });
     byId('openCustomerChatBtn').addEventListener('click', () => openCustomerChat());
-    byId('workbenchNav').addEventListener('click', () => setView('workbench'));
+    byId('workbenchNav').addEventListener('click', () => selectQueue('all'));
+    byId('pendingEvidenceNav').addEventListener('click', () => selectQueue('awaiting_evidence'));
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
     byId('customerChatBack').addEventListener('click', () => setView('workbench'));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);

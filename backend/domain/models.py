@@ -152,6 +152,12 @@ class ResponsibleParty(str, Enum):
     EXTERNAL_PARTY = 'external_party'
 
 
+class EvidenceWaitType(str, Enum):
+    CLAIMANT = 'claimant'
+    EXTERNAL_AGENCY = 'external_agency'
+    INTERNAL = 'internal'
+
+
 class ClaimCreationStatus(str, Enum):
     CREATED = 'created'
     PENDING = 'pending'
@@ -395,6 +401,11 @@ class EvidenceRecord(ContractModel):
     needed_for: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
     claimant_note: str | None = None
+    wait_type: EvidenceWaitType | None = None
+    responsible_party: ResponsibleParty | None = None
+    expected_by: datetime | None = None
+    expected_timing: str | None = Field(default=None, max_length=200)
+    context_summary: str | None = Field(default=None, max_length=1000)
     created_at: datetime
     updated_at: datetime
 
@@ -662,6 +673,9 @@ class WorkbenchClaimListItem(ContractModel):
     route: str | None = None
     evidence_state: EvidenceState
     evidence_summary: EvidenceSummary
+    pending_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    pending_evidence_count: int = Field(default=0, ge=0)
+    pending_wait_types: list[EvidenceWaitType] = Field(default_factory=list)
     next_action_summary: str
     responsible_party: ResponsibleParty
     claim_creation_status: ClaimCreationStatus | None = None

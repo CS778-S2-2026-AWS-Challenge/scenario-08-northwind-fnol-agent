@@ -30,7 +30,7 @@
         "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
       }
     },
-    "evidence_summary": {"received": 0, "pending": 1, "needs_attention": 0},
+    "evidence_summary": {"received": 0, "pending": 3, "needs_attention": 0},
     "route": "standard",
     "active_session_id": "ses_fixture_at06",
     "external_claim": null,
@@ -75,6 +75,53 @@
       "needed_for": ["later_action"],
       "provenance": {"internal_note": "Expected document only; no file exists."},
       "claimant_note": "Police said the report will be available next week.",
+      "wait_type": "claimant",
+      "responsible_party": "claimant",
+      "expected_by": "2026-08-19T23:59:59Z",
+      "expected_timing": "Expected next week",
+      "context_summary": "The police report is needed for a later action and does not block current safe work.",
+      "created_at": "2026-08-12T01:05:00Z",
+      "updated_at": "2026-08-12T01:05:00Z"
+    },
+    {
+      "evidence_id": "evd_fixture_at06_agency",
+      "claim_id": "clm_fixture_at06",
+      "kind": "agency_incident_record",
+      "status": "pending_generation",
+      "file_status": "not_available",
+      "original_filename": null,
+      "media_type": null,
+      "size_bytes": null,
+      "source": "external_system",
+      "related_fields": [],
+      "needed_for": ["later_action"],
+      "provenance": {"internal_note": "Requested from the external agency."},
+      "claimant_note": null,
+      "wait_type": "external_agency",
+      "responsible_party": "external_party",
+      "expected_timing": "Usually within five working days",
+      "context_summary": "The external agency is preparing its incident record for later review.",
+      "created_at": "2026-08-12T01:05:00Z",
+      "updated_at": "2026-08-12T01:05:00Z"
+    },
+    {
+      "evidence_id": "evd_fixture_at06_internal",
+      "claim_id": "clm_fixture_at06",
+      "kind": "internal_policy_history",
+      "status": "pending_generation",
+      "file_status": "not_available",
+      "original_filename": null,
+      "media_type": null,
+      "size_bytes": null,
+      "source": "staff",
+      "related_fields": [],
+      "needed_for": ["later_action"],
+      "provenance": {"internal_note": "Northwind archive lookup is in progress."},
+      "claimant_note": null,
+      "wait_type": "internal",
+      "responsible_party": "claims_professional",
+      "expected_by": "2026-08-14T05:00:00Z",
+      "context_summary": "A claims professional is retrieving the internal policy history.",
       "created_at": "2026-08-12T01:05:00Z",
       "updated_at": "2026-08-12T01:05:00Z"
     }
@@ -96,7 +143,7 @@
   "expected": {
     "workflow_state": "ready_for_next",
     "customer_status": "continue_current_report",
-    "pending_evidence": 1,
+    "pending_evidence": 3,
     "unrelated_action_blocked": false
   }
 }

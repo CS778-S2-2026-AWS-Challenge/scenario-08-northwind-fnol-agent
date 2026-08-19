@@ -11,6 +11,7 @@ WORKBENCH_DEMO_SCENARIO_IDS = (
     'AT-02-coverage-ambiguity',
     'AT-04-urgent',
     'AT-05-human-request',
+    'AT-06-pending-evidence',
     'AT-10-controlled-assessor',
 )
 
