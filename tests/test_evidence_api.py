@@ -70,16 +70,22 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
 
 
 @pytest.mark.parametrize(
-    'file_status',
-    [EvidenceFileStatus.READY, EvidenceFileStatus.NOT_AVAILABLE],
+    ('status', 'file_status'),
+    [
+        ('incomplete', EvidenceFileStatus.READY),
+        ('incomplete', EvidenceFileStatus.NOT_AVAILABLE),
+        ('unofficial', EvidenceFileStatus.READY),
+        ('unofficial', EvidenceFileStatus.NOT_AVAILABLE),
+    ],
 )
-def test_incomplete_evidence_remains_in_staff_pending_evidence_view(
+def test_unresolved_evidence_remains_in_staff_pending_evidence_view(
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
+    status: str,
     file_status: EvidenceFileStatus,
 ) -> None:
-    created = create_claim(client, auth_headers, f'incomplete-{file_status.value}-claim')
+    created = create_claim(client, auth_headers, f'{status}-{file_status.value}-claim')
     claim = created['claim']
     assert isinstance(claim, dict)
     claim_id = str(claim['claim_id'])
@@ -88,12 +94,12 @@ def test_incomplete_evidence_remains_in_staff_pending_evidence_view(
         f'/api/v1/claims/{claim_id}/evidence',
         headers={
             **auth_headers,
-            'Idempotency-Key': f'incomplete-{file_status.value}',
+            'Idempotency-Key': f'{status}-{file_status.value}',
             'If-Match': '1',
         },
         json={
             'kind': 'repair_quote',
-            'status': 'incomplete',
+            'status': status,
             'needed_for': ['later_action'],
             'claimant_note': 'The final page is still required.',
         },
@@ -118,7 +124,7 @@ def test_incomplete_evidence_remains_in_staff_pending_evidence_view(
     assert item['evidence_summary']['needs_attention'] == 1
     assert item['pending_evidence_count'] == 1
     assert item['pending_wait_types'] == ['claimant']
-    assert item['pending_evidence'][0]['status'] == 'incomplete'
+    assert item['pending_evidence'][0]['status'] == status
     assert item['pending_evidence'][0]['file_status'] == file_status.value
     assert item['pending_evidence'][0]['responsible_party'] == 'claimant'
     assert item['pending_evidence'][0]['context_summary'] == 'Needed for: later_action'
