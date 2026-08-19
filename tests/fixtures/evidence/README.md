@@ -40,3 +40,35 @@ entries with:
 ```powershell
 py -3.12 scripts/run_evidence_visibility_fixtures.py
 ```
+
+## The shared evidence fixture service
+
+`backend/services/evidence_fixtures.py` is the one place a business path asks
+for evidence fixtures. It loads the lifecycle catalogue and the path entries,
+and resolves every record through the single domain rule in
+`backend/domain/evidence.py`, so no path can carry a private mapping from
+status and file status to a lifecycle stage.
+
+Validate all five business paths through the one service with:
+
+```powershell
+py -3.12 scripts/run_evidence_paths.py
+```
+
+### Entry stages and the conflict state
+
+`lifecycle_stage_for()` answers for the five **entry** stages an evidence item
+can start in. `inconsistent` is deliberately not one of them: it is reached
+after two settled records disagree on a material fact, so it is a conflict
+rather than an entry.
+
+`is_registered_evidence_shape()` is the wider check used when sweeping
+fixtures. It accepts the five entry stages plus a settled conflict, and rejects
+a conflict declared while the file is still arriving, because a disagreement is
+not meaningful until the files have settled.
+
+`test_evidence_fixture_service.py` sweeps every evidence record in
+`backend/demo_data/scenarios`, `tests/fixtures/professional_review`, the
+lifecycle catalogue, and the path entries. Parsing already forces the domain
+`EvidenceRecord`, so a private model fails at load; the sweep adds the subtler
+check that no path invents an unregistered status and file-status combination.
