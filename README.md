@@ -27,6 +27,19 @@ The project is in Sprint 1 and is building a full-path prototype. The prototype 
 
 Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
+## Repository Operation Rules
+
+All contributors and coding agents must follow [the repository operation rules](docs/repo_rule.md).
+Coding agents enter through [AGENT.md](AGENT.md), which defines the mandatory reading order and
+authority boundary. Install the versioned local quality hook once per clone:
+
+```powershell
+./scripts/install-git-hooks.ps1
+```
+
+Every pull request must reference a repository issue and pass the required GitHub checks. Coding
+agents must not merge pull requests or change Draft status without explicit current authorisation.
+
 ## Repository Layout
 
 | Path | Purpose |
@@ -81,13 +94,15 @@ Copy the non-secret values from `.env.example` into the process environment when
 
 ## Verification
 
-Run the complete repository quality gate before requesting review:
+Run the complete repository quality gate before pushing and before requesting review:
 
 ```powershell
 ./scripts/check.ps1
 ```
 
-After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run. The command checks backend formatting, linting, types, tests and coverage, then checks and builds the claimant client.
+After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run.
+The command checks backend formatting, linting, types, tests and coverage, the pull-request policy
+validator, and then checks and builds the claimant client.
 
 Run the synthetic integration fixtures from the repository root with:
 
