@@ -119,7 +119,7 @@ def _pending_evidence(records: list[EvidenceRecord]) -> list[EvidenceRecord]:
     return [
         record
         for record in records
-        if record.status is EvidenceStatus.PENDING_GENERATION
+        if record.status in {EvidenceStatus.PENDING_GENERATION, EvidenceStatus.INCOMPLETE}
         or record.file_status in pending_file_states
     ]
 

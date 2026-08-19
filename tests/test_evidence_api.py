@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import EvidenceUploadNotFound, MockEvidenceStorage
+from backend.domain.models import EvidenceFileStatus
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -65,6 +66,61 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
     assert stored.claim_state.evidence.value == 'pending_generation'
+
+
+@pytest.mark.parametrize(
+    'file_status',
+    [EvidenceFileStatus.READY, EvidenceFileStatus.NOT_AVAILABLE],
+)
+def test_incomplete_evidence_remains_in_staff_pending_evidence_view(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    file_status: EvidenceFileStatus,
+) -> None:
+    created = create_claim(client, auth_headers, f'incomplete-{file_status.value}-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+
+    registered = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'incomplete-{file_status.value}',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'repair_quote',
+            'status': 'incomplete',
+            'needed_for': ['later_action'],
+            'claimant_note': 'The final page is still required.',
+        },
+    )
+    assert registered.status_code == 201
+    evidence_id = registered.json()['evidence']['evidence_id']
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert evidence is not None
+    if file_status is EvidenceFileStatus.READY:
+        repository.save_evidence(
+            evidence.model_copy(update={'file_status': EvidenceFileStatus.READY}),
+            'cus_demo',
+        )
+
+    response = client.get(
+        '/api/v1/workbench/claims?view=awaiting_evidence',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
+
+    assert response.status_code == 200
+    item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
+    assert item['evidence_summary']['needs_attention'] == 1
+    assert item['pending_evidence_count'] == 1
+    assert item['pending_wait_types'] == ['claimant']
+    assert item['pending_evidence'][0]['status'] == 'incomplete'
+    assert item['pending_evidence'][0]['file_status'] == file_status.value
+    assert item['pending_evidence'][0]['responsible_party'] == 'claimant'
+    assert item['pending_evidence'][0]['context_summary'] == 'Needed for: later_action'
 
 
 @pytest.mark.parametrize(
