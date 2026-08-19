@@ -21,3 +21,4 @@ This directory contains engineering guidance, API information, and user-research
 - [Research directory](User_Research_and_Pain_Points/)
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
+- `week4-integration-inputs.md` records the Issue #150 Week 4 compilation: integration points, fallbacks, evidence and fixture inputs, path compatibility, and open blockers with owners.
