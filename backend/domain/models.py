@@ -749,10 +749,28 @@ class CreateSupportRequest(ContractModel):
     preferred_channel: PreferredChannel | None = None
 
 
+class HandoffDeliveryState(str, Enum):
+    DELIVERED = 'delivered'
+    QUEUED_LOCALLY = 'queued_locally'
+
+
+class HandoffDelivery(ContractModel):
+    """Claimant-safe statement of whether the staff queue system was notified.
+
+    `queued_locally` means the notification service could not be reached. The
+    handoff is still saved and still in the staff queue, so the request is not
+    lost; only the push notification is missing.
+    """
+
+    state: HandoffDeliveryState
+    limitations: list[str] = Field(default_factory=list, max_length=10)
+
+
 class SupportRequestResponse(ContractModel):
     handoff: ClaimantHandoff
     revision: int
     customer_next_step: CustomerNextStep
+    delivery: HandoffDelivery
 
 
 class EvidenceListResponse(ContractModel):

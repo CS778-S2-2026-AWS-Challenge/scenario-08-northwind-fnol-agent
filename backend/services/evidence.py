@@ -1,5 +1,6 @@
 from backend.adapters.evidence_storage import (
     EvidenceStorage,
+    EvidenceStorageUnavailable,
     EvidenceUploadNotFound,
     EvidenceUploadTooLarge,
     UnsupportedEvidenceMediaType,
@@ -324,6 +325,16 @@ def request_upload(
             media_type=payload.media_type,
             size_bytes=payload.size_bytes,
         )
+    except EvidenceStorageUnavailable as error:
+        # An outage is not a rejected file. It is reported as a retryable
+        # dependency failure so the claimant is told to try again rather than
+        # told their evidence was refused.
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable. The claim is unchanged.',
+            retryable=True,
+        ) from error
     except UnsupportedEvidenceMediaType as error:
         raise ApiError(
             status_code=415,
@@ -446,6 +457,16 @@ def complete_upload(
             media_type=evidence.media_type,
             size_bytes=evidence.size_bytes,
         )
+    except EvidenceStorageUnavailable as error:
+        # An outage is not a rejected file. It is reported as a retryable
+        # dependency failure so the claimant is told to try again rather than
+        # told their evidence was refused.
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable. The claim is unchanged.',
+            retryable=True,
+        ) from error
     except EvidenceUploadNotFound as error:
         raise ApiError(
             status_code=409,

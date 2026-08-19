@@ -1,3 +1,9 @@
+from backend.adapters.handoff_dispatch import (
+    HandoffDispatchAdapter,
+    HandoffDispatchReceipt,
+    HandoffDispatchUnavailable,
+    local_queue_receipt,
+)
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.ids import new_id
@@ -8,6 +14,7 @@ from backend.domain.models import (
     CustomerNextStep,
     CustomerSupport,
     FormStatus,
+    HandoffDelivery,
     HandoffPacket,
     HandoffPriority,
     HandoffRecord,
@@ -65,12 +72,37 @@ def claimant_handoff(handoff: HandoffRecord) -> ClaimantHandoff:
     )
 
 
-def _response(handoff: HandoffRecord, claim: WorkingClaim) -> SupportRequestResponse:
+def _response(
+    handoff: HandoffRecord,
+    claim: WorkingClaim,
+    receipt: HandoffDispatchReceipt,
+) -> SupportRequestResponse:
     return SupportRequestResponse(
         handoff=claimant_handoff(handoff),
         revision=claim.revision,
         customer_next_step=claim.customer_next_step,
+        delivery=HandoffDelivery(
+            state=receipt.state,
+            limitations=list(receipt.limitations),
+        ),
     )
+
+
+def notify_staff_queue(
+    dispatch: HandoffDispatchAdapter,
+    handoff: HandoffRecord,
+) -> HandoffDispatchReceipt:
+    """Notify the staff queue system, falling back to the persisted queue.
+
+    Dispatch runs only after the handoff is durable. A notification outage
+    therefore degrades delivery, never the request: the Workbench queue is
+    derived from persisted claim state, so staff still see the handoff.
+    """
+
+    try:
+        return dispatch.dispatch(handoff)
+    except HandoffDispatchUnavailable:
+        return local_queue_receipt()
 
 
 def _handoff_settings(
@@ -266,6 +298,7 @@ def updated_claim_for_handoff(
 
 def create_support_request(
     repository: PersistenceRepository,
+    dispatch: HandoffDispatchAdapter,
     principal: Principal,
     claim_id: str,
     payload: CreateSupportRequest,
@@ -301,7 +334,7 @@ def create_support_request(
                 message='The idempotent support request could not be restored.',
                 retryable=True,
             )
-        return _response(handoff, claim)
+        return _response(handoff, claim, notify_staff_queue(dispatch, handoff))
 
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
@@ -335,7 +368,7 @@ def create_support_request(
                 handoff_id=active_handoff.handoff_id,
             )
         )
-        return _response(active_handoff, claim)
+        return _response(active_handoff, claim, notify_staff_queue(dispatch, active_handoff))
 
     handoff, next_step = build_handoff(
         repository,
@@ -376,4 +409,4 @@ def create_support_request(
             code='IDEMPOTENCY_CONFLICT',
             message='The support request was already accepted with different retry data.',
         ) from conflict
-    return _response(handoff, updated_claim)
+    return _response(handoff, updated_claim, notify_staff_queue(dispatch, handoff))
