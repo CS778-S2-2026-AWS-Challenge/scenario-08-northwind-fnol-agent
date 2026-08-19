@@ -99,6 +99,40 @@ retrieval bundle is idempotent; attempting to reuse a retrieval or signal ID
 for different content is a persistence conflict. Every persisted review signal
 must identify its parent retrieval record in `source_refs`.
 
+## Staff review integration and source-preserving write-back
+
+Issue #136 connects the persisted #126 review records to the existing staff
+workbench and revision-aware staff write-back boundary without redefining the
+general staff-action contract.
+
+- A persisted `ReviewSignalRecord` is projected only to the staff workbench.
+  Its `source_refs` remain intact and the workbench adds the provider-neutral
+  retrieval record referenced by the retrieval ID as `source_evidence`.
+- Retrieval and review-signal source records are immutable evidence. Staff
+  decisions are persisted separately as `SignalDecisionRecord` values and do
+  not rewrite the retrieval facts, uncertainty, signal reason codes, or source
+  provenance.
+- When staff decide a persisted review signal, the signal's original
+  `source_refs` are automatically unioned into the decision's `evidence_refs`
+  before persistence. Staff may add evidence references, but cannot
+  accidentally omit the source evidence that caused the review signal.
+- The persisted decision retains the authenticated staff actor, the staff's
+  decision, staff reason codes, and staff summary. These fields remain distinct
+  from the original retrieval uncertainty and original review-signal reasons.
+- A staff review decision is a revision-aware shared write: it uses the current
+  `WorkingClaim.revision` through `If-Match`, advances that parent revision once,
+  and persists through the existing `save_staff_mutation(...)` boundary.
+- The review decision itself does not set `fraud_signal`, change workflow state,
+  approve or reject the claim, or block progression. Any such high-impact state
+  transition requires its own authorised contract and reasoned staff action.
+- Signals that are not persisted #126 retrieval-review signals continue through
+  the pre-existing legacy signal-decision service. Issue #136 therefore adds
+  the retrieval integration path without replacing Agent/message review
+  behaviour.
+- Issue #109 owns the general staff-action and state-write-back contract/fixtures.
+  Issue #136 consumes that revisioned persistence boundary rather than
+  redefining it.
+
 ## Public API boundary
 
 Issue #108 and #126 do not add retrieval records to `ClaimantClaim` or another

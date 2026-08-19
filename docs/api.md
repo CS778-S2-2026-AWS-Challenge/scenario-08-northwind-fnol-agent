@@ -975,7 +975,24 @@ Request:
 }
 ```
 
-`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection and next step.
+`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection, next step, and delivery state.
+
+`delivery.state` reports whether the staff queue system was notified:
+
+- `delivered` means the notification service accepted the handoff.
+- `queued_locally` means the notification service could not be reached. The
+  handoff is still saved, the claim revision still advances exactly once, and
+  the Workbench queue still shows the claim, because that queue is derived from
+  persisted claim state rather than from the notification. Only the push
+  notification is missing, and `delivery.limitations` says so in
+  claimant-safe words.
+
+Notification runs only after the handoff is durable, so a notification outage
+never fails the claimant request and never loses it. A retry with the same
+idempotency key returns the same handoff and does not notify twice.
+
+`GET /health/ready` reports the notification service under the
+`handoff_dispatch` check.
 
 The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
@@ -1363,6 +1380,9 @@ reply by repeating the next-step summary.
 
 ### `POST /internal/v1/policy/search`
 
+Retrieves provider-neutral policy facts for one claim. Requires an integration
+principal.
+
 Request:
 
 ```json
@@ -1370,10 +1390,7 @@ Request:
   "claim_id": "clm_01J4Y7Q2AW",
   "policy_reference": "synthetic-policy-101",
   "question": "Does this event require professional coverage review?",
-  "effective_at": "2026-08-09T22:15:00Z",
-  "filters": {
-    "product": "motor"
-  }
+  "effective_at": "2026-08-09T22:15:00Z"
 }
 ```
 
@@ -1383,34 +1400,52 @@ Response:
 {
   "result_id": "pol_01J4Y93M22",
   "status": "evidence_found",
-  "citations": [
-    {
-      "document_id": "policy-wording-v3",
-      "document_version": "3",
-      "section": "4.2",
-      "title": "Accidental damage",
-      "excerpt": "Synthetic fixture excerpt for prototype use.",
-      "effective_from": "2026-01-01",
-      "source_uri": "fixture://policies/policy-wording-v3#4.2"
-    }
-  ],
+  "source": {
+    "system": "fixture_policy_administration",
+    "reference": "synthetic-policy-101",
+    "retrieved_at": "2026-08-19T03:45:30Z"
+  },
+  "facts": {
+    "policy_reference": "synthetic-policy-101",
+    "product": "motor",
+    "status": "active",
+    "excess_amount": 500.0,
+    "currency": "NZD",
+    "coverage_sections": ["accidental_damage", "third_party_liability"]
+  },
+  "uncertainty": [],
   "limitations": [],
-  "retrieved_at": "2026-08-10T03:45:30Z"
+  "retrieved_at": "2026-08-19T03:45:30Z"
 }
 ```
 
-Status is `evidence_found`, `no_evidence`, `ambiguous`, or `unavailable`. Retrieval provides evidence and limitations, not authority to decide coverage.
+Status is `evidence_found`, `no_evidence`, `ambiguous`, or `unavailable`.
+
+- `evidence_found` returns allow-listed facts with the `source` that supplied
+  them, and persists a retrieval record against the claim.
+- `ambiguous` returns the same facts plus explicit `uncertainty`. Each
+  uncertainty becomes a staff-only professional-review signal. Ambiguity is
+  reported as evidence for a person; it is never resolved here.
+- `no_evidence` means the provider answered and holds no matching record.
+- `unavailable` means the provider could not answer. It carries `limitations`
+  and never carries `facts` or a `source`, and nothing is persisted, because an
+  absent answer must not become a finding.
+
+Retrieval provides evidence and limitations, not authority to decide coverage.
+Provider-only scoring, fraud labels, and coverage verdicts are discarded at the
+adapter boundary and never appear in a response or in storage.
 
 ### `POST /internal/v1/claim-history/search`
+
+Retrieves purpose-limited claim history. Requires an integration principal.
 
 Request:
 
 ```json
 {
   "claim_id": "clm_01J4Y7Q2AW",
-  "customer_id": "cus_01J4Y7M8M6",
+  "history_reference": "synthetic-history-204",
   "purpose": "relevant_history_review",
-  "fields": ["incident_type", "loss_date", "insured_item_reference"],
   "limit": 10
 }
 ```
@@ -1420,22 +1455,64 @@ Response:
 ```json
 {
   "result_id": "his_01J4Y95E0P",
-  "status": "completed",
-  "records": [
-    {
-      "history_record_id": "history-fixture-04",
-      "incident_type": "motor",
-      "loss_date": "2025-10-03",
-      "insured_item_reference": "synthetic-vehicle-a",
-      "source_system": "fixture_claims_history"
-    }
-  ],
-  "limitations": ["Synthetic history fixture; no production identity matching."],
-  "retrieved_at": "2026-08-10T03:46:20Z"
+  "status": "evidence_found",
+  "source": {
+    "system": "fixture_claims_history",
+    "reference": "synthetic-history-204",
+    "retrieved_at": "2026-08-19T03:46:20Z"
+  },
+  "facts": {
+    "history_reference": "synthetic-history-204",
+    "incident_type": "motor",
+    "occurred_at": "2025-10-03T00:00:00Z",
+    "status": "closed",
+    "outcome": "settled"
+  },
+  "uncertainty": [],
+  "limitations": [],
+  "retrieved_at": "2026-08-19T03:46:20Z"
 }
 ```
 
-The request MUST be purpose-limited. Results provide evidence only and MUST NOT return an automated fraud conclusion.
+`purpose` is an allow-list, not free text, so a caller cannot widen the reason
+for reading a claimant's history. `relevant_history_review` is the only accepted
+value; anything else is rejected with `422`. Status values and the `unavailable`
+rules match the policy endpoint.
+
+Results provide evidence only and MUST NOT return an automated fraud
+conclusion.
+
+### Retrieval provider availability
+
+### Dependency availability
+
+`GET /health/ready` reports what is actually wired behind every replaceable
+adapter:
+
+| Check | Meaning |
+|---|---|
+| `policy`, `claim_history` | the retrieval adapter |
+| `handoff_dispatch` | the staff queue notification service |
+| `evidence_storage` | the evidence object store |
+| `claims_service` | the external claim-creation service |
+
+Each reports `using_fixture` when the adapter answers under the production
+contract, and `unavailable` while it is in an outage. A fixture says it is a
+fixture; it never claims to be the real provider.
+
+Every unconfirmed AWS capability stays visible as its own check —
+`aws_policy_history`, `aws_evidence_storage`, `aws_claims_service` — and remains
+`pending_confirmation` until AWS access is confirmed, so a working fixture can
+never be mistaken for confirmed AWS access.
+
+`persistence` and `agent` have no adapter boundary yet and report
+`not_configured`.
+
+An evidence-storage outage is reported to the caller as `503`
+`DEPENDENCY_UNAVAILABLE` with `retryable: true`, never as a media-type or size
+rejection, and leaves the claim unchanged. Registering evidence the claimant
+does not yet hold does not touch the object store, so that path keeps working
+during an outage.
 
 ### `POST /internal/v1/claims/create`
 
