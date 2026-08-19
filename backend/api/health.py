@@ -4,6 +4,7 @@ from typing import Literal, cast
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 
@@ -36,6 +37,7 @@ def readiness(request: Request) -> ReadinessResponse:
     handoff_dispatch = cast(
         HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter
     ).connection_status()
+    evidence_storage = cast(EvidenceStorage, request.app.state.evidence_storage).connection_status()
     return ReadinessResponse(
         status='degraded',
         checks={
@@ -47,7 +49,8 @@ def readiness(request: Request) -> ReadinessResponse:
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',
             'handoff_dispatch': handoff_dispatch,
-            'evidence_storage': 'not_configured',
+            'evidence_storage': evidence_storage,
+            'aws_evidence_storage': 'pending_confirmation',
         },
         checked_at=datetime.now(UTC),
     )
