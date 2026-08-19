@@ -88,6 +88,7 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
   await waitFor(() => {
     expect(dom.window.document.querySelectorAll('#claimList > button')).toHaveLength(3)
     expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 3')
+    expect(dom.window.document.querySelector('#allQueueCount').textContent).toBe('8')
   })
   const firstCard = dom.window.document.querySelector('#claimList > button')
   expect(firstCard.textContent).toContain('Priority: High')
@@ -108,6 +109,17 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
   await waitFor(() => {
     expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 3')
     expect(dom.window.document.querySelector('#claimList').textContent).toContain('customer-1')
+  })
+
+  dom.window.document.querySelector('#urgentQueueCard').click()
+  await waitFor(() => {
+    expect(dom.window.document.querySelector('#viewSelect').value).toBe('urgent')
+    expect(dom.window.document.querySelector('#queueTitle').textContent).toBe('Urgent request queue')
+    expect(dom.window.document.querySelector('#urgentQueueCard').getAttribute('aria-pressed')).toBe('true')
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('view=urgent'),
+      expect.any(Object),
+    )
   })
   dom.window.close()
 })
@@ -180,9 +192,18 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
       requested_action: 'Continue with the saved report.',
       assigned_to: handoffStatus === 'accepted' ? 'stf_demo' : null,
       packet: {
+        incident_summary: 'A rear-end collision with confirmed core facts.',
+        form_snapshot: {
+          'incident.location': {
+            value: 'Queen Street',
+            status: 'confirmed',
+            source: 'claimant',
+            source_refs: ['msg_claimant'],
+          },
+        },
         promised_next_step: 'A staff member will review the report.',
         pending_items: ['evd_police'],
-        missing_items: [],
+        missing_items: ['vehicle.drivable'],
         conflicts: [],
         low_confidence_items: [],
       },
@@ -221,6 +242,11 @@ it('renders persisted claim context and uses the handoff accept endpoint', async
     expect(dom.window.document.body.textContent).toContain('Pending Generation')
     expect(dom.window.document.body.textContent).toContain('The police report can be added later.')
     expect(dom.window.document.body.textContent).toContain('sig_internal')
+    expect(dom.window.document.body.textContent).toContain('Confirmed incident')
+    expect(dom.window.document.body.textContent).toContain('A rear-end collision with confirmed core facts.')
+    expect(dom.window.document.body.textContent).toContain('Incident / Location: Queen Street')
+    expect(dom.window.document.body.textContent).toContain('Missing: vehicle.drivable')
+    expect(dom.window.document.body.textContent).toContain('Continue with the saved report.')
   })
   const accept = [...dom.window.document.querySelectorAll('button')]
     .find((button) => button.textContent === 'Accept handoff')
