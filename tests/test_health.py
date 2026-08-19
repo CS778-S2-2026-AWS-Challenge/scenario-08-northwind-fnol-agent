@@ -22,6 +22,7 @@ def test_readiness_reports_unconfigured_dependencies_honestly(client: TestClient
     assert payload['checks']['policy'] == 'using_fixture'
     assert payload['checks']['claim_history'] == 'using_fixture'
     assert payload['checks']['aws_policy_history'] == 'pending_confirmation'
+    assert payload['checks']['handoff_dispatch'] == 'using_fixture'
     assert {
         value
         for name, value in payload['checks'].items()
@@ -32,6 +33,7 @@ def test_readiness_reports_unconfigured_dependencies_honestly(client: TestClient
             'policy',
             'claim_history',
             'aws_policy_history',
+            'handoff_dispatch',
         }
     } == {'not_configured'}
     assert datetime.fromisoformat(payload['checked_at'])

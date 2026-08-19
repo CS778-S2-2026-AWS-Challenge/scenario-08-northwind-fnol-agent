@@ -4,6 +4,7 @@ from typing import Literal, cast
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 
 router = APIRouter(tags=['health'])
@@ -32,6 +33,9 @@ def readiness(request: Request) -> ReadinessResponse:
     retrieval = cast(
         PolicyHistoryAdapter, request.app.state.policy_history_adapter
     ).connection_status()
+    handoff_dispatch = cast(
+        HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter
+    ).connection_status()
     return ReadinessResponse(
         status='degraded',
         checks={
@@ -42,6 +46,7 @@ def readiness(request: Request) -> ReadinessResponse:
             'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',
+            'handoff_dispatch': handoff_dispatch,
             'evidence_storage': 'not_configured',
         },
         checked_at=datetime.now(UTC),

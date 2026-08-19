@@ -975,7 +975,24 @@ Request:
 }
 ```
 
-`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection and next step.
+`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection, next step, and delivery state.
+
+`delivery.state` reports whether the staff queue system was notified:
+
+- `delivered` means the notification service accepted the handoff.
+- `queued_locally` means the notification service could not be reached. The
+  handoff is still saved, the claim revision still advances exactly once, and
+  the Workbench queue still shows the claim, because that queue is derived from
+  persisted claim state rather than from the notification. Only the push
+  notification is missing, and `delivery.limitations` says so in
+  claimant-safe words.
+
+Notification runs only after the handoff is durable, so a notification outage
+never fails the claimant request and never loses it. A retry with the same
+idempotency key returns the same handoff and does not notify twice.
+
+`GET /health/ready` reports the notification service under the
+`handoff_dispatch` check.
 
 The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
@@ -1468,10 +1485,11 @@ conclusion.
 ### Retrieval provider availability
 
 `GET /health/ready` reports the configured retrieval adapter under the `policy`
-and `claim_history` checks: `using_fixture` when the adapter answers, and
-`unavailable` while it is in an outage. The AWS provider behind that adapter is
-reported separately as `aws_policy_history` and stays `pending_confirmation`
-until AWS access is confirmed.
+and `claim_history` checks, and the staff notification service under
+`handoff_dispatch`: `using_fixture` when the adapter answers, and `unavailable`
+while it is in an outage. The AWS provider behind retrieval is reported
+separately as `aws_policy_history` and stays `pending_confirmation` until AWS
+access is confirmed.
 
 ### `POST /internal/v1/claims/create`
 

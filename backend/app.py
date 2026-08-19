@@ -7,6 +7,7 @@ from backend.adapters.claims_service import (
     MockClaimsServiceAdapter,
 )
 from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
+from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
@@ -33,6 +34,7 @@ def create_app(
     assessor_service_adapter: AssessorServiceAdapter | None = None,
     evidence_storage: EvidenceStorage | None = None,
     policy_history_adapter: PolicyHistoryAdapter | None = None,
+    handoff_dispatch_adapter: HandoffDispatchAdapter | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     app = FastAPI(
@@ -48,6 +50,7 @@ def create_app(
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = evidence_storage or MockEvidenceStorage()
     app.state.policy_history_adapter = policy_history_adapter or MockPolicyHistoryAdapter()
+    app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
 
     configure_cors(app, resolved_settings)
     app.add_middleware(RequestIdMiddleware)
