@@ -18,9 +18,20 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
             'AT-02-coverage-ambiguity',
             'AT-04-urgent',
             'AT-05-human-request',
+            'AT-06-pending-evidence',
             'AT-10-controlled-assessor',
         }
-        assert len(body['claim_ids']) == 4
+        assert len(body['claim_ids']) == 5
+
+        pending = client.get('/api/v1/workbench/claims?view=awaiting_evidence', headers=STAFF_AUTH)
+        assert pending.status_code == 200
+        pending_items = pending.json()['items']
+        assert [item['claim_id'] for item in pending_items] == ['clm_fixture_at06']
+        assert pending_items[0]['pending_wait_types'] == [
+            'claimant',
+            'external_agency',
+            'internal',
+        ]
 
         listing = client.get('/api/v1/workbench/claims', headers=STAFF_AUTH)
         assert listing.status_code == 200

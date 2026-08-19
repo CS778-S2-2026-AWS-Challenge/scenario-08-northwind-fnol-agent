@@ -99,6 +99,10 @@
       "needed_for": ["later_action"],
       "provenance": {"internal_storage_state": "no_object_expected_yet"},
       "claimant_note": "The report was not available during the first session.",
+      "wait_type": "claimant",
+      "responsible_party": "claimant",
+      "expected_timing": "Timing not confirmed",
+      "context_summary": "The claimant can provide the police report after resuming the claim.",
       "created_at": "2026-08-02T02:18:00Z",
       "updated_at": "2026-08-02T02:18:00Z"
     }

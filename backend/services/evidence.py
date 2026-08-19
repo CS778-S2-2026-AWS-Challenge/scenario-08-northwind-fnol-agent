@@ -27,11 +27,13 @@ from backend.domain.models import (
     EvidenceSource,
     EvidenceStatus,
     EvidenceUploadResponse,
+    EvidenceWaitType,
     FormSource,
     FormStatus,
     NeededFor,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
+    ResponsibleParty,
     StructuredFormField,
     UploadConstraints,
     UploadTarget,
@@ -256,6 +258,11 @@ def register_evidence(
         related_fields=payload.related_fields,
         needed_for=payload.needed_for,
         claimant_note=payload.claimant_note,
+        wait_type='claimant',
+        responsible_party='claimant',
+        context_summary=(
+            f'Needed for: {", ".join(payload.needed_for)}' if payload.needed_for else None
+        ),
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -361,6 +368,9 @@ def request_upload(
         media_type=payload.media_type,
         size_bytes=payload.size_bytes,
         source=EvidenceSource.CLAIMANT,
+        wait_type='claimant',
+        responsible_party='claimant',
+        context_summary='Waiting for the claimant to complete the evidence upload.',
         provenance={'storage_key': target.storage_key},
         created_at=timestamp,
         updated_at=timestamp,
@@ -496,6 +506,11 @@ def complete_upload(
         update={
             'status': EvidenceStatus.RECEIVED,
             'file_status': EvidenceFileStatus.PROCESSING,
+            'wait_type': EvidenceWaitType.INTERNAL,
+            'responsible_party': ResponsibleParty.NORTHWIND,
+            'expected_by': None,
+            'expected_timing': None,
+            'context_summary': 'Northwind is processing the completed evidence upload.',
             'provenance': provenance,
             'updated_at': timestamp,
         }

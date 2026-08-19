@@ -10,7 +10,7 @@ They are the source used by the development/test demo seeding workflow.
 | `AT-02-coverage-ambiguity.json` | Ambiguous coverage routed to a professional-review handoff card |
 | `AT-04-urgent.json` | Injury/danger report with an urgent handoff card |
 | `AT-05-human-request.json` | Explicit human-support request with a standard-priority handoff card |
-| `AT-06-pending-evidence.json` | Future evidence that does not block unrelated work |
+| `AT-06-pending-evidence.json` | Claimant-owned future evidence, expected timing, and non-blocking work |
 | `AT-08-resume.json` | Cross-session summary, unresolved work, pending evidence, and prior commitment |
 | `AT-12-signal-writeback.json` | Shared claim state with an internal-only review signal |
 | `AT-10-controlled-assessor.json` | Created claim, assessor route, evidence state, and next responsible action |

@@ -48,5 +48,7 @@ The page is hard-coded for the local prototype staff token.
   the queue and detail are reloaded after each successful mutation.
 - The queue is never populated automatically. For a local walkthrough, staff must explicitly use
   **Load workbench demo queue** while the queue is empty. The action is available only in development
-  and test environments and loads the bounded AT-02, AT-04, and AT-05 demo set.
+  and test environments and loads the bounded AT-02, AT-04, AT-05, AT-06, and AT-10 demo set.
+  If local claims already exist, the page offers an explicit, confirmed **Reset and load demo queue**
+  action because resetting clears the current local demo state.
 - It does not expose claimant-only private data.
