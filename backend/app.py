@@ -8,6 +8,7 @@ from backend.adapters.claims_service import (
 )
 from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
 from backend.api.claims import router as claims_router
+from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
@@ -55,5 +56,6 @@ def create_app(
     app.include_router(integrations_router)
     app.include_router(evidence_router)
     app.include_router(workbench_router)
+    app.include_router(demo_router)
     app.include_router(handoffs_router)
     return app

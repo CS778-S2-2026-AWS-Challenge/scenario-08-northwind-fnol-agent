@@ -8,10 +8,12 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
     WorkingClaim,
 )
+from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -29,6 +31,8 @@ class FixtureRepository(PersistenceRepository):
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
+        self._retrievals: dict[str, RetrievalRecord] = {}
+        self._review_signals: dict[str, ReviewSignalRecord] = {}
         self._staff_actions: dict[str, StaffActionRecord] = {}
         self._customer_updates: dict[str, CustomerUpdateRecord] = {}
         self._signal_decisions: dict[str, SignalDecisionRecord] = {}
@@ -38,6 +42,36 @@ class FixtureRepository(PersistenceRepository):
     @property
     def claim_count(self) -> int:
         return len(self._claims)
+
+    def reset_demo_state(self) -> dict[str, int]:
+        """Clear only records owned by this in-memory prototype repository."""
+        cleared = {
+            'claims': len(self._claims),
+            'sessions': len(self._sessions),
+            'messages': len(self._messages),
+            'agent_decisions': len(self._decisions),
+            'evidence': len(self._evidence),
+            'retrievals': len(self._retrievals),
+            'review_signals': len(self._review_signals),
+            'staff_actions': len(self._staff_actions),
+            'customer_updates': len(self._customer_updates),
+            'signal_decisions': len(self._signal_decisions),
+            'handoffs': len(self._handoffs),
+            'idempotency_records': len(self._idempotency),
+        }
+        self._claims.clear()
+        self._sessions.clear()
+        self._messages.clear()
+        self._decisions.clear()
+        self._evidence.clear()
+        self._retrievals.clear()
+        self._review_signals.clear()
+        self._staff_actions.clear()
+        self._customer_updates.clear()
+        self._signal_decisions.clear()
+        self._handoffs.clear()
+        self._idempotency.clear()
+        return cleared
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -77,6 +111,47 @@ class FixtureRepository(PersistenceRepository):
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
         self._sessions[session.session_id] = deepcopy(session)
+
+    def save_session_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        records_match = (
+            stored_claim.customer_id == claim.customer_id
+            and claim.revision == expected_revision + 1
+            and claim.active_session_id == session.session_id
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.status is SessionStatus.ACTIVE
+            and session.context_revision == expected_revision
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+        )
+        if not records_match:
+            raise KeyError(claim.claim_id)
+        if session.session_id in self._sessions:
+            raise IdempotencyConflict(session.session_id)
+        if any(
+            existing.claim_id == claim.claim_id and existing.status is SessionStatus.ACTIVE
+            for existing in self._sessions.values()
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        if self._idempotency.get(lookup) is not None:
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         claim = self.get_claim(claim_id, customer_id)
@@ -404,6 +479,66 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim.claim_id] = deepcopy(claim)
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
         self._idempotency[lookup] = idempotency
+
+    def save_retrieval_bundle(
+        self,
+        record: RetrievalRecord,
+        review_signals: list[ReviewSignalRecord],
+        customer_id: str,
+    ) -> None:
+        if self.get_claim(record.claim_id, customer_id) is None:
+            raise KeyError(record.claim_id)
+        if any(
+            signal.claim_id != record.claim_id or record.retrieval_id not in signal.source_refs
+            for signal in review_signals
+        ):
+            raise KeyError(record.claim_id)
+
+        existing_record = self._retrievals.get(record.retrieval_id)
+        if existing_record is not None and existing_record != record:
+            raise IdempotencyConflict(record.retrieval_id)
+
+        incoming_signals: dict[str, ReviewSignalRecord] = {}
+        for signal in review_signals:
+            incoming_signal = incoming_signals.get(signal.signal_id)
+            if incoming_signal is not None and incoming_signal != signal:
+                raise IdempotencyConflict(signal.signal_id)
+            incoming_signals[signal.signal_id] = signal
+
+        for signal in incoming_signals.values():
+            existing_signal = self._review_signals.get(signal.signal_id)
+            if existing_signal is not None and existing_signal != signal:
+                raise IdempotencyConflict(signal.signal_id)
+
+        self._retrievals[record.retrieval_id] = deepcopy(record)
+        for signal in incoming_signals.values():
+            self._review_signals[signal.signal_id] = deepcopy(signal)
+
+    def list_retrieval_records(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[RetrievalRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        records = [
+            deepcopy(record) for record in self._retrievals.values() if record.claim_id == claim_id
+        ]
+        return sorted(records, key=lambda record: (record.source.retrieved_at, record.retrieval_id))
+
+    def list_review_signals(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[ReviewSignalRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        signals = [
+            deepcopy(signal)
+            for signal in self._review_signals.values()
+            if signal.claim_id == claim_id
+        ]
+        return sorted(signals, key=lambda signal: (signal.created_at, signal.signal_id))
 
     def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
         return sorted(

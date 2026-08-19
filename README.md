@@ -95,9 +95,33 @@ Run the synthetic integration fixtures from the repository root with:
 py -3.12 scripts/run_scenarios.py
 ```
 
+Validate the reusable evidence lifecycle catalogue with:
+
+```powershell
+py -3.12 scripts/run_evidence_fixtures.py
+```
+
+Validate evidence visibility and the five business-path entry states with:
+
+```powershell
+py -3.12 scripts/run_evidence_visibility_fixtures.py
+```
+
 Every invocation creates a fresh in-memory repository, so rerunning the command
-is the clean fixture reset. The concrete API and logical DynamoDB mapping is
-[documented here](docs/api-dynamodb-fixture-examples.md).
+is a clean reset for that isolated fixture verifier. It does not reset a running
+FastAPI demo process.
+
+To reset the running local demo backend, start the backend and run:
+
+```powershell
+py -3.12 scripts/reset_demo.py
+```
+
+The command clears only the in-memory fixture repository and mock adapter state,
+prints a record count for every cleared store, and exits non-zero when the backend
+cannot confirm the reset. It refuses to run against components that have not
+explicitly opted into the synthetic reset boundary. The concrete API and logical
+DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 

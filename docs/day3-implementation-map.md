@@ -29,10 +29,10 @@ production policy decisions, or a full frontend-backend integration in Day 2.
 
 ## Scenario Dependency Matrix
 
-The fixture names below are stable planning identifiers. AT-01, AT-06, AT-08,
-and AT-12 now have validated synthetic JSON fixtures under
-`tests/fixtures/scenarios/`; the remaining identifiers continue to describe
-planned fixture work.
+The fixture names below are stable planning identifiers. AT-01, AT-02, AT-04,
+AT-05, AT-06, AT-08, and AT-12 now have validated synthetic JSON fixtures
+under `backend/demo_data/scenarios/`; the remaining identifiers continue to
+describe planned fixture work.
 
 | Scenario | Claimant page and state | Agent action and guard | API contract dependency | Fixture dependency | Observable result |
 |---|---|---|---|---|---|

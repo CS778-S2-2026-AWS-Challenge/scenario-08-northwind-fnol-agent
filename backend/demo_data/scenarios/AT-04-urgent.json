@@ -1,0 +1,197 @@
+{
+  "scenario_id": "AT-04-urgent",
+  "description": "Synthetic injury/danger report that interrupts intake with an urgent handoff.",
+  "claim": {
+    "claim_id": "clm_fixture_at04",
+    "customer_id": "cus_demo",
+    "revision": 3,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "complex",
+      "coverage": "not_assessed",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "human_requested",
+      "urgency": "urgent",
+      "workflow_state": "professional_review",
+      "next_action": "URGENT_HANDOFF"
+    },
+    "form": {
+      "incident.description": {
+        "value": "A rear-end collision on the motorway left a passenger trapped and injured.",
+        "source": "claimant",
+        "source_refs": ["msg_at04_claimant_1"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T09:00:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.location": {
+        "value": "Northern Motorway, near Exit 12.",
+        "source": "claimant",
+        "source_refs": ["msg_at04_claimant_1"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T09:00:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "vehicle.drivable": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "later_action",
+        "confidence": null,
+        "updated_at": "2026-08-13T09:00:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "authorities.emergency_services_notified": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "later_action",
+        "confidence": null,
+        "updated_at": "2026-08-13T09:00:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": null,
+    "active_session_id": "ses_fixture_at04",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "urgent_support_queued",
+      "summary": "Move to a safer place if you can do so safely. Contact local emergency services yourself if immediate help is needed. Northwind urgent support has been requested with the details already provided.",
+      "responsible_party": "northwind",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-13T08:55:00Z",
+    "updated_at": "2026-08-13T09:00:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at04",
+      "claim_id": "clm_fixture_at04",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "A motorway collision with a trapped, injured passenger; urgent support requested.",
+      "unresolved_questions": ["confirm:vehicle.drivable"],
+      "pending_items": ["authorities.emergency_services_notified"],
+      "prior_commitments": [],
+      "context_revision": 3,
+      "started_at": "2026-08-13T08:55:00Z",
+      "last_active_at": "2026-08-13T09:00:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [],
+  "messages": [
+    {
+      "message_id": "msg_at04_claimant_1",
+      "claim_id": "clm_fixture_at04",
+      "session_id": "ses_fixture_at04",
+      "client_message_id": "at04-injury",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {
+        "type": "text",
+        "text": "A passenger is injured and trapped after a rear-end collision on the motorway near Exit 12."
+      },
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-08-13T09:00:00Z"
+    }
+  ],
+  "handoffs": [
+    {
+      "handoff_id": "hnd_fixture_at04",
+      "claim_id": "clm_fixture_at04",
+      "type": "urgent_support",
+      "status": "queued",
+      "priority": "urgent",
+      "queue": "urgent_support",
+      "support_need": "urgent",
+      "trigger": "urgent_safety_risk",
+      "preferred_channel": null,
+      "reason_codes": ["URGENT_SAFETY_RISK"],
+      "reason": "The claimant reported an injured, trapped passenger and an unsafe roadside location during intake.",
+      "requested_action": "Respond to the immediate support need and continue the report from the preserved context.",
+      "applied_rule": "prototype_immediate_transfer",
+      "packet": {
+        "incident_summary": "A rear-end collision on the motorway left a passenger trapped and injured.",
+        "form_revision": 3,
+        "form_snapshot": {
+          "incident.description": {
+            "value": "A rear-end collision on the motorway left a passenger trapped and injured.",
+            "source": "claimant",
+            "source_refs": ["msg_at04_claimant_1"],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T09:00:00Z",
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+          },
+          "incident.location": {
+            "value": "Northern Motorway, near Exit 12.",
+            "source": "claimant",
+            "source_refs": ["msg_at04_claimant_1"],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T09:00:00Z",
+            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+          },
+          "vehicle.drivable": {
+            "value": null,
+            "source": "claimant",
+            "source_refs": [],
+            "status": "missing",
+            "needed_for": "later_action",
+            "confidence": null,
+            "updated_at": "2026-08-13T09:00:00Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          },
+          "authorities.emergency_services_notified": {
+            "value": null,
+            "source": "claimant",
+            "source_refs": [],
+            "status": "missing",
+            "needed_for": "later_action",
+            "confidence": null,
+            "updated_at": "2026-08-13T09:00:00Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          }
+        },
+        "evidence_refs": [],
+        "missing_items": ["vehicle.drivable", "authorities.emergency_services_notified"],
+        "pending_items": [],
+        "conflicts": [],
+        "low_confidence_items": [],
+        "policy_citation_refs": [],
+        "history_evidence_refs": [],
+        "source_refs": ["msg_at04_claimant_1"],
+        "prior_customer_updates": [],
+        "promised_next_step": "Move to a safer place if you can do so safely. Contact local emergency services yourself if immediate help is needed. Northwind urgent support has been requested with the details already provided."
+      },
+      "source_message_id": "msg_at04_claimant_1",
+      "assigned_to": null,
+      "created_at": "2026-08-13T09:00:00Z",
+      "accepted_at": null,
+      "resolved_at": null
+    }
+  ],
+  "expected": {
+    "workflow_state": "professional_review",
+    "customer_status": "urgent_support_queued",
+    "confirmed_fields": ["incident.description", "incident.location"],
+    "handoff_priority": "urgent",
+    "handoff_queue": "urgent_support",
+    "handoff_gaps": ["vehicle.drivable", "authorities.emergency_services_notified"]
+  }
+}

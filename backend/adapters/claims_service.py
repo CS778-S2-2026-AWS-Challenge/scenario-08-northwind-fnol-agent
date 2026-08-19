@@ -9,6 +9,7 @@ from backend.domain.models import (
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     ExternalClaimResult,
+    IntegrationSource,
     RouteAssessorRequest,
 )
 from backend.services.support import now_utc
@@ -58,6 +59,11 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
     def __init__(self) -> None:
         self._created: dict[str, tuple[str, ExternalClaimResult]] = {}
 
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {'mock_claim_results': len(self._created)}
+        self._created.clear()
+        return cleared
+
     def create_claim(
         self,
         command: CreateExternalClaimRequest,
@@ -78,6 +84,7 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
             creation_status=ClaimCreationStatus.CREATED,
             route=command.route,
             next_step='Claims intake review',
+            source=IntegrationSource.FIXTURE,
             expected_by=timestamp + timedelta(hours=24),
             created_at=timestamp,
         )
@@ -90,6 +97,11 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
 
     def __init__(self) -> None:
         self._routed: dict[str, tuple[str, AssessorRoutingResult]] = {}
+
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {'mock_assessor_results': len(self._routed)}
+        self._routed.clear()
+        return cleared
 
     def route_assessor(
         self,

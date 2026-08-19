@@ -1,0 +1,125 @@
+{
+  "scenario_id": "AT-10-controlled-assessor",
+  "description": "Synthetic created motor claim showing its external claim result, assessor route, evidence state, and next responsible action.",
+  "claim": {
+    "claim_id": "clm_fixture_at10",
+    "customer_id": "cus_demo",
+    "revision": 8,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "clear",
+      "evidence": "received",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "created",
+      "next_action": "PROCEED"
+    },
+    "form": {
+      "incident.description": {
+        "value": "The insured vehicle was rear-ended while stopped at traffic lights.",
+        "source": "claimant",
+        "source_refs": ["msg_at10_claimant"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T02:05:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      }
+    },
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "route": "motor_assessment",
+    "active_session_id": "ses_fixture_at10",
+    "external_claim": {
+      "external_claim_id": "ext_fixture_at10",
+      "claim_number": "NW-AT10-001",
+      "creation_status": "created",
+      "route": "motor_assessment",
+      "next_step": "Route the vehicle damage assessment to the Auckland assessor queue.",
+      "source": "fixture",
+      "expected_by": "2026-08-14T02:15:00Z",
+      "created_at": "2026-08-13T02:12:00Z"
+    },
+    "external_claim_source_revision": 7,
+    "external_claim_fingerprint": "fixture-at10-creation",
+    "assessor_routing": {
+      "routing_status": "queued",
+      "assessor_reference": null,
+      "queue_reference": "assessor-auckland-motor",
+      "next_step": "An assessor coordinator must assign the next available motor assessor.",
+      "expected_by": "2026-08-14T02:15:00Z",
+      "limitations": []
+    },
+    "assessor_routing_fingerprint": "fixture-at10-routing",
+    "customer_next_step": {
+      "status": "awaiting_assessor_assignment",
+      "summary": "Assign the next available motor assessor and confirm the assessment appointment.",
+      "responsible_party": "external_party",
+      "expected_by": "2026-08-14T02:15:00Z",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-08-13T02:00:00Z",
+    "updated_at": "2026-08-13T02:15:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at10",
+      "claim_id": "clm_fixture_at10",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "The motor claim was created successfully with one damage image received and is queued for assessor assignment.",
+      "unresolved_questions": [],
+      "pending_items": ["Assessor assignment and appointment confirmation."],
+      "prior_commitments": ["Northwind will confirm the assessment appointment after an assessor is assigned."],
+      "context_revision": 8,
+      "started_at": "2026-08-13T02:00:00Z",
+      "last_active_at": "2026-08-13T02:15:00Z",
+      "closed_at": null
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_at10_damage",
+      "claim_id": "clm_fixture_at10",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "synthetic-rear-damage.png",
+      "media_type": "image/png",
+      "size_bytes": 1600,
+      "source": "claimant",
+      "related_fields": ["incident.description"],
+      "needed_for": ["current_action"],
+      "provenance": {"storage_key": "fixture/at10/rear-damage"},
+      "claimant_note": "Rear damage after the collision.",
+      "created_at": "2026-08-13T02:07:00Z",
+      "updated_at": "2026-08-13T02:07:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at10_claimant",
+      "claim_id": "clm_fixture_at10",
+      "session_id": "ses_fixture_at10",
+      "client_message_id": "at10-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I was rear-ended while stopped at traffic lights."},
+      "evidence_refs": ["evd_fixture_at10_damage"],
+      "in_reply_to": null,
+      "created_at": "2026-08-13T02:05:00Z"
+    }
+  ],
+  "expected": {
+    "workflow_state": "created",
+    "queue": "created_routed",
+    "route": "motor_assessment",
+    "evidence_state": "received",
+    "responsible_party": "external_party",
+    "assessor_routing_status": "queued"
+  }
+}
