@@ -5,10 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.repositories.scenario_loader import (
-    EvidenceLifecycleStage,
-    load_evidence_lifecycle_fixtures,
-)
+from backend.domain.evidence import EvidenceLifecycleStage
+from backend.repositories.scenario_loader import load_evidence_lifecycle_fixtures
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 FIXTURE_PATH = REPOSITORY_ROOT / 'tests' / 'fixtures' / 'evidence' / 'evidence-lifecycle.json'

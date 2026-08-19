@@ -6,6 +6,7 @@ from backend.domain.ids import new_id
 from backend.domain.models import (
     AcceptHandoffRequest,
     ActorType,
+    AgentAction,
     Coverage,
     CreateStaffActionRequest,
     CreateStaffMessageRequest,
@@ -15,6 +16,7 @@ from backend.domain.models import (
     HandoffMutationResponse,
     HandoffRecord,
     HandoffStatus,
+    HandoffType,
     MessageRecord,
     MessageVisibility,
     ResolveHandoffRequest,
@@ -162,9 +164,21 @@ def accept_handoff(
             'revision': claim.revision + 1,
             'updated_at': timestamp,
             'customer_next_step': CustomerNextStep(
-                status='human_support_in_progress',
-                summary='A Northwind staff member is now assisting you.',
-                responsible_party='northwind',
+                status=(
+                    'professional_review_in_progress'
+                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+                    else 'human_support_in_progress'
+                ),
+                summary=(
+                    'A claims specialist is now reviewing the policy point in your report.'
+                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+                    else 'A Northwind staff member is now assisting you.'
+                ),
+                responsible_party=(
+                    'claims_professional'
+                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+                    else 'northwind'
+                ),
             ),
         }
     )
@@ -309,7 +323,11 @@ def resolve_handoff(
     action = StaffActionRecord(
         action_id=new_id('act'),
         claim_id=claim_id,
-        action_type='handoff_support',
+        action_type=(
+            'professional_review'
+            if handoff.type is HandoffType.PROFESSIONAL_REVIEW
+            else 'handoff_support'
+        ),
         status=StaffActionStatus.COMPLETED,
         assigned_to=resolved.assigned_to or principal.subject,
         requested_outcome=handoff.requested_action,
@@ -326,8 +344,12 @@ def resolve_handoff(
         created_by=principal.subject,
         created_at=timestamp,
     )
+    resulting_state = projected.claim_state
+    if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
+        resulting_state = resulting_state.model_copy(update={'next_action': AgentAction.PROCEED})
     updated = projected.model_copy(
         update={
+            'claim_state': resulting_state,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
             'customer_next_step': CustomerNextStep(
