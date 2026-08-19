@@ -483,8 +483,20 @@ Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overr
     "form_revision": 7,
     "form_snapshot": {},
     "evidence_refs": ["evd_01J4Y7V5QJ"],
+    "evidence": [
+      {
+        "evidence_id": "evd_01J4Y7V5QJ",
+        "kind": "police_report",
+        "status": "pending_generation",
+        "file_status": "not_available",
+        "source": "claimant",
+        "visibility": "shared",
+        "related_fields": ["authorities.police_report_reference"],
+        "needed_for": ["later_action"]
+      }
+    ],
     "missing_items": [],
-    "pending_items": ["police_report"],
+    "pending_items": ["evd_01J4Y7V5QJ"],
     "conflicts": [],
     "policy_citation_refs": ["pol_01J4Y93M22"],
     "history_evidence_refs": [],
@@ -507,6 +519,11 @@ requested -> queued -> accepted -> in_progress -> resolved
 ```
 
 Priority is `standard`, `high`, `urgent`, or `immediate`. Queue is a configured value such as `claimant_support`, `coverage_review`, `complex_claims`, `urgent_support`, or `fraud_review`.
+
+The staff-only packet carries the evidence list with its source, lifecycle and file state,
+visibility, related fields, and purpose. It does not copy storage keys, checksums, or extraction
+provenance. Claimant handoff responses exclude the complete packet, and claimant evidence
+projections continue to exclude `internal_only` items.
 
 ### Staff Action
 

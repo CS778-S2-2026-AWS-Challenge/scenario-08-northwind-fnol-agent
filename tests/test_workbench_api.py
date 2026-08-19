@@ -355,6 +355,22 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
     assert staff_handoff['reason_codes'] == ['HUMAN_SUPPORT_REQUESTED']
     assert staff_handoff['requested_action'].startswith('Contact the claimant')
     assert staff_handoff['packet']['pending_items'] == staff_handoff['packet']['evidence_refs']
+    assert staff_handoff['packet']['evidence'] == [
+        {
+            'evidence_id': staff_handoff['packet']['evidence_refs'][0],
+            'kind': 'police_report',
+            'status': 'pending_generation',
+            'file_status': 'not_available',
+            'source': 'claimant',
+            'visibility': 'shared',
+            'original_filename': None,
+            'media_type': None,
+            'size_bytes': None,
+            'related_fields': ['authorities.police_report_reference'],
+            'needed_for': ['later_action'],
+            'claimant_note': 'The synthetic report is not available yet.',
+        }
+    ]
     assert staff_handoff['packet']['source_refs']
     assert staff_handoff['packet']['promised_next_step'].startswith(
         'A Northwind support request has been queued'
