@@ -67,9 +67,7 @@ def build_policy_review_handoff(
             if field.confidence is not None and field.confidence < 0.8
         ],
         policy_citation_refs=policy_citations,
-        source_refs=list(
-            dict.fromkeys([signal.signal_id, *signal.source_refs, source_message_id])
-        ),
+        source_refs=list(dict.fromkeys([signal.signal_id, *signal.source_refs, source_message_id])),
         prior_customer_updates=[
             str(message.content.get('text'))
             for message in messages

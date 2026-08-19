@@ -246,8 +246,7 @@ def _policy_search_tool(proposal: AgentProposal) -> dict[str, object] | None:
         (
             tool
             for tool in proposal.required_tools
-            if tool.get('tool') == 'policy_history'
-            and tool.get('operation') == 'search_policy'
+            if tool.get('tool') == 'policy_history' and tool.get('operation') == 'search_policy'
         ),
         None,
     )
@@ -290,8 +289,7 @@ def _execute_policy_search(
         (
             record
             for record in repository.list_retrieval_records(claim_id, customer_id)
-            if isinstance(record, PolicyRetrievalRecord)
-            and record.retrieval_id == result.result_id
+            if isinstance(record, PolicyRetrievalRecord) and record.retrieval_id == result.result_id
         ),
         None,
     )
@@ -575,8 +573,7 @@ def submit_message(
             ),
             evidence_refs=payload.evidence_refs,
             professional_review_required=any(
-                signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY'
-                for signal in persisted_review_signals
+                signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
             ),
         )
     )
@@ -676,8 +673,7 @@ def submit_message(
                 (
                     item
                     for item in reversed(existing_signals)
-                    if policy_record is not None
-                    and policy_record.retrieval_id in item.source_refs
+                    if policy_record is not None and policy_record.retrieval_id in item.source_refs
                 ),
                 None,
             )

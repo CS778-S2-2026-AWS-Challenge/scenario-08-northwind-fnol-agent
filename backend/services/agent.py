@@ -499,9 +499,8 @@ class ControlledAgent:
                 required_tools=[],
                 next_action_requirements=[],
             )
-        if (
-            context.professional_review_required
-            and any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS)
+        if context.professional_review_required and any(
+            pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS
         ):
             return AgentProposal(
                 action=AgentAction.UPDATE,
