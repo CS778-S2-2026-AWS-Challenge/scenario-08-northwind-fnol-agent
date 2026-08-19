@@ -1,0 +1,103 @@
+{
+  "scenario_id": "AT-16-retrieval-unavailable",
+  "description": "A required provider is temporarily unavailable, so no retrieval evidence exists and the claim moves to professional review carrying the limitation.",
+  "claim": {
+    "claim_id": "clm_fixture_at16",
+    "customer_id": "cus_demo",
+    "revision": 2,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "coverage": "not_assessed",
+      "evidence": "not_started",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": "provider_unavailable_review",
+    "active_session_id": "ses_fixture_at16",
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "Northwind will review the available information while an external record is unavailable.",
+      "responsible_party": "claims_professional"
+    },
+    "created_at": "2026-08-19T03:00:00Z",
+    "updated_at": "2026-08-19T03:04:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at16",
+      "claim_id": "clm_fixture_at16",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "A required retrieval provider is unavailable and the limitation is recorded.",
+      "context_revision": 2,
+      "started_at": "2026-08-19T03:00:00Z",
+      "last_active_at": "2026-08-19T03:04:00Z"
+    }
+  ],
+  "evidence": [],
+  "retrievals": [],
+  "handoffs": [
+    {
+      "handoff_id": "hnd_fixture_at16",
+      "claim_id": "clm_fixture_at16",
+      "type": "human_support",
+      "status": "queued",
+      "priority": "standard",
+      "queue": "professional_review",
+      "support_need": null,
+      "trigger": "professional_review_required",
+      "preferred_channel": null,
+      "reason_codes": ["RETRIEVAL_UNAVAILABLE"],
+      "reason": "The policy provider was unavailable, so no coverage facts were retrieved and none were assumed.",
+      "requested_action": "Retrieve the policy record through another channel, or continue on the information already provided.",
+      "applied_rule": "provider_unavailable_professional_review",
+      "packet": {
+        "incident_summary": "A synthetic motor incident reported while the policy provider was unreachable.",
+        "form_revision": 2,
+        "form_snapshot": {},
+        "evidence_refs": [],
+        "missing_items": [],
+        "pending_items": [],
+        "conflicts": [],
+        "low_confidence_items": [],
+        "policy_citation_refs": [],
+        "history_evidence_refs": [],
+        "source_refs": [],
+        "prior_customer_updates": [],
+        "promised_next_step": "A claims professional will continue this claim while the external policy record is unavailable."
+      },
+      "source_message_id": "msg_at16_claimant",
+      "assigned_to": null,
+      "created_at": "2026-08-19T03:03:00Z",
+      "accepted_at": null,
+      "resolved_at": null
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at16_claimant",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-policy",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My policy number is available if you need it."},
+      "created_at": "2026-08-19T03:01:00Z"
+    }
+  ],
+  "expected": {
+    "action": "HANDOFF",
+    "evidence_state": "not_started",
+    "review_reason": "RETRIEVAL_UNAVAILABLE",
+    "unavailable_provider": true,
+    "visibility": {
+      "claimant_message_count": 1,
+      "staff_message_count": 1,
+      "staff_review_signal_count": 0,
+      "internal_reason_hidden": true
+    }
+  }
+}

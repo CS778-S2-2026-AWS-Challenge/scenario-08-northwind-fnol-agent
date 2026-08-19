@@ -1,0 +1,88 @@
+{
+  "scenario_id": "AT-14-history-signal",
+  "description": "Relevant claim history is retrieved as evidence and requires bounded professional review without an automated fraud conclusion.",
+  "claim": {
+    "claim_id": "clm_fixture_at14",
+    "customer_id": "cus_demo",
+    "revision": 4,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "coverage": "not_assessed",
+      "evidence": "received",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "route": "history_review",
+    "active_session_id": "ses_fixture_at14",
+    "customer_next_step": {
+      "status": "professional_review",
+      "summary": "A claims professional is checking relevant information before the report proceeds.",
+      "responsible_party": "claims_professional"
+    },
+    "created_at": "2026-08-19T01:00:00Z",
+    "updated_at": "2026-08-19T01:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at14",
+      "claim_id": "clm_fixture_at14",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Relevant history was retrieved and transferred for professional review.",
+      "context_revision": 4,
+      "started_at": "2026-08-19T01:00:00Z",
+      "last_active_at": "2026-08-19T01:05:00Z"
+    }
+  ],
+  "evidence": [],
+  "retrievals": [
+    {
+      "retrieval_id": "ret_fixture_at14_history",
+      "claim_id": "clm_fixture_at14",
+      "kind": "claim_history",
+      "source": {
+        "system": "synthetic-history-adapter",
+        "reference": "history-at14",
+        "retrieved_at": "2026-08-19T01:03:00Z"
+      },
+      "facts": {
+        "history_reference": "HIST-AT14",
+        "incident_type": "motor",
+        "status": "closed",
+        "outcome": "withdrawn"
+      },
+      "uncertainty": [
+        {
+          "code": "RELEVANT_HISTORY_REVIEW",
+          "detail": "A claims professional must decide whether the retrieved history is relevant to this incident."
+        }
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at14_claimant",
+      "claim_id": "clm_fixture_at14",
+      "session_id": "ses_fixture_at14",
+      "client_message_id": "at14-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "The vehicle was damaged while parked overnight."},
+      "created_at": "2026-08-19T01:01:00Z"
+    }
+  ],
+  "expected": {
+    "action": "HANDOFF",
+    "evidence_state": "received",
+    "review_reason": "RELEVANT_HISTORY_REVIEW",
+    "visibility": {
+      "claimant_message_count": 1,
+      "staff_message_count": 1,
+      "staff_review_signal_count": 1,
+      "internal_reason_hidden": true
+    }
+  }
+}

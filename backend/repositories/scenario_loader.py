@@ -27,7 +27,9 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.retrieval import RetrievalRecord
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.services.retrieval_review import persist_retrieval_record
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
@@ -41,6 +43,7 @@ class ScenarioFixture(ContractModel):
     claim: WorkingClaim
     sessions: list[SessionRecord] = Field(min_length=1)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
+    retrievals: list[RetrievalRecord] = Field(default_factory=list)
     messages: list[MessageRecord] = Field(default_factory=list)
     handoffs: list[HandoffRecord] = Field(default_factory=list)
     staff_actions: list[StaffActionRecord] = Field(default_factory=list)
@@ -72,6 +75,11 @@ class ScenarioFixture(ContractModel):
 
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
+        retrieval_ids = {record.retrieval_id for record in self.retrievals}
+        if len(retrieval_ids) != len(self.retrievals):
+            raise ValueError('Scenario retrieval identifiers must be unique.')
+        if any(record.claim_id != self.claim.claim_id for record in self.retrievals):
+            raise ValueError('Every retrieval record must belong to the scenario claim.')
         if any(
             message.claim_id != self.claim.claim_id or message.session_id not in session_ids
             for message in self.messages
@@ -369,6 +377,8 @@ def seed_scenario(
             repository.save_session(session)
     for evidence in scenario.evidence:
         repository.save_evidence(evidence, scenario.claim.customer_id)
+    for retrieval in scenario.retrievals:
+        persist_retrieval_record(repository, retrieval, scenario.claim.customer_id)
     for message in scenario.messages:
         repository.save_message(message, scenario.claim.customer_id)
     for handoff in scenario.handoffs:
