@@ -34,6 +34,7 @@ def reset_demo(
             'assessor adapter': request.app.state.assessor_service_adapter,
             'evidence storage': request.app.state.evidence_storage,
             'retrieval adapter': request.app.state.policy_history_adapter,
+            'handoff dispatch': request.app.state.handoff_dispatch_adapter,
         }
     )
     return DemoResetResponse(status='reset', cleared=cleared)

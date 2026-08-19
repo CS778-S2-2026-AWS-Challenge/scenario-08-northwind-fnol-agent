@@ -2,6 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, status
 
+from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import CreateSupportRequest, SupportRequestResponse
 from backend.repositories.protocols import PersistenceRepository
@@ -12,6 +13,10 @@ router = APIRouter(prefix='/api/v1/claims', tags=['claimant-support'])
 
 def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
+
+
+def dispatch_for(request: Request) -> HandoffDispatchAdapter:
+    return cast(HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter)
 
 
 @router.post(
@@ -29,6 +34,7 @@ def request_support(
 ) -> SupportRequestResponse:
     return create_support_request(
         repository_for(request),
+        dispatch_for(request),
         principal,
         claim_id,
         payload,
