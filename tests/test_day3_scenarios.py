@@ -106,7 +106,7 @@ def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.count('PASS AT-') == 8
+    assert completed.stdout.count('PASS AT-') == 9
     assert 'PASS AT-06-pending-evidence' in completed.stdout
     assert 'PASS AT-08-resume' in completed.stdout
 
@@ -135,9 +135,43 @@ def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() ->
     assert fast.json()['customer_next_step']['status'] == 'ready_to_create'
     assert pending.status_code == 200
     assert pending.json()['workflow_state'] == 'ready_for_next'
-    assert pending.json()['evidence_summary']['pending'] == 1
+    assert pending.json()['evidence_summary']['pending'] == 3
     assert evidence.json()['items'][0]['status'] == 'pending_generation'
     assert 'provenance' not in evidence.json()['items'][0]
+
+
+def test_pending_evidence_is_a_cross_workflow_staff_view_with_responsibility_context() -> None:
+    repository, claim_id, _ = scenario('AT-06-pending-evidence')
+
+    with client_for(repository) as client:
+        response = client.get(
+            '/api/v1/workbench/claims?view=awaiting_evidence',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+
+    assert response.status_code == 200
+    item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
+    assert item['queue'] == 'ready_to_progress'
+    assert item['workflow_state'] == 'ready_for_next'
+    assert item['pending_evidence_count'] == 3
+    assert item['pending_wait_types'] == ['claimant', 'external_agency', 'internal']
+    assert item['pending_evidence'][0] == {
+        **item['pending_evidence'][0],
+        'wait_type': 'claimant',
+        'responsible_party': 'claimant',
+        'expected_timing': 'Expected next week',
+    }
+
+
+def test_pending_evidence_does_not_close_or_block_the_claim() -> None:
+    repository, claim_id, _ = scenario('AT-06-pending-evidence')
+    claim = repository.get_claim(claim_id, 'cus_demo')
+
+    assert claim is not None
+    assert claim.claim_state.workflow_state is WorkflowState.READY_FOR_NEXT
+    assert claim.claim_state.next_action is AgentAction.PROCEED
+    assert claim.customer_next_step.can_resume is True
+    assert claim.evidence_summary.pending == 3
 
 
 def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None:

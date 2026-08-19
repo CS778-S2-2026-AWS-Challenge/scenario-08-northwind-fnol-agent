@@ -212,6 +212,11 @@ def register_evidence(
         related_fields=payload.related_fields,
         needed_for=payload.needed_for,
         claimant_note=payload.claimant_note,
+        wait_type='claimant',
+        responsible_party='claimant',
+        context_summary=(
+            f'Needed for: {", ".join(payload.needed_for)}' if payload.needed_for else None
+        ),
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -307,6 +312,9 @@ def request_upload(
         media_type=payload.media_type,
         size_bytes=payload.size_bytes,
         source=EvidenceSource.CLAIMANT,
+        wait_type='claimant',
+        responsible_party='claimant',
+        context_summary='Waiting for the claimant to complete the evidence upload.',
         provenance={'storage_key': target.storage_key},
         created_at=timestamp,
         updated_at=timestamp,

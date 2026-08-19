@@ -232,6 +232,9 @@ def _pending_evidence_for_proposal(
         needed_for=['later_action'],
         provenance={'reported_in_message_id': claimant_message.message_id},
         claimant_note=str(claimant_message.content.get('text') or ''),
+        wait_type='claimant',
+        responsible_party='claimant',
+        context_summary='The document is expected later and is needed for a later action.',
         created_at=timestamp,
         updated_at=timestamp,
     )

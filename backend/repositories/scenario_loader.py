@@ -345,9 +345,17 @@ def load_evidence_path_fixtures(
 
 
 def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
+    staff_only_fields = {
+        'provenance',
+        'wait_type',
+        'responsible_party',
+        'expected_by',
+        'expected_timing',
+        'context_summary',
+    }
     return [
         ClaimantEvidence.model_validate(
-            fixture.evidence.model_dump(exclude={'provenance'}, mode='json')
+            fixture.evidence.model_dump(exclude=staff_only_fields, mode='json')
         )
         for fixture in entry.evidence
         if fixture.visibility is not FixtureVisibility.INTERNAL_ONLY

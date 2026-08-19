@@ -86,8 +86,8 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
   })
 
   await waitFor(() => {
-    expect(dom.window.document.querySelectorAll('#claimList > button')).toHaveLength(6)
-    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 2')
+    expect(dom.window.document.querySelectorAll('#claimList > button')).toHaveLength(3)
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 3')
   })
   const firstCard = dom.window.document.querySelector('#claimList > button')
   expect(firstCard.textContent).toContain('Priority: High')
@@ -97,16 +97,16 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
   dom.window.document.querySelector('#nextQueuePage').click()
   await waitFor(() => {
     const cards = dom.window.document.querySelectorAll('#claimList > button')
-    expect(cards).toHaveLength(2)
-    expect(cards[0].textContent).toContain('customer-7')
-    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 2 of 2')
+    expect(cards).toHaveLength(3)
+    expect(cards[0].textContent).toContain('customer-4')
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 2 of 3')
   })
 
   const filter = dom.window.document.querySelector('#viewSelect')
   filter.value = 'professional_review'
   filter.dispatchEvent(new dom.window.Event('change'))
   await waitFor(() => {
-    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 2')
+    expect(dom.window.document.querySelector('#queuePageStatus').textContent).toBe('Page 1 of 3')
     expect(dom.window.document.querySelector('#claimList').textContent).toContain('customer-1')
   })
   dom.window.close()
