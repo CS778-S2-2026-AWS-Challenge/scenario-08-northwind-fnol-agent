@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const page = await readFile(new URL('../employee/index.html', import.meta.url), 'utf8');
-const workbenchUrl = page.match(/function workbenchUrl\(\) \{[\s\S]*?\n    \}/)?.[0];
-const setView = page.match(/function setView\(view,[\s\S]*?\n    \}\n\n    function restoreViewFromHistory/)?.[0]
+const normalizedPage = page.replaceAll('\r\n', '\n');
+const workbenchUrl = normalizedPage.match(/function workbenchUrl\(\) \{[\s\S]*?\n    \}/)?.[0];
+const setView = normalizedPage.match(/function setView\(view,[\s\S]*?\n    \}\n\n    function restoreViewFromHistory/)?.[0]
   ?.replace('\n\n    function restoreViewFromHistory', '');
 
 assert.ok(workbenchUrl, 'The workbench URL helper must exist.');
