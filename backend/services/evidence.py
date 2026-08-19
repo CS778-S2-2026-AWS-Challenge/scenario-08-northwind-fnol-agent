@@ -19,8 +19,10 @@ from backend.domain.models import (
     EvidenceSource,
     EvidenceStatus,
     EvidenceUploadResponse,
+    EvidenceWaitType,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
+    ResponsibleParty,
     UploadConstraints,
     UploadTarget,
     WorkingClaim,
@@ -429,6 +431,11 @@ def complete_upload(
         update={
             'status': EvidenceStatus.RECEIVED,
             'file_status': EvidenceFileStatus.PROCESSING,
+            'wait_type': EvidenceWaitType.INTERNAL,
+            'responsible_party': ResponsibleParty.NORTHWIND,
+            'expected_by': None,
+            'expected_timing': None,
+            'context_summary': 'Northwind is processing the completed evidence upload.',
             'provenance': provenance,
             'updated_at': timestamp,
         }

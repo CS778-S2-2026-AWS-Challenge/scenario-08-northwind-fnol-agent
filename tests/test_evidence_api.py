@@ -158,6 +158,10 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
         f'/api/v1/claims/{claim_id}/evidence',
         headers=auth_headers,
     )
+    workbench = client.get(
+        '/api/v1/workbench/claims?view=awaiting_evidence',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
 
     assert completed.status_code == 202
     body = completed.json()
@@ -174,6 +178,21 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert 'provenance' not in body['evidence']
     assert listed.status_code == 200
     assert listed.json()['items'] == [body['evidence']]
+    assert workbench.status_code == 200
+    workbench_item = next(
+        item for item in workbench.json()['items'] if item['claim_id'] == claim_id
+    )
+    assert workbench_item['pending_wait_types'] == ['internal']
+    assert workbench_item['pending_evidence_count'] == 1
+    assert workbench_item['pending_evidence'][0]['status'] == 'received'
+    assert workbench_item['pending_evidence'][0]['file_status'] == 'processing'
+    assert workbench_item['pending_evidence'][0]['wait_type'] == 'internal'
+    assert workbench_item['pending_evidence'][0]['responsible_party'] == 'northwind'
+    assert workbench_item['pending_evidence'][0]['context_summary'] == (
+        'Northwind is processing the completed evidence upload.'
+    )
+    assert 'claimant' not in workbench_item['pending_wait_types']
+    assert 'Waiting for the claimant' not in str(workbench_item['pending_evidence'])
     public_payload = listed.text
     assert 'storage_key' not in public_payload
     assert 'upload_checksum' not in public_payload
