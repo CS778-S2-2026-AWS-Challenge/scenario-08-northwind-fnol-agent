@@ -24,6 +24,19 @@ class EvidenceUploadNotFound(EvidenceStorageError):
     pass
 
 
+class EvidenceStorageUnavailable(EvidenceStorageError):
+    """The configured object store could not be reached.
+
+    Carried separately from the validation errors above so a transport outage
+    is never reported to a claimant as a rejected file.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
 @dataclass(frozen=True, slots=True)
 class StoredUploadTarget:
     method: str
@@ -42,6 +55,9 @@ class StoredUpload:
 class EvidenceStorage(Protocol):
     max_size_bytes: int
     allowed_media_types: tuple[str, ...]
+
+    def connection_status(self) -> str:
+        raise NotImplementedError
 
     def create_upload_target(
         self,
@@ -80,9 +96,20 @@ class MockEvidenceStorage(EvidenceStorage):
     max_size_bytes = MAX_UPLOAD_SIZE_BYTES
     allowed_media_types = ALLOWED_MEDIA_TYPES
 
-    def __init__(self) -> None:
+    def __init__(self, outage: EvidenceStorageUnavailable | None = None) -> None:
         self._pending: dict[tuple[str, str], _PendingUpload] = {}
         self._completed: dict[tuple[str, str], StoredUpload] = {}
+        self._outage = outage
+
+    def set_outage(self, outage: EvidenceStorageUnavailable | None) -> None:
+        self._outage = outage
+
+    def connection_status(self) -> str:
+        return 'unavailable' if self._outage is not None else 'using_fixture'
+
+    def _guard(self) -> None:
+        if self._outage is not None:
+            raise self._outage
 
     def reset_demo_state(self) -> dict[str, int]:
         cleared = {
@@ -91,6 +118,7 @@ class MockEvidenceStorage(EvidenceStorage):
         }
         self._pending.clear()
         self._completed.clear()
+        self._outage = None
         return cleared
 
     def create_upload_target(
@@ -101,6 +129,7 @@ class MockEvidenceStorage(EvidenceStorage):
         media_type: str,
         size_bytes: int,
     ) -> StoredUploadTarget:
+        self._guard()
         if media_type not in self.allowed_media_types:
             raise UnsupportedEvidenceMediaType(media_type)
         if size_bytes > self.max_size_bytes:
@@ -130,6 +159,7 @@ class MockEvidenceStorage(EvidenceStorage):
         media_type: str,
         size_bytes: int,
     ) -> StoredUpload:
+        self._guard()
         pending = self._pending.get((claim_id, evidence_id))
         if pending is None or pending.media_type != media_type or pending.size_bytes != size_bytes:
             raise EvidenceUploadNotFound(evidence_id)

@@ -1484,12 +1484,35 @@ conclusion.
 
 ### Retrieval provider availability
 
-`GET /health/ready` reports the configured retrieval adapter under the `policy`
-and `claim_history` checks, and the staff notification service under
-`handoff_dispatch`: `using_fixture` when the adapter answers, and `unavailable`
-while it is in an outage. The AWS provider behind retrieval is reported
-separately as `aws_policy_history` and stays `pending_confirmation` until AWS
-access is confirmed.
+### Dependency availability
+
+`GET /health/ready` reports what is actually wired behind every replaceable
+adapter:
+
+| Check | Meaning |
+|---|---|
+| `policy`, `claim_history` | the retrieval adapter |
+| `handoff_dispatch` | the staff queue notification service |
+| `evidence_storage` | the evidence object store |
+| `claims_service` | the external claim-creation service |
+
+Each reports `using_fixture` when the adapter answers under the production
+contract, and `unavailable` while it is in an outage. A fixture says it is a
+fixture; it never claims to be the real provider.
+
+Every unconfirmed AWS capability stays visible as its own check —
+`aws_policy_history`, `aws_evidence_storage`, `aws_claims_service` — and remains
+`pending_confirmation` until AWS access is confirmed, so a working fixture can
+never be mistaken for confirmed AWS access.
+
+`persistence` and `agent` have no adapter boundary yet and report
+`not_configured`.
+
+An evidence-storage outage is reported to the caller as `503`
+`DEPENDENCY_UNAVAILABLE` with `retryable: true`, never as a media-type or size
+rejection, and leaves the claim unchanged. Registering evidence the claimant
+does not yet hold does not touch the object store, so that path keeps working
+during an outage.
 
 ### `POST /internal/v1/claims/create`
 
