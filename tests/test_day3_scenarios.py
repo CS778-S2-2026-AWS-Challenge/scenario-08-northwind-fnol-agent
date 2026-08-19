@@ -20,7 +20,7 @@ from backend.repositories.protocols import RevisionConflict
 from backend.repositories.scenario_loader import load_scenario, load_scenarios, seed_scenario
 from scripts.run_scenarios import run_scenarios
 
-SCENARIO_DIRECTORY = Path(__file__).parent / 'fixtures' / 'scenarios'
+SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
@@ -39,9 +39,14 @@ def client_for(repository: FixtureRepository) -> TestClient:
     'scenario_id',
     [
         'AT-01-clear-motor',
+        'AT-02-coverage-ambiguity',
+        'AT-04-urgent',
+        'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
+        'AT-10-controlled-assessor',
         'AT-12-signal-writeback',
+        'AT-13-staff-action-lifecycle',
     ],
 )
 def test_scenario_files_validate_and_seed(scenario_id: str) -> None:
@@ -59,17 +64,36 @@ def test_scenario_runner_reports_repeatable_fixture_counts() -> None:
 
     assert [result.scenario_id for result in results] == [
         'AT-01-clear-motor',
+        'AT-02-coverage-ambiguity',
+        'AT-04-urgent',
+        'AT-05-human-request',
         'AT-06-pending-evidence',
         'AT-08-resume',
+        'AT-10-controlled-assessor',
         'AT-12-signal-writeback',
+        'AT-13-staff-action-lifecycle',
     ]
     assert {result.scenario_id: result.sessions for result in results} == {
         'AT-01-clear-motor': 1,
+        'AT-02-coverage-ambiguity': 1,
+        'AT-04-urgent': 1,
+        'AT-05-human-request': 1,
         'AT-06-pending-evidence': 1,
         'AT-08-resume': 2,
+        'AT-10-controlled-assessor': 1,
         'AT-12-signal-writeback': 1,
+        'AT-13-staff-action-lifecycle': 1,
     }
     assert next(result for result in results if result.scenario_id == 'AT-08-resume').evidence == 1
+    assert {
+        result.scenario_id: result.handoffs
+        for result in results
+        if result.scenario_id in {'AT-02-coverage-ambiguity', 'AT-04-urgent', 'AT-05-human-request'}
+    } == {
+        'AT-02-coverage-ambiguity': 1,
+        'AT-04-urgent': 1,
+        'AT-05-human-request': 1,
+    }
 
 
 def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
@@ -82,7 +106,7 @@ def test_scenario_runner_is_directly_executable_from_repository_root() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.count('PASS AT-') == 4
+    assert completed.stdout.count('PASS AT-') == 9
     assert 'PASS AT-06-pending-evidence' in completed.stdout
     assert 'PASS AT-08-resume' in completed.stdout
 
@@ -114,6 +138,35 @@ def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() ->
     assert pending.json()['evidence_summary']['pending'] == 1
     assert evidence.json()['items'][0]['status'] == 'pending_generation'
     assert 'provenance' not in evidence.json()['items'][0]
+
+
+def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None:
+    repository, claim_id, _ = scenario('AT-10-controlled-assessor')
+
+    with client_for(repository) as client:
+        listing = client.get(
+            '/api/v1/workbench/claims?view=created_routed',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        detail = client.get(
+            f'/api/v1/workbench/claims/{claim_id}',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+
+    assert listing.status_code == 200
+    item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
+    assert item['queue'] == 'created_routed'
+    assert item['route'] == 'motor_assessment'
+    assert item['evidence_state'] == 'received'
+    assert item['evidence_summary'] == {'received': 1, 'pending': 0, 'needs_attention': 0}
+    assert item['next_action_summary'].startswith('Assign the next available motor assessor')
+    assert item['responsible_party'] == 'external_party'
+    assert item['claim_creation_status'] == 'created'
+    assert item['assessor_routing_status'] == 'queued'
+
+    assert detail.status_code == 200
+    assert detail.json()['sessions'][0]['summary'].startswith('The motor claim was created')
+    assert detail.json()['messages']
 
 
 def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> None:
@@ -275,6 +328,50 @@ def test_claimant_and_staff_projections_share_state_without_leaking_internal_sig
     assert 'fraud_signal' not in claimant_view.json()
     assert len(claimant_messages.json()['items']) == 1
     assert 'HISTORY-REVIEW-01' not in claimant_messages.text
+
+
+def test_staff_action_lifecycle_fixture_records_audit_and_safe_claimant_update() -> None:
+    repository, claim_id, session_id = scenario('AT-13-staff-action-lifecycle')
+    staff_auth = {'Authorization': 'Bearer synthetic-staff'}
+    claimant_auth = {'Authorization': 'Bearer synthetic-claimant'}
+
+    actions = repository.list_staff_actions(claim_id)
+    assert [action.action_type for action in actions] == [
+        'assign_review',
+        'professional_review',
+        'resolve_review',
+        'claimant_write_back',
+    ]
+    assert all(
+        action.completed_by and action.completed_at and action.result and action.result.reason_codes
+        for action in actions
+    )
+    updates = repository.list_customer_updates(claim_id)
+    assert len(updates) == 1
+    assert updates[0].summary == (
+        'A claims professional has completed the review and your claim can continue.'
+    )
+
+    with client_for(repository) as client:
+        workbench = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth)
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=claimant_auth)
+        messages = client.get(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages', headers=claimant_auth
+        )
+
+    assert workbench.status_code == 200
+    assert len(workbench.json()['staff_actions']) == 4
+    assert len(workbench.json()['customer_updates']) == 1
+    assert claimant.status_code == 200
+    assert claimant.json()['customer_next_step']['status'] == 'review_completed'
+    claimant_payload = f'{claimant.text}{messages.text}'
+    for internal_value in (
+        'HISTORY-REVIEW-01',
+        'REVIEW_QUEUE_ASSIGNED',
+        'REVIEW_OUTCOME_RESOLVED',
+        'staff_actions',
+    ):
+        assert internal_value not in claimant_payload
 
 
 def test_loader_rejects_missing_active_session(tmp_path: Path) -> None:

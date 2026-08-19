@@ -37,6 +37,7 @@ from backend.domain.models import (
 )
 from backend.repositories.protocols import (
     ClaimRepository,
+    IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
@@ -75,7 +76,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         open_handoffs = [
             item
             for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
-            if item.status.value not in {'resolved', 'cancelled'}
+            if item.status.value not in {'resolved', 'cancelled'} and item.support_need is not None
         ]
         if open_handoffs:
             active = open_handoffs[-1]
@@ -286,16 +287,23 @@ def start_session(
     active_session = repository.get_active_session(claim_id, principal.subject)
     if active_session is not None and active_session.status is SessionStatus.ACTIVE:
         session = active_session
-        repository.save_idempotency(
-            IdempotencyRecord(
-                actor_id=principal.subject,
-                route=route,
-                key=key,
-                request_fingerprint=fingerprint,
-                claim_id=claim_id,
-                session_id=session.session_id,
+        try:
+            repository.save_idempotency(
+                IdempotencyRecord(
+                    actor_id=principal.subject,
+                    route=route,
+                    key=key,
+                    request_fingerprint=fingerprint,
+                    claim_id=claim_id,
+                    session_id=session.session_id,
+                )
             )
-        )
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The session resume request conflicted with an existing retry or session.',
+            ) from conflict
     else:
         previous_sessions = repository.list_sessions_for_claim(
             claim_id,
@@ -358,6 +366,12 @@ def start_session(
                 message='The claim changed while the session was being resumed.',
                 retryable=True,
                 current_revision=conflict.current_revision,
+            ) from conflict
+        except IdempotencyConflict as conflict:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
         claim = updated_claim
 
@@ -539,11 +553,21 @@ def confirm_form_fields(
         )
         for field_code in payload.field_codes
     }
-    projected_claim = claim.model_copy(update={'form': {**claim.form, **confirmed_fields}})
+    incident_type = claim.incident_type
+    confirmed_incident_type = confirmed_fields.get('incident.type')
+    if confirmed_incident_type is not None and isinstance(confirmed_incident_type.value, str):
+        incident_type = confirmed_incident_type.value.strip().lower()
+    projected_claim = claim.model_copy(
+        update={
+            'form': {**claim.form, **confirmed_fields},
+            'incident_type': incident_type,
+        }
+    )
     next_step = next_controlled_intake_step(projected_claim)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
+            'incident_type': incident_type,
             'claim_state': claim.claim_state.model_copy(update={'next_action': AgentAction.ASK}),
             'customer_next_step': next_step,
             'revision': claim.revision + 1,

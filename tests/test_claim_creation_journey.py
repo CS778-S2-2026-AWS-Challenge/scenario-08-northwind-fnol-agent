@@ -131,6 +131,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert result['decision']['reason_codes'] == ['CLAIM_CREATION_AUTHORISED']
     assert result['external_claim']['creation_status'] == journey['expected_creation_status']
     assert result['external_claim']['route'] == journey['expected_route']
+    assert result['external_claim']['source'] == journey['expected_source']
     assert result['external_claim']['claim_number']
     assert result['external_claim']['next_step']
     assert result['external_claim']['expected_by']
@@ -141,6 +142,66 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     projection = claimant_view.json()
     assert projection['workflow_state'] == 'created'
     assert projection['external_claim'] == result['external_claim']
+
+
+def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    journey = _fixture()
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'unclassified-working-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    )
+    assert created.status_code == 201
+    working = created.json()
+    claim = working['claim']
+
+    turn = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/sessions/{working["session"]["session_id"]}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unclassified-description-turn',
+            'If-Match': str(claim['revision']),
+        },
+        json={
+            'client_message_id': 'unclassified-description',
+            'content': {'type': 'text', 'text': journey['input']},
+            'evidence_refs': [],
+        },
+    )
+    assert turn.status_code == 200
+    turn_body = turn.json()
+    proposed = {item['field_code'] for item in turn_body['form_changes']}
+    assert proposed == {*journey['expected_proposed_fields'], 'incident.type'}
+
+    confirmed = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unclassified-confirm-all',
+            'If-Match': str(turn_body['claim_revision']),
+        },
+        json={'field_codes': sorted(proposed)},
+    )
+    assert confirmed.status_code == 200
+    confirmed_body = confirmed.json()
+    assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
+
+    claimant_view = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=auth_headers)
+    assert claimant_view.status_code == 200
+    assert claimant_view.json()['incident_type'] == 'motor'
+
+    created_external = client.post(
+        f'/api/v1/claims/{claim["claim_id"]}/creation',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'unclassified-controlled-creation',
+            'If-Match': str(confirmed_body['revision']),
+        },
+    )
+    assert created_external.status_code == 201
 
 
 def test_claim_creation_rejects_a_stale_working_claim_revision(

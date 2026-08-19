@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from backend.domain.intake import next_controlled_intake_field
+from backend.domain.intake import infer_controlled_incident_type, next_controlled_intake_field
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -54,6 +54,42 @@ INJURY_PATTERNS = (
 DANGER_PATTERNS = (
     re.compile(r'\b(?:still|continuing|immediate)\s+(?:danger|dangerous|unsafe)\b', re.IGNORECASE),
     re.compile(r'\b(?:fire|smoke)\s+(?:is\s+)?(?:spreading|continuing|active)\b', re.IGNORECASE),
+)
+INJURY_NEGATION_PATTERNS = (
+    re.compile(
+        r'\b(?:no\s+one|nobody|none)\s+'
+        r'(?:(?:is|are|was|were|got|has\s+been|have\s+been)\s+)?'
+        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf'\b{PERSON_SUBJECT}\s+'
+        r'(?:am|are|is|was|were|has\s+been|have\s+been)\s+not\s+'
+        r'(?:(?:seriously|badly)\s+)?(?:injured|hurt|bleeding|trapped|unconscious)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\bthere\s+(?:is|are|was|were)\s+no\s+'
+        r'(?:injured|hurt|bleeding|trapped|unconscious)\s+'
+        r'(?:person|people|passenger|driver|pedestrian|cyclist|child|adult)\b',
+        re.IGNORECASE,
+    ),
+)
+DANGER_NEGATION_PATTERNS = (
+    re.compile(
+        r'\b(?:there\s+(?:is|are|was|were)\s+)?no\s+'
+        r'(?:(?:still|continuing|immediate|ongoing)\s+)?(?:danger|dangerous|unsafe)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\b(?:is|are|was|were)\s+not\s+'
+        r'(?:(?:still|currently)\s+)?(?:in\s+)?(?:danger|dangerous|unsafe)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\bno\s+longer\s+(?:in\s+)?(?:danger|dangerous|unsafe)\b',
+        re.IGNORECASE,
+    ),
 )
 HUMAN_REQUEST_PATTERNS = (
     re.compile(
@@ -109,7 +145,18 @@ class AgentProposal:
     controlled_rule_authorised: bool = False
 
 
-def _initial_form_changes(message_text: str) -> list[ProposedFormChange]:
+def _contains_unnegated_signal(
+    message_text: str,
+    signal_patterns: tuple[re.Pattern[str], ...],
+    negation_patterns: tuple[re.Pattern[str], ...],
+) -> bool:
+    remaining_text = message_text
+    for pattern in negation_patterns:
+        remaining_text = pattern.sub('', remaining_text)
+    return any(pattern.search(remaining_text) for pattern in signal_patterns)
+
+
+def _initial_form_changes(message_text: str, incident_type: str | None) -> list[ProposedFormChange]:
     changes = [
         ProposedFormChange(
             field_code='incident.description',
@@ -120,6 +167,20 @@ def _initial_form_changes(message_text: str) -> list[ProposedFormChange]:
             confidence=1.0,
         )
     ]
+    inferred_incident_type = (
+        infer_controlled_incident_type(message_text) if incident_type is None else None
+    )
+    if inferred_incident_type is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.type',
+                value=inferred_incident_type,
+                source=FormSource.INFERENCE,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.95,
+            )
+        )
     location = LOCATION_PATTERN.search(message_text)
     if location is not None:
         changes.append(
@@ -150,6 +211,7 @@ def _initial_form_changes(message_text: str) -> list[ProposedFormChange]:
 def _confirmation_response(changes: list[ProposedFormChange]) -> str:
     labels = {
         'incident.description': 'what happened',
+        'incident.type': 'the incident type',
         'incident.location': 'where it happened',
         'loss.description': 'what was damaged or lost',
     }
@@ -170,8 +232,12 @@ class ControlledAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         message_text = context.message_text or ''
-        injury_signal = any(pattern.search(message_text) for pattern in INJURY_PATTERNS)
-        danger_signal = any(pattern.search(message_text) for pattern in DANGER_PATTERNS)
+        injury_signal = _contains_unnegated_signal(
+            message_text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
+        )
+        danger_signal = _contains_unnegated_signal(
+            message_text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS
+        )
         if injury_signal or danger_signal:
             return AgentProposal(
                 action=AgentAction.URGENT_HANDOFF,
@@ -250,7 +316,7 @@ class ControlledAgent:
         intake_field = next_controlled_intake_field(context.claim)
         if context.message_text is not None and intake_field is not None:
             changes = (
-                _initial_form_changes(message_text)
+                _initial_form_changes(message_text, context.claim.incident_type)
                 if not context.claim.form and intake_field.field_code == 'incident.description'
                 else [
                     ProposedFormChange(

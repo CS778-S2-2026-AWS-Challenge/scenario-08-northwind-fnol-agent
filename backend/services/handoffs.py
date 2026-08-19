@@ -12,6 +12,7 @@ from backend.domain.models import (
     HandoffPriority,
     HandoffRecord,
     HandoffStatus,
+    HandoffTrigger,
     HandoffType,
     MessageVisibility,
     PreferredChannel,
@@ -52,6 +53,8 @@ def _claim_not_found() -> ApiError:
 
 
 def claimant_handoff(handoff: HandoffRecord) -> ClaimantHandoff:
+    if handoff.support_need is None:
+        raise ValueError('An internal handoff cannot be projected as a claimant support request.')
     return ClaimantHandoff(
         handoff_id=handoff.handoff_id,
         status=handoff.status,
@@ -118,6 +121,15 @@ def _handoff_settings(
             'You do not need to restart your report.'
         ),
     )
+
+
+def _claimant_handoff_trigger(support_need: SupportNeed) -> HandoffTrigger:
+    return {
+        SupportNeed.HUMAN_REQUESTED: HandoffTrigger.CLAIMANT_SUPPORT_REQUEST,
+        SupportNeed.ACCESSIBILITY_REQUIRED: HandoffTrigger.ACCESSIBILITY_NEED,
+        SupportNeed.DISTRESS: HandoffTrigger.DISTRESS_SIGNAL,
+        SupportNeed.URGENT: HandoffTrigger.URGENT_SAFETY_RISK,
+    }[support_need]
 
 
 def build_handoff(
@@ -190,6 +202,7 @@ def build_handoff(
         priority=priority,
         queue=queue,
         support_need=support_need,
+        trigger=_claimant_handoff_trigger(support_need),
         preferred_channel=preferred_channel,
         reason_codes=[reason_code or default_reason_code],
         reason=reason,

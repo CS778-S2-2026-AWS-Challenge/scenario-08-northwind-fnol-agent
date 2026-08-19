@@ -8,6 +8,7 @@ from backend.adapters.claims_service import (
 )
 from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
 from backend.api.claims import router as claims_router
+from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
@@ -19,6 +20,7 @@ from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
 
@@ -39,7 +41,11 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = resolved_settings
-    app.state.claim_repository = repository or FixtureRepository()
+    # Every application consumer reads the repository from app.state, so the
+    # handoff lifecycle and ownership invariants are applied once here rather
+    # than by individual routers.  No router, service, seed path, or adapter
+    # can reach an unguarded handoff write.
+    app.state.claim_repository = guarded_handoff_repository(repository or FixtureRepository())
     app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
@@ -55,5 +61,6 @@ def create_app(
     app.include_router(integrations_router)
     app.include_router(evidence_router)
     app.include_router(workbench_router)
+    app.include_router(demo_router)
     app.include_router(handoffs_router)
     return app
