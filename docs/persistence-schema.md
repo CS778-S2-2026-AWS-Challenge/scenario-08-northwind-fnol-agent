@@ -25,6 +25,7 @@ methods.
 | Message | `CLAIM#<claim_id>` | `MESSAGE#<created_at>#<message_id>` | claim and session |
 | Agent decision | `CLAIM#<claim_id>` | `DECISION#<created_at>#<decision_id>` | claim, session, and trigger message |
 | Evidence | `CLAIM#<claim_id>` | `EVIDENCE#<evidence_id>` | claim |
+| Handoff | `CLAIM#<claim_id>` | `HANDOFF#<created_at>#<handoff_id>` | claim |
 
 Customer claim listing needs a logical customer lookup:
 `CUSTOMER#<customer_id>` with `CLAIM#<created_at>#<claim_id>` ordering. Whether
@@ -49,6 +50,9 @@ part of HTTP request or response models.
 7. Save a material claim revision only when the expected revision still
    matches; otherwise return a repository revision conflict.
 8. Record idempotency results using actor, route, and client key.
+9. Read handoff priority, owner, status, reason, and transfer packet under the
+   claim, then persist lifecycle changes with the same expected claim revision
+   used for the associated shared-state write.
 
 ## Record Rules
 
@@ -95,6 +99,47 @@ part of HTTP request or response models.
 - Future persistence adapters must preserve these invariants without exposing
   provider keys or creating a second concurrency model beside
   `WorkingClaim.revision`.
+
+## Handoff persistence, ownership, and revision invariants
+
+- A `HandoffRecord` is a claim-scoped durable child record. Priority, queue,
+  support need, reason codes, reason, requested action, transfer packet,
+  ownership, status, and lifecycle timestamps are persisted rather than kept
+  only in a workbench projection.
+- `WorkingClaim.revision` remains the single optimistic-concurrency token for
+  handoff lifecycle changes. Accepting, continuing, cancelling, or resolving a
+  handoff must use the current claim revision and advance that revision exactly
+  once when shared state changes. There is no independent handoff revision
+  counter.
+- The revision returned by handoff mutation responses is therefore the parent
+  `WorkingClaim.revision` produced by that material handoff write. This keeps
+  the handoff and shared Claim State in one concurrency domain.
+- A newly requested or queued handoff has no staff owner. Acceptance assigns an
+  owner and records `accepted_at`. Once an owner is persisted, later active
+  work must be performed by that owner and the owner cannot be replaced by a
+  blind record overwrite.
+- Allowed lifecycle movement is `requested -> queued -> accepted ->
+  in_progress -> resolved`, with cancellation permitted before acceptance.
+  Repeated in-progress writes may retain `in_progress`; resolved and cancelled
+  records are terminal.
+- Handoff identity, type, priority, queue, support need, reason, requested
+  action, source context, transfer packet, and creation timestamp are immutable
+  after creation. Lifecycle writes may update status, owner, and the applicable
+  acceptance or resolution timestamps only.
+- Direct `save_handoff` writes may seed a new record or repeat an identical
+  record, but they must not overwrite an existing handoff. Material lifecycle
+  changes must go through a revision-checked mutation.
+- Idempotency metadata for a handoff mutation identifies the same
+  `handoff_id`. A repeated claimant support request reuses the existing active
+  handoff where applicable instead of creating a second record with competing
+  ownership.
+- These invariants are applied at the application persistence boundary. The
+  repository is decorated once when the application is constructed, so the
+  object held in application state is already guarded and no router, service,
+  seed path, or adapter can reach an unguarded handoff write.
+- A future persistence adapter must enforce the same revision, ownership, and
+  transition invariants even if its physical transaction or conditional-write
+  mechanism differs from the fixture repository.
 
 ## Unknowns and Next Decision Points
 

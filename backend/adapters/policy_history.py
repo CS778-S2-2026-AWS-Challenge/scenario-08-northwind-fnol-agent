@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import Field
 
@@ -7,11 +7,14 @@ from backend.domain.models import ContractModel
 from backend.domain.retrieval import (
     ClaimHistoryFacts,
     ClaimHistoryRetrievalRecord,
+    ClaimHistorySearchRequest,
     PolicyFacts,
     PolicyRetrievalRecord,
+    PolicySearchRequest,
     RetrievalSource,
     RetrievalUncertainty,
 )
+from backend.services.support import now_utc
 
 
 class ProviderUncertainty(ContractModel):
@@ -98,3 +101,131 @@ def map_history_provider_payload(
         facts=facts,
         uncertainty=_uncertainty(envelope),
     )
+
+
+class RetrievalUnavailable(Exception):
+    """The provider could not be reached, timed out, or refused the request.
+
+    Raised instead of returning an empty envelope so an absent answer can never
+    be mistaken for a negative finding.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+class PolicyHistoryAdapter(Protocol):
+    """Stable retrieval boundary implemented by fixtures now and AWS later."""
+
+    def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
+        raise NotImplementedError
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        raise NotImplementedError
+
+    def connection_status(self) -> str:
+        raise NotImplementedError
+
+
+_FIXTURE_POLICIES: dict[str, dict[str, Any]] = {
+    'synthetic-policy-101': {
+        'policy_reference': 'synthetic-policy-101',
+        'product': 'motor',
+        'status': 'active',
+        'effective_from': '2026-01-01T00:00:00Z',
+        'effective_to': '2027-01-01T00:00:00Z',
+        'excess_amount': 500.0,
+        'currency': 'NZD',
+        'coverage_sections': ['accidental_damage', 'third_party_liability'],
+        # Provider-only fields below are deliberately present in the fixture so
+        # tests can prove the mapping discards them.
+        'fraud_label': 'elevated',
+        'risk_score': 0.82,
+        'policy_conclusion': 'covered',
+    },
+    'synthetic-policy-ambiguous': {
+        'policy_reference': 'synthetic-policy-ambiguous',
+        'product': 'motor',
+        'status': 'active',
+        'coverage_sections': ['accidental_damage'],
+    },
+}
+
+_FIXTURE_HISTORIES: dict[str, dict[str, Any]] = {
+    'synthetic-history-204': {
+        'history_reference': 'synthetic-history-204',
+        'incident_type': 'motor',
+        'occurred_at': '2025-10-03T00:00:00Z',
+        'status': 'closed',
+        'outcome': 'settled',
+        'fraud_finding': 'none',
+        'internal_note': 'Provider-only commentary that must not cross the boundary.',
+    },
+}
+
+_AMBIGUOUS_POLICY_UNCERTAINTY = ProviderUncertainty(
+    code='COVERAGE_SECTION_INCOMPLETE',
+    detail='The fixture policy does not state whether this event type is covered.',
+)
+
+
+class MockPolicyHistoryAdapter(PolicyHistoryAdapter):
+    """Deterministic fixture retrieval with a controllable outage.
+
+    The outage is explicit rather than random so the unavailable path is a
+    demonstrable business path rather than a flaky test.
+    """
+
+    def __init__(self, outage: RetrievalUnavailable | None = None) -> None:
+        self._outage = outage
+        self._lookups = 0
+
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {'mock_retrieval_lookups': self._lookups}
+        self._lookups = 0
+        self._outage = None
+        return cleared
+
+    def set_outage(self, outage: RetrievalUnavailable | None) -> None:
+        self._outage = outage
+
+    def connection_status(self) -> str:
+        return 'unavailable' if self._outage is not None else 'using_fixture'
+
+    def _guard(self) -> None:
+        if self._outage is not None:
+            raise self._outage
+        self._lookups += 1
+
+    def search_policy(self, command: PolicySearchRequest) -> ProviderLookupEnvelope:
+        self._guard()
+        payload = _FIXTURE_POLICIES.get(command.policy_reference)
+        if payload is None:
+            raise LookupError(command.policy_reference)
+        uncertainty = (
+            [_AMBIGUOUS_POLICY_UNCERTAINTY]
+            if command.policy_reference == 'synthetic-policy-ambiguous'
+            else []
+        )
+        return ProviderLookupEnvelope(
+            provider='fixture_policy_administration',
+            provider_reference=command.policy_reference,
+            retrieved_at=now_utc(),
+            payload=payload,
+            uncertainty=uncertainty,
+        )
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        self._guard()
+        payload = _FIXTURE_HISTORIES.get(command.history_reference)
+        if payload is None:
+            raise LookupError(command.history_reference)
+        return ProviderLookupEnvelope(
+            provider='fixture_claims_history',
+            provider_reference=command.history_reference,
+            retrieved_at=now_utc(),
+            payload=payload,
+            uncertainty=[],
+        )

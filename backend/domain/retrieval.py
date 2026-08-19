@@ -76,3 +76,56 @@ class ReviewSignalRecord(ContractModel):
     reason_codes: list[str] = Field(min_length=1, max_length=100)
     summary: str = Field(min_length=1, max_length=1000)
     created_at: datetime
+
+
+class RetrievalStatus(str, Enum):
+    """Outcome of one retrieval attempt.
+
+    `unavailable` means the provider could not answer. It never carries facts,
+    because an absent answer must not be reported as a finding.
+    """
+
+    EVIDENCE_FOUND = 'evidence_found'
+    NO_EVIDENCE = 'no_evidence'
+    AMBIGUOUS = 'ambiguous'
+    UNAVAILABLE = 'unavailable'
+
+
+class PolicySearchRequest(ContractModel):
+    claim_id: str = Field(min_length=1, max_length=100)
+    policy_reference: str = Field(min_length=1, max_length=200)
+    question: str | None = Field(default=None, min_length=1, max_length=500)
+    effective_at: datetime | None = None
+
+
+class ClaimHistorySearchRequest(ContractModel):
+    """Purpose-limited history lookup.
+
+    `purpose` is an allow-list rather than free text so a caller cannot widen
+    the reason for reading a claimant's history.
+    """
+
+    claim_id: str = Field(min_length=1, max_length=100)
+    history_reference: str = Field(min_length=1, max_length=200)
+    purpose: Literal['relevant_history_review'] = 'relevant_history_review'
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class PolicySearchResponse(ContractModel):
+    result_id: str = Field(min_length=1, max_length=100)
+    status: RetrievalStatus
+    source: RetrievalSource | None = None
+    facts: PolicyFacts | None = None
+    uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+    retrieved_at: datetime
+
+
+class ClaimHistorySearchResponse(ContractModel):
+    result_id: str = Field(min_length=1, max_length=100)
+    status: RetrievalStatus
+    source: RetrievalSource | None = None
+    facts: ClaimHistoryFacts | None = None
+    uncertainty: list[RetrievalUncertainty] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+    retrieved_at: datetime

@@ -410,6 +410,23 @@ class EvidenceRecord(ContractModel):
     updated_at: datetime
 
 
+class HandoffEvidenceItem(ContractModel):
+    """Staff handoff projection of evidence without copying storage provenance."""
+
+    evidence_id: str
+    kind: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+    source: EvidenceSource
+    visibility: MessageVisibility
+    original_filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    claimant_note: str | None = None
+
+
 class HandoffPacket(ContractModel):
     """Staff-only transfer context built from the authoritative working claim."""
 
@@ -417,6 +434,7 @@ class HandoffPacket(ContractModel):
     form_revision: int = Field(ge=1)
     form_snapshot: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list)
+    evidence: list[HandoffEvidenceItem] = Field(default_factory=list)
     missing_items: list[str] = Field(default_factory=list)
     pending_items: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
@@ -742,16 +760,49 @@ class CompleteEvidenceUploadRequest(ContractModel):
     upload_checksum: str = Field(pattern=r'^sha256:[0-9a-fA-F]{64}$')
 
 
+class EvidenceFactProposal(ContractModel):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class CompleteEvidenceProcessingRequest(ContractModel):
+    facts: list[EvidenceFactProposal] = Field(min_length=1, max_length=50)
+
+
+class EvidenceFactDecisionRequest(ContractModel):
+    field_codes: list[str] = Field(min_length=1, max_length=50)
+    decision: Literal['confirmed', 'rejected']
+
+
 class CreateSupportRequest(ContractModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     support_need: SupportNeed
     preferred_channel: PreferredChannel | None = None
 
 
+class HandoffDeliveryState(str, Enum):
+    DELIVERED = 'delivered'
+    QUEUED_LOCALLY = 'queued_locally'
+
+
+class HandoffDelivery(ContractModel):
+    """Claimant-safe statement of whether the staff queue system was notified.
+
+    `queued_locally` means the notification service could not be reached. The
+    handoff is still saved and still in the staff queue, so the request is not
+    lost; only the push notification is missing.
+    """
+
+    state: HandoffDeliveryState
+    limitations: list[str] = Field(default_factory=list, max_length=10)
+
+
 class SupportRequestResponse(ContractModel):
     handoff: ClaimantHandoff
     revision: int
     customer_next_step: CustomerNextStep
+    delivery: HandoffDelivery
 
 
 class EvidenceListResponse(ContractModel):
@@ -792,6 +843,20 @@ class EvidenceCompleteResponse(ContractModel):
     revision: int
     status_url: str
     customer_next_step: CustomerNextStep
+
+
+class EvidenceProcessingResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    file_status: EvidenceFileStatus
+    proposed_fields: dict[str, StructuredFormField]
+
+
+class EvidenceFactDecisionResponse(ContractModel):
+    evidence_id: str
+    revision: int
+    decision: Literal['confirmed', 'rejected']
+    updated_fields: dict[str, StructuredFormField]
 
 
 class CreateClaimRequest(ContractModel):
