@@ -588,6 +588,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
 | `POST` | `/claims/{claim_id}/evidence/{evidence_id}/complete` | Complete and validate an upload |
+| `POST` | `/claims/{claim_id}/evidence/{evidence_id}/fact-decisions` | Confirm or reject proposed extracted facts |
 | `POST` | `/claims/{claim_id}/support-requests` | Explicitly request human support |
 | `GET` | `/claims/{claim_id}/updates` | Read claimant-visible progress updates |
 
@@ -980,6 +981,26 @@ The Sprint 2 mock adapter returns `202` and records the public `file_status` as
 size, and processing status can be read back from the evidence list. Storage
 keys, checksums, processing references, and file contents remain internal.
 
+### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions`
+
+Confirms or rejects facts proposed by completed image or document processing.
+
+Request:
+
+```json
+{
+  "field_codes": ["incident.description"],
+  "decision": "confirmed"
+}
+```
+
+This request requires `Idempotency-Key` and `If-Match`. Every selected field
+must still be `proposed`, use `image` or `document` as its source, and reference
+the same evidence item. A confirmed fact becomes `confirmed`. A rejected fact
+uses the form status `disputed` so it cannot be mistaken for accepted claim
+information. Both outcomes retain the original source reference and record the
+proposal and decision times in internal provenance.
+
 ### `POST /api/v1/claims/{claim_id}/support-requests`
 
 Request:
@@ -1355,6 +1376,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 | `POST` | `/internal/v1/policy/search` | Retrieve cited policy evidence |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
+| `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
 | `POST` | `/internal/v1/assessors/route` | Request a rule-authorised assessor action |
 
 ### `POST /internal/v1/agent/turns`
@@ -1530,6 +1552,40 @@ An evidence-storage outage is reported to the caller as `503`
 rejection, and leaves the claim unchanged. Registering evidence the claimant
 does not yet hold does not touch the object store, so that path keeps working
 during an outage.
+
+### `POST /internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing`
+
+Records the typed result of image or document extraction after an accepted
+upload reaches `processing`.
+
+Request:
+
+```json
+{
+  "facts": [
+    {
+      "field_code": "incident.description",
+      "value": "Rear panel damage is visible.",
+      "confidence": 0.87
+    }
+  ]
+}
+```
+
+This service-to-service request requires integration credentials,
+`Idempotency-Key`, and `If-Match`. It moves the evidence file from `processing`
+to `ready` and writes registered extracted fields as `proposed`.
+
+Extraction may only fill a field the shared form does not hold yet. If any
+target field already exists — in any state, including `proposed`, `disputed`,
+`missing`, and `pending_generation`, not only `confirmed` — the request is
+rejected with `409 INVALID_STATE_TRANSITION` and nothing is written. Writing
+into an occupied field would replace its value, source, and source references,
+so an earlier claimant proposal or a disputed value would stop being traceable.
+The existing field must be resolved first.
+
+Transition provenance records source, actor, and accepted time for the file and
+each proposed fact.
 
 ### `POST /internal/v1/claims/create`
 

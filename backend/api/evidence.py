@@ -7,6 +7,8 @@ from backend.core.auth import Principal, require_claimant
 from backend.domain.models import (
     CompleteEvidenceUploadRequest,
     EvidenceCompleteResponse,
+    EvidenceFactDecisionRequest,
+    EvidenceFactDecisionResponse,
     EvidenceListResponse,
     EvidenceMutationResponse,
     EvidenceUploadResponse,
@@ -16,6 +18,7 @@ from backend.domain.models import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import (
     complete_upload,
+    decide_evidence_facts,
     list_evidence,
     register_evidence,
     request_upload,
@@ -105,6 +108,30 @@ def finish_evidence_upload(
     return complete_upload(
         repository_for(request),
         storage_for(request),
+        principal,
+        claim_id,
+        evidence_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+
+
+@router.post(
+    '/{claim_id}/evidence/{evidence_id}/fact-decisions',
+    response_model=EvidenceFactDecisionResponse,
+)
+def decide_extracted_facts(
+    claim_id: str,
+    evidence_id: str,
+    payload: EvidenceFactDecisionRequest,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> EvidenceFactDecisionResponse:
+    return decide_evidence_facts(
+        repository_for(request),
         principal,
         claim_id,
         evidence_id,

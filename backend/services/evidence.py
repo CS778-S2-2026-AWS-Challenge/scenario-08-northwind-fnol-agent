@@ -8,20 +8,31 @@ from backend.adapters.evidence_storage import (
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.evidence import evidence_state_for, evidence_summary_for
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
     ClaimantEvidence,
+    CompleteEvidenceProcessingRequest,
     CompleteEvidenceUploadRequest,
     EvidenceCompleteResponse,
+    EvidenceFactDecisionRequest,
+    EvidenceFactDecisionResponse,
     EvidenceFileStatus,
     EvidenceListResponse,
     EvidenceMutationResponse,
+    EvidenceProcessingResponse,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
     EvidenceUploadResponse,
+    FormSource,
+    FormStatus,
+    NeededFor,
     RegisterEvidenceRequest,
     RequestEvidenceUploadRequest,
+    StructuredFormField,
     UploadConstraints,
     UploadTarget,
     WorkingClaim,
@@ -73,6 +84,38 @@ def _claimant_evidence(evidence: EvidenceRecord) -> ClaimantEvidence:
         created_at=evidence.created_at,
         updated_at=evidence.updated_at,
     )
+
+
+def _transition_entry(
+    *,
+    field_code: str | None,
+    from_state: str,
+    to_state: str,
+    source: str,
+    at: str,
+    actor_type: str,
+    actor_id: str,
+    proposed_at: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        'field_code': field_code,
+        'from': from_state,
+        'to': to_state,
+        'source': source,
+        'at': at,
+        'actor_type': actor_type,
+        'actor_id': actor_id,
+        'proposed_at': proposed_at,
+    }
+
+
+def _with_transition(
+    provenance: dict[str, object],
+    transition: dict[str, str | None],
+) -> dict[str, object]:
+    existing = provenance.get('transition_history', [])
+    history = existing if isinstance(existing, list) else []
+    return {**provenance, 'transition_history': [*history, transition]}
 
 
 def _updated_claim(
@@ -432,12 +475,23 @@ def complete_upload(
         ) from error
 
     timestamp = now_utc()
-    provenance = {
-        **evidence.provenance,
-        'storage_key': stored.storage_key,
-        'upload_checksum': stored.checksum,
-        'processing_state': 'queued',
-    }
+    provenance = _with_transition(
+        {
+            **evidence.provenance,
+            'storage_key': stored.storage_key,
+            'upload_checksum': stored.checksum,
+            'processing_state': 'queued',
+        },
+        _transition_entry(
+            field_code=None,
+            from_state=EvidenceFileStatus.AWAITING_UPLOAD.value,
+            to_state=EvidenceFileStatus.PROCESSING.value,
+            source=evidence.source.value,
+            at=timestamp.isoformat(),
+            actor_type=ActorType.SYSTEM.value,
+            actor_id='mock_evidence_storage',
+        ),
+    )
     completed = evidence.model_copy(
         update={
             'status': EvidenceStatus.RECEIVED,
@@ -458,6 +512,326 @@ def complete_upload(
         updated_claim,
         expected_revision,
         completed,
+        IdempotencyRecord(
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            response_payload=response.model_dump(mode='json'),
+        ),
+    )
+    return response
+
+
+def complete_evidence_processing(
+    repository: PersistenceRepository,
+    claim_id: str,
+    evidence_id: str,
+    payload: CompleteEvidenceProcessingRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> EvidenceProcessingResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    route = f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    existing = repository.find_idempotency(claim.customer_id, route, key)
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key was reused with different processing results.',
+            )
+        if existing.response_payload is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The idempotent processing result could not be restored.',
+                retryable=True,
+            )
+        return EvidenceProcessingResponse.model_validate(existing.response_payload)
+
+    _validate_revision(claim, expected_revision)
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        raise _evidence_not_found()
+    if evidence.file_status is not EvidenceFileStatus.PROCESSING:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='This evidence item is not awaiting processing completion.',
+        )
+    if evidence.media_type is None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='The evidence media type is unavailable.',
+        )
+
+    field_codes = [fact.field_code for fact in payload.facts]
+    invalid_codes = [code for code in field_codes if code not in REGISTERED_FIELD_CODES]
+    if len(set(field_codes)) != len(field_codes) or invalid_codes:
+        details = [
+            ErrorDetail(field=code, reason='The extracted field code is not registered.')
+            for code in invalid_codes
+        ]
+        if len(set(field_codes)) != len(field_codes):
+            details.append(ErrorDetail(field='facts', reason='Field codes must not be repeated.'))
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The processing result contains invalid extracted facts.',
+            details=details,
+        )
+    # Extraction may only fill a field that the shared form does not hold yet.
+    # Writing into an occupied field would replace its value, source, and
+    # source references through the merge below, so a claimant proposal, a
+    # disputed value, or a recorded gap would silently disappear instead of
+    # remaining traceable. A confirmed value is protected for the same reason.
+    occupied_fields = [code for code in field_codes if code in claim.form]
+    if occupied_fields:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Extracted facts cannot overwrite existing claim information.',
+            details=[
+                ErrorDetail(
+                    field=code,
+                    reason=(
+                        f'The existing field is {claim.form[code].status.value} '
+                        'and must be resolved before extraction can fill it.'
+                    ),
+                )
+                for code in occupied_fields
+            ],
+        )
+
+    timestamp = now_utc()
+    form_source = (
+        FormSource.IMAGE if evidence.media_type.startswith('image/') else FormSource.DOCUMENT
+    )
+    proposed_fields = {
+        fact.field_code: StructuredFormField(
+            value=fact.value,
+            source=form_source,
+            source_refs=[evidence_id],
+            status=FormStatus.PROPOSED,
+            needed_for=NeededFor.CURRENT_ACTION,
+            confidence=fact.confidence,
+            updated_at=timestamp,
+            updated_by=ActorReference(
+                actor_type=ActorType.SYSTEM,
+                actor_id='mock_evidence_processor',
+            ),
+        )
+        for fact in payload.facts
+    }
+    provenance: dict[str, object] = {
+        **evidence.provenance,
+        'processing_state': 'completed',
+        'extraction_state': 'proposed',
+        'fact_decisions': {code: 'proposed' for code in field_codes},
+    }
+    provenance = _with_transition(
+        provenance,
+        _transition_entry(
+            field_code=None,
+            from_state=EvidenceFileStatus.PROCESSING.value,
+            to_state=EvidenceFileStatus.READY.value,
+            source=evidence.source.value,
+            at=timestamp.isoformat(),
+            actor_type=ActorType.SYSTEM.value,
+            actor_id='mock_evidence_processor',
+        ),
+    )
+    for field_code in field_codes:
+        provenance = _with_transition(
+            provenance,
+            _transition_entry(
+                field_code=field_code,
+                from_state=EvidenceFileStatus.PROCESSING.value,
+                to_state=FormStatus.PROPOSED.value,
+                source=form_source.value,
+                at=timestamp.isoformat(),
+                actor_type=ActorType.SYSTEM.value,
+                actor_id='mock_evidence_processor',
+            ),
+        )
+    processed = evidence.model_copy(
+        update={
+            'file_status': EvidenceFileStatus.READY,
+            'provenance': provenance,
+            'updated_at': timestamp,
+        }
+    )
+    updated_claim = _updated_claim(claim, _records_with(repository, claim, processed)).model_copy(
+        update={'form': {**claim.form, **proposed_fields}}
+    )
+    response = EvidenceProcessingResponse(
+        evidence_id=evidence_id,
+        revision=updated_claim.revision,
+        file_status=processed.file_status,
+        proposed_fields=proposed_fields,
+    )
+    _persist(
+        repository,
+        updated_claim,
+        expected_revision,
+        processed,
+        IdempotencyRecord(
+            actor_id=claim.customer_id,
+            route=route,
+            key=key,
+            request_fingerprint=fingerprint,
+            claim_id=claim_id,
+            session_id=claim.active_session_id or '',
+            response_payload=response.model_dump(mode='json'),
+        ),
+    )
+    return response
+
+
+def decide_evidence_facts(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    evidence_id: str,
+    payload: EvidenceFactDecisionRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> EvidenceFactDecisionResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'
+    fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    existing = repository.find_idempotency(principal.subject, route, key)
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key was reused with a different fact decision.',
+            )
+        if existing.response_payload is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The idempotent fact decision could not be restored.',
+                retryable=True,
+            )
+        return EvidenceFactDecisionResponse.model_validate(existing.response_payload)
+
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    _validate_revision(claim, expected_revision)
+    evidence = repository.get_evidence(claim_id, evidence_id, principal.subject)
+    if evidence is None:
+        raise _evidence_not_found()
+    if evidence.file_status is not EvidenceFileStatus.READY:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Evidence facts cannot be decided before processing is complete.',
+        )
+
+    duplicate_codes = len(set(payload.field_codes)) != len(payload.field_codes)
+    unavailable_codes = [
+        field_code
+        for field_code in payload.field_codes
+        if field_code not in claim.form
+        or claim.form[field_code].status is not FormStatus.PROPOSED
+        or evidence_id not in claim.form[field_code].source_refs
+        or claim.form[field_code].source not in {FormSource.IMAGE, FormSource.DOCUMENT}
+    ]
+    if duplicate_codes or unavailable_codes:
+        details = [
+            ErrorDetail(
+                field=field_code,
+                reason='The field is not a proposed fact from this evidence item.',
+            )
+            for field_code in unavailable_codes
+        ]
+        if duplicate_codes:
+            details.append(
+                ErrorDetail(field='field_codes', reason='Field codes must not be repeated.')
+            )
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='One or more evidence facts cannot be decided.',
+            details=details,
+        )
+
+    timestamp = now_utc()
+    form_status = FormStatus.CONFIRMED if payload.decision == 'confirmed' else FormStatus.DISPUTED
+    updated_fields = {
+        field_code: claim.form[field_code].model_copy(
+            update={
+                'status': form_status,
+                'confidence': 1.0
+                if payload.decision == 'confirmed'
+                else claim.form[field_code].confidence,
+                'updated_at': timestamp,
+                'updated_by': ActorReference(
+                    actor_type=ActorType.CLAIMANT,
+                    actor_id=principal.subject,
+                ),
+            }
+        )
+        for field_code in payload.field_codes
+    }
+    stored_decisions = evidence.provenance.get('fact_decisions', {})
+    decisions = dict(stored_decisions) if isinstance(stored_decisions, dict) else {}
+    provenance: dict[str, object] = dict(evidence.provenance)
+    for field_code in payload.field_codes:
+        original = claim.form[field_code]
+        decisions[field_code] = payload.decision
+        provenance = _with_transition(
+            provenance,
+            _transition_entry(
+                field_code=field_code,
+                from_state=FormStatus.PROPOSED.value,
+                to_state=payload.decision,
+                source=original.source.value,
+                at=timestamp.isoformat(),
+                actor_type=ActorType.CLAIMANT.value,
+                actor_id=principal.subject,
+                proposed_at=original.updated_at.isoformat(),
+            ),
+        )
+    provenance['fact_decisions'] = decisions
+    decision_states = set(decisions.values())
+    if 'proposed' in decision_states:
+        provenance['extraction_state'] = 'proposed'
+    elif decision_states == {'confirmed'}:
+        provenance['extraction_state'] = 'confirmed'
+    elif decision_states == {'rejected'}:
+        provenance['extraction_state'] = 'rejected'
+    else:
+        provenance['extraction_state'] = 'reviewed'
+
+    decided = evidence.model_copy(update={'provenance': provenance, 'updated_at': timestamp})
+    updated_claim = _updated_claim(claim, _records_with(repository, claim, decided)).model_copy(
+        update={'form': {**claim.form, **updated_fields}}
+    )
+    response = EvidenceFactDecisionResponse(
+        evidence_id=evidence_id,
+        revision=updated_claim.revision,
+        decision=payload.decision,
+        updated_fields=updated_fields,
+    )
+    _persist(
+        repository,
+        updated_claim,
+        expected_revision,
+        decided,
         IdempotencyRecord(
             actor_id=principal.subject,
             route=route,
