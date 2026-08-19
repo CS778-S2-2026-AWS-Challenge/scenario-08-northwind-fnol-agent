@@ -15,6 +15,23 @@ review reason, and claimant/staff visibility outcome.
 fixture without manual edits. Internal review reasons must remain visible to
 staff but absent from claimant message responses.
 
+## An unavailable provider is not evidence
+
+`AT-16-retrieval-unavailable.json` persists **no** retrieval record and no
+derived review signal. This matches the runtime contract for
+`POST /internal/v1/policy/search`, where an `unavailable` result carries
+limitations only: no source, no facts, and nothing written to the claim.
+
+A fixture that stored a placeholder record with a synthetic source and an
+unresolved `policy_reference` would turn "the provider returned nothing" into
+apparently sourced evidence, validate behaviour the API forbids, and teach the
+Workbench to read an outage as a finding.
+
+The review reason still reaches staff: it travels on the handoff that routed
+the claim, with `trigger: professional_review_required` and the reason code in
+`reason_codes`. `test_an_unavailable_provider_persists_no_retrieval_evidence`
+enforces this, keyed off the `unavailable_provider` flag in `expected`.
+
 Policy and history scenarios use the provider-neutral retrieval records and
 derived `ReviewSignalRecord` boundary established by issues #108 and #126.
 Provider references, retrieval identifiers, uncertainty details, and review

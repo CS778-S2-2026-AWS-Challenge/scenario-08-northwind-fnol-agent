@@ -1,6 +1,6 @@
 {
   "scenario_id": "AT-16-retrieval-unavailable",
-  "description": "A required provider is temporarily unavailable, so the limitation is preserved and the claim moves to professional review.",
+  "description": "A required provider is temporarily unavailable, so no retrieval evidence exists and the claim moves to professional review carrying the limitation.",
   "claim": {
     "claim_id": "clm_fixture_at16",
     "customer_id": "cus_demo",
@@ -38,25 +38,42 @@
     }
   ],
   "evidence": [],
-  "retrievals": [
+  "retrievals": [],
+  "handoffs": [
     {
-      "retrieval_id": "ret_fixture_at16_policy",
+      "handoff_id": "hnd_fixture_at16",
       "claim_id": "clm_fixture_at16",
-      "kind": "policy",
-      "source": {
-        "system": "synthetic-policy-adapter",
-        "reference": "lookup-attempt-at16",
-        "retrieved_at": "2026-08-19T03:02:00Z"
+      "type": "human_support",
+      "status": "queued",
+      "priority": "standard",
+      "queue": "professional_review",
+      "support_need": null,
+      "trigger": "professional_review_required",
+      "preferred_channel": null,
+      "reason_codes": ["RETRIEVAL_UNAVAILABLE"],
+      "reason": "The policy provider was unavailable, so no coverage facts were retrieved and none were assumed.",
+      "requested_action": "Retrieve the policy record through another channel, or continue on the information already provided.",
+      "applied_rule": "provider_unavailable_professional_review",
+      "packet": {
+        "incident_summary": "A synthetic motor incident reported while the policy provider was unreachable.",
+        "form_revision": 2,
+        "form_snapshot": {},
+        "evidence_refs": [],
+        "missing_items": [],
+        "pending_items": [],
+        "conflicts": [],
+        "low_confidence_items": [],
+        "policy_citation_refs": [],
+        "history_evidence_refs": [],
+        "source_refs": [],
+        "prior_customer_updates": [],
+        "promised_next_step": "A claims professional will continue this claim while the external policy record is unavailable."
       },
-      "facts": {
-        "policy_reference": "POLICY-REFERENCE-UNRESOLVED"
-      },
-      "uncertainty": [
-        {
-          "code": "RETRIEVAL_UNAVAILABLE",
-          "detail": "The policy provider was temporarily unavailable and returned no coverage facts."
-        }
-      ]
+      "source_message_id": "msg_at16_claimant",
+      "assigned_to": null,
+      "created_at": "2026-08-19T03:03:00Z",
+      "accepted_at": null,
+      "resolved_at": null
     }
   ],
   "messages": [
@@ -75,10 +92,11 @@
     "action": "HANDOFF",
     "evidence_state": "not_started",
     "review_reason": "RETRIEVAL_UNAVAILABLE",
+    "unavailable_provider": true,
     "visibility": {
       "claimant_message_count": 1,
       "staff_message_count": 1,
-      "staff_review_signal_count": 1,
+      "staff_review_signal_count": 0,
       "internal_reason_hidden": true
     }
   }

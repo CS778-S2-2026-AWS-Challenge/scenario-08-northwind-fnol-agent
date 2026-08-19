@@ -49,13 +49,16 @@ def test_professional_review_scenarios_load_and_seed_repeatably_without_edits() 
         'AT-13-coverage-ambiguity': 1,
         'AT-14-history-signal': 1,
         'AT-15-conflicting-evidence': 0,
-        'AT-16-retrieval-unavailable': 1,
+        # An unavailable provider returns no facts, so there is no retrieval
+        # record and no signal derived from one. The review reason travels on
+        # the handoff instead.
+        'AT-16-retrieval-unavailable': 0,
     }
     assert {result.scenario_id: result.review_signals for result in first} == {
         'AT-13-coverage-ambiguity': 1,
         'AT-14-history-signal': 1,
         'AT-15-conflicting-evidence': 0,
-        'AT-16-retrieval-unavailable': 1,
+        'AT-16-retrieval-unavailable': 0,
     }
 
 
@@ -95,3 +98,38 @@ def test_review_reasons_are_visible_to_staff_but_not_claimants() -> None:
         for retrieval in scenario.retrievals:
             assert retrieval.retrieval_id not in claimant_messages.text
             assert retrieval.source.reference not in claimant_messages.text
+
+
+def test_an_unavailable_provider_persists_no_retrieval_evidence() -> None:
+    """An outage must not be recorded as a sourced retrieval finding.
+
+    The runtime contract for `POST /internal/v1/policy/search` returns
+    `unavailable` with limitations only: no source, no facts, nothing
+    persisted. A fixture that stored a placeholder record with a synthetic
+    source would validate behaviour the API forbids, and would teach the
+    Workbench to read an outage as evidence.
+    """
+    unavailable = [
+        scenario
+        for scenario in load_scenarios(FIXTURE_DIRECTORY)
+        if scenario.expected.get('unavailable_provider') is True
+    ]
+    assert [scenario.scenario_id for scenario in unavailable] == ['AT-16-retrieval-unavailable']
+
+    for scenario in unavailable:
+        assert scenario.retrievals == []
+
+        repository = FixtureRepository()
+        seed_scenario(repository, scenario)
+        claim_id = scenario.claim.claim_id
+        customer_id = scenario.claim.customer_id
+
+        assert repository.list_retrieval_records(claim_id, customer_id) == []
+        assert repository.list_review_signals(claim_id, customer_id) == []
+
+        # The review reason still reaches staff, carried by the handoff that
+        # routed the claim, rather than by invented evidence.
+        handoffs = repository.list_handoffs(claim_id, customer_id)
+        assert len(handoffs) == 1
+        assert scenario.expected['review_reason'] in handoffs[0].reason_codes
+        assert handoffs[0].trigger.value == 'professional_review_required'
