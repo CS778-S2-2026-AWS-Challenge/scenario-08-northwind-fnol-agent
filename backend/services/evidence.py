@@ -589,19 +589,26 @@ def complete_evidence_processing(
             message='The processing result contains invalid extracted facts.',
             details=details,
         )
-    confirmed_overwrites = [
-        code
-        for code in field_codes
-        if code in claim.form and claim.form[code].status is FormStatus.CONFIRMED
-    ]
-    if confirmed_overwrites:
+    # Extraction may only fill a field that the shared form does not hold yet.
+    # Writing into an occupied field would replace its value, source, and
+    # source references through the merge below, so a claimant proposal, a
+    # disputed value, or a recorded gap would silently disappear instead of
+    # remaining traceable. A confirmed value is protected for the same reason.
+    occupied_fields = [code for code in field_codes if code in claim.form]
+    if occupied_fields:
         raise ApiError(
             status_code=409,
             code='INVALID_STATE_TRANSITION',
-            message='Extracted facts cannot overwrite confirmed claim information.',
+            message='Extracted facts cannot overwrite existing claim information.',
             details=[
-                ErrorDetail(field=code, reason='The existing field is already confirmed.')
-                for code in confirmed_overwrites
+                ErrorDetail(
+                    field=code,
+                    reason=(
+                        f'The existing field is {claim.form[code].status.value} '
+                        'and must be resolved before extraction can fill it.'
+                    ),
+                )
+                for code in occupied_fields
             ],
         )
 

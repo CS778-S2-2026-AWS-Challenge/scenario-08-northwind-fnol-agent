@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -829,3 +829,103 @@ def test_mock_storage_validates_pending_object_identity() -> None:
         size_bytes=100,
     )
     assert storage.completed_upload('clm_fixture', 'evd_fixture') == completed
+
+
+def process_facts(
+    client: TestClient,
+    claim_id: str,
+    evidence_id: str,
+    *,
+    key: str,
+    revision: int,
+    value: str,
+    field_code: str = 'incident.description',
+) -> object:
+    return client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=integration_headers(key, revision),
+        json={'facts': [{'field_code': field_code, 'value': value}]},
+    )
+
+
+@pytest.mark.parametrize(
+    ('decision', 'expected_status'),
+    [
+        (None, 'proposed'),
+        ('rejected', 'disputed'),
+    ],
+)
+def test_processing_cannot_replace_an_unresolved_field_from_an_earlier_source(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    decision: str | None,
+    expected_status: str,
+) -> None:
+    """A later extraction must not silently discard an unresolved earlier fact.
+
+    The confirmed case is already covered above. This covers the states the
+    claimant still owns: a standing proposal, and a value they disputed.
+    """
+    case = expected_status
+    created = create_claim(client, auth_headers, f'{case}-guard-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+
+    first_evidence_id = upload_evidence(client, auth_headers, claim_id, f'{case}-first', 1)
+    complete_upload(client, auth_headers, claim_id, first_evidence_id, f'{case}-first', 2)
+    processed = process_facts(
+        client,
+        claim_id,
+        first_evidence_id,
+        key=f'{case}-first-processing',
+        revision=3,
+        value='The first reading of the damage.',
+    )
+    assert cast(Any, processed).status_code == 200
+    revision = 4
+
+    if decision is not None:
+        decided = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{first_evidence_id}/fact-decisions',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'{case}-decision',
+                'If-Match': str(revision),
+            },
+            json={'field_codes': ['incident.description'], 'decision': decision},
+        )
+        assert decided.status_code == 200
+        revision += 1
+
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+    field_before = before.form['incident.description']
+    assert field_before.status.value == expected_status
+
+    second_evidence_id = upload_evidence(client, auth_headers, claim_id, f'{case}-second', revision)
+    complete_upload(
+        client, auth_headers, claim_id, second_evidence_id, f'{case}-second', revision + 1
+    )
+    overwrite = process_facts(
+        client,
+        claim_id,
+        second_evidence_id,
+        key=f'{case}-second-processing',
+        revision=revision + 2,
+        value='A conflicting later reading.',
+    )
+
+    assert cast(Any, overwrite).status_code == 409
+    body = cast(Any, overwrite).json()
+    assert body['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert [detail['field'] for detail in body['error']['details']] == ['incident.description']
+    assert expected_status in body['error']['details'][0]['reason']
+
+    # The earlier fact keeps its value, source, and source references.
+    after = repository.get_claim(claim_id, 'cus_demo')
+    assert after is not None
+    field_after = after.form['incident.description']
+    assert field_after.model_dump(mode='json') == field_before.model_dump(mode='json')
+    assert field_after.source_refs == [first_evidence_id]

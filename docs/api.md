@@ -1557,9 +1557,18 @@ Request:
 
 This service-to-service request requires integration credentials,
 `Idempotency-Key`, and `If-Match`. It moves the evidence file from `processing`
-to `ready` and writes registered extracted fields as `proposed`; it never
-overwrites a confirmed form value. Transition provenance records source, actor,
-and accepted time for the file and each proposed fact.
+to `ready` and writes registered extracted fields as `proposed`.
+
+Extraction may only fill a field the shared form does not hold yet. If any
+target field already exists — in any state, including `proposed`, `disputed`,
+`missing`, and `pending_generation`, not only `confirmed` — the request is
+rejected with `409 INVALID_STATE_TRANSITION` and nothing is written. Writing
+into an occupied field would replace its value, source, and source references,
+so an earlier claimant proposal or a disputed value would stop being traceable.
+The existing field must be resolved first.
+
+Transition provenance records source, actor, and accepted time for the file and
+each proposed fact.
 
 ### `POST /internal/v1/claims/create`
 
