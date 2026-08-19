@@ -21,3 +21,4 @@ This directory contains engineering guidance, API information, and user-research
 - [Research directory](User_Research_and_Pain_Points/)
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
+- `day5-agent-authority-and-visibility.md` records the Issue #148 `bdfa123` run of the ambiguity, conflict, and visibility fixtures.
