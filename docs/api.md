@@ -1245,8 +1245,9 @@ Resolving a handoff MUST record the staff result, state changes, claimant update
 ### `POST /api/v1/workbench/demo/seed-scenarios`
 
 Loads a bounded, mixed local workbench demonstration queue. AT-02, AT-04, and AT-05 exercise
-professional-review and human-handoff work, while AT-10 exercises a created claim routed to an
-assessor. This endpoint is not a handoff-only seed boundary. It is an explicit staff action: the
+professional-review and human-handoff work, AT-06 exercises claimant, external-agency, and
+internal pending-evidence waits, while AT-10 exercises a created claim routed to an assessor.
+This endpoint is not a handoff-only seed boundary. It is an explicit staff action: the
 workbench never calls it during page load. The route requires the synthetic staff credential, is
 available only in development and test environments, and returns
 `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` if claims already exist. Reset the local demo before loading
@@ -1262,12 +1263,14 @@ Response `200`:
     "AT-02-coverage-ambiguity",
     "AT-04-urgent",
     "AT-05-human-request",
+    "AT-06-pending-evidence",
     "AT-10-controlled-assessor"
   ],
   "claim_ids": [
     "clm_fixture_at02",
     "clm_fixture_at04",
     "clm_fixture_at05",
+    "clm_fixture_at06",
     "clm_fixture_at10"
   ]
 }

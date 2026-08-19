@@ -30,7 +30,7 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
     session_id = loaded.claim.active_session_id or ''
     claim = repository.get_claim(claim_id, 'cus_demo')
     session = repository.get_session(claim_id, session_id, 'cus_demo')
-    evidence = repository.list_evidence(claim_id, 'cus_demo')[0]
+    evidence_records = repository.list_evidence(claim_id, 'cus_demo')
     assert claim is not None
     assert session is not None
 
@@ -79,16 +79,17 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
         ),
         expected_revision=claim.revision,
     )
-    repository.save_evidence(
-        evidence.model_copy(
-            update={
-                'status': EvidenceStatus.RECEIVED,
-                'file_status': EvidenceFileStatus.READY,
-                'updated_at': paused_at + timedelta(minutes=1),
-            }
-        ),
-        'cus_demo',
-    )
+    for evidence in evidence_records:
+        repository.save_evidence(
+            evidence.model_copy(
+                update={
+                    'status': EvidenceStatus.RECEIVED,
+                    'file_status': EvidenceFileStatus.READY,
+                    'updated_at': paused_at + timedelta(minutes=1),
+                }
+            ),
+            'cus_demo',
+        )
 
     with TestClient(create_app(Settings(), repository)) as client:
         response = client.post(

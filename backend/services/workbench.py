@@ -1,6 +1,9 @@
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.models import (
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceStatus,
     HandoffPriority,
     HandoffRecord,
     MessageRecord,
@@ -106,6 +109,26 @@ def _queue_for_claim(claim: WorkingClaim) -> str:
     }[workflow_state]
 
 
+def _pending_evidence(records: list[EvidenceRecord]) -> list[EvidenceRecord]:
+    pending_file_states = {
+        EvidenceFileStatus.AWAITING_UPLOAD,
+        EvidenceFileStatus.UPLOADING,
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+    }
+    return [
+        record
+        for record in records
+        if record.status
+        in {
+            EvidenceStatus.PENDING_GENERATION,
+            EvidenceStatus.INCOMPLETE,
+            EvidenceStatus.UNOFFICIAL,
+        }
+        or record.file_status in pending_file_states
+    ]
+
+
 def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
@@ -116,6 +139,8 @@ def list_workbench_claims(
 
     items: list[WorkbenchClaimListItem] = []
     for claim in repository.list_claims_internal():
+        evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
+        pending_evidence = _pending_evidence(evidence)
         handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
         open_handoffs = [
             handoff for handoff in handoffs if handoff.status.value not in {'resolved', 'cancelled'}
@@ -130,7 +155,10 @@ def list_workbench_claims(
             (handoff.assigned_to for handoff in open_handoffs if handoff.assigned_to),
             None,
         )
-        if view and view != 'all' and view != queue:
+        if view == 'awaiting_evidence':
+            if not pending_evidence:
+                continue
+        elif view and view != 'all' and view != queue:
             continue
         items.append(
             WorkbenchClaimListItem(
@@ -145,6 +173,13 @@ def list_workbench_claims(
                 route=claim.route,
                 evidence_state=claim.claim_state.evidence,
                 evidence_summary=claim.evidence_summary,
+                pending_evidence=pending_evidence,
+                pending_evidence_count=len(pending_evidence),
+                pending_wait_types=list(
+                    dict.fromkeys(
+                        item.wait_type for item in pending_evidence if item.wait_type is not None
+                    )
+                ),
                 next_action_summary=claim.customer_next_step.summary,
                 responsible_party=claim.customer_next_step.responsible_party,
                 claim_creation_status=(
