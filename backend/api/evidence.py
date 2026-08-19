@@ -91,6 +91,7 @@ def create_evidence_upload(
 @router.post(
     '/{claim_id}/evidence/{evidence_id}/complete',
     response_model=EvidenceCompleteResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def finish_evidence_upload(
     claim_id: str,

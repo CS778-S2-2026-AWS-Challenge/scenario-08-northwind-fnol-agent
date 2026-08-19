@@ -31,10 +31,10 @@ from backend.services.claims import (
     get_session,
     list_claims,
     start_claim,
-    start_session,
     update_form,
 )
 from backend.services.messages import list_claim_messages, submit_message
+from backend.services.resume import start_session_with_recovery
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 
@@ -123,7 +123,7 @@ def create_session(
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> ClaimantSession:
-    return start_session(
+    return start_session_with_recovery(
         repository_for(request),
         principal,
         claim_id,

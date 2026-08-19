@@ -68,7 +68,7 @@ def _populate_demo(
         },
         json={'upload_checksum': f'sha256:{"a" * 64}'},
     )
-    assert completed.status_code == 200
+    assert completed.status_code == 202
 
     claim_outcome = claims_adapter.create_claim(
         CreateExternalClaimRequest(
