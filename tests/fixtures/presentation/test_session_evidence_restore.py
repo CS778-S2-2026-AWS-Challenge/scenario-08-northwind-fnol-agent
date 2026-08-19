@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 from backend.domain.models import SessionStatus
 from backend.repositories.fixture import FixtureRepository
 
+PROPOSED_FIELD_CODE = 'incident.description'
+PROPOSED_VALUE = 'Rear panel damage shown in the supplied evidence.'
+
 
 def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
     claim = repository.get_claim(claim_id, 'cus_demo')
@@ -73,21 +76,48 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
         },
         json={'upload_checksum': checksum},
     )
-    assert completed.status_code == 200
+    assert completed.status_code == 202
     assert completed.json()['revision'] == 3
     assert completed.json()['evidence']['status'] == 'received'
-    assert completed.json()['evidence']['file_status'] == 'ready'
+    assert completed.json()['evidence']['file_status'] == 'processing'
     assert completed.json()['evidence']['source'] == 'claimant'
     assert 'provenance' not in completed.json()['evidence']
 
+    processed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'day5-evidence-processing',
+            'If-Match': '3',
+        },
+        json={
+            'facts': [
+                {
+                    'field_code': PROPOSED_FIELD_CODE,
+                    'value': PROPOSED_VALUE,
+                    'confidence': 0.87,
+                }
+            ]
+        },
+    )
+    assert processed.status_code == 200
+    assert processed.json()['revision'] == 4
+    assert processed.json()['file_status'] == 'ready'
+    proposal = processed.json()['proposed_fields'][PROPOSED_FIELD_CODE]
+    assert proposal['status'] == 'proposed'
+    assert proposal['source'] == 'image'
+    assert proposal['source_refs'] == [evidence_id]
+
     stored_before = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    claim_before = repository.get_claim(claim_id, 'cus_demo')
     assert stored_before is not None
+    assert claim_before is not None
     before_payload = stored_before.model_dump(mode='json')
+    before_proposed = claim_before.form[PROPOSED_FIELD_CODE].model_dump(mode='json')
     assert stored_before.provenance['upload_checksum'] == checksum
-    assert stored_before.provenance['extraction_state'] == 'proposed'
     assert stored_before.provenance['storage_key']
 
-    assert _pause_active_session(repository, claim_id) == 4
+    assert _pause_active_session(repository, claim_id) == 5
 
     resumed = client.post(
         f'/api/v1/claims/{claim_id}/sessions',
@@ -104,11 +134,23 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     stored_after = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
     assert current_claim is not None
     assert stored_after is not None
-    assert current_claim.revision == 5
+    assert current_claim.revision == 6
     assert current_claim.active_session_id == resumed_session_id
     assert current_claim.evidence_summary.received == 1
     assert current_claim.evidence_summary.pending == 0
     assert stored_after.model_dump(mode='json') == before_payload
+
+    # The facts proposed by processing survive the session boundary as proposals.
+    # Resume must not confirm, discard, or rewrite a claimant decision that has
+    # not been made yet.
+    assert current_claim.form[PROPOSED_FIELD_CODE].model_dump(mode='json') == before_proposed
+    assert current_claim.form[PROPOSED_FIELD_CODE].status.value == 'proposed'
+    assert current_claim.form[PROPOSED_FIELD_CODE].source_refs == [evidence_id]
+
+    claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert claimant_claim.status_code == 200
+    assert claimant_claim.json()['form'][PROPOSED_FIELD_CODE]['status'] == 'proposed'
+    assert claimant_claim.json()['revision'] == 6
 
     claimant_evidence = client.get(
         f'/api/v1/claims/{claim_id}/evidence',
@@ -122,7 +164,7 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert claimant_items[0]['file_status'] == 'ready'
     assert claimant_items[0]['source'] == 'claimant'
     assert 'provenance' not in claimant_items[0]
-    assert claimant_evidence.json()['revision'] == 5
+    assert claimant_evidence.json()['revision'] == 6
 
     staff_detail = client.get(
         f'/api/v1/workbench/claims/{claim_id}',
@@ -136,7 +178,7 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert staff_evidence['file_status'] == 'ready'
     assert staff_evidence['source'] == 'claimant'
     assert staff_evidence['provenance'] == before_payload['provenance']
-    assert staff_detail.json()['revision'] == 5
+    assert staff_detail.json()['revision'] == 6
 
     sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
     assert len(sessions) == 2
