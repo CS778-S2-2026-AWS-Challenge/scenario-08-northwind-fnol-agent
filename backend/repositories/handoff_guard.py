@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Protocol, cast, runtime_checkable
 
 from backend.domain.models import HandoffRecord, HandoffStatus, WorkingClaim
 from backend.repositories.protocols import (
@@ -11,6 +11,18 @@ from backend.repositories.protocols import (
 
 class HandoffPersistenceConflict(IdempotencyConflict):
     """A handoff write would bypass lifecycle, ownership, or revision invariants."""
+
+
+@runtime_checkable
+class _ResettableRepository(Protocol):
+    """Structural view of the controlled demo-reset opt-in.
+
+    Declared here so the guard does not depend on the service that owns the
+    reset boundary.
+    """
+
+    def reset_demo_state(self) -> dict[str, int]:
+        raise NotImplementedError
 
 
 _ALLOWED_TRANSITIONS: dict[HandoffStatus, set[HandoffStatus]] = {
@@ -146,6 +158,10 @@ class HandoffPersistenceGuard:
     WorkingClaim.revision remains the only optimistic-concurrency token. The
     guard adds handoff ownership and lifecycle invariants without introducing a
     second revision counter.
+
+    The application wraps its repository once, when the app is constructed, so
+    every router, service, seed path, and adapter that reads the repository
+    from application state writes through these invariants.
     """
 
     def __init__(self, repository: PersistenceRepository) -> None:
@@ -203,7 +219,23 @@ class HandoffPersistenceGuard:
         )
 
 
+class ResettableHandoffPersistenceGuard(HandoffPersistenceGuard):
+    """Guard for a repository that also opts in to controlled demo reset.
+
+    Runtime protocol checks read the class rather than resolving attributes
+    through ``__getattr__``, so a repository that offers demo reset needs that
+    method declared on its wrapper too. The plain guard deliberately does not
+    declare it, which keeps the reset boundary fail-closed for a repository
+    that never offered reset.
+    """
+
+    def reset_demo_state(self) -> dict[str, int]:
+        return cast(_ResettableRepository, self._repository).reset_demo_state()
+
+
 def guarded_handoff_repository(repository: PersistenceRepository) -> HandoffPersistenceGuard:
     if isinstance(repository, HandoffPersistenceGuard):
         return repository
+    if isinstance(repository, _ResettableRepository):
+        return ResettableHandoffPersistenceGuard(repository)
     return HandoffPersistenceGuard(repository)

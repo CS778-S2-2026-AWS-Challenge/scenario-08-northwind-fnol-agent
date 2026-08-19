@@ -20,6 +20,7 @@ from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
 
@@ -40,7 +41,11 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = resolved_settings
-    app.state.claim_repository = repository or FixtureRepository()
+    # Every application consumer reads the repository from app.state, so the
+    # handoff lifecycle and ownership invariants are applied once here rather
+    # than by individual routers.  No router, service, seed path, or adapter
+    # can reach an unguarded handoff write.
+    app.state.claim_repository = guarded_handoff_repository(repository or FixtureRepository())
     app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()

@@ -133,6 +133,10 @@ part of HTTP request or response models.
   `handoff_id`. A repeated claimant support request reuses the existing active
   handoff where applicable instead of creating a second record with competing
   ownership.
+- These invariants are applied at the application persistence boundary. The
+  repository is decorated once when the application is constructed, so the
+  object held in application state is already guarded and no router, service,
+  seed path, or adapter can reach an unguarded handoff write.
 - A future persistence adapter must enforce the same revision, ownership, and
   transition invariants even if its physical transaction or conditional-write
   mechanism differs from the fixture repository.
