@@ -5,7 +5,12 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
-from backend.domain.evidence import evidence_state_for, evidence_summary_for
+from backend.domain.evidence import (
+    EvidenceLifecycleStage,
+    evidence_state_for,
+    evidence_summary_for,
+    lifecycle_stage_for,
+)
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.models import (
     AgentAction,
@@ -141,14 +146,6 @@ class ScenarioFixture(ContractModel):
         return self
 
 
-class EvidenceLifecycleStage(str, Enum):
-    PENDING = 'pending'
-    UNOFFICIAL = 'unofficial'
-    INCOMPLETE = 'incomplete'
-    NOT_YET_GENERATED = 'not_yet_generated'
-    RECEIVED = 'received'
-
-
 class FixtureVisibility(str, Enum):
     CLAIMANT_VISIBLE = 'claimant_visible'
     SHARED = 'shared'
@@ -172,32 +169,10 @@ class EvidenceLifecycleCase(ContractModel):
 
     @model_validator(mode='after')
     def validate_lifecycle_stage(self) -> 'EvidenceLifecycleCase':
-        pending_file_states = {
-            EvidenceFileStatus.AWAITING_UPLOAD,
-            EvidenceFileStatus.UPLOADING,
-            EvidenceFileStatus.UPLOADED,
-            EvidenceFileStatus.PROCESSING,
-        }
-        valid_start = {
-            EvidenceLifecycleStage.UNOFFICIAL: self.evidence.status is EvidenceStatus.UNOFFICIAL,
-            EvidenceLifecycleStage.NOT_YET_GENERATED: (
-                self.evidence.status is EvidenceStatus.PENDING_GENERATION
-                and self.evidence.file_status is EvidenceFileStatus.NOT_AVAILABLE
-            ),
-            EvidenceLifecycleStage.RECEIVED: (
-                self.evidence.status is EvidenceStatus.RECEIVED
-                and self.evidence.file_status is EvidenceFileStatus.READY
-            ),
-            EvidenceLifecycleStage.PENDING: (
-                self.evidence.status is EvidenceStatus.INCOMPLETE
-                and self.evidence.file_status in pending_file_states
-            ),
-            EvidenceLifecycleStage.INCOMPLETE: (
-                self.evidence.status is EvidenceStatus.INCOMPLETE
-                and self.evidence.file_status not in pending_file_states
-            ),
-        }
-        if not valid_start[self.lifecycle_stage]:
+        # The stage is resolved by the shared domain rule rather than a table
+        # kept here, so a fixture cannot declare a stage the runtime would not
+        # give the same record.
+        if lifecycle_stage_for(self.evidence) is not self.lifecycle_stage:
             raise ValueError(
                 f'{self.lifecycle_stage.value} fixture does not match its contract state.'
             )
