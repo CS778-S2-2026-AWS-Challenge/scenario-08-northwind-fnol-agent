@@ -4,6 +4,7 @@ This directory contains engineering guidance, API information, and user-research
 
 ## Engineering
 
+- [Repository Operation Rules](repo_rule.md)
 - [Current API](api.md)
 - [Development Conventions](development-conventions.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
