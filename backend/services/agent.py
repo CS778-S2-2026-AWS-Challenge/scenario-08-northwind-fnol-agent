@@ -111,6 +111,21 @@ PENDING_POLICE_REPORT_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+REAR_END_COLLISION_PATTERNS = (
+    re.compile(
+        r'\b(?:hit|struck)\b[^.!?]*\b(?:back|rear)\b[^.!?]*\b(?:car|vehicle|bumper)\b',
+        re.IGNORECASE,
+    ),
+    re.compile(r'\brear[- ]?ended\b', re.IGNORECASE),
+)
+SAFETY_CLEAR_PATTERNS = (
+    re.compile(r'\b(?:scene|area|road)\s+(?:is|was)\s+safe\b', re.IGNORECASE),
+    re.compile(
+        r'\b(?:car|cars|vehicle|vehicles|we|i)\s+(?:is|are|was|were|have\s+been|has\s+been)?\s*'
+        r'(?:moved|parked|pulled)\s+(?:off|out\s+of|away\s+from)\s+(?:the\s+)?(?:road|traffic)\b',
+        re.IGNORECASE,
+    ),
+)
 LOCATION_PATTERN = re.compile(
     r'\b(?:at|on|in)\s+([A-Z][A-Za-z0-9 -]+?)(?=[,.]|\s+(?:when|while|and)\b|$)'
 )
@@ -127,6 +142,7 @@ class AgentTurnContext:
     trigger_message_id: str
     message_text: str | None
     evidence_refs: list[str]
+    professional_review_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +222,176 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
             )
         )
     return changes
+
+
+def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
+    description = claim.form.get('incident.description')
+    candidate = str(description.value) if description is not None else message_text
+    inferred_type = claim.form.get('incident.type')
+    if description is None:
+        is_motor = (
+            claim.incident_type is None and infer_controlled_incident_type(candidate) == 'motor'
+        )
+    else:
+        is_motor = (
+            inferred_type is not None
+            and inferred_type.value == 'motor'
+            and inferred_type.source is FormSource.INFERENCE
+        )
+    return is_motor and any(pattern.search(candidate) for pattern in REAR_END_COLLISION_PATTERNS)
+
+
+def _guided_initial_form_changes(message_text: str) -> list[ProposedFormChange]:
+    changes = _initial_form_changes(message_text, None)
+    return [
+        change.model_copy(update={'status': FormStatus.CONFIRMED})
+        if change.field_code == 'incident.description'
+        else change
+        for change in changes
+    ]
+
+
+def _safety_is_explicitly_clear(message_text: str) -> bool:
+    injury_clear = any(pattern.search(message_text) for pattern in INJURY_NEGATION_PATTERNS)
+    danger_clear = any(pattern.search(message_text) for pattern in DANGER_NEGATION_PATTERNS)
+    scene_clear = any(pattern.search(message_text) for pattern in SAFETY_CLEAR_PATTERNS)
+    return injury_clear and (danger_clear or scene_clear)
+
+
+def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentProposal | None:
+    claim = context.claim
+    if not _is_guided_rear_end_claim(claim, message_text):
+        return None
+
+    if 'incident.description' not in claim.form:
+        changes = _guided_initial_form_changes(message_text)
+        return AgentProposal(
+            action=AgentAction.ASK,
+            reason_codes=['SAFETY_STATUS_REQUIRED'],
+            customer_reason='Your immediate safety needs to be clear before the report continues.',
+            customer_response=(
+                'I can help you report this. First, is anyone injured, in immediate danger, '
+                'or blocking traffic?'
+            ),
+            customer_next_step=CustomerNextStep(
+                status='provide_safety_status',
+                summary='Tell us whether anyone is injured or still in danger.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['incident.injury_or_danger'],
+            ),
+            form_changes=changes,
+            state_changes=[StateChange(path='claim_state.next_action', to='ASK')],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=['provide:incident.injury_or_danger'],
+        )
+
+    if 'incident.injury_or_danger' not in claim.form:
+        if not _safety_is_explicitly_clear(message_text):
+            return AgentProposal(
+                action=AgentAction.CLARIFY,
+                reason_codes=['SAFETY_STATUS_UNCLEAR'],
+                customer_reason='The current safety situation is not clear yet.',
+                customer_response=(
+                    'Before we continue, please tell me whether anyone is injured, whether there '
+                    'is any immediate danger, and whether the vehicles are out of traffic.'
+                ),
+                customer_next_step=CustomerNextStep(
+                    status='clarify_safety_status',
+                    summary='Clarify whether anyone is injured or still in danger.',
+                    responsible_party=ResponsibleParty.CLAIMANT,
+                    required_items=['incident.injury_or_danger'],
+                ),
+                form_changes=[],
+                state_changes=[StateChange(path='claim_state.next_action', to='CLARIFY')],
+                proposed_signals=[],
+                required_tools=[],
+                next_action_requirements=['clarify:incident.injury_or_danger'],
+            )
+        return AgentProposal(
+            action=AgentAction.ASK,
+            reason_codes=['SAFETY_STATUS_RECORDED'],
+            customer_reason='No injury or immediate danger was reported.',
+            customer_response='Thanks. About when did this happen? An approximate time is fine.',
+            customer_next_step=CustomerNextStep(
+                status='provide_incident_time',
+                summary='Tell us approximately when the incident happened.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['incident.occurred_at'],
+            ),
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.injury_or_danger',
+                    value=False,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    confidence=1.0,
+                )
+            ],
+            state_changes=[StateChange(path='claim_state.next_action', to='ASK')],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=['provide:incident.occurred_at'],
+        )
+
+    if 'incident.occurred_at' not in claim.form:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['POLICY_WORDING_REVIEW_NEEDED'],
+            customer_reason=(
+                'One point in the applicable collision wording needs a specialist check.'
+            ),
+            customer_response=(
+                'Thanks. I have saved those details and will check the policy linked to your '
+                'report. Is a police report or reference available now, or is it still pending?'
+            ),
+            customer_next_step=CustomerNextStep(
+                status='provide_police_report_status',
+                summary='Tell us whether the police report or reference is available yet.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['authorities.police_report_reference'],
+            ),
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.occurred_at',
+                    value=message_text,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    confidence=1.0,
+                )
+            ],
+            state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+            proposed_signals=[],
+            required_tools=[
+                {
+                    'tool': 'policy_history',
+                    'operation': 'search_policy',
+                    'policy_reference': 'synthetic-policy-ambiguous',
+                    'question': (
+                        'Can this rear-end collision report proceed under the applicable '
+                        'collision-damage wording?'
+                    ),
+                }
+            ],
+            next_action_requirements=['provide:authorities.police_report_reference'],
+        )
+    return AgentProposal(
+        action=AgentAction.UPDATE,
+        reason_codes=['ADDITIONAL_CONTEXT_RECORDED'],
+        customer_reason='Your additional information remains part of the same report.',
+        customer_response=(
+            'I have added that information to the same report. The policy review can continue, '
+            'and you do not need to start again.'
+        ),
+        customer_next_step=claim.customer_next_step,
+        form_changes=[],
+        state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+        proposed_signals=[],
+        required_tools=[],
+        next_action_requirements=[],
+    )
 
 
 def _confirmation_response(changes: list[ProposedFormChange]) -> str:
@@ -313,6 +499,51 @@ class ControlledAgent:
                 required_tools=[],
                 next_action_requirements=[],
             )
+        if (
+            context.professional_review_required
+            and any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS)
+        ):
+            return AgentProposal(
+                action=AgentAction.UPDATE,
+                reason_codes=['EVIDENCE_PENDING_GENERATION', 'PROFESSIONAL_REVIEW_REQUIRED'],
+                customer_reason=(
+                    'The police report is not available yet, but it is not needed for the current '
+                    'policy review.'
+                ),
+                customer_response=(
+                    'That is okay. I have recorded that the police report is expected later and '
+                    'sent the relevant facts and policy wording to a claims specialist. They can '
+                    'review it now, and you can add the report when it becomes available.'
+                ),
+                customer_next_step=CustomerNextStep(
+                    status='professional_review_queued',
+                    summary=(
+                        'A claims specialist is checking one policy point. Add the police report '
+                        'when it becomes available.'
+                    ),
+                    responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
+                ),
+                form_changes=[],
+                state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+                proposed_signals=[],
+                required_tools=[
+                    {
+                        'tool': 'evidence_registry',
+                        'operation': 'record_pending_generation',
+                        'kind': 'police_report',
+                    },
+                    {
+                        'tool': 'professional_review',
+                        'operation': 'create_policy_review',
+                    },
+                ],
+                next_action_requirements=[],
+            )
+
+        if context.message_text is not None:
+            guided = _guided_proposal(context, message_text)
+            if guided is not None:
+                return guided
         intake_field = next_controlled_intake_field(context.claim)
         if context.message_text is not None and intake_field is not None:
             changes = (
