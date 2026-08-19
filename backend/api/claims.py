@@ -4,6 +4,7 @@ from typing import cast
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from backend.adapters.claims_service import ClaimsServiceAdapter
+from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import (
     ClaimantClaim,
@@ -49,6 +50,10 @@ def agent_for(request: Request) -> AgentTurnProvider:
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
     return cast(ClaimsServiceAdapter, request.app.state.claims_service_adapter)
+
+
+def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
+    return cast(PolicyHistoryAdapter, request.app.state.policy_history_adapter)
 
 
 @router.post('', response_model=CreateClaimResponse, status_code=status.HTTP_201_CREATED)
@@ -158,6 +163,7 @@ def create_message(
     return submit_message(
         repository_for(request),
         agent_for(request),
+        policy_history_adapter_for(request),
         principal,
         claim_id,
         session_id,

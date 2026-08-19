@@ -1,0 +1,43 @@
+{
+  "journey_id": "PRES-02-guided-rear-end-review",
+  "description": "Guided rear-end report with sourced policy uncertainty, pending evidence, and staff resolution.",
+  "claim": {
+    "locale": "en-NZ"
+  },
+  "turns": [
+    {
+      "input": "Someone hit the back of my car on Queen Street. The bumper is damaged and I'm not sure what I'm supposed to do now.",
+      "expected_action": "ASK",
+      "next_step_status": "provide_safety_status",
+      "required_item": "incident.injury_or_danger"
+    },
+    {
+      "input": "No one was hurt. We moved both cars out of traffic and the scene is safe.",
+      "expected_action": "ASK",
+      "next_step_status": "provide_incident_time",
+      "required_item": "incident.occurred_at"
+    },
+    {
+      "input": "It happened at about 5:30 pm today.",
+      "expected_action": "UPDATE",
+      "next_step_status": "provide_police_report_status"
+    },
+    {
+      "input": "The police report will be ready next week.",
+      "expected_action": "UPDATE",
+      "next_step_status": "professional_review_queued",
+      "expected_evidence_status": "pending_generation"
+    }
+  ],
+  "policy": {
+    "reference": "synthetic-policy-ambiguous",
+    "source_system": "fixture_policy_administration",
+    "source_reference": "synthetic-policy-ambiguous",
+    "review_reason": "COVERAGE_SECTION_INCOMPLETE"
+  },
+  "staff_resolution": {
+    "coverage": "clear",
+    "workflow_state": "ready_for_next",
+    "customer_update": "A claims specialist reviewed the collision wording. Your report can continue, and you can add the police report when it becomes available."
+  }
+}
