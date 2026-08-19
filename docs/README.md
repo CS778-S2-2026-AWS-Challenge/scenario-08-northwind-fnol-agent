@@ -21,3 +21,4 @@ This directory contains engineering guidance, API information, and user-research
 - [Research directory](User_Research_and_Pain_Points/)
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
+- `day5-fact-source-and-confirmation.md` records the Issue #141 `bdfa123` check of fact source and confirmation state on the clear-claim path.
