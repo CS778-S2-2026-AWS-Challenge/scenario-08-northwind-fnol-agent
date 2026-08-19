@@ -1,15 +1,26 @@
 from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
+from backend.api import claims as claims_api
+from backend.api import evidence as evidence_api
+from backend.api import handoffs as handoffs_api
+from backend.api import integrations as integrations_api
+from backend.api import workbench as workbench_api
+from backend.core.errors import ApiError
 from backend.domain.models import HandoffStatus
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.handoff_guard import (
     HandoffPersistenceConflict,
+    HandoffPersistenceGuard,
+    ResettableHandoffPersistenceGuard,
     guarded_handoff_repository,
 )
 from backend.repositories.protocols import IdempotencyRecord, RevisionConflict
+from backend.services.demo_reset import reset_demo_components
 
 
 def create_claim_and_handoff(
@@ -596,3 +607,84 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
             retry,
             handoff=terminal.model_copy(update={'resolved_at': terminal.accepted_at}),
         )
+
+
+def application_repository(app: FastAPI) -> Any:
+    """The repository object every router, service, and adapter consumes."""
+    return app.state.claim_repository
+
+
+def router_repository(app: FastAPI, repository_for: Any) -> Any:
+    request = Request({'type': 'http', 'app': app, 'headers': []})
+    return repository_for(request)
+
+
+def test_every_router_receives_the_guarded_application_repository(app: FastAPI) -> None:
+    guarded = application_repository(app)
+
+    assert isinstance(guarded, HandoffPersistenceGuard)
+    for repository_for in (
+        claims_api.repository_for,
+        evidence_api.repository_for,
+        handoffs_api.repository_for,
+        integrations_api.repository_for,
+        workbench_api.repository_for,
+    ):
+        assert router_repository(app, repository_for) is guarded
+
+
+def test_application_repository_rejects_an_unguarded_handoff_overwrite(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(client, auth_headers, key_prefix='bypass')
+    accept_handoff(client, staff_auth_headers, claim_id, handoff_id, key='bypass-accept')
+
+    guarded = application_repository(app)
+    claim = guarded.get_claim_internal(claim_id)
+    assert claim is not None
+    accepted = guarded.get_handoff(claim_id, handoff_id, claim.customer_id)
+    assert accepted is not None
+    assert accepted.assigned_to is not None
+
+    # A consumer holding the application repository cannot take ownership with a
+    # direct write, and cannot skip the revision-checked mutation boundary.
+    with pytest.raises(HandoffPersistenceConflict):
+        guarded.save_handoff(
+            accepted.model_copy(update={'assigned_to': 'stf_other'}),
+            claim.customer_id,
+        )
+
+    with pytest.raises(HandoffPersistenceConflict):
+        guarded.save_staff_mutation(
+            claim.model_copy(update={'revision': claim.revision + 1}),
+            claim.revision,
+            handoff_retry(claim_id, handoff_id, actor_id='stf_other', key='bypass-write'),
+            handoff=accepted.model_copy(update={'status': HandoffStatus.RESOLVED}),
+        )
+
+    stored = guarded.get_handoff(claim_id, handoff_id, claim.customer_id)
+    assert stored == accepted
+    assert guarded.get_claim_internal(claim_id) == claim
+
+
+def test_guarding_preserves_the_controlled_demo_reset_opt_in() -> None:
+    repository = FixtureRepository()
+    guarded = guarded_handoff_repository(repository)
+
+    assert isinstance(guarded, ResettableHandoffPersistenceGuard)
+    assert reset_demo_components({'repository': guarded}) == repository.reset_demo_state()
+
+
+def test_guarding_keeps_demo_reset_closed_for_a_repository_without_it() -> None:
+    class ResetlessRepository:
+        pass
+
+    guarded = guarded_handoff_repository(cast(Any, ResetlessRepository()))
+
+    assert not isinstance(guarded, ResettableHandoffPersistenceGuard)
+    with pytest.raises(ApiError) as unavailable:
+        reset_demo_components({'repository': guarded})
+    assert unavailable.value.code == 'DEMO_RESET_UNAVAILABLE'
