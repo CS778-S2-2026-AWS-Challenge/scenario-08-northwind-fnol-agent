@@ -84,6 +84,15 @@ class MockEvidenceStorage(EvidenceStorage):
         self._pending: dict[tuple[str, str], _PendingUpload] = {}
         self._completed: dict[tuple[str, str], StoredUpload] = {}
 
+    def reset_demo_state(self) -> dict[str, int]:
+        cleared = {
+            'mock_pending_uploads': len(self._pending),
+            'mock_completed_uploads': len(self._completed),
+        }
+        self._pending.clear()
+        self._completed.clear()
+        return cleared
+
     def create_upload_target(
         self,
         *,

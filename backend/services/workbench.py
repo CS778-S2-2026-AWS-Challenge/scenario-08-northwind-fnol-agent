@@ -57,6 +57,7 @@ def workbench_handoff(handoff: HandoffRecord) -> WorkbenchHandoff:
         priority=handoff.priority,
         queue=handoff.queue,
         support_need=handoff.support_need,
+        trigger=handoff.trigger,
         preferred_channel=handoff.preferred_channel,
         reason_codes=handoff.reason_codes,
         reason=handoff.reason,
@@ -141,7 +142,17 @@ def list_workbench_claims(
                 queue=queue,
                 priority=priority,
                 next_action=claim.claim_state.next_action,
+                route=claim.route,
+                evidence_state=claim.claim_state.evidence,
                 evidence_summary=claim.evidence_summary,
+                next_action_summary=claim.customer_next_step.summary,
+                responsible_party=claim.customer_next_step.responsible_party,
+                claim_creation_status=(
+                    claim.external_claim.creation_status if claim.external_claim else None
+                ),
+                assessor_routing_status=(
+                    claim.assessor_routing.routing_status if claim.assessor_routing else None
+                ),
                 open_handoff_count=len(open_handoffs),
                 assignee_id=assignee_id,
                 created_at=claim.created_at,
