@@ -16,9 +16,22 @@ def test_readiness_reports_unconfigured_dependencies_honestly(client: TestClient
     assert payload['status'] == 'degraded'
     assert payload['checks']['claims_service'] == 'using_fixture'
     assert payload['checks']['aws_claims_service'] == 'pending_confirmation'
+    # Retrieval is now wired to an adapter, so it reports that adapter rather
+    # than claiming nothing is configured. The AWS provider behind it is still
+    # unconfirmed and stays visible as its own check.
+    assert payload['checks']['policy'] == 'using_fixture'
+    assert payload['checks']['claim_history'] == 'using_fixture'
+    assert payload['checks']['aws_policy_history'] == 'pending_confirmation'
     assert {
         value
         for name, value in payload['checks'].items()
-        if name not in {'claims_service', 'aws_claims_service'}
+        if name
+        not in {
+            'claims_service',
+            'aws_claims_service',
+            'policy',
+            'claim_history',
+            'aws_policy_history',
+        }
     } == {'not_configured'}
     assert datetime.fromisoformat(payload['checked_at'])

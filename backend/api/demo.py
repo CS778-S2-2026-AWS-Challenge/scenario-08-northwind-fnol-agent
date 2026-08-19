@@ -33,6 +33,7 @@ def reset_demo(
             'claims adapter': request.app.state.claims_service_adapter,
             'assessor adapter': request.app.state.assessor_service_adapter,
             'evidence storage': request.app.state.evidence_storage,
+            'retrieval adapter': request.app.state.policy_history_adapter,
         }
     )
     return DemoResetResponse(status='reset', cleared=cleared)

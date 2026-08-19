@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from backend.adapters.policy_history import PolicyHistoryAdapter
 
 router = APIRouter(tags=['health'])
 
@@ -24,14 +26,20 @@ def liveness() -> LivenessResponse:
 
 
 @router.get('/health/ready', response_model=ReadinessResponse)
-def readiness() -> ReadinessResponse:
+def readiness(request: Request) -> ReadinessResponse:
+    # Retrieval reports what the configured adapter actually says, so an
+    # unavailable provider is visible here rather than only at call time.
+    retrieval = cast(
+        PolicyHistoryAdapter, request.app.state.policy_history_adapter
+    ).connection_status()
     return ReadinessResponse(
         status='degraded',
         checks={
             'persistence': 'not_configured',
             'agent': 'not_configured',
-            'policy': 'not_configured',
-            'claim_history': 'not_configured',
+            'policy': retrieval,
+            'claim_history': retrieval,
+            'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',
             'evidence_storage': 'not_configured',
