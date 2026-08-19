@@ -205,6 +205,7 @@ class PreferredChannel(str, Enum):
 class HandoffType(str, Enum):
     HUMAN_SUPPORT = 'human_support'
     URGENT_SUPPORT = 'urgent_support'
+    PROFESSIONAL_REVIEW = 'professional_review'
 
 
 class HandoffStatus(str, Enum):

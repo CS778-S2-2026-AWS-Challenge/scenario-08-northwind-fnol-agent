@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
@@ -12,6 +13,7 @@ from backend.domain.models import (
     AuthorityOutcome,
     ClaimantDecision,
     ClaimantMessage,
+    Coverage,
     CreateMessageRequest,
     CustomerNextStep,
     EvidenceFileStatus,
@@ -23,6 +25,7 @@ from backend.domain.models import (
     FormSource,
     FormStatus,
     HandoffRecord,
+    HandoffType,
     MessageListResponse,
     MessageRecord,
     MessageTurnResponse,
@@ -33,6 +36,12 @@ from backend.domain.models import (
     ResponsibleParty,
     StructuredFormField,
     SupportNeed,
+    WorkflowState,
+)
+from backend.domain.retrieval import (
+    PolicyRetrievalRecord,
+    PolicySearchRequest,
+    RetrievalStatus,
 )
 from backend.repositories.protocols import (
     IdempotencyConflict,
@@ -41,6 +50,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.agent import (
+    AgentProposal,
     AgentTurnContext,
     AgentTurnProvider,
     authorised_state_changes,
@@ -51,6 +61,8 @@ from backend.services.handoffs import (
     claimant_handoff,
     updated_claim_for_handoff,
 )
+from backend.services.professional_reviews import build_policy_review_handoff
+from backend.services.retrieval import search_policy
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -58,6 +70,18 @@ from backend.services.support import (
     parse_if_match,
     request_fingerprint,
     require_idempotency_key,
+)
+
+INTERNAL_ONLY_REASON_CODES = frozenset(
+    {
+        'SAFETY_STATUS_REQUIRED',
+        'SAFETY_STATUS_UNCLEAR',
+        'SAFETY_STATUS_RECORDED',
+        'POLICY_WORDING_REVIEW_NEEDED',
+        'PROFESSIONAL_REVIEW_REQUIRED',
+        'EVIDENCE_PENDING_GENERATION',
+        'ADDITIONAL_CONTEXT_RECORDED',
+    }
 )
 
 
@@ -84,7 +108,9 @@ def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
     return ClaimantDecision(
         decision_id=decision.decision_id,
         action=decision.action,
-        reason_codes=decision.reason_codes,
+        reason_codes=[
+            code for code in decision.reason_codes if code not in INTERNAL_ONLY_REASON_CODES
+        ],
         customer_reason=decision.customer_reason,
         customer_next_step=decision.customer_next_step,
     )
@@ -134,7 +160,13 @@ def _message_turn_response(
             for field_code, field in decision.form_changes.items()
         ],
         decision=_claimant_decision(decision),
-        handoff=claimant_handoff(handoff).model_dump(mode='json') if handoff is not None else None,
+        handoff=(
+            claimant_handoff(handoff).model_dump(mode='json')
+            if handoff is not None
+            and handoff.type is not HandoffType.PROFESSIONAL_REVIEW
+            and handoff.support_need is not None
+            else None
+        ),
     )
 
 
@@ -178,6 +210,7 @@ def _build_form_changes(
     proposals: list[ProposedFormChange],
     claimant_message: MessageRecord,
     timestamp: datetime,
+    authority_outcome: AuthorityOutcome,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     for proposal in proposals:
@@ -194,13 +227,80 @@ def _build_form_changes(
             value=proposal.value,
             source=proposal.source,
             source_refs=[claimant_message.message_id],
-            status=FormStatus.PROPOSED,
+            status=(
+                proposal.status
+                if authority_outcome is AuthorityOutcome.AUTHORISED
+                and proposal.source is FormSource.CLAIMANT
+                else FormStatus.PROPOSED
+            ),
             needed_for=proposal.needed_for,
             confidence=proposal.confidence,
             updated_at=timestamp,
             updated_by=ActorReference(actor_type=ActorType.AGENT, actor_id='controlled_agent'),
         )
     return form_changes
+
+
+def _policy_search_tool(proposal: AgentProposal) -> dict[str, object] | None:
+    return next(
+        (
+            tool
+            for tool in proposal.required_tools
+            if tool.get('tool') == 'policy_history' and tool.get('operation') == 'search_policy'
+        ),
+        None,
+    )
+
+
+def _execute_policy_search(
+    repository: PersistenceRepository,
+    adapter: PolicyHistoryAdapter,
+    claim_id: str,
+    customer_id: str,
+    proposal: AgentProposal,
+) -> PolicyRetrievalRecord | None:
+    tool = _policy_search_tool(proposal)
+    if tool is None:
+        return None
+    policy_reference = str(tool.get('policy_reference') or '')
+    existing = next(
+        (
+            record
+            for record in reversed(repository.list_retrieval_records(claim_id, customer_id))
+            if isinstance(record, PolicyRetrievalRecord)
+            and record.facts.policy_reference == policy_reference
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing
+    result = search_policy(
+        repository,
+        adapter,
+        PolicySearchRequest(
+            claim_id=claim_id,
+            policy_reference=policy_reference,
+            question=str(tool.get('question') or '') or None,
+        ),
+    )
+    if result.status not in {RetrievalStatus.AMBIGUOUS, RetrievalStatus.EVIDENCE_FOUND}:
+        return None
+    return next(
+        (
+            record
+            for record in repository.list_retrieval_records(claim_id, customer_id)
+            if isinstance(record, PolicyRetrievalRecord) and record.retrieval_id == result.result_id
+        ),
+        None,
+    )
+
+
+def _professional_review_requested(proposal: AgentProposal) -> bool:
+    return any(
+        tool.get('tool') == 'professional_review'
+        and tool.get('operation') == 'create_policy_review'
+        for tool in proposal.required_tools
+    )
 
 
 def _pending_evidence_for_proposal(
@@ -243,6 +343,7 @@ def _pending_evidence_for_proposal(
 def submit_message(
     repository: PersistenceRepository,
     agent: AgentTurnProvider,
+    policy_history_adapter: PolicyHistoryAdapter,
     principal: Principal,
     claim_id: str,
     session_id: str,
@@ -358,6 +459,8 @@ def submit_message(
             item
             for item in reversed(repository.list_handoffs(claim_id, principal.subject))
             if item.status.value not in {'resolved', 'cancelled'}
+            and item.type is not HandoffType.PROFESSIONAL_REVIEW
+            and item.support_need is not None
         ),
         None,
     )
@@ -454,6 +557,7 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
     proposal = agent.propose_turn(
         AgentTurnContext(
             claim=claim,
@@ -468,13 +572,20 @@ def submit_message(
                 else None
             ),
             evidence_refs=payload.evidence_refs,
+            professional_review_required=any(
+                signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
+            ),
         )
     )
     authority = validate_proposal(proposal)
     executed_state_changes = authorised_state_changes(proposal, authority)
     effective_next_step = _effective_next_step(proposal.customer_next_step, authority.outcome)
     form_changes = _build_form_changes(
-        claim.form, proposal.form_changes, claimant_message, timestamp
+        claim.form,
+        proposal.form_changes,
+        claimant_message,
+        timestamp,
+        authority.outcome,
     )
     pending_evidence = _pending_evidence_for_proposal(
         claim_id,
@@ -495,6 +606,25 @@ def submit_message(
         )
     if authority.outcome is AuthorityOutcome.BLOCKED:
         form_changes = {}
+
+    policy_retrieval = _execute_policy_search(
+        repository,
+        policy_history_adapter,
+        claim_id,
+        principal.subject,
+        proposal,
+    )
+    inferred_incident_type = claim.incident_type
+    incident_type_change = form_changes.get('incident.type')
+    if (
+        inferred_incident_type is None
+        and incident_type_change is not None
+        and incident_type_change.source is FormSource.INFERENCE
+        and incident_type_change.confidence is not None
+        and incident_type_change.confidence >= 0.9
+        and isinstance(incident_type_change.value, str)
+    ):
+        inferred_incident_type = incident_type_change.value.strip().lower()
 
     next_action = claim.claim_state.next_action
     for state_change in executed_state_changes:
@@ -526,11 +656,65 @@ def submit_message(
         )
         updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
     else:
+        projected_form = {**claim.form, **form_changes}
+        professional_review = _professional_review_requested(proposal)
+        if professional_review:
+            existing_retrievals = repository.list_retrieval_records(claim_id, principal.subject)
+            existing_signals = repository.list_review_signals(claim_id, principal.subject)
+            policy_record = next(
+                (
+                    item
+                    for item in reversed(existing_retrievals)
+                    if isinstance(item, PolicyRetrievalRecord) and item.uncertainty
+                ),
+                None,
+            )
+            review_signal = next(
+                (
+                    item
+                    for item in reversed(existing_signals)
+                    if policy_record is not None and policy_record.retrieval_id in item.source_refs
+                ),
+                None,
+            )
+            if policy_record is None or review_signal is None:
+                raise ApiError(
+                    status_code=409,
+                    code='INVALID_STATE_TRANSITION',
+                    message='A sourced policy review is required before professional review.',
+                )
+            projected_claim = claim.model_copy(
+                update={
+                    'form': projected_form,
+                    'incident_type': inferred_incident_type,
+                    'revision': claim.revision + 1,
+                }
+            )
+            handoff, effective_next_step = build_policy_review_handoff(
+                repository,
+                projected_claim,
+                retrieval=policy_record,
+                signal=review_signal,
+                source_message_id=claimant_message.message_id,
+                pending_evidence=pending_evidence,
+            )
         updated_claim = claim.model_copy(
             update={
                 'claim_state': claim.claim_state.model_copy(
                     update={
-                        'next_action': next_action,
+                        'next_action': (
+                            AgentAction.HANDOFF if professional_review else next_action
+                        ),
+                        **(
+                            {'coverage': Coverage.REVIEW_REQUIRED}
+                            if policy_retrieval is not None
+                            else {}
+                        ),
+                        **(
+                            {'workflow_state': WorkflowState.PROFESSIONAL_REVIEW}
+                            if professional_review
+                            else {}
+                        ),
                         **(
                             {'evidence': EvidenceState.PENDING_GENERATION}
                             if pending_evidence is not None
@@ -538,7 +722,8 @@ def submit_message(
                         ),
                     }
                 ),
-                'form': {**claim.form, **form_changes},
+                'form': projected_form,
+                'incident_type': inferred_incident_type,
                 'evidence_summary': (
                     claim.evidence_summary.model_copy(
                         update={'pending': claim.evidence_summary.pending + 1}
