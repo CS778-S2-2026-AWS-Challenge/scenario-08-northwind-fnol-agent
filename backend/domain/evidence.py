@@ -70,14 +70,17 @@ def is_registered_evidence_shape(record: EvidenceRecord) -> bool:
 
     Wider than `lifecycle_stage_for`, which answers only for the five *entry*
     stages a claim can start an item in. `inconsistent` is not an entry state:
-    it is reached after two settled records disagree on a material fact, so it
-    is registered here but deliberately has no entry stage. A conflict is only
-    meaningful once the file has settled, so it may not sit in a pending file
-    state.
+    it is reached after two records disagree on a material fact, so it is
+    registered here but deliberately has no entry stage.
+
+    A conflict requires comparable settled evidence, so it is only registered
+    with a `ready` file. `failed` and `not_available` are excluded as well as
+    the pending states: a file that never arrived, or never will, cannot be
+    the thing another record disagrees with.
     """
 
     if record.status is EvidenceStatus.INCONSISTENT:
-        return record.file_status not in PENDING_FILE_STATES
+        return record.file_status is EvidenceFileStatus.READY
     try:
         lifecycle_stage_for(record)
     except UnregisteredEvidenceShape:

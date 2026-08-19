@@ -63,9 +63,13 @@ after two settled records disagree on a material fact, so it is a conflict
 rather than an entry.
 
 `is_registered_evidence_shape()` is the wider check used when sweeping
-fixtures. It accepts the five entry stages plus a settled conflict, and rejects
-a conflict declared while the file is still arriving, because a disagreement is
-not meaningful until the files have settled.
+fixtures. It accepts the five entry stages plus a conflict on a `ready` file.
+
+A conflict is established by comparing settled evidence, so `inconsistent` is
+registered only with `ready`. The pending file states are rejected because
+nothing has settled yet, and `failed` and `not_available` are rejected because
+a file that never arrived, or never will, cannot be the thing another record
+disagrees with.
 
 `test_evidence_fixture_service.py` sweeps every evidence record in
 `backend/demo_data/scenarios`, `tests/fixtures/professional_review`, the

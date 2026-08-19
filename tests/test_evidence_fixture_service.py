@@ -177,15 +177,46 @@ def test_a_conflict_is_registered_but_is_not_an_entry_stage() -> None:
         created_at=now_utc(),
         updated_at=now_utc(),
     )
-    in_flight = settled.model_copy(
-        update={'evidence_id': 'evd_conflict_pending', 'file_status': EvidenceFileStatus.UPLOADING}
-    )
-
     assert is_registered_evidence_shape(settled) is True
     assert check_records([settled], origin='synthetic') == []
     with pytest.raises(UnregisteredEvidenceShape):
         lifecycle_stage_for(settled)
 
-    # A conflict cannot be declared while the file is still arriving.
-    assert is_registered_evidence_shape(in_flight) is False
-    assert len(check_records([in_flight], origin='synthetic')) == 1
+
+@pytest.mark.parametrize(
+    'file_status',
+    [
+        # Still arriving: there is nothing settled to disagree with yet.
+        EvidenceFileStatus.AWAITING_UPLOAD,
+        EvidenceFileStatus.UPLOADING,
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+        # Terminal but absent: a file that never arrived, or never will,
+        # cannot be the thing another record disagrees with.
+        EvidenceFileStatus.FAILED,
+        EvidenceFileStatus.NOT_AVAILABLE,
+    ],
+)
+def test_a_conflict_without_comparable_settled_evidence_is_rejected(
+    file_status: EvidenceFileStatus,
+) -> None:
+    """Only `inconsistent` + `ready` is a registered conflict.
+
+    A conflict is established by comparing settled evidence, so every other
+    file status must fail the sweep rather than be blessed by it.
+    """
+    record = EvidenceRecord(
+        evidence_id=f'evd_conflict_{file_status.value}',
+        claim_id='clm_conflict',
+        kind='claimant_statement',
+        status=EvidenceStatus.INCONSISTENT,
+        file_status=file_status,
+        source=EvidenceSource.CLAIMANT,
+        created_at=now_utc(),
+        updated_at=now_utc(),
+    )
+
+    assert is_registered_evidence_shape(record) is False
+    violations = check_records([record], origin='synthetic')
+    assert len(violations) == 1
+    assert file_status.value in violations[0].reason
