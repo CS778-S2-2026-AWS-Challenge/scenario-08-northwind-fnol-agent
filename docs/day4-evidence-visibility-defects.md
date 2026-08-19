@@ -88,24 +88,52 @@ third is an internal Northwind archive lookup.
 
 Internal **provenance** is correctly stripped — `internal_note` does not appear
 in the response — so the field-level boundary added for Issue #110 works. The
-gap is at record level: `EvidenceRecord` has no visibility field, so
-`_claimant_evidence` has nothing to filter on and the claimant projection cannot
-be narrower than the full list.
-
-`tests/fixtures/evidence/README.md` already states the intended rule: the
-claimant projection "includes the first two classes, removes internal
-provenance, and always excludes internal-only evidence." The fixture layer
-implements it with `FixtureVisibility`. The runtime has no equivalent.
+gap is at record level: `_claimant_evidence` applies no record-level rule, so
+the claimant projection cannot be narrower than the full list.
 
 **Expected:** the claimant evidence list excludes records the claimant did not
 provide and cannot act on.
 **Actual:** it returns all three, including a staff-sourced internal record.
 
-This needs a domain decision before code: whether visibility is an explicit
-field on `EvidenceRecord`, or derived from `source`. Deriving from `source`
-would be smaller but would permanently couple "who supplied it" to "who may see
-it", which is not obviously true for an external record a claimant is waiting
-on. Recorded for the owning stacks rather than decided here.
+### The runtime already has a rule; the claimant endpoint does not apply it
+
+An earlier draft of this record said the fix needed a domain decision because
+`EvidenceRecord` has no visibility field. That understated what already exists,
+and is corrected here.
+
+`backend/services/evidence_handoff.py` contains `default_handoff_visibility()`:
+
+```python
+if evidence.source is EvidenceSource.CLAIMANT:
+    return MessageVisibility.SHARED
+return MessageVisibility.INTERNAL_ONLY
+```
+
+That is a record-level visibility rule derived from `source`. It is applied by
+both the claimant support handoff path and the professional-review path, and
+handoff packets have carried a per-item `visibility` field since Issue #129.
+The fixture layer states the same intent with `FixtureVisibility`, and
+`tests/fixtures/evidence/README.md` describes the claimant projection as
+excluding internal-only evidence.
+
+So the gap is narrower than "no rule exists": **the repository has one rule, in
+one place, with two callers, and `GET /api/v1/claims/{claim_id}/evidence` does
+not apply it.**
+
+Still to decide, and why this is assigned rather than patched:
+
+- whether `shared` / `internal_only` are the right classes for the claimant
+  list, or whether it needs the third class the fixtures use
+  (`claimant_visible`);
+- whether deriving from `source` is correct permanently. It couples "who
+  supplied it" to "who may see it", which is not obviously right for an
+  external record a claimant is actively waiting on;
+- whether the `EvidenceWaitType` enum now on `main` (`claimant`,
+  `external_agency`, `internal`) is meant to become this boundary, in which case
+  it and `default_handoff_visibility` must not diverge.
+
+Whoever picks this up should start from `default_handoff_visibility`, not from a
+blank design. See also `docs/day5-evidence-handoff-packet.md` (Issue #146).
 
 ## Not defects
 

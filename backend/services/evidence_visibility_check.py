@@ -60,6 +60,20 @@ class PathDefect:
         )
 
 
+def compare_claimant_projection(
+    declared: set[str],
+    projected: set[str],
+) -> tuple[set[str], set[str]]:
+    """Compare the declared and projected claimant sets in both directions.
+
+    Returns (unexpected, missing). A one-directional check would report a
+    projection that shows too much but stay silent on one that hides a record
+    the claimant is entitled to, and would miss a mixed mismatch entirely.
+    """
+
+    return projected - declared, declared - projected
+
+
 def _projections(scenario: ScenarioFixture) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
@@ -150,17 +164,26 @@ def check_path_evidence(
                 )
             )
 
-        if scenario_ids and claimant_ids > declared_claimant and not leaked:
-            defects.append(
-                PathDefect(
-                    business_path=entry.business_path.value,
-                    scenario_id=entry.scenario_id,
-                    code='CLAIMANT_PROJECTION_WIDER_THAN_DECLARED',
-                    expected=f'the claimant sees {sorted(declared_claimant)}',
-                    actual=f'the claimant sees {sorted(claimant_ids)}',
-                    responsible_stack='evidence API (liyang6620)',
+        # Only meaningful once the entry describes the scenario's own records.
+        # While PATH_FIXTURE_NOT_ANCHORED is open the two sets name different
+        # universes, so comparing them would report noise rather than a defect.
+        anchored = bool(scenario_ids) and set(declared) == scenario_ids
+        if anchored and not leaked:
+            unexpected, missing = compare_claimant_projection(declared_claimant, claimant_ids)
+            if unexpected or missing:
+                defects.append(
+                    PathDefect(
+                        business_path=entry.business_path.value,
+                        scenario_id=entry.scenario_id,
+                        code='CLAIMANT_PROJECTION_DIFFERS_FROM_DECLARED',
+                        expected=f'the claimant sees exactly {sorted(declared_claimant)}',
+                        actual=(
+                            f'unexpected: {sorted(unexpected) or "none"}; '
+                            f'missing: {sorted(missing) or "none"}'
+                        ),
+                        responsible_stack='evidence API (liyang6620)',
+                    )
                 )
-            )
 
     return defects
 

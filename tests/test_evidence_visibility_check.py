@@ -6,10 +6,13 @@ not let them change silently. When one is fixed, this test fails and the fixer
 updates `docs/day4-evidence-visibility-defects.md` in the same change.
 """
 
+import pytest
+
 from backend.repositories.scenario_loader import EvidenceBusinessPath
 from backend.services.evidence_visibility_check import (
     PathDefect,
     check_path_evidence,
+    compare_claimant_projection,
     describe,
     paths_checked,
 )
@@ -93,3 +96,42 @@ def test_the_claimant_leak_is_reported_against_the_evidence_stack() -> None:
 def test_the_report_is_readable_when_clean_and_when_not() -> None:
     assert describe([]) == 'No evidence path defects found.'
     assert 'DEFECT' in describe(check_path_evidence())
+
+
+@pytest.mark.parametrize(
+    ('declared', 'projected', 'unexpected', 'missing'),
+    [
+        # Identical: nothing to report.
+        ({'a', 'b'}, {'a', 'b'}, set(), set()),
+        # Wider than declared: the claimant sees something they should not.
+        ({'a'}, {'a', 'b'}, {'b'}, set()),
+        # Narrower than declared: a record the claimant is entitled to is
+        # missing. A one-directional superset check reports nothing here.
+        ({'a', 'b'}, {'a'}, set(), {'b'}),
+        # Mixed: one missing and one unexpected at the same time. The set
+        # sizes match, so a length comparison would also miss this.
+        ({'a', 'b'}, {'a', 'c'}, {'c'}, {'b'}),
+    ],
+)
+def test_the_claimant_comparison_reports_both_directions(
+    declared: set[str],
+    projected: set[str],
+    unexpected: set[str],
+    missing: set[str],
+) -> None:
+    """Regression for a one-directional comparison.
+
+    The first version only detected a strict superset, so a projection that
+    hid a record the claimant was entitled to, or swapped one for another,
+    passed silently.
+    """
+    assert compare_claimant_projection(declared, projected) == (unexpected, missing)
+
+
+def test_a_missing_claimant_visible_record_is_a_reportable_difference() -> None:
+    """The case the original check could not see, stated plainly."""
+    unexpected, missing = compare_claimant_projection({'evd_expected'}, set())
+
+    assert unexpected == set()
+    assert missing == {'evd_expected'}
+    assert missing, 'a missing claimant-visible record must be reportable'
