@@ -1,13 +1,17 @@
 # Development Conventions
 
+Repository operations and coding-agent authority are governed by the
+[Repository Operation Rules](repo_rule.md). This document defines implementation conventions and
+Kanban collaboration details within that boundary.
+
 ## Branches and Pull Requests
 
-- Do not develop directly on `main`. Start from the latest remote `main`:
+- Do not develop directly on `main`. Fetch the remote and create the branch from the latest
+  `origin/main`. This also works when another worktree currently has local `main` checked out:
 
   ```powershell
-  git switch main
-  git pull --ff-only origin main
-  git switch -c feature/short-topic
+  git fetch origin --prune
+  git switch -c feature/short-topic origin/main
   ```
 
 - Use a short-lived `feature/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>` branch. Use one branch and pull request for one coherent outcome.
@@ -18,8 +22,10 @@
   gh pr create --base main
   ```
 
-- The pull request description must identify the Kanban card, purpose, behaviour change, acceptance evidence, exact verification commands and results, contract or data impact, UI screenshots when relevant, and remaining risks.
-- Before requesting review, run the repository baseline check from the repository root and record the exact command and result in the pull request:
+- Every pull request must reference a valid repository issue. Use a closing keyword only for a
+  complete delivery, and use `Refs #123` for partial work that must leave the issue open.
+- The pull request description must identify the issue, purpose, behaviour change, acceptance evidence, exact verification commands and results, contract or data impact, UI screenshots when relevant, dependencies, and remaining risks.
+- Before pushing and before requesting review, run the repository baseline check from the repository root and record the exact command and result in the pull request:
 
   ```powershell
   ./scripts/check.ps1
@@ -43,7 +49,7 @@ GitHub Project 12 is the shared source for assignment, dependencies, progress, a
 
 Plan weekly work as Project DraftIssues. Set `Tracking` to `Repository issue` for work that must become a repository Issue, or `Delivery without repo` for non-repository deliverables that remain manually managed. During Auckland working hours, the Kanban sync checks `Ready` DraftIssues every 15 minutes and converts only repository-tracked cards whose assignees, estimate, size, dates, acceptance criteria, and dependencies are complete. Conversion preserves the same Project item and its multiple assignees. The first assignee who starts the shared task moves the card to `In progress`; individual assignees do not maintain separate card statuses.
 
-Link a pull request with a closing reference such as `Closes #123`. A draft pull request keeps the linked card `In progress`; a pull request ready for review moves it to `In review`; closing without merge returns it to `In progress`; and merge moves it to `Done`.
+Link a complete delivery with a closing reference such as `Closes #123`. A draft pull request keeps the linked card `In progress`; a pull request ready for review moves it to `In review`; closing without merge returns it to `In progress`; and merge moves it to `Done`. `Refs #123` records a partial relationship but does not drive this closing-reference automation.
 
 For a card with multiple assignees, the `Ownership` section must state who leads the card and what each assignee contributes. Each person's effort belongs in `Assignees and effort`; the Project `Estimate` is the sum of those person-hours.
 
@@ -104,7 +110,7 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 ## Quality Gate
 
-Before merge, the relevant format, lint, type, unit, contract, build, and end-to-end checks must pass. The repository has a minimal CI workflow, but `main` does not yet require status checks; the pull request must record the exact local checks run and their results. A successful build alone does not demonstrate product correctness.
+Before merge, the relevant format, lint, type, unit, contract, build, and end-to-end checks must pass. `main` requires `Backend quality`, `Customer quality`, and `PR policy` for the final pull-request head. The pull request must also record the exact local checks run and their results. A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 

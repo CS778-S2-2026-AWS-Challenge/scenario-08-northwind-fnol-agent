@@ -1,0 +1,45 @@
+name: PR Policy
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: pr-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: PR policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test policy validator
+        run: node --test .github/scripts/pr_policy.test.cjs
+
+      - name: Validate pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const policy = require('./.github/scripts/pr_policy.cjs');
+            await policy.run({ github, context, core });
