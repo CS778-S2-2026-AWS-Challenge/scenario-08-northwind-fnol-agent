@@ -22,3 +22,4 @@ This directory contains engineering guidance, API information, and user-research
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
 - `day4-evidence-visibility-defects.md` records the Issue #140 evidence state and visibility check, its reproduction command, and the open defects with their owning stacks.
+- `day5-evidence-handoff-packet.md` records the Issue #146 `bdfa123` check of the evidence handoff packet, its outage behaviour, and the visibility rule already present in the handoff path.
