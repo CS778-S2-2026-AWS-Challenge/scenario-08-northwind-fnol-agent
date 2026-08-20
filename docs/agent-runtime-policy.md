@@ -224,6 +224,17 @@ prompt compliance alone.
   pending work, responsibility, and promised next steps.
 - Customer preferences may adapt communication but cannot replace formal claim records,
   change decision authority, or grant data access.
+- Customer Memory may be used only when the memory has an explicit source, permitted
+  visibility, a current purpose, and a valid retention period. It is a small continuity
+  layer, not a compressed copy of all prior claims or conversations.
+- A category-level continuity hint such as a prior incomplete interaction may help offer
+  resume, but must not be treated as evidence that the customer is unreliable, fraudulent,
+  low priority, or unwilling to cooperate.
+- The Agent must distinguish a non-claim conversation from a claim draft. It must not
+  create a claim from teasing, general questions, or unrelated chat without credible
+  claim intent.
+- A memory record must not override current claimant statements, current Claim State,
+  policy records, evidence, staff decisions, or explicit correction by the customer.
 - The Agent must not receive secrets, raw provider payloads, unrelated customer records,
   complete history without a permitted purpose, or unbounded conversation history.
 
@@ -285,6 +296,7 @@ Policy evaluation must include:
 
 - expected action trajectories such as ask, confirm, proceed, update, or handoff;
 - urgent, human-request, professional-review, pending-evidence, resume, and creation paths;
+- incomplete-claim resume, non-claim intent, customer-memory expiry, and memory correction;
 - motor, home, contents, and conditional branch activation without irrelevant cross-branch
   questions;
 - dynamic required-now and candidate-field selection without treating the field model as

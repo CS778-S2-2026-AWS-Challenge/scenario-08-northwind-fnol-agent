@@ -16,15 +16,18 @@ provider payloads, or SDK types.
 | Group | Records | Primary ownership |
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
-| Claim | Working Claim State, structured facts, independent attributes, workflow, next action, revision | `claim_id`, linked to `customer_id` |
-| Interaction | sessions, messages, compact summaries, unresolved work, prior commitments | `claim_id` and `session_id` |
+| Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
+| Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | claim-creation result, routing result, external participant task, idempotency result | `claim_id` and operation identity |
 | Configuration | versioned model, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
+| Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
 the active profile's object or document store. Domain records retain protected references
@@ -35,8 +38,8 @@ and checksums rather than embedding those bytes.
 1. Read one claim after verifying customer ownership or authorised staff access.
 2. List a customer's working claims in a stable order without exposing another customer.
 3. Read the current Working Claim and conditionally write one material revision.
-4. Create, pause, close, and resume claim-scoped sessions without copying older Claim
-   State over a newer revision.
+4. Create, pause, close, and resume sessions without copying older Claim State over a
+   newer revision; a non-claim session may exist without a `claim_id`.
 5. Append and page messages while filtering visibility before projection.
 6. Register, update, and list evidence metadata while preserving object provenance.
 7. Save structured retrieval results and source-linked review signals atomically.
@@ -44,7 +47,9 @@ and checksums rather than embedding those bytes.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
 11. Resolve the active configuration version and read its immutable publication record.
-12. Append audit events and query them by authorised subject and time range.
+12. Read customer memory only through a purpose-limited, visibility-filtered access path.
+13. Create and process follow-up tasks by due time, responsibility, priority, and status.
+14. Append audit events and query them by authorised subject and time range.
 
 ## Claim Revision and Idempotency
 
@@ -61,6 +66,10 @@ and checksums rather than embedding those bytes.
 ## Session and Resume Invariants
 
 - The Working Claim is authoritative; sessions hold bounded interaction context only.
+- A session may have `interaction_intent = non_claim_intent` and no `claim_id` when the
+  conversation has no credible claim purpose.
+- Once a session has produced material incident facts, a draft claim may be linked to
+  it; later unrelated messages remain session-only and must not overwrite claim facts.
 - A session summary records the claim revision it represents. That revision may lag but
   must not exceed the current claim revision.
 - Complete messages remain durable outside the bounded summary.
@@ -70,6 +79,42 @@ and checksums rather than embedding those bytes.
   approved product contract explicitly changes this rule.
 - Resume preserves confirmed facts, evidence records, pending work, and prior
   commitments while using the latest authorised Claim State.
+
+## Claim Lifecycle, Follow-up, and Retention Invariants
+
+- Claim lifecycle status is an enumerated state with approved transitions, not a set of
+  unrelated booleans such as `saved`, `active`, and `abandoned`.
+- A paused or incomplete claim retains the next action, blocking reason, responsible
+  party, priority band, last meaningful customer activity, follow-up due time, and expiry
+  time needed for safe resume and staff work.
+- `awaiting_customer`, `awaiting_external_material`, explicit customer withdrawal, and
+  timeout expiry remain distinguishable outcomes.
+- Follow-up is a separate work record. Agent or staff automation cannot silently create
+  an outbound contact without the approved channel, consent, frequency, and authority
+  rules.
+- Expiry makes a record eligible for retention processing; an Agent turn must not delete
+  claim data directly.
+- Purge processing must distinguish claim-specific deletion, required audit retention,
+  and permitted anonymised aggregates. A `retention_hold` requires a source, reason,
+  owner, and review or expiry condition.
+- A user-level continuity hint may survive claim purge only when it is purpose-limited,
+  source-linked, visibility-controlled, and has an expiry or deletion rule. Full claim
+  facts and transcripts must not be copied into Customer.
+- A customer deletion request must resolve all records linked by `customer_id`, including
+  memory, sessions, follow-up, evidence references, and retention records, subject to a
+  documented legal or audit exception.
+
+## Customer Memory Invariants
+
+- Customer Memory is separate from Customer identity and from Claim State.
+- Only explicit preferences or bounded, category-level continuity facts with a clear
+  product purpose may be stored.
+- A single interruption must not create a permanent reliability, fraud, or service-priority
+  classification.
+- Each memory record retains source, visibility, correction status, created time, and
+  expiry or deletion behaviour.
+- Memory is never used as an unreviewed substitute for current claim facts, policy
+  records, evidence, or professional decisions.
 
 ## Evidence Invariants
 
@@ -117,6 +162,8 @@ and checksums rather than embedding those bytes.
   uses one complete profile and cannot mix provider stores silently.
 - Administrative configuration must not provide unrestricted direct edits to production
   Claim State.
+- Retention and purge configuration is versioned policy, not an unreviewed database job
+  embedded in one provider adapter.
 
 ## Provider Conformance
 

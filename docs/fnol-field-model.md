@@ -98,6 +98,11 @@ branch and field-selection model defined here. This limitation must remain visib
 the registry, rules, orchestration, API, consumers, fixtures, and tests are updated
 together.
 
+Lifecycle and operational fields such as claim status, next action, responsible party,
+follow-up due time, expiry, and purge status belong to Claim State and workflow records.
+They are not automatically claimant-facing FNOL fields and must not be confused with
+the dynamic information collected from the claimant.
+
 ## Dynamic Branch Model
 
 ### Branch types
@@ -235,6 +240,10 @@ Changing a question's wording or candidate priority is not automatically a schem
 but it still follows Agent Policy publication and evaluation. Making a field required for
 claim creation, urgent handling, or another high-impact action is a controlled business
 rule and requires Northwind authority.
+
+Adding lifecycle states, follow-up fields, retention fields, or Customer Memory fields
+is a separate data and persistence contract change; it does not turn those fields into
+ordinary claimant questions.
 
 ## Open Decisions
 

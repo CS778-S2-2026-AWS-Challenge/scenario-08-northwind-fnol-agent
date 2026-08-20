@@ -22,6 +22,14 @@ service mappings below are implementation options, not claims of availability.
   knowledge documents, retrieval results, internal review material, and audit
   records remain separate even when a provider stores them in one physical
   database.
+- Claim-specific records and customer-level records remain separate. A stable
+  `customer_id` links them, but the Customer record does not contain complete
+  claim history, message transcripts, unfinished claim details, or staff-only
+  review signals.
+- A short-lived, purpose-limited Customer Memory may retain a confirmed preference
+  or an expiring continuity hint after a claim is purged. An interruption is not a
+  permanent negative customer trait and must not become a fraud, reliability, or
+  service-priority decision by itself.
 - Raw evidence bytes do not belong in Claim State. Evidence metadata retains a
   protected object reference owned by the active adapter.
 - RAG supports knowledge retrieval. It does not replace structured claim,
@@ -41,9 +49,10 @@ service mappings below are implementation options, not claims of availability.
 | Data class | Examples | Canonical use | Agent access | Visibility |
 | --- | --- | --- | --- | --- |
 | Customer profile | identity reference, permitted contact details, communication preferences | Identify the authorised customer and adapt communication | Minimum fields required for the current task | Customer-scoped and authorised staff |
+| Customer preferences and memory | explicit communication preference, short-lived continuity hint, source, visibility, expiry | Resume a useful interaction without retaining full claim content | Only purpose-relevant, source-linked, non-sensitive memory | Customer and authorised staff according to each record's visibility |
 | FNOL field and branch definitions | field category, value contract, claim family, branch, applicability, current-action requirement, confirmation policy | Constrain the dynamic form to predefined information and versioned rules | Active field and branch metadata only | Published definitions are controlled; claimant sees only relevant labels and questions |
-| Working Claim State | incident facts, form fields, independent claim attributes, workflow state, next action | Authoritative current FNOL record | Bounded current snapshot | Claimant-safe projection, shared fields, and staff-only fields are separated |
-| Sessions and messages | complete messages, bounded session summary, unresolved questions, prior commitments | Resume interaction without replacing Claim State | Recent necessary messages and compact context only | Customer and staff according to message visibility |
+| Working Claim State | incident facts, form fields, independent claim attributes, lifecycle status, next action, responsibility, and retention timestamps | Authoritative current FNOL record | Bounded current snapshot | Claimant-safe projection, shared fields, and staff-only fields are separated |
+| Sessions and messages | intent, complete messages, bounded session summary, unresolved questions, prior commitments | Resume interaction without replacing Claim State; keep non-claim chat out of claim facts | Recent necessary messages and compact context only | Customer and staff according to message visibility |
 | Evidence metadata | evidence ID, type, state, provenance, checksum, protected object reference | Track evidence lifecycle and source | Safe metadata and extracted proposals | Claimant-safe metadata; protected provenance for staff |
 | Evidence objects | images, PDFs, police documents, audio if approved | Original submitted material | Only through authorised evidence tools | Protected object access |
 | Extracted evidence facts | proposed vehicle damage, dates, document fields | Candidate facts derived from evidence | Proposals with source references | Never confirmed solely because a model extracted them |
@@ -52,6 +61,8 @@ service mappings below are implementation options, not claims of availability.
 | Knowledge documents | policy wording, legislation, industry guidance, approved procedures | Answer process and wording questions with citations | RAG retrieval with scope filters | Controlled by document authority and access metadata |
 | Retrieval records | returned facts, citations, source, version, retrieval time, limitations | Preserve what evidence supported an answer or review | Current relevant result only | Customer-safe citation or staff evidence according to source |
 | Handoffs and staff work | transfer packet, queue, owner, staff action, review decision | Preserve responsibility and professional decisions | Status and authorised result only | Internal details remain staff-only |
+| Follow-up tasks | due time, responsible party, attempt count, channel, outcome | Track Agent or staff follow-up for paused or incomplete claims | Current task and safe claim context only | Staff; claimant sees only an authorised contact or status |
+| Retention and purge records | expiry, hold, purge eligibility, deletion or anonymisation result | Apply retention policy without making deletion an Agent side effect | No routine Agent access | Restricted operations and audit access |
 | Internal signals | ambiguity, conflicting evidence, review-required indicators | Route work for professional attention | Bounded reason and required action | Staff-only |
 | Audit events | actor, action, authority check, revision, outcome, timestamp | Trace material changes | Not general model context | Restricted operational access |
 | Evaluation data | synthetic conversations, expected actions, RAG relevance labels, corrected outputs | Compare models and verify Agent behaviour | Test and evaluation environments only | Synthetic or explicitly approved data |
@@ -103,9 +114,9 @@ The logical responsibilities stay stable even if one provider combines them
 physically:
 
 1. **Transactional store** holds customer references, Claim State, sessions,
-   messages, evidence metadata, policy/history retrieval records, handoffs,
-   staff actions, active branch and rule references, revisions, idempotency records,
-   and audit events.
+   messages, customer preferences and memory, evidence metadata, policy/history
+   retrieval records, handoffs, staff actions, follow-up tasks, active branch and
+   rule references, revisions, idempotency records, retention work, and audit events.
 2. **Object store** holds original evidence and other large binary objects.
 3. **Knowledge document store** holds approved source documents, parsed text,
    versions, authority metadata, and chunk records.
@@ -120,6 +131,38 @@ physically:
 Physical co-location does not remove the logical visibility, retention,
 ownership, or authority boundaries.
 
+## Customer and Claim Relationship
+
+The logical relationship is linked but not merged:
+
+```text
+Customer
+  ├── CustomerPreferences
+  ├── CustomerMemory
+  ├── Claims
+  │     ├── Sessions and Messages
+  │     ├── Claim Fields and Evidence
+  │     ├── Handoffs and Staff Work
+  │     └── Follow-up Tasks
+  ├── Interaction Metrics
+  └── Authorised Audit References
+```
+
+`Customer` stores stable identity references and permitted contact details. Claim-specific
+facts, messages, evidence, staff decisions, and unfinished-work details remain owned by
+their claim or interaction records. `CustomerMemory` is a separate, source-linked record
+for a small set of durable or short-lived facts that have an explicit product purpose.
+
+An interaction with no credible claim intent may remain a session with
+`interaction_intent = non_claim_intent` and no `claim_id`. If a user has already supplied
+material incident facts, a draft claim may be retained while later unrelated messages
+remain session-only.
+
+After a temporary claim is purged, the system may retain an expiring category-level
+continuity hint such as `awaiting_external_material`, but not the full accident account
+or transcript. An interruption must not by itself become a fraud, reliability, or
+service-priority signal.
+
 ## Provider-neutral Ports
 
 Application services depend on capability ports rather than one large provider
@@ -127,6 +170,7 @@ adapter:
 
 ```text
 CustomerRepository
+CustomerMemoryRepository
 ClaimRepository
 SessionRepository
 EvidenceMetadataRepository
@@ -136,6 +180,8 @@ ClaimHistoryDataSource
 KnowledgeDocumentStore
 KnowledgeRetriever
 HandoffRepository
+FollowUpRepository
+RetentionRepository
 AuditEventStore
 ```
 
