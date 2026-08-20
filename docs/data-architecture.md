@@ -29,6 +29,9 @@ service mappings below are implementation options, not claims of availability.
   decisions.
 - The Agent accesses data through application tools and services. It does not
   query a provider SDK, database collection, bucket, or vector index directly.
+- The internal FNOL form is dynamic by selection, not by schema invention.
+  Approved rules activate only predefined fields, tags, and branches from the
+  [FNOL Information Model](fnol-field-model.md).
 - Northwind's Administration and Control Plane owns system and knowledge
   management. Runtime services consume approved configuration and published
   knowledge rather than depending on a third-party note application.
@@ -38,6 +41,7 @@ service mappings below are implementation options, not claims of availability.
 | Data class | Examples | Canonical use | Agent access | Visibility |
 | --- | --- | --- | --- | --- |
 | Customer profile | identity reference, permitted contact details, communication preferences | Identify the authorised customer and adapt communication | Minimum fields required for the current task | Customer-scoped and authorised staff |
+| FNOL field and branch definitions | field category, value contract, claim family, branch, applicability, current-action requirement, confirmation policy | Constrain the dynamic form to predefined information and versioned rules | Active field and branch metadata only | Published definitions are controlled; claimant sees only relevant labels and questions |
 | Working Claim State | incident facts, form fields, independent claim attributes, workflow state, next action | Authoritative current FNOL record | Bounded current snapshot | Claimant-safe projection, shared fields, and staff-only fields are separated |
 | Sessions and messages | complete messages, bounded session summary, unresolved questions, prior commitments | Resume interaction without replacing Claim State | Recent necessary messages and compact context only | Customer and staff according to message visibility |
 | Evidence metadata | evidence ID, type, state, provenance, checksum, protected object reference | Track evidence lifecycle and source | Safe metadata and extracted proposals | Claimant-safe metadata; protected provenance for staff |
@@ -53,6 +57,46 @@ service mappings below are implementation options, not claims of availability.
 | Evaluation data | synthetic conversations, expected actions, RAG relevance labels, corrected outputs | Compare models and verify Agent behaviour | Test and evaluation environments only | Synthetic or explicitly approved data |
 | Operational telemetry | request IDs, latency, error class, token usage, retrieval metrics | Reliability and cost measurement | Aggregated metrics only | Restricted operational access |
 
+## Dynamic FNOL Form and Branches
+
+The detailed field groups, current coverage, selection states, and branch rules are
+defined in the
+[FNOL Information Model and Field Taxonomy](fnol-field-model.md). The architecture
+separates three concerns:
+
+```text
+industry and process evidence
+-> logical FNOL information model
+-> approved field, tag, and branch definitions
+-> claim-specific active form selected by controlled rules
+-> stored field values, sources, states, and decisions
+```
+
+All possible form fields and processing tags are predefined. Dynamic form generation
+means that the system selects an applicable subset for one claim; it does not allow a
+model or client to create an arbitrary field name or schema.
+
+A controlled decision graph may:
+
+- interrupt ordinary collection for urgent safety or human-support needs;
+- activate a primary motor, home, contents, or unknown claim-family branch;
+- add conditional branches for another party, Police involvement, witness, theft,
+  evidence state, material conflict, or another approved condition;
+- classify active fields as required now, candidate now, pending later, inactive, or
+  system-owned according to the current next action; and
+- recalculate the active subset after new facts, correction, evidence, resume, or staff
+  action without deleting source history.
+
+One claim may hold several branch dimensions at the same time. For example, a motor
+claim can also involve injury, another party, damaged property, pending Police evidence,
+and professional review. A single route label must not overwrite those independent
+facts, responsibilities, or decisions.
+
+The current implementation contains 18 allowed field codes and a bounded four-field
+intake path. It does not yet implement a data-driven branch engine, dynamic required-now
+selection, or a published field and tag catalogue. Those remain implementation work and
+must not be inferred from this architecture document.
+
 ## Logical Storage Responsibilities
 
 The logical responsibilities stay stable even if one provider combines them
@@ -60,7 +104,8 @@ physically:
 
 1. **Transactional store** holds customer references, Claim State, sessions,
    messages, evidence metadata, policy/history retrieval records, handoffs,
-   staff actions, revisions, idempotency records, and audit events.
+   staff actions, active branch and rule references, revisions, idempotency records,
+   and audit events.
 2. **Object store** holds original evidence and other large binary objects.
 3. **Knowledge document store** holds approved source documents, parsed text,
    versions, authority metadata, and chunk records.
@@ -68,6 +113,9 @@ physically:
    knowledge chunks.
 5. **Evaluation store** holds synthetic scenarios, expected results, model
    comparison results, and RAG evaluation evidence outside production records.
+6. **Configuration store** holds immutable published Agent Policy, field, tag,
+   branch, tool-permission, and controlled-rule versions when those capabilities
+   are implemented.
 
 Physical co-location does not remove the logical visibility, retention,
 ownership, or authority boundaries.
@@ -238,6 +286,8 @@ status.
 The Agent receives a bounded context assembled by application services:
 
 - the current Claim State snapshot;
+- active claim-family and conditional branches, current-action field requirements,
+  and allowed registered fields;
 - unresolved questions and pending actions;
 - a compact session summary and only necessary recent messages;
 - authorised structured policy or history results;
@@ -264,6 +314,11 @@ Each implemented profile must pass the same behavioural contracts for:
 - unavailable, timeout, malformed, and partial provider responses; and
 - prevention of mixed-provider reads and writes.
 
+The dynamic FNOL information model must additionally be evaluated for claim-family and
+conditional branch activation, irrelevant-question avoidance, required-now versus
+candidate selection, correction of a proposed branch, preservation of field provenance,
+and rejection of unregistered fields and tags.
+
 RAG evaluation must additionally measure retrieval relevance, citation support,
 correct policy version and jurisdiction, safe refusal when evidence is
 insufficient, and comparison with a non-RAG model baseline.
@@ -277,6 +332,8 @@ insufficient, and comparison with a non-RAG model baseline.
 - Which customer policy and claim-history fields may be shown to claimants.
 - Which Control Plane roles, approval levels, and publication workflow Northwind will
   authorise.
+- Which field, tag, and branch definitions belong in the MVP and which changes require
+  a code-level schema migration rather than configuration publication.
 - Whether evidence extraction and embeddings run inside the selected provider
   profile or through a separately approved external processing boundary.
 - Which model evaluation dataset is sufficient before fine-tuning is considered.
