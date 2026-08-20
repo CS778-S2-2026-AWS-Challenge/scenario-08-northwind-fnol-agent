@@ -50,11 +50,22 @@ def upload_and_process(
     client: TestClient,
     claim_id: str,
     case: str,
+    *,
+    start_revision: int = 1,
+    expect_processing: int = 200,
 ) -> str:
-    """Take one evidence item from upload through completed processing."""
+    """Take one evidence item from upload through completed processing.
+
+    `expect_processing` lets a caller assert that processing is *refused*,
+    which is the interesting case when the target field is already owned.
+    """
     requested = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',
-        headers={**CLAIMANT_AUTH, 'Idempotency-Key': f'{case}-upload', 'If-Match': '1'},
+        headers={
+            **CLAIMANT_AUTH,
+            'Idempotency-Key': f'{case}-upload',
+            'If-Match': str(start_revision),
+        },
         json={
             'kind': 'incident_image',
             'original_filename': f'{case}.jpg',
@@ -67,17 +78,27 @@ def upload_and_process(
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
-        headers={**CLAIMANT_AUTH, 'Idempotency-Key': f'{case}-complete', 'If-Match': '2'},
+        headers={
+            **CLAIMANT_AUTH,
+            'Idempotency-Key': f'{case}-complete',
+            'If-Match': str(start_revision + 1),
+        },
         json={'upload_checksum': f'sha256:{"c" * 64}'},
     )
     assert completed.status_code == 202
 
     processed = client.post(
         f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
-        headers={**INTEGRATION_AUTH, 'Idempotency-Key': f'{case}-processing', 'If-Match': '3'},
+        headers={
+            **INTEGRATION_AUTH,
+            'Idempotency-Key': f'{case}-processing',
+            'If-Match': str(start_revision + 2),
+        },
         json={'facts': [{'field_code': FIELD, 'value': EXTRACTED, 'confidence': 0.87}]},
     )
-    assert processed.status_code == 200
+    assert processed.status_code == expect_processing
+    if expect_processing == 409:
+        assert processed.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     return evidence_id
 
 
@@ -153,65 +174,61 @@ def test_a_decision_changes_confirmation_state_without_losing_the_source(
     assert refs_before == [evidence_id]
 
 
-def test_a_claimant_stated_fact_is_not_labelled_as_machine_read(
+def state_claimant_fact(client: TestClient, claim_id: str, revision: int, value: str) -> Any:
+    """Create a genuinely claimant-owned field through the claimant form."""
+    return client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**CLAIMANT_AUTH, 'If-Match': f'"{revision}"'},
+        json={'updates': [{'field_code': FIELD, 'value': value, 'status': 'confirmed'}]},
+    )
+
+
+def test_a_claimant_stated_fact_is_not_relabelled_as_machine_read(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    """Extraction may not overwrite a field a person already owns.
+    """Extraction may not take over a field the claimant already owns.
 
-    This is the boundary from Issue #120: a fact the claim already holds keeps
-    its own source and confirmation state, and a later extraction is rejected
-    rather than silently relabelling it as image-derived.
+    The field is created through the claimant form, so it genuinely carries
+    `source: claimant` and `status: confirmed` before any evidence exists. An
+    earlier version of this test called the upload-and-process helper first,
+    which made the field image-derived and therefore only proved that one
+    extraction cannot overwrite another. That is a weaker claim than the name.
     """
+    claimant_value = 'I was rear-ended while stopped at the lights.'
+
     with client as active:
         claim_id = create_claim(active, 'claimant-owned-claim')
-        first_evidence = upload_and_process(active, claim_id, 'claimant-owned')
+
+        stated = state_claimant_fact(active, claim_id, 1, claimant_value)
+        assert stated.status_code == 200
 
         before = repository.get_claim(claim_id, CUSTOMER_ID)
         assert before is not None
-        snapshot = before.form[FIELD].model_dump(mode='json')
+        owned = before.form[FIELD]
+        # The precondition the test name depends on.
+        assert owned.source is FormSource.CLAIMANT
+        assert owned.status is FormStatus.CONFIRMED
+        assert owned.value == claimant_value
+        snapshot = owned.model_dump(mode='json')
 
-        second = active.post(
-            f'/api/v1/claims/{claim_id}/evidence/uploads',
-            headers={
-                **CLAIMANT_AUTH,
-                'Idempotency-Key': 'claimant-owned-upload-2',
-                'If-Match': '4',
-            },
-            json={
-                'kind': 'incident_image',
-                'original_filename': 'second.jpg',
-                'media_type': 'image/jpeg',
-                'size_bytes': 512,
-            },
-        )
-        second_evidence = str(second.json()['evidence_id'])
-        active.post(
-            f'/api/v1/claims/{claim_id}/evidence/{second_evidence}/complete',
-            headers={
-                **CLAIMANT_AUTH,
-                'Idempotency-Key': 'claimant-owned-complete-2',
-                'If-Match': '5',
-            },
-            json={'upload_checksum': f'sha256:{"d" * 64}'},
-        )
-        conflicting = active.post(
-            f'/internal/v1/claims/{claim_id}/evidence/{second_evidence}/processing',
-            headers={
-                **INTEGRATION_AUTH,
-                'Idempotency-Key': 'claimant-owned-processing-2',
-                'If-Match': '6',
-            },
-            json={'facts': [{'field_code': FIELD, 'value': 'A different later reading.'}]},
+        evidence_id = upload_and_process(
+            active,
+            claim_id,
+            'claimant-owned',
+            start_revision=2,
+            expect_processing=409,
         )
 
-    assert conflicting.status_code == 409
-    assert conflicting.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    conflicting = repository.get_claim(claim_id, CUSTOMER_ID)
+    assert conflicting is not None
 
-    after = repository.get_claim(claim_id, CUSTOMER_ID)
-    assert after is not None
-    assert after.form[FIELD].model_dump(mode='json') == snapshot
-    assert after.form[FIELD].source_refs == [first_evidence]
+    # The claimant's own words, source, and confirmation state are untouched,
+    # and no image reference was attached to them.
+    assert conflicting.form[FIELD].model_dump(mode='json') == snapshot
+    assert conflicting.form[FIELD].source is FormSource.CLAIMANT
+    assert conflicting.form[FIELD].status is FormStatus.CONFIRMED
+    assert evidence_id not in conflicting.form[FIELD].source_refs
 
 
 def test_the_source_and_confirmation_check_is_repeatable(

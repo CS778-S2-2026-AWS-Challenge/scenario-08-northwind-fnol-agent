@@ -24,10 +24,12 @@ Run `tests/fixtures/presentation/test_fact_source_and_confirmation.py`.
    In both cases the value, the source, and the source references are unchanged.
    A rejected value stays visible as disputed rather than disappearing, so the
    disagreement itself remains part of the record.
-3. **A claimant-owned fact is not relabelled as machine-read.** A later
-   extraction targeting a field the claim already holds is rejected with `409
-   INVALID_STATE_TRANSITION`, and the existing field is byte-identical
-   afterwards, still pointing at the first evidence item.
+3. **A claimant-owned fact is not relabelled as machine-read.** The field is
+   created through the claimant form, so it genuinely carries `source:
+   claimant` and `status: confirmed` before any evidence exists. A later
+   extraction targeting it is rejected with `409 INVALID_STATE_TRANSITION`, the
+   field is byte-identical afterwards, and the evidence identifier never
+   appears in its `source_refs`.
 4. **The check is repeatable.** Two independent claims driven through the same
    path land in identical source and confirmation state, so the demonstration
    does not depend on residue from an earlier run.
@@ -50,3 +52,9 @@ The overwrite rejection in 3 is the boundary introduced by Issue #120 after
 review: extraction may only fill a field the shared form does not hold yet.
 Without it, a second reading would replace the first and the claim would lose
 both the original value and its provenance.
+
+An earlier version of check 3 built the field by running the upload-and-process
+helper first, which made it image-derived. That only proved one extraction
+cannot overwrite another — a weaker claim than the check's name. It now creates
+the field through the claimant form, so the precondition the name depends on is
+established rather than assumed.
