@@ -23,7 +23,7 @@ production rule or external provider connection.
 
 ## MVP Knowledge, Model, and Data Scenarios
 
-The `MVP-AT` namespace adds product targets without renaming or reusing the stable
+The `MVP-AT` namespace adds committed MVP targets without renaming or reusing the stable
 `AT-01` through `AT-12` runtime scenario identifiers.
 
 | ID | Scenario | Required observable result |
@@ -35,14 +35,18 @@ The `MVP-AT` namespace adds product targets without renaming or reusing the stab
 | MVP-AT-05 | Model API is unavailable or malformed | The error is normalised, claim progress is preserved, and the service does not fabricate an Agent result |
 | MVP-AT-06 | Data runtime profile selection | Exactly one fixture, Cloudflare, MongoDB, or AWS profile is active; incomplete or mixed-provider configuration fails explicitly |
 
-## MVP Administration and Control Plane Scenarios
+## Product-Direction Administration and Control Plane Scenarios
+
+These scenarios describe the longer-term governed administration capability. They are
+not committed Sprint 2 MVP acceptance criteria; the implementation is tracked as extra
+backlog work in issue #208.
 
 | ID | Scenario | Required observable result |
 | --- | --- | --- |
-| MVP-AT-07 | Knowledge source publication | An authorised user uploads or imports a source, supplies required metadata, validates parsing and retrieval, then publishes a version with audit history |
-| MVP-AT-08 | Model or rule configuration change | A draft is validated before publication; the active version, actor, reason, and effective time are visible; an earlier version can be restored |
-| MVP-AT-09 | Secret-backed integration configuration | The administration interface stores only a secret reference, never returns the secret value, and reports a bounded connection result |
-| MVP-AT-10 | Unauthorised administration attempt | The change is rejected, no active configuration changes, and the attempt is auditable without leaking restricted values |
+| DIR-AT-01 | Knowledge source publication | An authorised user uploads or imports a source, supplies required metadata, validates parsing and retrieval, then publishes a version with audit history |
+| DIR-AT-02 | Model or rule configuration change | A draft is validated before publication; the active version, actor, reason, and effective time are visible; an earlier version can be restored |
+| DIR-AT-03 | Secret-backed integration configuration | The administration interface stores only a secret reference, never returns the secret value, and reports a bounded connection result |
+| DIR-AT-04 | Unauthorised administration attempt | The change is rejected, no active configuration changes, and the attempt is auditable without leaking restricted values |
 
 ## Cross-cutting Acceptance
 

@@ -12,7 +12,7 @@ The service should:
 - progress a claim when the information is sufficient for the next safe action, even if later evidence is still pending;
 - preserve context across sessions and human handoffs;
 - give claims staff a workbench backed by the same claim state used by the Agent;
-- provide an administration and control plane for versioned model, data, knowledge, rule, integration, access, evaluation, and operational configuration;
+- provide a governed administration and control plane for versioned model, data, knowledge, rule, integration, access, evaluation, and operational configuration as the product direction develops;
 - keep coverage, fraud, safety, and other high-impact decisions within explicit business and human-review boundaries;
 - make claimant effort, human effort, and agent cost observable.
 
@@ -26,7 +26,7 @@ The service should:
 
 ## Current Stage
 
-The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, staff review, and the first incremental Control Plane capabilities.
+The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, and staff review. Control Plane implementation is product-direction work tracked separately as extra backlog, not a committed Sprint 2 capacity item.
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 

@@ -1554,8 +1554,12 @@ Every unconfirmed provider capability stays visible as its own check and remains
 `pending_confirmation` until its access is verified, so a working fixture can never be
 mistaken for a confirmed Cloudflare, MongoDB, AWS, or Northwind service.
 
-`persistence` and `agent` have no adapter boundary yet and report
-`not_configured`.
+The application already exposes provider-neutral seams for `persistence` and `agent`:
+`create_app()` injects a `PersistenceRepository` and an `AgentTurnProvider`, defaulting
+to the current `FixtureRepository` and `ControlledAgent` implementations. The remaining
+gap is provider and model readiness, not the existence of an adapter boundary. Until a
+real provider profile or model gateway is configured and verified, those checks report
+the bounded readiness state `not_configured`.
 
 An evidence-storage outage is reported to the caller as `503`
 `DEPENDENCY_UNAVAILABLE` with `retryable: true`, never as a media-type or size

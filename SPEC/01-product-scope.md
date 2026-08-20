@@ -40,8 +40,6 @@ that it reduces the process knowledge and coordination work required from the cl
 - context-preserving standard and urgent human handoff;
 - controlled claim creation and conditional routing through replaceable adapters;
 - a staff workbench derived from the same Claim State;
-- an administration and control plane for versioned system, model, knowledge, rule,
-  integration, access, evaluation, and operational configuration;
 - observability for claimant effort, staff effort, model usage, latency, and failure.
 
 ## Product Direction
@@ -55,6 +53,11 @@ professionals, and other approved participants should be able to work from the s
 claim context rather than making the claimant carry information between disconnected
 services. This direction is planned incrementally and does not imply that every external
 participant or integration exists in the current MVP.
+
+The product direction also includes a governed Administration and Control Plane for
+versioned model, knowledge, rule, integration, access, evaluation, and operational
+configuration. Its design is documented now, but its implementation is extra backlog
+work outside the committed Sprint 2 capacity and is tracked separately in issue #208.
 
 ## Boundaries
 
