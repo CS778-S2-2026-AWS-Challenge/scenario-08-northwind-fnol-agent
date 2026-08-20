@@ -21,3 +21,4 @@ This directory contains engineering guidance, API information, and user-research
 - [Research directory](User_Research_and_Pain_Points/)
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
+- `day4-scenario-derivation-guard.md` records the scenario evidence derivation guard, the three scenarios it found declaring evidence they did not hold, and what it narrows about Defect 1.

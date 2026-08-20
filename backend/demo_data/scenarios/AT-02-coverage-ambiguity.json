@@ -40,7 +40,7 @@
         "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
       }
     },
-    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 1},
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
     "route": "professional_review",
     "active_session_id": "ses_fixture_at02",
     "external_claim": null,

@@ -80,6 +80,21 @@ class ScenarioFixture(ContractModel):
 
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
+
+        # A scenario may not declare an evidence state or summary that its own
+        # records contradict. Path entries have been held to this since Issue
+        # #110; canonical scenarios were not, and a scenario claiming an item
+        # needed attention while holding no evidence went unnoticed.
+        if self.claim.claim_state.evidence is not evidence_state_for(self.evidence):
+            raise ValueError(
+                f'{self.scenario_id}: claim_state.evidence must derive from the '
+                'scenario evidence records.'
+            )
+        if self.claim.evidence_summary != evidence_summary_for(self.evidence):
+            raise ValueError(
+                f'{self.scenario_id}: evidence_summary must derive from the '
+                'scenario evidence records.'
+            )
         retrieval_ids = {record.retrieval_id for record in self.retrievals}
         if len(retrieval_ids) != len(self.retrievals):
             raise ValueError('Scenario retrieval identifiers must be unique.')
