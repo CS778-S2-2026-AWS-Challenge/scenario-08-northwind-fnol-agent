@@ -39,6 +39,7 @@ current document explicitly adopts the same rule.
 - [Day 4 API and data-boundary verification](day4-api-data-boundary-verification.md)
 - [Day 4 routing and workbench write-back verification](day4-routing-workbench-writeback-verification.md)
 - [Day 4 urgent and human-support verification](day4-urgent-human-support-verification.md)
+- [Day 4 evidence-state and visibility defects](day4-evidence-visibility-defects.md)
 - [Day 4 responsive and accessibility verification](day4-responsive-accessibility-verification.md)
 - [Day 4 journey test records](d4-t02-test-records.md)
 - [Day 4 technical demonstration runbook](day4-technical-demo-runbook.md)
