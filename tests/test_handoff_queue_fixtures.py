@@ -111,3 +111,31 @@ def test_queue_list_surfaces_open_handoff_priority_per_claim() -> None:
         item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
         assert item['priority'] == expected_priority
         assert item['open_handoff_count'] == 1
+
+
+def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> None:
+    repository = FixtureRepository()
+    claim_ids: dict[str, str] = {}
+    for scenario_id in ('AT-05-human-request', 'AT-02-coverage-ambiguity', 'AT-04-urgent'):
+        loaded = load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json')
+        seed_scenario(repository, loaded)
+        claim_ids[scenario_id] = loaded.claim.claim_id
+
+    with _staff_client(repository) as client:
+        all_items = client.get(
+            '/api/v1/workbench/claims',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        ).json()['items']
+        urgent_items = client.get(
+            '/api/v1/workbench/claims?view=urgent',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        ).json()['items']
+        human_items = client.get(
+            '/api/v1/workbench/claims?view=human_requests',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        ).json()['items']
+
+    relevant = [item for item in all_items if item['claim_id'] in claim_ids.values()]
+    assert [item['priority'] for item in relevant] == ['urgent', 'high', 'standard']
+    assert [item['claim_id'] for item in urgent_items] == [claim_ids['AT-04-urgent']]
+    assert [item['claim_id'] for item in human_items] == [claim_ids['AT-05-human-request']]

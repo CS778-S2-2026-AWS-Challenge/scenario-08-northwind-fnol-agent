@@ -22,3 +22,4 @@ This directory contains engineering guidance, API information, and user-research
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
 - `day5-fact-source-and-confirmation.md` records the Issue #141 `bdfa123` check of fact source and confirmation state on the clear-claim path.
+- `day4-evidence-visibility-defects.md` records the Issue #140 evidence state and visibility check, its reproduction command, and the open defects with their owning stacks.

@@ -45,6 +45,15 @@
     .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
     .header h1 { margin: 0; font-size: 28px; }
     .header p { margin: 0; color: #475569; max-width: 650px; }
+    .queue-overview { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .queue-overview button { display:grid; grid-template-columns:1fr auto; gap:4px 14px; min-height:104px; padding:17px 18px; border:1px solid #dbe4ea; border-radius:16px; background:#fff; color:#0f172a; text-align:left; cursor:pointer; box-shadow:0 5px 18px rgba(15,23,42,.04); transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
+    .queue-overview button:hover { border-color:#5eead4; box-shadow:0 10px 24px rgba(15,23,42,.08); transform:translateY(-1px); }
+    .queue-overview button[aria-pressed="true"] { border-color:#0f766e; box-shadow:0 0 0 2px rgba(15,118,110,.12); }
+    .queue-overview button.is-urgent { border-left:5px solid #dc2626; background:linear-gradient(135deg,#fff 65%,#fff1f2); }
+    .queue-overview button.is-human { border-left:5px solid #0284c7; background:linear-gradient(135deg,#fff 65%,#eff6ff); }
+    .queue-overview strong { font-size:15px; }
+    .queue-overview .queue-total { grid-row:1 / span 2; grid-column:2; align-self:center; min-width:42px; color:#0f172a; font-size:30px; font-weight:800; text-align:right; }
+    .queue-overview small { color:#64748b; font-size:12px; line-height:1.45; }
     .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
     .panel { grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: visible; }
     .detail-panel { grid-column: 1 / -1; }
@@ -311,6 +320,7 @@
     }
     @media(max-width:720px) {
       .content { min-width:0; padding:16px; }
+      .queue-overview { grid-template-columns:1fr; }
       .detail-grid, .staff-form-grid, .context-row { grid-template-columns:1fr; }
       .claim-list button { width:100%; }
       .customer-chat-content { grid-template-columns:1fr; }
@@ -328,6 +338,8 @@
         <label for="viewSelect">Queue filter</label>
         <select id="viewSelect">
           <option value="all">All claims</option>
+          <option value="urgent">Urgent requests</option>
+          <option value="human_requests">Human requests</option>
           <option value="new_untriaged">New and untriaged</option>
           <option value="awaiting_evidence">Awaiting evidence</option>
           <option value="professional_review">Professional review</option>
@@ -366,6 +378,24 @@
           <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
         </div>
       </div>
+
+      <nav class="queue-overview" aria-label="Priority handoff queues">
+        <button id="urgentQueueCard" class="is-urgent" type="button" data-queue-view="urgent" aria-pressed="false">
+          <strong>Urgent requests</strong>
+          <span id="urgentQueueCount" class="queue-total">—</span>
+          <small>Immediate safety and urgent handoffs. Take these first.</small>
+        </button>
+        <button id="humanQueueCard" class="is-human" type="button" data-queue-view="human_requests" aria-pressed="false">
+          <strong>Human requests</strong>
+          <span id="humanQueueCount" class="queue-total">—</span>
+          <small>Claimants waiting for a person to continue their saved report.</small>
+        </button>
+        <button id="allQueueCard" type="button" data-queue-view="all" aria-pressed="true">
+          <strong>All work</strong>
+          <span id="allQueueCount" class="queue-total">—</span>
+          <small>Every active claim, ordered by handoff priority.</small>
+        </button>
+      </nav>
 
       <div class="workspace">
         <section class="panel">
@@ -515,6 +545,13 @@
     let detailRevision = null;
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
+
+    const queueCopy = {
+      all: ['Employee workbench', 'Every active claim, ordered by the highest open handoff priority.'],
+      urgent: ['Urgent request queue', 'Immediate and urgent handoffs that should be accepted first.'],
+      human_requests: ['Human request queue', 'Claimants waiting for a staff member to continue from the saved context.'],
+      awaiting_evidence: ['Pending evidence queue', 'Claims waiting for evidence from the claimant, Northwind, or another party.'],
+    };
 
     const stateMap = {
       professional_review: 'Professional review',
@@ -719,6 +756,17 @@
 
     async function fetchClaimDetail(claimId) {
       return apiRequest(`${API_BASE}/${encodeURIComponent(claimId)}`);
+    }
+
+    async function refreshQueueOverview() {
+      const [allPayload, urgentPayload, humanPayload] = await Promise.all([
+        fetchClaims('all'),
+        fetchClaims('urgent'),
+        fetchClaims('human_requests'),
+      ]);
+      byId('allQueueCount').textContent = String(allPayload.items?.length || 0);
+      byId('urgentQueueCount').textContent = String(urgentPayload.items?.length || 0);
+      byId('humanQueueCount').textContent = String(humanPayload.items?.length || 0);
     }
 
     function formatLabel(value) {
@@ -997,8 +1045,20 @@
       priority.textContent = handoff.priority;
       heading.append(title, priority);
       wrapper.append(heading);
+      const confirmedFacts = Object.entries(handoff.packet?.form_snapshot || {})
+        .filter(([, field]) => field.status === 'confirmed')
+        .map(([code, field]) => `${formatLabel(code)}: ${textOrEmpty(field.value)}`);
+      const gaps = [
+        ...(handoff.packet?.missing_items || []).map(item => `Missing: ${item}`),
+        ...(handoff.packet?.pending_items || []).map(item => `Pending: ${item}`),
+        ...(handoff.packet?.conflicts || []).map(item => `Conflict: ${item}`),
+        ...(handoff.packet?.low_confidence_items || []).map(item => `Low confidence: ${item}`),
+      ];
       wrapper.append(definitionList([
         { label: 'Priority', value: handoff.priority },
+        { label: 'Confirmed incident', value: handoff.packet?.incident_summary },
+        { label: 'Confirmed facts', value: confirmedFacts },
+        { label: 'Gaps', value: gaps },
         { label: 'Reason', value: handoff.reason },
         { label: 'Requested action', value: handoff.requested_action },
         { label: 'Promised next step', value: handoff.packet?.promised_next_step },
@@ -1213,11 +1273,17 @@
     }
 
     function syncQueueNavigation() {
-      const pendingSelected = byId('viewSelect').value === 'awaiting_evidence';
+      const selectedView = byId('viewSelect').value;
+      const pendingSelected = selectedView === 'awaiting_evidence';
       const workbenchVisible = !byId('workbenchView').hidden;
       byId('pendingEvidenceNav').classList.toggle('active', workbenchVisible && pendingSelected);
       byId('workbenchNav').classList.toggle('active', workbenchVisible && !pendingSelected);
-      byId('queueTitle').textContent = pendingSelected ? 'Pending evidence queue' : 'Employee workbench';
+      const [title, description] = queueCopy[selectedView] || [formatLabel(selectedView), 'Claims matching the selected operational queue.'];
+      byId('queueTitle').textContent = title;
+      byId('queueTitle').nextElementSibling.textContent = description;
+      document.querySelectorAll('[data-queue-view]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.queueView === selectedView));
+      });
     }
 
     async function selectQueue(view) {
@@ -1279,6 +1345,7 @@
         const payload = await fetchClaims(view);
         claims = payload.items || [];
         renderClaims(claims);
+        await refreshQueueOverview();
         if (claims.length && !claims.some(item => item.claim_id === activeClaimId)) {
           activeClaimId = claims[0].claim_id;
         }
@@ -1304,6 +1371,9 @@
     byId('resetDemoQueue').addEventListener('click', resetAndLoadDemoQueue);
     byId('previousQueuePage').addEventListener('click', () => changeQueuePage(-1));
     byId('nextQueuePage').addEventListener('click', () => changeQueuePage(1));
+    document.querySelectorAll('[data-queue-view]').forEach(button => {
+      button.addEventListener('click', () => selectQueue(button.dataset.queueView));
+    });
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
     byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
