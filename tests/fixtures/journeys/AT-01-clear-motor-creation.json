@@ -9,5 +9,83 @@
   ],
   "expected_route": "standard_motor_intake",
   "expected_creation_status": "created",
-  "expected_source": "fixture"
+  "expected_source": "fixture",
+  "baseline_states": [
+    {
+      "name": "describe",
+      "action": "CONFIRM",
+      "facts": [
+        {
+          "field_code": "incident.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "status": "proposed",
+          "source": "claimant"
+        }
+      ],
+      "next_step": {
+        "status": "confirmation_required",
+        "responsible_party": "claimant"
+      }
+    },
+    {
+      "name": "confirm",
+      "action": "CONFIRM",
+      "facts": [
+        {
+          "field_code": "incident.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "status": "confirmed",
+          "source": "claimant"
+        }
+      ],
+      "next_step": {
+        "status": "provide_incident_location",
+        "responsible_party": "claimant"
+      }
+    },
+    {
+      "name": "correct",
+      "action": "UPDATE",
+      "facts": [
+        {
+          "field_code": "incident.description",
+          "value": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
+          "status": "confirmed",
+          "source": "claimant"
+        }
+      ],
+      "next_step": {
+        "status": "provide_incident_location",
+        "responsible_party": "claimant"
+      }
+    },
+    {
+      "name": "proceed",
+      "action": "PROCEED",
+      "facts": [
+        {
+          "field_code": "incident.description",
+          "value": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.location",
+          "value": "Queen Street",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "loss.description",
+          "value": "Damage to the rear bumper",
+          "status": "confirmed",
+          "source": "claimant"
+        }
+      ],
+      "next_step": {
+        "status": "ready_to_create",
+        "responsible_party": "claimant"
+      }
+    }
+  ]
 }
