@@ -21,3 +21,4 @@ This directory contains engineering guidance, API information, and user-research
 - [Research directory](User_Research_and_Pain_Points/)
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
+- `day4-evidence-visibility-defects.md` records the Issue #140 evidence state and visibility check, its reproduction command, and the open defects with their owning stacks.
