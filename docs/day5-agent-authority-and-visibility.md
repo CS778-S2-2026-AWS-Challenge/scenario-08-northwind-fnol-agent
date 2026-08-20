@@ -47,18 +47,31 @@ persisted review signal for AT-13 and AT-14, and through the handoff reason
 codes for AT-15 and AT-16 — and that the detail returns the same Claim State
 dimensions the Agent reads, rather than a separate board record.
 
-## Note on the two routes a reason travels
+## The reason travels three named routes
 
-AT-13 and AT-14 carry their reason as a persisted `ReviewSignalRecord` derived
-from retrieval uncertainty. AT-15 and AT-16 carry it on the handoff instead:
-AT-15 because an evidence conflict does not originate from a retrieval, and
-AT-16 because an unavailable provider produces no sourced record at all, per the
-retrieval contract from Issue #124.
+Corrected after review. An earlier version of this document said two routes and
+the check allowed a repository-state fallback, which meant the assertion could
+have passed while the Workbench exposed nothing. Reading the projection alone
+showed there are three, and that AT-15 uses a route neither of the other two
+does.
 
-Both routes reach staff and neither reaches the claimant, which is what the
-acceptance condition asks. It is recorded here because a reader checking only
-for review signals would conclude, wrongly, that two of the four scenarios
-never tell staff why review is required.
+| Scenario | Route in the Workbench projection |
+| --- | --- |
+| AT-13-coverage-ambiguity | `signals[].reason_codes` |
+| AT-14-history-signal | `signals[].reason_codes` |
+| AT-15-conflicting-evidence | an `internal_only` message with `content.type: review_signal` |
+| AT-16-retrieval-unavailable | `handoffs[].reason_codes` |
+
+AT-13 and AT-14 derive a `ReviewSignalRecord` from retrieval uncertainty.
+AT-16 has no sourced record to derive from — an unavailable provider produces
+none under the Issue #124 contract — so its reason rides the handoff. AT-15 has
+neither a retrieval nor, in the seeded state, a handoff, so it carries a
+structured internal message instead.
+
+The check now names the expected route per scenario and asserts the reason is
+in that route **and only that route**, reading the response body rather than
+repository state. A scenario that stops exposing its reason fails here instead
+of passing because the string appears somewhere incidental in the response.
 
 ## Boundary
 

@@ -104,9 +104,49 @@ def test_internal_review_signals_never_reach_the_claimant(scenario: ScenarioFixt
         assert handoff.requested_action not in claimant_text
 
 
+# Which part of the Workbench projection carries the review reason. Named per
+# scenario so a reason that stops being exposed fails here instead of being
+# found somewhere incidental in the response body.
+REASON_CHANNEL = {
+    'AT-13-coverage-ambiguity': 'signals',
+    'AT-14-history-signal': 'signals',
+    'AT-15-conflicting-evidence': 'internal_message',
+    'AT-16-retrieval-unavailable': 'handoffs',
+}
+
+
+def reason_in_projection(body: dict[str, Any], reason: str) -> set[str]:
+    """Every channel of the Workbench projection that carries the reason.
+
+    Reads the response only. An earlier version fell back to
+    `repository.list_review_signals()`, which meant the assertion could pass
+    while the projection exposed nothing — a false positive for the very claim
+    the test makes.
+    """
+    found: set[str] = set()
+    if any(reason in signal.get('reason_codes', []) for signal in body.get('signals', [])):
+        found.add('signals')
+    if any(reason in handoff.get('reason_codes', []) for handoff in body.get('handoffs', [])):
+        found.add('handoffs')
+    # The internal review-signal message carries a structured `reason`, not
+    # prose, so this reads that field rather than searching message text.
+    if any(
+        message.get('visibility') == 'internal_only'
+        and message.get('content', {}).get('type') == 'review_signal'
+        and message.get('content', {}).get('reason') == reason
+        for message in body.get('messages', [])
+    ):
+        found.add('internal_message')
+    return found
+
+
 def test_staff_can_see_the_review_reason_and_act(scenario: ScenarioFixture) -> None:
-    """Issue #148: staff can act on what the claimant cannot see."""
-    repository, client = seeded(scenario)
+    """Issue #148: staff can act on what the claimant cannot see.
+
+    The reason must be present in a named part of the projection, not merely
+    somewhere in the response body.
+    """
+    _, client = seeded(scenario)
     claim_id = scenario.claim.claim_id
 
     with client as active:
@@ -114,13 +154,15 @@ def test_staff_can_see_the_review_reason_and_act(scenario: ScenarioFixture) -> N
 
     assert detail.status_code == 200
     body: dict[str, Any] = detail.json()
-
     review_reason = str(scenario.expected['review_reason'])
-    signals = repository.list_review_signals(claim_id, scenario.claim.customer_id)
-    reached_staff = review_reason in detail.text or any(
-        review_reason in signal.reason_codes for signal in signals
+
+    channels = reason_in_projection(body, review_reason)
+    expected_channel = REASON_CHANNEL[scenario.scenario_id]
+    assert expected_channel in channels, (
+        f'{scenario.scenario_id}: staff cannot see why review is required. '
+        f'Expected it in {expected_channel}; the projection carries it in '
+        f'{sorted(channels) or "nothing"}.'
     )
-    assert reached_staff, f'{scenario.scenario_id}: staff cannot see why review is required'
 
     # Staff hold the shared claim state, not a separate board record: the
     # detail returns the same Claim State dimensions the Agent reads.
@@ -129,6 +171,28 @@ def test_staff_can_see_the_review_reason_and_act(scenario: ScenarioFixture) -> N
     assert body['claim_state']['workflow_state'] == WorkflowState.PROFESSIONAL_REVIEW.value
     assert body['claim_state']['next_action'] == AgentAction.HANDOFF.value
     assert body['claim_state']['fraud_signal'] == FraudSignal.NONE.value
+
+
+def test_the_review_reason_travels_three_named_routes() -> None:
+    """Each condition reaches staff by a route the projection actually exposes.
+
+    Recorded as a set so a scenario cannot quietly stop exposing its reason and
+    still pass because the string appears somewhere else in the response.
+    """
+    assert set(REASON_CHANNEL) == {scenario.scenario_id for scenario in review_scenarios()}
+    assert set(REASON_CHANNEL.values()) == {'signals', 'handoffs', 'internal_message'}
+
+    for scenario in review_scenarios():
+        _, client = seeded(scenario)
+        with client as active:
+            body = active.get(
+                f'/api/v1/workbench/claims/{scenario.claim.claim_id}', headers=STAFF_AUTH
+            ).json()
+        channels = reason_in_projection(body, str(scenario.expected['review_reason']))
+        assert channels == {REASON_CHANNEL[scenario.scenario_id]}, (
+            f'{scenario.scenario_id} carries its reason in {sorted(channels)}, '
+            f'not only {REASON_CHANNEL[scenario.scenario_id]}'
+        )
 
 
 def test_no_review_condition_advances_the_claim_on_its_own() -> None:
