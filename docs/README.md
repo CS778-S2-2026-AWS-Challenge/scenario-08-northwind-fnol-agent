@@ -22,3 +22,4 @@ This directory contains engineering guidance, API information, and user-research
 
 Product requirements belong in `SPEC/`. Time-bound commitments belong in `sprint/`. Documentation must not silently redefine either source.
 - `week4-integration-inputs.md` records the Issue #150 Week 4 compilation: integration points, fallbacks, evidence and fixture inputs, path compatibility, and open blockers with owners.
+- `day4-evidence-visibility-defects.md` records the Issue #140 evidence state and visibility check, its reproduction command, and the open defects with their owning stacks.
