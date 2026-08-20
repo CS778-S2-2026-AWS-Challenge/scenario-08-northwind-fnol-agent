@@ -45,18 +45,34 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert "title.textContent = 'Professional review workspace'" in page
     assert "controlsAlreadyOpen ? 'Hide review controls' : 'Review and decide'" in page
     assert "action.setAttribute('aria-controls', 'detailStaffActions')" in page
-    assert "const shouldOpen = reviewControlsOpenClaimId !== detail.claim_id" in page
-    assert "reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null" in page
+    assert 'const shouldOpen = reviewControlsOpenClaimId !== detail.claim_id' in page
+    assert 'reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null' in page
     assert "action.textContent = shouldOpen ? 'Hide review controls' : 'Review and decide'" in page
     assert 'controls.scrollIntoView' not in page
-    assert "const showReviewControls = isProfessionalReview && reviewControlsOpenClaimId === detail.claim_id" in page
-    assert "byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none'" in page
+    assert (
+        'const showReviewControls = isProfessionalReview '
+        '&& reviewControlsOpenClaimId === detail.claim_id' in page
+    )
+    assert (
+        "byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none'" in page
+    )
     assert '#detailStaffActions.integrated-review-controls > summary { display:none; }' in page
     assert '.detail-panel > #detailStaffActions { order:1; }' in page
     assert 'Supporting records are linked automatically.' in page
     assert "empty.textContent = 'No review task has been created yet.'" in page
     assert 'supporting record(s) linked automatically.' in page
     assert "'Review task already open'" in page
+    assert 'Choose the next claim stage' in page
+    assert 'placeholder="For example: Does section 4.2 apply' in page
+    assert 'placeholder="For example: Policy section 4.2 applies' in page
+    assert (
+        'result: { outcome: outcomeCode, summary: persistedResultSummary, '
+        'reason_codes: reasonCodes, source_refs: sourceRefs }' in page
+    )
+    assert 'id="evidenceReviewList"' in page
+    assert "new Option('Can be relied on', 'accepted')" in page
+    assert "new Option('Claimant must resubmit', 'resubmission_required')" in page
+    assert 'function deriveWorkflowFromEvidenceFindings()' in page
 
 
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
@@ -129,7 +145,9 @@ def test_employee_workbench_groups_detail_with_progressive_disclosure() -> None:
     assert 'Handoffs and internal review' in page
     assert 'id="detailHistory"' in page
     assert 'History and continuity' in page
-    assert '<details class="detail-section integrated-review-controls" id="detailStaffActions"' in page
+    assert (
+        '<details class="detail-section integrated-review-controls" id="detailStaffActions"' in page
+    )
     assert "byId('detailReview').open = hasReviewWork" in page
 
 

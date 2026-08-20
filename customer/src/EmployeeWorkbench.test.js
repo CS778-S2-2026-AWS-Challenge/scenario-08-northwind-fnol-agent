@@ -16,6 +16,14 @@ function response(body, status = 200) {
   )
 }
 
+function fillProfessionalReviewCompletion(document) {
+  document.querySelector('#completeResultSummary').value =
+    'Policy section 4.2 applies to the confirmed incident facts, so the claim can continue.'
+  document.querySelector('#completeWorkflowState').value = 'ready_for_next'
+  document.querySelector('#customerUpdateSummary').value =
+    'We completed the policy review. Your report can continue and Northwind will prepare the next step.'
+}
+
 function queueItem(number, overrides = {}) {
   return {
     claim_id: `clm_page_${number}`,
@@ -352,6 +360,7 @@ it('clears stale detail and keeps write-back controls disabled when a mutation e
     expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_review')
     expect(dom.window.document.querySelector('#signalDecisionSelect').value).toBe('sig_review')
   })
+  fillProfessionalReviewCompletion(dom.window.document)
   dom.window.document.querySelector('#completeStaffActionBtn').click()
 
   await waitFor(() => {
@@ -416,6 +425,7 @@ it('disables exhausted action and signal controls when the claim remains in the 
   })
 
   await waitFor(() => expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_same_queue'))
+  fillProfessionalReviewCompletion(dom.window.document)
   dom.window.document.querySelector('#completeStaffActionBtn').click()
 
   await waitFor(() => {
@@ -469,6 +479,7 @@ it('clears stale write-back state when the post-mutation refresh fails', async (
   })
 
   await waitFor(() => expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('act_refresh_failure'))
+  fillProfessionalReviewCompletion(dom.window.document)
   dom.window.document.querySelector('#completeStaffActionBtn').click()
 
   await waitFor(() => {
