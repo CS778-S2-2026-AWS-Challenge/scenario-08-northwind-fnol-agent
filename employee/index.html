@@ -106,6 +106,12 @@
     .badge.waiting { background: #f8fafc; color: #334155; }
 
     .detail-panel { display: grid; gap: 16px; }
+    .detail-panel > #detailSummary { order:0; }
+    .detail-panel > #detailStaffActions { order:1; }
+    .detail-panel > #detailReview { order:2; }
+    .detail-panel > #detailEvidence { order:3; }
+    .detail-panel > #detailNextStep { order:4; }
+    .detail-panel > #detailHistory { order:5; }
     .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
     .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
     details.detail-section { padding:0; overflow:hidden; }
@@ -248,8 +254,22 @@
     .empty-state { padding: 30px 20px; color: #334155; }
     .error { padding: 18px 20px; background: #fef2f2; color: #991b1b; border-radius: 14px; margin-bottom: 16px; }
     .staff-controls { display:grid; gap:16px; }
-    .staff-control { padding:16px; border:1px solid #e2e8f0; border-radius:14px; background:#f8fafc; }
-    .staff-control h3 { margin:0 0 12px; font-size:14px; color:#0f172a; }
+    .staff-control { padding:18px; border:1px solid #e2e8f0; border-radius:14px; background:#f8fafc; }
+    .staff-control h3 { margin:0; font-size:16px; color:#0f172a; }
+    .staff-step-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:8px; }
+    .staff-step-number { display:grid; flex:0 0 28px; width:28px; height:28px; place-items:center; border-radius:50%; background:#0f766e; color:#fff; font-size:13px; font-weight:800; }
+    .staff-step-purpose { margin:0 0 14px 40px; color:#475569; font-size:13px; line-height:1.55; }
+    .field-help { color:#64748b; font-size:11px; font-weight:400; line-height:1.45; }
+    .staff-workflow-intro { margin:0 0 16px; padding:13px 14px; border-left:4px solid #0f766e; border-radius:8px; background:#f0fdfa; color:#334155; font-size:13px; line-height:1.55; }
+    .privacy-note { margin-top:12px; padding:11px 12px; border-radius:9px; background:#eff6ff; color:#1e3a8a; font-size:12px; line-height:1.5; }
+    .linked-records { grid-column:1 / -1; padding:11px 12px; border:1px dashed #94a3b8; border-radius:9px; background:#fff; color:#475569; font-size:12px; line-height:1.5; }
+    .linked-records strong { color:#334155; }
+    .review-task-list { display:grid; gap:9px; margin-bottom:14px; }
+    .review-task-card { padding:13px 14px; border:1px solid #99f6e4; border-left:4px solid #0f766e; border-radius:10px; background:#f0fdfa; }
+    .review-task-card-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; }
+    .review-task-card-head strong { margin-right:auto; color:#134e4a; }
+    .review-task-card p { margin:4px 0 0; color:#334155; font-size:12px; line-height:1.5; }
+    .review-task-empty { margin:0 0 14px 40px; color:#64748b; font-size:12px; }
     .staff-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .staff-control label { display:grid; gap:5px; color:#475569; font-size:12px; }
     .staff-control input, .staff-control select, .staff-control textarea { width:100%; padding:9px 10px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#0f172a; font:inherit; }
@@ -257,10 +277,28 @@
     .staff-control .wide { grid-column:1 / -1; }
     .staff-action-button { margin-top:12px; padding:10px 14px; border:0; border-radius:9px; background:#0369a1; color:#fff; font-weight:700; cursor:pointer; }
     .staff-action-button:disabled { opacity:.55; cursor:not-allowed; }
+    .button-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .button-row .staff-action-button { margin-top:0; }
+    .secondary-button { padding:10px 14px; border:1px solid #94a3b8; border-radius:9px; background:#fff; color:#0f172a; font-weight:700; cursor:pointer; }
+    .secondary-button:disabled { opacity:.55; cursor:not-allowed; }
     .mutation-status { margin-top:10px; min-height:18px; color:#475569; font-size:12px; white-space:pre-wrap; }
+    #detailStaffActions { transition:border-color .18s ease,box-shadow .18s ease; }
+    #detailStaffActions.integrated-review-controls { border-color:#c4b5fd; border-top:4px solid #8b5cf6; background:#fdfcff; }
+    #detailStaffActions.integrated-review-controls > summary { display:none; }
+    #detailStaffActions.is-attention { border-color:#8b5cf6; box-shadow:0 0 0 3px rgba(139,92,246,.14); }
+    .review-workspace { display:grid; gap:16px; margin-top:18px; padding:20px; border:1px solid #c4b5fd; border-left:6px solid #7c3aed; border-radius:16px; background:linear-gradient(135deg,#faf5ff 0%,#eff6ff 100%); }
+    .review-workspace-head { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; }
+    .review-workspace-head > div { margin-right:auto; }
+    .review-workspace-eyebrow { margin:0 0 4px; color:#6d28d9; font-size:11px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .review-workspace h3 { margin:0; color:#312e81; font-size:20px; }
+    .review-workspace-summary { margin:5px 0 0; color:#475569; line-height:1.55; }
+    .review-workspace-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .review-workspace-stat { padding:12px; border:1px solid rgba(124,58,237,.14); border-radius:11px; background:rgba(255,255,255,.82); }
+    .review-workspace-stat strong { display:block; color:#312e81; font-size:20px; }
+    .review-workspace-stat span { color:#64748b; font-size:11px; }
     
-    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } .claim-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media (max-width: 680px) { .claim-list { grid-template-columns:1fr; } .operational-summary-grid { grid-template-columns:1fr; } .operational-summary-card.next { grid-column:auto; grid-template-columns:1fr; } }
+    @media (max-width: 1024px) { .page { grid-template-columns: 1fr; } .content { padding: 20px; } .workspace { grid-template-columns: 1fr; } .claim-list { grid-template-columns:repeat(2,minmax(0,1fr)); } .review-workspace-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width: 680px) { .claim-list { grid-template-columns:1fr; } .operational-summary-grid, .review-workspace-grid { grid-template-columns:1fr; } .operational-summary-card.next { grid-column:auto; grid-template-columns:1fr; } }
 
     /* Assistant and customer conversation components */
     .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
@@ -436,42 +474,50 @@
             <summary>History and continuity <span class="detail-section-hint">Previous sessions and communication</span></summary>
             <div id="detailHistoryContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailStaffActions" style="display:none">
-            <summary>Staff actions and write-back <span class="detail-section-hint">Audited workflow controls</span></summary>
+          <details class="detail-section integrated-review-controls" id="detailStaffActions" style="display:none">
+            <summary>Complete the professional review <span class="detail-section-hint">Three guided steps</span></summary>
             <div class="detail-section-body">
-            <p class="muted">These controls persist audited staff decisions to the shared claim state. Internal reasons are never copied into the claimant update.</p>
+            <p class="staff-workflow-intro"><strong>How this works:</strong> define the question, record what the evidence shows, then finish the review with a safe customer update. Your internal reasoning stays private.</p>
             <div class="staff-controls">
               <section class="staff-control">
-                <h3>Create a staff action</h3>
+                <div class="staff-step-head"><span class="staff-step-number">1</span><h3>Define the review question</h3></div>
+                <p class="staff-step-purpose">Create a review task only when this claim does not already have one. State the exact question another claims professional must answer.</p>
+                <div id="reviewTaskList" class="review-task-list" aria-live="polite"></div>
                 <div class="staff-form-grid">
-                  <label>Action type<input id="createActionType" value="professional_review" maxlength="100"></label>
-                  <label>Source references<input id="createActionRefs" placeholder="pol_123, ev_456"></label>
-                  <label class="wide">Requested outcome<textarea id="createActionOutcome">Review the claim and record the authorised outcome.</textarea></label>
+                  <label>What kind of review is needed?<select id="createActionType"><option value="professional_review">General professional review</option><option value="coverage_review">Policy coverage review</option><option value="history_review">Previous claim history review</option><option value="evidence_review">Conflicting evidence review</option></select></label>
+                  <label class="wide">What question must the reviewer answer?<textarea id="createActionOutcome">Decide whether the available information allows this claim to continue.</textarea></label>
+                  <div class="linked-records"><strong>Supporting records are linked automatically.</strong> <span id="linkedRecordSummary">The current policy, history, evidence and handoff records will be attached to the task.</span><input id="createActionRefs" type="hidden"></div>
                 </div>
-                <button id="createStaffActionBtn" class="staff-action-button" type="button">Create action</button>
+                <button id="createStaffActionBtn" class="staff-action-button" type="button">Create review task</button>
               </section>
               <section class="staff-control">
-                <h3>Complete an open action</h3>
+                <div class="staff-step-head"><span class="staff-step-number">2</span><h3>Record what the evidence shows</h3></div>
+                <p class="staff-step-purpose">A signal is a question raised by the system, not a claim decision or fraud finding. Choose the signal, explain your finding, then confirm, dismiss, or resolve it.</p>
                 <div class="staff-form-grid">
-                  <label class="wide">Open action<select id="completeActionSelect"></select></label>
-                  <label>Outcome code<input id="completeOutcomeCode" value="professional_review_completed" maxlength="100"></label>
-                  <label>Reason codes<input id="completeReasonCodes" value="STAFF_REVIEW_COMPLETED"></label>
-                  <label class="wide">Internal result summary<textarea id="completeResultSummary">The staff review is complete.</textarea></label>
-                  <label>New workflow state<select id="completeWorkflowState"><option value="">No workflow change</option><option value="ready_for_next">Ready for next action</option><option value="awaiting_evidence">Awaiting evidence</option><option value="professional_review">Professional review</option></select></label>
-                  <label>Customer responsible party<select id="customerResponsibleParty"><option value="northwind">Northwind</option><option value="claimant">Claimant</option><option value="claims_professional">Claims professional</option><option value="external_party">External party</option></select></label>
-                  <label class="wide">Claimant-safe update<textarea id="customerUpdateSummary">Your claim has been reviewed. We will guide you through the next step.</textarea></label>
+                  <label class="wide">Question raised for review<select id="signalDecisionSelect"></select></label>
+                  <label>Why are you making this finding?<select id="signalReasonCodes"><option value="STAFF_SIGNAL_REVIEWED">Evidence reviewed by a claims professional</option><option value="POLICY_SECTION_CONFIRMED">Relevant policy wording confirmed</option><option value="SOURCE_RECORD_NOT_COMPARABLE">Source record does not apply to this claim</option><option value="CONFLICT_REQUIRES_REVIEW">Evidence conflict still needs review</option></select></label>
+                  <label class="wide">What did you find? <span class="field-help">Internal only. Describe the evidence and why it supports this result.</span><textarea id="signalDecisionSummary">I reviewed this signal against the available evidence and recorded the result.</textarea></label>
                 </div>
-                <button id="completeStaffActionBtn" class="staff-action-button" type="button">Complete action and update claim</button>
+                <div class="button-row" role="group" aria-label="Review signal decision">
+                  <button id="confirmSignalBtn" class="staff-action-button" type="button">Keep for further review</button>
+                  <button id="dismissSignalBtn" class="secondary-button" type="button">Not relevant — dismiss</button>
+                  <button id="resolveSignalBtn" class="secondary-button" type="button">Reviewed — resolve</button>
+                </div>
               </section>
               <section class="staff-control">
-                <h3>Decide a review signal</h3>
+                <div class="staff-step-head"><span class="staff-step-number">3</span><h3>Finish the review and update the claimant</h3></div>
+                <p class="staff-step-purpose">Save the professional outcome, move the claim to its correct next stage, and write a short update the claimant can safely see.</p>
                 <div class="staff-form-grid">
-                  <label class="wide">Review signal<select id="signalDecisionSelect"></select></label>
-                  <label>Decision<select id="signalDecisionValue"><option value="confirmed">Confirmed for review</option><option value="dismissed">Dismissed</option><option value="overridden">Overridden</option><option value="resolved">Resolved</option></select></label>
-                  <label>Reason codes<input id="signalReasonCodes" value="STAFF_SIGNAL_REVIEWED"></label>
-                  <label class="wide">Internal decision summary<textarea id="signalDecisionSummary">A staff member reviewed this signal against the available evidence.</textarea></label>
+                  <label class="wide">Review task to finish<select id="completeActionSelect"></select></label>
+                  <label>Review result<select id="completeOutcomeCode"><option value="professional_review_completed">Review completed</option><option value="more_information_required">More information is required</option><option value="referred_for_further_review">Further specialist review is required</option></select></label>
+                  <label>Reason for completing it<select id="completeReasonCodes"><option value="STAFF_REVIEW_COMPLETED">Professional review completed</option><option value="POLICY_SECTION_CONFIRMED">Relevant policy wording confirmed</option><option value="SOURCE_RECORD_NOT_COMPARABLE">Source record does not apply</option><option value="EVIDENCE_INCOMPLETE">More evidence is needed</option></select></label>
+                  <label class="wide">Internal review result <span class="field-help">State what was decided and which evidence supports it.</span><textarea id="completeResultSummary">I reviewed the available information and recorded the authorised outcome.</textarea></label>
+                  <label>What happens to the claim next?<select id="completeWorkflowState"><option value="">Keep its current stage</option><option value="ready_for_next">Continue to the next claim step</option><option value="awaiting_evidence">Wait for more evidence</option><option value="professional_review">Keep in professional review</option></select></label>
+                  <label>Who is responsible for the next step?<select id="customerResponsibleParty"><option value="northwind">Northwind</option><option value="claimant">Claimant</option><option value="claims_professional">Claims professional</option><option value="external_party">External party</option></select></label>
+                  <label class="wide">Update shown to the claimant <span class="field-help">Use plain language. Do not mention internal signals, risk labels, or private history.</span><textarea id="customerUpdateSummary">We have completed our review and will guide you through the next step.</textarea></label>
                 </div>
-                <button id="decideSignalBtn" class="staff-action-button" type="button">Record signal decision</button>
+                <p class="privacy-note"><strong>Privacy check:</strong> the internal result and reason codes stay in the staff record. Only the update immediately above is shown to the claimant.</p>
+                <button id="completeStaffActionBtn" class="staff-action-button" type="button">Finish review and save customer update</button>
               </section>
             </div>
             <div id="mutationStatus" class="mutation-status" aria-live="polite"></div>
@@ -543,6 +589,7 @@
     let activeClaimDetail = null;
     const detailCache = new Map();
     let detailRevision = null;
+    let reviewControlsOpenClaimId = null;
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -648,13 +695,68 @@
     }
 
     function syncStaffControlState() {
-      byId('createStaffActionBtn').disabled = !activeClaimDetail;
+      const hasOpenReviewTask = (activeClaimDetail?.staff_actions || []).some(
+        item => !['completed', 'cancelled'].includes(item.status)
+      );
+      byId('createStaffActionBtn').disabled = !activeClaimDetail || hasOpenReviewTask;
+      byId('createStaffActionBtn').textContent = hasOpenReviewTask
+        ? 'Review task already open'
+        : 'Create review task';
       byId('completeStaffActionBtn').disabled = !activeClaimDetail || !byId('completeActionSelect').value;
-      byId('decideSignalBtn').disabled = !activeClaimDetail || !byId('signalDecisionSelect').value;
+      const signalDecisionDisabled = !activeClaimDetail || !byId('signalDecisionSelect').value;
+      ['confirmSignalBtn', 'dismissSignalBtn', 'resolveSignalBtn']
+        .forEach(id => { byId(id).disabled = signalDecisionDisabled; });
     }
 
     function populateStaffControls(detail) {
       const openActions = (detail.staff_actions || []).filter(item => !['completed', 'cancelled'].includes(item.status));
+      const taskList = byId('reviewTaskList');
+      taskList.replaceChildren();
+      if (!detail.staff_actions?.length) {
+        const empty = document.createElement('p');
+        empty.className = 'review-task-empty';
+        empty.textContent = 'No review task has been created yet.';
+        taskList.append(empty);
+      } else {
+        detail.staff_actions.forEach(action => {
+          const card = document.createElement('article');
+          card.className = 'review-task-card';
+          const head = document.createElement('div');
+          head.className = 'review-task-card-head';
+          const title = document.createElement('strong');
+          title.textContent = formatLabel(action.action_type);
+          const status = document.createElement('span');
+          status.className = 'badge review';
+          status.textContent = formatLabel(action.status);
+          head.append(title, status);
+          const question = document.createElement('p');
+          question.textContent = `Review question: ${action.requested_outcome}`;
+          const owner = document.createElement('p');
+          owner.textContent = `Assigned to: ${action.assigned_to || 'Current staff member'}`;
+          card.append(head, question, owner);
+          if (action.source_refs?.length) {
+            const sources = document.createElement('p');
+            sources.textContent = `${action.source_refs.length} supporting record(s) linked automatically.`;
+            card.append(sources);
+          }
+          if (action.result) {
+            const result = document.createElement('p');
+            result.textContent = `Result: ${action.result.summary}`;
+            card.append(result);
+          }
+          taskList.append(card);
+        });
+      }
+
+      const automaticRefs = [
+        ...(detail.retrievals || []).map(item => item.retrieval_id),
+        ...(detail.evidence || []).map(item => item.evidence_id),
+        ...(detail.handoffs || []).filter(item => !['resolved', 'cancelled'].includes(item.status)).map(item => item.handoff_id),
+      ].filter(Boolean);
+      byId('createActionRefs').value = [...new Set(automaticRefs)].join(', ');
+      byId('linkedRecordSummary').textContent = automaticRefs.length
+        ? `${new Set(automaticRefs).size} current supporting record(s) will be attached automatically.`
+        : 'No supporting record is available yet; the task can still be created.';
       const actionSelect = byId('completeActionSelect');
       actionSelect.replaceChildren();
       openActions.forEach(action => actionSelect.add(new Option(`${action.action_type} · ${action.status}`, action.action_id)));
@@ -662,12 +764,15 @@
 
       const signalSelect = byId('signalDecisionSelect');
       signalSelect.replaceChildren();
-      (detail.signals || []).filter(signal => !(signal.decisions || []).length).forEach(signal => {
+      (detail.signals || []).filter(signal => {
+        const decisions = signal.decisions || [];
+        const latestDecision = decisions[decisions.length - 1]?.decision;
+        return !['dismissed', 'overridden', 'resolved'].includes(latestDecision);
+      }).forEach(signal => {
         const signalId = signal.signal_id || signal.code;
         if (signalId) signalSelect.add(new Option(signal.code || signal.signal_id, signalId));
       });
-      if (!signalSelect.options.length) signalSelect.add(new Option('No undecided review signals', ''));
-      byId('detailStaffActions').style.display = 'block';
+      if (!signalSelect.options.length) signalSelect.add(new Option('No actionable review signals', ''));
       syncStaffControlState();
     }
 
@@ -734,15 +839,21 @@
       await refreshAfterStaffMutation('Action completed; claim state and claimant-safe update persisted.');
     }
 
-    async function decideSignalFromForm() {
+    async function decideSignalFromForm(decision) {
       if (!activeClaimDetail) throw new Error('Select a claim before deciding a signal.');
       const signalId = byId('signalDecisionSelect').value;
       if (!signalId) throw new Error('Choose an undecided review signal.');
       const reasonCodes = commaSeparatedValues(byId('signalReasonCodes').value);
       const summary = byId('signalDecisionSummary').value.trim();
       if (!reasonCodes.length || !summary) throw new Error('Decision reason and summary are required.');
-      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, { decision: byId('signalDecisionValue').value, reason_codes: reasonCodes, summary, evidence_refs: [] });
-      await refreshAfterStaffMutation('Review-signal decision recorded as an internal audited decision.');
+      const selectedSignal = (activeClaimDetail.signals || []).find(
+        signal => (signal.signal_id || signal.code) === signalId
+      );
+      const evidenceRefs = (selectedSignal?.source_evidence || [])
+        .map(item => item.retrieval_id)
+        .filter(Boolean);
+      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, { decision, reason_codes: reasonCodes, summary, evidence_refs: evidenceRefs });
+      await refreshAfterStaffMutation(`${formatLabel(decision)} signal decision recorded with its reason and evidence.`);
     }
 
     async function fetchClaims(view) {
@@ -1004,6 +1115,24 @@
       }));
       evidenceContainer.append(contextBlock('Evidence', definitionList(evidenceRows)));
 
+      const retrievalRows = (detail.retrievals || []).map(item => {
+        const reference = item.kind === 'policy'
+          ? item.facts?.policy_reference
+          : item.facts?.history_reference;
+        const facts = Object.entries(item.facts || {})
+          .filter(([, value]) => value !== null && value !== '' && !(Array.isArray(value) && !value.length))
+          .map(([key, value]) => `${formatLabel(key)}: ${Array.isArray(value) ? value.join(', ') : value}`);
+        return {
+          label: `${formatLabel(item.kind)} · ${reference || item.retrieval_id}`,
+          value: facts,
+          meta: [
+            `Source: ${item.source?.system || 'Unknown'} · ${item.source?.reference || 'No reference'}`,
+            ...(item.uncertainty || []).map(value => `Uncertainty — ${value.code}: ${value.detail}`),
+          ],
+        };
+      });
+      evidenceContainer.append(contextBlock('Policy and claim history', definitionList(retrievalRows)));
+
       const continuityItems = (detail.sessions || []).flatMap(session => [
         ...(session.summary ? [`Summary: ${session.summary}`] : []),
         ...session.unresolved_questions.map(item => `Open question: ${item}`),
@@ -1015,7 +1144,17 @@
       const signalRows = (detail.signals || []).map(signal => ({
         label: textOrEmpty(signal.code || signal.signal_id, 'Internal signal'),
         value: formatLabel(signal.status || 'review required'),
-        meta: [signal.reason, signal.decisions?.length ? `${signal.decisions.length} staff decision(s)` : ''],
+        meta: [
+          signal.summary || signal.reason,
+          signal.reason_codes?.length ? `Reasons: ${signal.reason_codes.join(', ')}` : '',
+          signal.source_refs?.length ? `Sources: ${signal.source_refs.join(', ')}` : '',
+          ...(signal.source_evidence || []).flatMap(item =>
+            (item.uncertainty || []).map(value => `Uncertainty — ${value.code}: ${value.detail}`)
+          ),
+          ...(signal.decisions || []).map(decision =>
+            `${formatLabel(decision.decision)} by ${decision.actor_id || 'staff'}: ${decision.summary || 'No result summary'} (${decision.reason_codes?.join(', ') || 'No reason code'})`
+          ),
+        ],
       }));
       reviewContainer.append(contextBlock('Internal signals', definitionList(signalRows)));
 
@@ -1206,6 +1345,82 @@
       return card;
     }
 
+    function professionalReviewWorkspace(detail) {
+      if (detail.claim_state.workflow_state !== 'professional_review') return null;
+      const section = document.createElement('section');
+      section.className = 'review-workspace';
+      section.setAttribute('aria-label', 'Professional review workspace');
+      const signals = detail.signals || [];
+      const retrievals = detail.retrievals || [];
+      const uncertaintyCount = retrievals.reduce(
+        (total, item) => total + (item.uncertainty || []).length, 0
+      );
+      const openActions = (detail.staff_actions || []).filter(
+        item => !['completed', 'cancelled'].includes(item.status)
+      );
+      const activeHandoff = (detail.handoffs || []).find(
+        item => !['resolved', 'cancelled'].includes(item.status)
+      );
+
+      const head = document.createElement('div');
+      head.className = 'review-workspace-head';
+      const copy = document.createElement('div');
+      const eyebrow = document.createElement('p');
+      eyebrow.className = 'review-workspace-eyebrow';
+      eyebrow.textContent = 'Decision required';
+      const title = document.createElement('h3');
+      title.textContent = 'Professional review workspace';
+      const summary = document.createElement('p');
+      summary.className = 'review-workspace-summary';
+      summary.textContent = activeHandoff?.requested_action
+        || signals[0]?.summary
+        || 'Review the available evidence, record the reason and result, then send only a claimant-safe status update.';
+      copy.append(eyebrow, title, summary);
+      const action = document.createElement('button');
+      action.className = 'staff-action-button';
+      action.type = 'button';
+      const controlsAlreadyOpen = reviewControlsOpenClaimId === detail.claim_id;
+      action.textContent = controlsAlreadyOpen ? 'Hide review controls' : 'Review and decide';
+      action.setAttribute('aria-controls', 'detailStaffActions');
+      action.setAttribute('aria-expanded', String(controlsAlreadyOpen));
+      action.addEventListener('click', () => {
+        const controls = byId('detailStaffActions');
+        const shouldOpen = reviewControlsOpenClaimId !== detail.claim_id;
+        reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null;
+        controls.style.display = shouldOpen ? 'block' : 'none';
+        controls.open = shouldOpen;
+        action.setAttribute('aria-expanded', String(shouldOpen));
+        action.textContent = shouldOpen ? 'Hide review controls' : 'Review and decide';
+        if (shouldOpen) {
+          controls.classList.add('is-attention');
+          window.setTimeout(() => controls.classList.remove('is-attention'), 900);
+        } else {
+          controls.classList.remove('is-attention');
+        }
+      });
+      head.append(copy, action);
+
+      const grid = document.createElement('div');
+      grid.className = 'review-workspace-grid';
+      [
+        ['Evidence sources', retrievals.length + (detail.evidence || []).length],
+        ['Uncertainties', uncertaintyCount],
+        ['Review signals', signals.length],
+        ['Open actions', openActions.length],
+      ].forEach(([label, value]) => {
+        const card = document.createElement('div');
+        card.className = 'review-workspace-stat';
+        const count = document.createElement('strong');
+        count.textContent = String(value);
+        const caption = document.createElement('span');
+        caption.textContent = label;
+        card.append(count, caption);
+        grid.append(card);
+      });
+      section.append(head, grid);
+      return section;
+    }
+
     function renderDetail(claimId, providedDetail = null) {
       const selected = claims.find(item => item.claim_id === claimId);
       if (!selected) {
@@ -1237,6 +1452,8 @@
           detailContent.appendChild(noteP);
 
           detailContent.append(operationalSummary(detail));
+          const reviewWorkspace = professionalReviewWorkspace(detail);
+          if (reviewWorkspace) detailContent.append(reviewWorkspace);
 
           renderContext(detail);
           byId('detailNextStep').style.display = 'block';
@@ -1244,6 +1461,11 @@
           byId('detailReview').style.display = 'block';
           byId('detailHistory').style.display = 'block';
           populateStaffControls(detail);
+          const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
+          byId('detailReview').open = isProfessionalReview || byId('detailReview').open;
+          const showReviewControls = isProfessionalReview && reviewControlsOpenClaimId === detail.claim_id;
+          byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none';
+          byId('detailStaffActions').open = showReviewControls;
           if (!customerChatView.hidden) renderCustomerChat();
         })
         .catch(error => {
@@ -1376,7 +1598,9 @@
     });
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
-    byId('decideSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, decideSignalFromForm));
+    byId('confirmSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('confirmed')));
+    byId('dismissSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('dismissed')));
+    byId('resolveSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('resolved')));
 
     loadClaims();
 

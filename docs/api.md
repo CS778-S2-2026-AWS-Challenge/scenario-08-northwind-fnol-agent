@@ -1112,6 +1112,7 @@ claimant routes:
   "sessions": [],
   "messages": [],
   "decisions": [],
+  "retrievals": [],
   "signals": [],
   "handoffs": [],
   "staff_actions": [],
@@ -1127,8 +1128,11 @@ claimant routes:
 `sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
 and context revisions. `messages` includes the complete persisted communication history,
 including internal-only staff or system records. `decisions` includes internal authority,
-tool, and proposed-signal context; `signals` projects those persisted proposed signals for the
-workbench. `handoffs` is a typed staff-only projection of the persisted handoff records and
+tool, and proposed-signal context. `retrievals` contains the provider-neutral policy and relevant
+claim-history records, including provenance and recorded uncertainty. `signals` projects persisted
+proposed signals and connects retrieval-backed signals to their source evidence through
+`source_refs` and `source_evidence`; recorded staff decisions include their actor, reason codes,
+result summary, and evidence references. `handoffs` is a typed staff-only projection of the persisted handoff records and
 includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
 internal `professional_review_required` trigger does not set `support_need`: that field remains
 specific to claimant support intent. Claimant routes return only the

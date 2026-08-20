@@ -9,6 +9,9 @@ def test_employee_workbench_wires_audited_staff_mutations() -> None:
     assert "requestMutation('/staff-actions', 'POST'" in page
     assert "requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH'" in page
     assert "requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST'" in page
+    assert "decideSignalFromForm('confirmed')" in page
+    assert "decideSignalFromForm('dismissed')" in page
+    assert "decideSignalFromForm('resolved')" in page
     assert "'Idempotency-Key': crypto.randomUUID()" in page
     assert "'If-Match': String(revision)" in page
     assert "path: 'claim_state.workflow_state'" in page
@@ -22,7 +25,38 @@ def test_employee_workbench_keeps_internal_and_claimant_text_separate() -> None:
     assert 'customerUpdateSummary' in page
     assert 'summary: customerSummary' in page
     assert 'reason_codes: reasonCodes' in page
-    assert 'Internal reasons are never copied into the claimant update.' in page
+    assert 'evidence_refs: evidenceRefs' in page
+    assert 'the internal result and reason codes stay in the staff record' in page
+    assert 'Only the update immediately above is shown to the claimant.' in page
+
+
+def test_employee_professional_review_connects_evidence_uncertainty_and_results() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert "contextBlock('Policy and claim history'" in page
+    assert 'detail.retrievals || []' in page
+    assert 'Uncertainty — ${value.code}: ${value.detail}' in page
+    assert 'signal.source_evidence || []' in page
+    assert 'decision.actor_id' in page
+    assert 'decision.summary' in page
+    assert "decision.reason_codes?.join(', ')" in page
+    assert 'No actionable review signals' in page
+    assert "section.setAttribute('aria-label', 'Professional review workspace')" in page
+    assert "title.textContent = 'Professional review workspace'" in page
+    assert "controlsAlreadyOpen ? 'Hide review controls' : 'Review and decide'" in page
+    assert "action.setAttribute('aria-controls', 'detailStaffActions')" in page
+    assert "const shouldOpen = reviewControlsOpenClaimId !== detail.claim_id" in page
+    assert "reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null" in page
+    assert "action.textContent = shouldOpen ? 'Hide review controls' : 'Review and decide'" in page
+    assert 'controls.scrollIntoView' not in page
+    assert "const showReviewControls = isProfessionalReview && reviewControlsOpenClaimId === detail.claim_id" in page
+    assert "byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none'" in page
+    assert '#detailStaffActions.integrated-review-controls > summary { display:none; }' in page
+    assert '.detail-panel > #detailStaffActions { order:1; }' in page
+    assert 'Supporting records are linked automatically.' in page
+    assert "empty.textContent = 'No review task has been created yet.'" in page
+    assert 'supporting record(s) linked automatically.' in page
+    assert "'Review task already open'" in page
 
 
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
@@ -95,7 +129,7 @@ def test_employee_workbench_groups_detail_with_progressive_disclosure() -> None:
     assert 'Handoffs and internal review' in page
     assert 'id="detailHistory"' in page
     assert 'History and continuity' in page
-    assert '<details class="detail-section" id="detailStaffActions"' in page
+    assert '<details class="detail-section integrated-review-controls" id="detailStaffActions"' in page
     assert "byId('detailReview').open = hasReviewWork" in page
 
 

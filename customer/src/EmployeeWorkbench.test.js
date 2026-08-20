@@ -68,6 +68,37 @@ function queueDetail(item) {
   }
 }
 
+it('toggles professional review controls without navigating away from the claim', async () => {
+  const item = queueItem(90)
+  const fetchMock = vi.fn((url) => {
+    if (String(url).endsWith(`/${item.claim_id}`)) return response(queueDetail(item))
+    return response({ items: [item], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = fetchMock },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('[aria-controls="detailStaffActions"]')).not.toBeNull())
+  const toggle = dom.window.document.querySelector('[aria-controls="detailStaffActions"]')
+  const controls = dom.window.document.querySelector('#detailStaffActions')
+  expect(controls.style.display).toBe('none')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+  toggle.click()
+  expect(controls.style.display).toBe('block')
+  expect(controls.open).toBe(true)
+  expect(toggle.textContent).toBe('Hide review controls')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+  toggle.click()
+  expect(controls.style.display).toBe('none')
+  expect(controls.open).toBe(false)
+  expect(toggle.textContent).toBe('Review and decide')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  dom.window.close()
+})
+
 it('paginates a large queue, resets on filter change, and keeps handoff facts visible', async () => {
   const items = Array.from({ length: 8 }, (_, index) => queueItem(index + 1))
   items[0] = queueItem(1, { priority: 'high', open_handoff_count: 2 })
@@ -333,7 +364,9 @@ it('clears stale detail and keeps write-back controls disabled when a mutation e
     expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('none')
     expect(dom.window.document.querySelector('#createStaffActionBtn').disabled).toBe(true)
     expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
-    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#confirmSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#dismissSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#resolveSignalBtn').disabled).toBe(true)
   })
   dom.window.close()
 })
@@ -387,11 +420,13 @@ it('disables exhausted action and signal controls when the claim remains in the 
 
   await waitFor(() => {
     expect(dom.window.document.querySelector('#claimCount').textContent).toBe('1 claim')
-    expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('block')
+    expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('none')
     expect(dom.window.document.querySelector('#completeActionSelect').value).toBe('')
     expect(dom.window.document.querySelector('#signalDecisionSelect').value).toBe('')
     expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
-    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#confirmSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#dismissSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#resolveSignalBtn').disabled).toBe(true)
     expect(dom.window.document.querySelector('#mutationStatus').textContent).toContain('persisted')
   })
   dom.window.close()
@@ -442,7 +477,9 @@ it('clears stale write-back state when the post-mutation refresh fails', async (
     expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('none')
     expect(dom.window.document.querySelector('#createStaffActionBtn').disabled).toBe(true)
     expect(dom.window.document.querySelector('#completeStaffActionBtn').disabled).toBe(true)
-    expect(dom.window.document.querySelector('#decideSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#confirmSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#dismissSignalBtn').disabled).toBe(true)
+    expect(dom.window.document.querySelector('#resolveSignalBtn').disabled).toBe(true)
   })
   dom.window.close()
 })

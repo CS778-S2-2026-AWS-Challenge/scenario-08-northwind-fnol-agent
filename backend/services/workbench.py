@@ -293,6 +293,10 @@ def get_workbench_claim_detail(
         sessions=[_workbench_session(session) for session in sessions],
         messages=messages,
         decisions=decisions,
+        retrievals=[
+            item.model_dump(mode='json')
+            for item in repository.list_retrieval_records(claim_id, claim.customer_id)
+        ],
         signals=signals,
         handoffs=[workbench_handoff(handoff) for handoff in handoffs],
         staff_actions=[
