@@ -1063,7 +1063,7 @@ Supported filters:
 
 | Filter | Values |
 |---|---|
-| `view` | `urgent`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `urgent`, `human_requests`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -1084,6 +1084,11 @@ contains `claim_id`, `revision`, `customer_reference`, `incident_type`, `workflo
 Queue assignment, priority, and assignee are derived from the shared claim state and active
 persisted handoffs. Creation and assessor-routing statuses are nullable until those integrations
 have produced a result.
+
+`urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
+contains claims with an open claimant-support handoff whose support need is `human_requested`.
+Queue results are ordered by priority (`immediate`, `urgent`, `high`, `standard`) and then by
+oldest claim creation time so staff can accept the highest-priority work first.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 

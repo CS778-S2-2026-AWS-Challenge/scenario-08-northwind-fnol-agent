@@ -8,6 +8,7 @@ from backend.domain.models import (
     HandoffRecord,
     MessageRecord,
     SessionRecord,
+    SupportNeed,
     WorkbenchClaimDetail,
     WorkbenchClaimListItem,
     WorkbenchClaimListResponse,
@@ -17,6 +18,13 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
+
+_PRIORITY_RANK = {
+    HandoffPriority.IMMEDIATE: 0,
+    HandoffPriority.URGENT: 1,
+    HandoffPriority.HIGH: 2,
+    HandoffPriority.STANDARD: 3,
+}
 
 
 def _staff_access_required() -> ApiError:
@@ -129,6 +137,30 @@ def _pending_evidence(records: list[EvidenceRecord]) -> list[EvidenceRecord]:
     ]
 
 
+def _matches_view(
+    view: str | None,
+    queue: str,
+    open_handoffs: list[HandoffRecord],
+    pending_evidence: list[EvidenceRecord],
+) -> bool:
+    if view in {None, 'all'}:
+        return True
+    if view == 'urgent':
+        return any(
+            handoff.priority in {HandoffPriority.IMMEDIATE, HandoffPriority.URGENT}
+            for handoff in open_handoffs
+        )
+    if view == 'human_requests':
+        return any(
+            handoff.queue == 'claimant_support'
+            and handoff.support_need is SupportNeed.HUMAN_REQUESTED
+            for handoff in open_handoffs
+        )
+    if view == 'awaiting_evidence':
+        return bool(pending_evidence)
+    return view == queue
+
+
 def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
@@ -155,10 +187,7 @@ def list_workbench_claims(
             (handoff.assigned_to for handoff in open_handoffs if handoff.assigned_to),
             None,
         )
-        if view == 'awaiting_evidence':
-            if not pending_evidence:
-                continue
-        elif view and view != 'all' and view != queue:
+        if not _matches_view(view, queue, open_handoffs, pending_evidence):
             continue
         items.append(
             WorkbenchClaimListItem(
@@ -194,6 +223,13 @@ def list_workbench_claims(
                 updated_at=claim.updated_at,
             )
         )
+    items.sort(
+        key=lambda item: (
+            _PRIORITY_RANK[item.priority],
+            item.created_at,
+            item.claim_id,
+        )
+    )
     return WorkbenchClaimListResponse(items=items, page={'next_cursor': None})
 
 
