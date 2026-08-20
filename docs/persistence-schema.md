@@ -1,151 +1,131 @@
-# Persistence Schema Draft
+# Persistence Contract
 
 ## Status and Boundary
 
-This is a Sprint 1 design draft for the persistence boundary. It is a logical
-model, not confirmation of an AWS table, index, region, identity, or service
-configuration. Those facts remain open until the provided environment is
-inspected.
+This document defines provider-neutral logical records, access patterns, and consistency
+rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical schema.
+Physical mappings belong inside the selected runtime-profile adapters and must preserve
+this contract.
 
-The public API exposes domain identifiers and typed records only. It never
-exposes partition keys, sort keys, index names, table names, object keys, or
-provider payloads. Route handlers depend on `PersistenceRepository` rather
-than a DynamoDB SDK.
+Public APIs expose domain identifiers and typed projections only. They never expose
+collection names, table names, partition keys, indexes, bucket keys, vector-index names,
+provider payloads, or SDK types.
 
-## Logical Item Layout
+## Logical Record Groups
 
-The draft uses one logical record collection. A future adapter may use one or
-more physical stores if it preserves these access patterns and repository
-methods.
+| Group | Records | Primary ownership |
+| --- | --- | --- |
+| Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, workflow, next action, revision | `claim_id`, linked to `customer_id` |
+| Interaction | sessions, messages, compact summaries, unresolved work, prior commitments | `claim_id` and `session_id` |
+| Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
+| Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
+| Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
+| Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
+| Integration | claim-creation result, routing result, external participant task, idempotency result | `claim_id` and operation identity |
+| Configuration | versioned model, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
+| Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 
-| Record | Logical partition | Logical sort | Required parent |
-|---|---|---|---|
-| Working claim | `CLAIM#<claim_id>` | `CLAIM` | customer ownership in the item |
-| Session | `CLAIM#<claim_id>` | `SESSION#<session_id>` | claim and customer |
-| Message | `CLAIM#<claim_id>` | `MESSAGE#<created_at>#<message_id>` | claim and session |
-| Agent decision | `CLAIM#<claim_id>` | `DECISION#<created_at>#<decision_id>` | claim, session, and trigger message |
-| Evidence | `CLAIM#<claim_id>` | `EVIDENCE#<evidence_id>` | claim |
-| Handoff | `CLAIM#<claim_id>` | `HANDOFF#<created_at>#<handoff_id>` | claim |
-
-Customer claim listing needs a logical customer lookup:
-`CUSTOMER#<customer_id>` with `CLAIM#<created_at>#<claim_id>` ordering. Whether
-this is implemented as a DynamoDB secondary index or another query mechanism
-is intentionally undecided.
-
-The key templates are implemented in
-`backend/repositories/key_layout.py`. They are adapter internals and are not
-part of HTTP request or response models.
+Original evidence bytes, policy documents, and other large objects are stored through
+the active profile's object or document store. Domain records retain protected references
+and checksums rather than embedding those bytes.
 
 ## Required Access Patterns
 
-1. Read one claim after verifying the authenticated customer owns it.
-2. List a customer's working claims ordered by creation time.
-3. Read one session under its claim and retain its resume revision.
-4. Append and page messages for one claim/session, filtering visibility before
-   claimant projection.
-5. Save and restore the validated Agent decision associated with a trigger
-   message, including its authority outcome and resulting claim revision.
-6. Read or list evidence under a claim without returning another customer's
-   records.
-7. Save a material claim revision only when the expected revision still
-   matches; otherwise return a repository revision conflict.
-8. Record idempotency results using actor, route, and client key.
-9. Read handoff priority, owner, status, reason, and transfer packet under the
-   claim, then persist lifecycle changes with the same expected claim revision
-   used for the associated shared-state write.
+1. Read one claim after verifying customer ownership or authorised staff access.
+2. List a customer's working claims in a stable order without exposing another customer.
+3. Read the current Working Claim and conditionally write one material revision.
+4. Create, pause, close, and resume claim-scoped sessions without copying older Claim
+   State over a newer revision.
+5. Append and page messages while filtering visibility before projection.
+6. Register, update, and list evidence metadata while preserving object provenance.
+7. Save structured retrieval results and source-linked review signals atomically.
+8. Read staff queues by priority, state, owner, next action, and service timing.
+9. Accept and resolve handoffs and staff work through the same claim revision boundary.
+10. Record idempotency results by actor, operation, client key, and request fingerprint.
+11. Resolve the active configuration version and read its immutable publication record.
+12. Append audit events and query them by authorised subject and time range.
 
-## Record Rules
+## Claim Revision and Idempotency
 
-- All identifiers are server-generated except a claimant's retry key.
-- Every child record carries its `claim_id`; messages also carry
-  `session_id`.
-- `MessageVisibility.INTERNAL_ONLY` is never returned by claimant APIs.
-- Evidence stores metadata, provenance, processing state, and a secure object
-  reference owned by the adapter. File bytes and signed upload URLs are not
-  stored in the domain record.
-- Claim and child writes must preserve ownership and optimistic-concurrency
-  checks at the repository boundary.
-- Complete messages remain durable; session summaries are bounded resume
-  context, not a replacement for message history.
-- Agent decisions preserve the proposal, reason codes, authority validation,
-  proposed form changes, and resulting revision. A review-required or blocked
-  high-impact proposal is recorded without applying its high-impact state change.
+- `WorkingClaim.revision` is the single optimistic-concurrency token for shared material
+  claim writes.
+- A mutation using a stale expected revision fails without a partial write.
+- A successful material mutation advances the revision exactly once.
+- An idempotency record identifies an accepted operation and request fingerprint. An
+  identical replay returns the current authorised projection; changed input under the
+  same key is a conflict.
+- Child records must not introduce a second concurrency counter that permits them to
+  overwrite shared Claim State.
 
-## Session snapshots, resume, and revision invariants
+## Session and Resume Invariants
 
-- `WorkingClaim` is the authoritative current FNOL state. Session records do
-  not own a private copy of Claim State and must not overwrite newer claim
-  state during resume.
-- A `SessionRecord` stores bounded interaction context: its compact summary,
-  unresolved questions, pending items, prior commitments, and the claim
-  revision represented by that context. Complete messages remain durable
-  records outside the bounded session snapshot.
-- `SessionRecord.context_revision` is the `WorkingClaim.revision` from which
-  the bounded session context was captured or last synchronised. It may lag
-  the current claim revision, but it must never be greater than the current
-  claim revision.
-- `context_revision` is provenance for resume context, not an optimistic-lock
-  token. Material Claim State writes use `WorkingClaim.revision` and the
-  repository expected-revision check.
-- Resuming an existing working claim continues the same `claim_id`. A new
-  interaction session may be created, but resume must not create a duplicate
-  working claim or replace confirmed claim facts with an older session
-  snapshot.
-- At most one claimant session for a working claim is active at a time, and
-  `WorkingClaim.active_session_id` identifies that active interaction.
-- Historical paused or closed sessions may retain an older
-  `context_revision`. Recovery logic may use their bounded context as input,
-  but the current `WorkingClaim` remains authoritative when the two differ.
-- Future persistence adapters must preserve these invariants without exposing
-  provider keys or creating a second concurrency model beside
-  `WorkingClaim.revision`.
+- The Working Claim is authoritative; sessions hold bounded interaction context only.
+- A session summary records the claim revision it represents. That revision may lag but
+  must not exceed the current claim revision.
+- Complete messages remain durable outside the bounded summary.
+- Resuming creates or activates an interaction session for the same `claim_id`; it does
+  not create a duplicate working claim.
+- At most one claimant interaction session is active for a working claim unless a later
+  approved product contract explicitly changes this rule.
+- Resume preserves confirmed facts, evidence records, pending work, and prior
+  commitments while using the latest authorised Claim State.
 
-## Handoff persistence, ownership, and revision invariants
+## Evidence Invariants
 
-- A `HandoffRecord` is a claim-scoped durable child record. Priority, queue,
-  support need, reason codes, reason, requested action, transfer packet,
-  ownership, status, and lifecycle timestamps are persisted rather than kept
-  only in a workbench projection.
-- `WorkingClaim.revision` remains the single optimistic-concurrency token for
-  handoff lifecycle changes. Accepting, continuing, cancelling, or resolving a
-  handoff must use the current claim revision and advance that revision exactly
-  once when shared state changes. There is no independent handoff revision
-  counter.
-- The revision returned by handoff mutation responses is therefore the parent
-  `WorkingClaim.revision` produced by that material handoff write. This keeps
-  the handoff and shared Claim State in one concurrency domain.
-- A newly requested or queued handoff has no staff owner. Acceptance assigns an
-  owner and records `accepted_at`. Once an owner is persisted, later active
-  work must be performed by that owner and the owner cannot be replaced by a
-  blind record overwrite.
-- Allowed lifecycle movement is `requested -> queued -> accepted ->
-  in_progress -> resolved`, with cancellation permitted before acceptance.
-  Repeated in-progress writes may retain `in_progress`; resolved and cancelled
-  records are terminal.
-- Handoff identity, type, priority, queue, support need, reason, requested
-  action, source context, transfer packet, and creation timestamp are immutable
-  after creation. Lifecycle writes may update status, owner, and the applicable
-  acceptance or resolution timestamps only.
-- Direct `save_handoff` writes may seed a new record or repeat an identical
-  record, but they must not overwrite an existing handoff. Material lifecycle
-  changes must go through a revision-checked mutation.
-- Idempotency metadata for a handoff mutation identifies the same
-  `handoff_id`. A repeated claimant support request reuses the existing active
-  handoff where applicable instead of creating a second record with competing
-  ownership.
-- These invariants are applied at the application persistence boundary. The
-  repository is decorated once when the application is constructed, so the
-  object held in application state is already guarded and no router, service,
-  seed path, or adapter can reach an unguarded handoff write.
-- A future persistence adapter must enforce the same revision, ownership, and
-  transition invariants even if its physical transaction or conditional-write
-  mechanism differs from the fixture repository.
+- Evidence metadata and original bytes are separate.
+- A protected object reference is adapter-owned and never appears in claimant responses.
+- Extraction produces source-linked proposals; it does not confirm a claim fact.
+- Evidence lifecycle writes preserve ownership, checksum, provenance, and permitted
+  visibility.
+- Pending, incomplete, unofficial, and not-yet-generated evidence remain distinct states.
 
-## Unknowns and Next Decision Points
+## Retrieval and Review Invariants
 
-- AWS identity provider, table/index availability, region, throughput model,
-  retention, encryption, and object storage are unconfirmed.
-- The physical mapping, serialization format, pagination token, retry policy,
-  and transaction support must be selected after AWS access is inspected.
-- A future DynamoDB adapter must implement `PersistenceRepository` and its
-  contract tests without changing route handlers or claimant projections.
+- Structured policy/history results and knowledge citations preserve source, version,
+  retrieval time, limitations, and visibility.
+- Raw provider payloads and discarded provider-only fields are not persisted as domain
+  facts.
+- A retrieval and any directly derived review signal are saved atomically.
+- Saving retrieval evidence does not itself advance claim revision or make a high-impact
+  decision.
+- Staff decisions are separate immutable records and retain the source references that
+  motivated the review.
+
+## Handoff and Staff-work Invariants
+
+- A handoff retains immutable identity, type, reason, priority, requested action, source
+  context, transfer packet, and creation time.
+- Lifecycle changes may update status, owner, and applicable timestamps through a
+  revision-checked claim mutation.
+- Acceptance records one owner. Active work cannot be reassigned by a blind overwrite.
+- Repeated support requests reuse an applicable active handoff rather than creating
+  competing ownership.
+- Staff write-back records actor, reason, outcome, evidence references, and a separate
+  claimant-safe update.
+
+## Configuration and Control Plane Invariants
+
+- Draft configuration is separate from the active published version.
+- Publication records author, reason, validation evidence, approver when required,
+  effective time, previous version, and rollback target.
+- Published versions are immutable. Rollback publishes or reactivates an approved prior
+  version and preserves the intervening audit history.
+- Secret values are stored in an approved secret manager. Configuration stores only a
+  secret reference and safe metadata.
+- Selecting a data runtime profile is a deployment-level configuration change. A process
+  uses one complete profile and cannot mix provider stores silently.
+- Administrative configuration must not provide unrestricted direct edits to production
+  Claim State.
+
+## Provider Conformance
+
+Each implemented runtime profile must pass the same repository and behaviour contract
+tests for ownership, revision, idempotency, visibility, resume, evidence provenance,
+retrieval source preservation, handoff ownership, configuration publication, and error
+atomicity.
+
+Candidate physical services and open provider decisions are recorded in
+`docs/data-architecture.md`. Availability, schema, identity, region, limits, retention,
+transactions, backup, recovery, and migration remain unconfirmed until verified for the
+selected profile.

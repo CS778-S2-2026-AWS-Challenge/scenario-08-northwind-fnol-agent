@@ -29,6 +29,9 @@ service mappings below are implementation options, not claims of availability.
   decisions.
 - The Agent accesses data through application tools and services. It does not
   query a provider SDK, database collection, bucket, or vector index directly.
+- Northwind's Administration and Control Plane owns system and knowledge
+  management. Runtime services consume approved configuration and published
+  knowledge rather than depending on a third-party note application.
 
 ## Data Classes
 
@@ -180,7 +183,7 @@ text
 ### Ingestion and retrieval
 
 ```text
-approved cloud-managed source
+Northwind Control Plane source
 -> import and malware/type validation
 -> OCR or text extraction
 -> section-aware chunking
@@ -193,9 +196,11 @@ approved cloud-managed source
 -> Agent explanation or professional review
 ```
 
-The source-management product is not fixed by this contract. Whatever product
-is selected must support version history, access control, export or API access,
-and a reliable ingestion trigger into the active data profile.
+The Northwind Control Plane manages source upload or import, required metadata,
+validation, version history, access control, ingestion status, retrieval testing,
+publication, withdrawal, and audit. Published content and indexes are stored through
+the active data runtime profile rather than read from a third-party note application at
+request time.
 
 ### RAG authority boundary
 
@@ -208,6 +213,25 @@ and a reliable ingestion trigger into the active data profile.
   limitation and may require professional review.
 - Prompt injection or instructions inside retrieved documents are untrusted
   content and must not alter system authority or tool permissions.
+
+## Administration and Control Plane Data Flow
+
+```text
+Admin Console
+-> authenticated Admin API
+-> versioned configuration and knowledge services
+-> validation, ingestion, evaluation, and connection jobs
+-> approved publication record
+-> active runtime-profile stores and indexes
+-> claimant, Agent, staff, and operations runtime
+```
+
+The browser never connects directly to a provider database, object store, vector
+index, model endpoint, or secret manager. Administrative records retain author,
+reason, validation, approval when required, publication state, effective time,
+previous version, and rollback target. Secret values remain in an approved secret
+manager; the Control Plane stores and displays only references and safe connection
+status.
 
 ## How the Agent Uses Data
 
@@ -251,7 +275,8 @@ insufficient, and comparison with a non-RAG model baseline.
 - Northwind data schemas, matching keys, permissions, retention, residency,
   encryption, backup, and deletion requirements.
 - Which customer policy and claim-history fields may be shown to claimants.
-- Which cloud-managed product will own knowledge authoring and approval.
+- Which Control Plane roles, approval levels, and publication workflow Northwind will
+  authorise.
 - Whether evidence extraction and embeddings run inside the selected provider
   profile or through a separately approved external processing boundary.
 - Which model evaluation dataset is sufficient before fine-tuning is considered.

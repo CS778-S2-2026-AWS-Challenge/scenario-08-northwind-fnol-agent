@@ -1,81 +1,84 @@
-# Research-to-Prototype Traceability
+# Research-to-Product Traceability
 
 ## Purpose
 
-This document traces supported research findings to claimant, Agent, and workbench prototype changes. It consolidates existing evidence and implementation status without changing the underlying research, survey data, product specification, or API contract.
+This document connects existing evidence to pain points, user needs, product principles,
+and validation boundaries. It does not define implementation status and does not replace
+`SPEC/`, the API contract, or sprint commitments.
 
-The traceability chain used throughout is:
+The traceability chain is:
 
-> Evidence → pain point → user type → prototype change → validation boundary
+> Evidence -> pain point -> user need -> product principle -> validation boundary
 
-This is a prioritisation and audit record. A mapped change is not evidence that the change has already been implemented or that the underlying finding represents all Northwind customers or employees.
+## Evidence Rules
 
-## Evidence and Decision Rules
-
-- Survey findings refer to the exploratory sample and retain the question-specific denominators recorded in the [FNOL Evidence Sheet](./FNOL_Evidence_Sheet.md#41-exploratory-survey-register). They are not population estimates.
-- Published and public evidence establishes process context or a supported mechanism, not Northwind-specific prevalence.
-- Employee findings are evidence-informed operational needs. Direct staff research remains limited, as stated in the [employee research boundary](./FNOL_Evidence_Sheet.md#51-research-boundary).
-- A row marked **Supported** is grounded in existing evidence and is consistent with the current specification.
-- A row marked **Hypothesis** remains a validation question and must not become a product requirement without further evidence or an authorised product decision.
-- Implementation status is descriptive only: **Implemented**, **Partial**, or **Planned**.
+- Survey results retain the question-specific denominators in the
+  [FNOL Evidence Sheet](./FNOL_Evidence_Sheet.md). They are exploratory, not population
+  estimates.
+- Public reports and process material establish context or plausible mechanisms, not
+  Northwind-specific prevalence.
+- Direct staff research remains limited. Employee needs are evidence-informed and require
+  further validation with authorised Northwind participants.
+- A product decision may respond to evidence without being directly proven by it. Such a
+  decision remains labelled as a team or governance decision.
+- Implementation and test status belong in current pull requests, tests, and sprint
+  evidence rather than this research record.
 
 ## Claimant Traceability
 
-| ID | Existing evidence | Pain point | User type | Traceable prototype change | Status | Boundary and validation |
-|---|---|---|---|---|---|---|
-| C01 | Survey findings S01, S03, S09 and S10; observation findings OBS-01 to OBS-03; [P1](./Pain_Point_Analysis.md#p1-unclear-immediate-actions-and-evidence-requirements) | A claimant may not know how to begin, what information matters, or what evidence to collect. | [First-Time Claimant](./User_Personas.md#persona-1-first-time-claimant) | Let the claimant begin in plain language, ask focused follow-up questions, and show the structured facts for review and correction. | **Implemented** in the versioned claimant conversation and form-confirmation path. | **Supported.** The survey and observation are exploratory; they justify guided design, not a universal abandonment or comprehension rate. |
-| C02 | Survey findings S04 and S12; [P2](./Pain_Point_Analysis.md#p2-lack-of-progress-timing-ownership-and-next-step-visibility) and [P7](./Pain_Point_Analysis.md#p7-unclear-ownership-delays-and-decision-explanations) | Claimants may not know the current status, owner, next action, or expected timing. | First-Time Claimant; [Efficiency-Seeking Claimant](./User_Personas.md#persona-2-efficiency-seeking-claimant) | Show claimant-safe status, responsible party, next step, and expected timing from the shared claim state. | **Partial.** Current claim and integration responses contain next-step and timing fields; the complete progress-update experience remains planned. | **Supported.** S04 uses `n=60` and S12 uses the previous-claim branch `n=48`; neither is a Northwind prevalence estimate. |
-| C03 | Survey findings S05, S10 and S11; [P3](./Pain_Point_Analysis.md#p3-repeated-information-and-fragmented-document-requests) | Evidence requirements can be unclear, fragmented, or repeated. | First-Time Claimant; Efficiency-Seeking Claimant | Register received, incomplete, unofficial, inconsistent, or pending evidence; show what is needed and allow later submission without restarting. | **Partial.** Evidence registration, listing, upload-target and completion APIs exist; the claimant upload interface remains planned. | **Supported.** Evidence prompts must remain claim-specific and must not imply that every listed document is required for every claim. |
-| C04 | Previous-claim survey findings and interview evidence on repeated explanation; [P3](./Pain_Point_Analysis.md#p3-repeated-information-and-fragmented-document-requests) | Returning claimants may have to repeat confirmed information after an interruption or channel change. | Efficiency-Seeking Claimant | Resume the same working claim with a bounded summary, unresolved questions, pending items, prior commitments, and confirmed facts. | **Partial.** Cross-session resume and persistence are implemented; the dedicated claimant resume entry experience remains planned. | **Supported.** Resume must use the current formal claim state and must not expose internal notes or replay the complete transcript by default. |
-| C05 | Survey findings S07, S13 and S14; observation findings OBS-04 and OBS-05; [P4](./Pain_Point_Analysis.md#p4-unclear-human-escalation-and-loss-of-context-during-handoff) | Urgent, stressful, inaccessible, disputed, or complex situations may require human support without loss of context. | [Urgent or Complex Claimant](./User_Personas.md#persona-3-urgent-or-complex-claimant) | Provide a visible human-support path and transfer confirmed facts, evidence state, unresolved work, handoff reason, and requested action. | **Planned** in the support-request and handoff contracts. | **Supported need; controlled rule.** The exact first-request behaviour remains an authorised prototype rule, not a research-derived universal rule. |
+| Evidence | Pain point | User need | Product principle | Validation boundary |
+| --- | --- | --- | --- | --- |
+| Survey S01, S03, S09 and S10; observations OBS-01 to OBS-03; [P1](./Pain_Point_Analysis.md#p1-unclear-immediate-actions-and-evidence-requirements) | A claimant may not know how to begin, what matters now, or which process step comes next. | Start naturally without learning insurance terminology or the insurer's question order. | Accept a non-linear account, structure it internally, and ask only for information needed for safety, material understanding, or the next action. | Validate with task completion, unnecessary-question count, correction rate, and qualitative comprehension; do not infer a universal abandonment rate. |
+| Survey S06 and S08; [P5](./Pain_Point_Analysis.md#p5-ai-misunderstanding-loss-of-control-and-unclear-decision-boundaries) | AI misunderstanding and unclear authority can reduce trust. | Correct material misunderstandings and know when a person controls a decision. | Keep extracted or inferred facts proposed, request confirmation only when material, and keep high-impact authority outside the model. | Test material fact correction, unsupported-action rejection, and claimant understanding; survey concern is not a measured model-failure rate. |
+| Survey S05, S10 and S11; [P3](./Pain_Point_Analysis.md#p3-repeated-information-and-fragmented-document-requests) | Evidence requirements may be unclear, fragmented, repeated, or impossible to satisfy immediately. | Know what is needed now versus later and continue safe work while evidence is pending. | Represent evidence lifecycle independently and apply the next-action-ready principle. | Verify that real prerequisites still block the dependent action while unrelated work progresses; do not imply that every document applies to every claim. |
+| Previous-claim survey responses and interview observations on repeated explanation | Returning claimants may repeat confirmed facts after a pause or channel change. | Resume the same claim context without starting again. | Preserve one authoritative Claim State, compact resume context, unresolved work, and prior commitments across sessions and handoff. | Verify no duplicate claim, no stale-session overwrite, and no unnecessary replay of the complete transcript. |
+| Survey S04 and S12; [P2](./Pain_Point_Analysis.md#p2-lack-of-progress-timing-ownership-and-next-step-visibility) and [P7](./Pain_Point_Analysis.md#p7-unclear-ownership-delays-and-decision-explanations) | Status, owner, timing, and responsibility may be unclear after submission. | Understand what happened, who acts next, what remains open, and when to return. | Derive plain-language updates from shared claim state and preserve responsibility and next action. | Retain the original sample limits; test whether users can accurately state status and responsibility after reading an update. |
+| Survey S07, S13 and S14; observations OBS-04 and OBS-05; [P4](./Pain_Point_Analysis.md#p4-unclear-human-escalation-and-loss-of-context-during-handoff) | Urgent, stressful, inaccessible, disputed, or complex situations may require human support. | Reach a person without losing known context or being repeatedly resisted. | Provide transparent human-support and urgent paths with structured handoff context. | The need is supported, but first-request routing, staffing, priority, and service levels require product authority and operational evidence. |
 
-## Agent Traceability
+## Staff and Operations Traceability
 
-| ID | Existing evidence | Pain point | Agent change | Status | Boundary and validation |
-|---|---|---|---|---|---|
-| A01 | S01, S03, S09, S10 and S11; [P1](./Pain_Point_Analysis.md#p1-unclear-immediate-actions-and-evidence-requirements) | A rigid form can ask irrelevant questions or assume knowledge the claimant does not have. | Use claim state and confirmed answers to select the next focused question; distinguish information needed now from information needed later. | **Implemented** for the current controlled claimant-intake path. | **Supported.** Required-field and route rules remain deterministic; the Agent must not invent requirements. |
-| A02 | S06 and S08; [P5](./Pain_Point_Analysis.md#p5-ai-misunderstanding-loss-of-control-and-unclear-decision-boundaries) | Claimants are concerned about AI misunderstanding facts or making decisions that should remain controlled. | Keep extracted or inferred fields proposed until confirmation; require deterministic validation or authorised staff control for high-impact actions. | **Implemented** for form confirmation, evidence proposals, message decisions, and authorised claim creation. | **Supported.** Survey concerns describe trust conditions, not observed model failure rates or legal authority. |
-| A03 | S05, S10 and S11; employee evidence W01, W02 and W07 | Evidence needed later can incorrectly stop unrelated safe work if all completeness is treated as one binary state. | Represent evidence independently as received, unofficial, incomplete, pending generation, or inconsistent; progress only actions whose current prerequisites are satisfied. | **Implemented** in claim and evidence state with repeatable pending-evidence fixtures. | **Supported mechanism.** The business action attached to each item must be explicit; the system must not silently waive a real prerequisite. |
-| A04 | S07, S13 and S14; [P4](./Pain_Point_Analysis.md#p4-unclear-human-escalation-and-loss-of-context-during-handoff) | Automation cannot safely resolve every urgent, complex, disputed, or accessibility-sensitive situation. | Select `HANDOFF` or `URGENT_HANDOFF` under controlled conditions and produce a claimant-safe next step plus a complete receiving context. | **Planned.** The action contract exists; end-to-end support-request and handoff behaviour remains to be implemented. | **Supported need; rule requires approval.** Survey preference does not define priority, staffing, or service-level thresholds. |
-| A05 | [P8](./Pain_Point_Analysis.md#p8-verification-that-feels-accusatory-or-unfair) and the evidence boundaries recorded for fraud research | Unsupported or opaque verification can feel accusatory and can turn a risk indicator into an unjustified conclusion. | Treat policy, history, and fraud-related outputs as cited evidence or proposed internal signals; never present them as an automated fraud conclusion. | **Partial.** Visibility boundaries and synthetic signal fixtures exist; policy/history retrieval and staff signal decision paths remain planned. | **Supported governance boundary.** Signal thresholds and production fraud rules are not established by the current research. |
+| Evidence | Pain point | User need | Product principle | Validation boundary |
+| --- | --- | --- | --- | --- |
+| Employee evidence W01, W02 and W06; [E1](./Pain_Point_Analysis.md#e1-information-intensive-and-claim-specific-intake) | Staff may reconstruct a claim from narrative, fields, files, and incomplete sources. | See a concise, source-preserving claim context and the exact action requested. | Workbench detail combines confirmed facts, source references, evidence state, gaps, conflicts, handoff reason, and requested action. | Validate with claims professionals; public complexity evidence does not establish Northwind handling time. |
+| W03, W07 and W08; [E3](./Pain_Point_Analysis.md#e3-multi-party-evidence-and-handoff-coordination) | Ownership and evidence context may be lost between internal or external participants. | Know the current owner, expected output, timing, and status of each assigned task. | Coordinate approved participants through task-specific views of one shared claim context. | Multi-party involvement supports the mechanism but does not prove that every current Northwind claim loses context. |
+| W04, W05 and W09; [E2](./Pain_Point_Analysis.md#e2-high-and-event-driven-workload-pressure) | Event-driven workload makes prioritisation and referral quality important. | Receive prioritised, actionable work rather than an undifferentiated queue. | Use independent urgency, evidence, review, ownership, and next-action dimensions to drive workbench queues. | Catastrophe evidence does not establish routine Northwind volume, staffing, or exact thresholds. |
+| W06, W07 and interview observations on repeated explanation | A staff decision can become a disconnected second status if it does not update shared state. | Record a source-backed decision once and communicate the permitted result to the claimant. | Store staff decisions separately from source evidence, write authorised state once, and produce a claimant-safe update. | Validate revision, source preservation, projection filtering, and staff comprehension. |
+| Survey and public evidence concerning waiting, repetition, and unclear progress | Staff time and claimant time can both be spent reconstructing context or chasing information. | Use professional effort where judgement or support adds value. | Measure claimant effort, staff effort, handoff completeness, model cost, and failure rather than assuming automation always saves time. | No current evidence establishes a Northwind ROI, handling-time reduction, or target automation rate. |
 
-## Workbench Traceability
+## Product and Governance Decisions
 
-| ID | Existing evidence | Employee pain point | User type | Traceable workbench change | Status | Boundary and validation |
-|---|---|---|---|---|---|---|
-| W01 | Employee evidence W01, W02 and W06; [E1](./Pain_Point_Analysis.md#e1-information-intensive-and-claim-specific-intake) | Staff must reconstruct a claim when narrative, fields, evidence, gaps, and sources are not presented together. | [Claims Professional](./User_Personas.md#persona-4-claims-professional) | Show one claim detail projection containing confirmed facts, field sources, evidence state, gaps, conflicts, decisions, handoff context, and requested action. | **Planned.** Shared persistence models exist; the functional workbench detail view remains to be implemented. | **Supported operational need.** Public requirements establish information complexity, not measured staff effort or target-system usability. |
-| W02 | W03, W07 and W08; [E3](./Pain_Point_Analysis.md#e3-multi-party-evidence-and-handoff-coordination) | Internal and external participants can lose ownership, requested action, or evidence context during handoff. | Claims Professional; [Claims Operations Lead](./User_Personas.md#persona-5-claims-operations-lead) | Make owner, priority, requested action, timing, evidence state, handoff reason, and action history visible from the same claim record. | **Planned.** The shared-state and handoff contracts exist; staff actions and write-back remain to be implemented. | **Supported mechanism.** Multi-party involvement does not prove that every insurer or routine claim currently loses information. |
-| W03 | W04, W05 and W09; [E2](./Pain_Point_Analysis.md#e2-high-and-event-driven-workload-pressure) | Event-driven volume and scarce specialist capacity increase the need for visible prioritisation and complete referrals. | Claims Operations Lead | Provide queue views for urgent, new or untriaged, awaiting-evidence, professional-review, and ready-to-progress claims, with ownership and service timing. | **Planned** in the workbench list contract. | **Evidence-informed.** Catastrophe evidence supports surge capability but must not be treated as routine Northwind volume or staffing data. |
-| W04 | W06, W07 and interview evidence on repeated explanation; [E3](./Pain_Point_Analysis.md#e3-multi-party-evidence-and-handoff-coordination) | Staff decisions can become a second disconnected status record if they do not update the claimant-visible claim state. | Claims Professional; Claims Operations Lead | Record actor, reason, outcome and resulting revision for staff actions; write the appropriate status and next step back to the shared claim while filtering internal details. | **Planned.** Synthetic shared-state tests demonstrate the boundary; the functional staff-action route remains to be implemented. | **Supported design direction.** Direct measurement of employee handling time, frustration, or workbench usability remains unavailable. |
+The following directions are supported by the needs above but remain explicit product or
+governance decisions rather than direct research findings:
 
-## Explicit Hypotheses and Open Decisions
+| Decision | Rationale | Required validation |
+| --- | --- | --- |
+| The Agent keeps professional structure internal and exposes only useful customer-facing explanations. | Responds to process-comprehension and cognitive-effort pain points without turning chat into another form review. | Claimant usability tests, correction analysis, and professional review of internal records. |
+| Approved knowledge retrieval uses citations while customer policy and history use structured authorised lookup. | Separates general guidance from customer-specific contractual facts and limits unsupported conclusions. | Source applicability, citation support, access, wrong-version rejection, and staff authority tests. |
+| A Control Plane manages versioned model, knowledge, rule, integration, access, evaluation, and operational configuration. | The product requires governed change, reproducibility, and rollback as model and knowledge dependencies grow. | Administrator workflow, role, approval, secret, publication, rollback, and audit testing. |
+| The longer-term product coordinates assessors, repairers, and other approved participants around shared claim context. | Responds to repeated context and ownership problems without making the claimant carry information between services. | Stakeholder confirmation, task-specific data minimisation, integration authority, service responsibility, and workflow testing. |
 
-The following items are not promoted to requirements by the current evidence:
+## Open Hypotheses
 
-| Hypothesis ID | Hypothesis or open decision | Why it remains open | Required validation |
-|---|---|---|---|
-| H01 | A specific workbench layout, queue taxonomy, or dashboard will reduce staff handling time. | Current employee evidence supports information and coordination needs but does not measure target-interface usability or handling-time improvement. | Claims-professional and operations-lead interviews, workflow observation, usability testing, and queue analytics. |
-| H02 | The first explicit request for a person should always transfer immediately rather than offering one transparent choice to finish the current step. | Research supports access to a human, but it does not establish one universal first-request rule. | Product approval, claimant testing, accessibility review, and service-capacity assessment. |
-| H03 | Specific coverage, fraud-review, urgency, or assessor thresholds are suitable for production. | Current rules are controlled prototype decisions and the research does not establish Northwind policy authority or production thresholds. | Northwind policy authority, operational data, governance review, and scenario validation. |
-
-## Coverage and Ownership Summary
-
-| Surface | Supported direction | Current boundary |
-|---|---|---|
-| Claimant | Guided intake, correctable facts, evidence status, resume, visible progress, and accessible human support | Core conversation and form path is implemented; evidence UI, resume entry, progress updates, and human-support journeys remain incomplete. |
-| Agent | Focused questions, proposed rather than silently confirmed facts, independent evidence state, and deterministic high-impact boundaries | Core message, form, evidence, and claim-creation guards are implemented; complete handoff, policy/history, and signal-review paths remain incomplete. |
-| Workbench | Shared claim projection, evidence and provenance, queue visibility, traceable staff actions, and claimant-safe write-back | Contracts and shared persistence foundations exist; the functional workbench and staff-action API remain incomplete. |
+| Hypothesis | Why it remains open | Required validation |
+| --- | --- | --- |
+| A specific workbench or Control Plane layout reduces handling or configuration time. | Existing evidence supports information and governance needs, not a particular interface. | Role-specific workflow observation, usability testing, error rate, and completion time. |
+| The first explicit request for a person should always transfer immediately. | Research supports access to a person but not one universal rule. | Product approval, claimant testing, accessibility review, and service-capacity evidence. |
+| Specific coverage, fraud-review, urgency, routing, or configuration-approval thresholds are suitable for production. | Current thresholds are controlled development rules without Northwind production authority. | Northwind policy, operational evidence, governance review, and scenario validation. |
+| Fine-tuning will outperform a well-evaluated general model with tools, RAG, and deterministic controls. | No approved training corpus or baseline comparison currently establishes the benefit. | Data rights, label quality, held-out evaluation, safety comparison, cost, and maintainability assessment. |
 
 ## Source Set and Maintenance
 
-This traceability record is derived only from existing project material:
+This record is based on:
 
 - [FNOL Evidence Sheet](./FNOL_Evidence_Sheet.md)
 - [Pain Point Analysis](./Pain_Point_Analysis.md)
 - [User Personas](./User_Personas.md)
 - [FNOL As-Is Process and Reporting Fields](./FNOL_As-Is_Process_and_Reporting_Fields_Concise_Research_Report_EN.md)
 - [Insurance Industry Interview and User Observation](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md)
-- [Current product specification](../../SPEC/README.md)
-- [Normative API contract](../api.md)
+- [Current Product Specification](../../SPEC/README.md)
+- [Current API Contract](../api.md)
+- [Data Architecture](../data-architecture.md)
 
-Future updates should add or revise a row only when the underlying evidence, product decision, implementation status, or limitation changes. Weak or conflicting evidence must remain visibly labelled rather than being converted into an unsupported requirement.
+Update this document only when evidence, a product decision, or a validation boundary
+changes. Current implementation status belongs in issues, pull requests, tests, and sprint
+delivery records.
