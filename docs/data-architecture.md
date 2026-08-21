@@ -236,7 +236,16 @@ The application composition root must:
 5. refuse partial or mixed-provider assembly; and
 6. run the same contract tests against every implemented profile.
 
-Implementation is tracked by repository issue #203.
+The current implementation selects `fixture` by default and assembles its persistence,
+evidence, structured policy/history, knowledge-document, and knowledge-retrieval
+capabilities as one bundle. Selecting `cloudflare`, `mongodb`, or `aws` currently fails
+startup with an explicit unsupported-profile error. Those profiles must remain
+unavailable until one complete provider-specific bundle and its conformance tests exist;
+the application does not fill missing capabilities from `fixture`.
+
+`DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
+connection and secret-reference variable names will be added with the corresponding
+adapter contract rather than invented before topology and access are verified.
 
 ## Knowledge Base and RAG
 
@@ -301,7 +310,13 @@ request time.
 - Retrieval results are evidence, not coverage, fraud, liability, approval, or
   rejection decisions.
 - Retrieval must filter insurer, jurisdiction, product, effective period,
-  document authority, and visibility before similarity ranking.
+  document authority, visibility, and exact source version before similarity
+  ranking.
+- The current fixture retriever fails closed when insurer, product, authority,
+  version, or effective time is omitted. It does not treat an omitted selector
+  as permission to broaden a search. Global documents with no insurer or product
+  are not executable retrieval candidates until an explicit governed scope and
+  applicability contract is introduced.
 - Answers must retain citations to the exact source version and section.
 - Missing, conflicting, expired, or inapplicable evidence must be stated as a
   limitation and may require professional review.
