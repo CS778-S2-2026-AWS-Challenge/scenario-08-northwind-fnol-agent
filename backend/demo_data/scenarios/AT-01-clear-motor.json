@@ -11,7 +11,7 @@
     "claim_state": {
       "severity": "fast_track",
       "coverage": "clear",
-      "evidence": "not_started",
+      "evidence": "received",
       "fraud_signal": "none",
       "customer_support": "guided",
       "urgency": "normal",
@@ -30,7 +30,7 @@
         "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
       }
     },
-    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
     "route": "fast_track",
     "active_session_id": "ses_fixture_at01",
     "external_claim": null,
@@ -60,7 +60,25 @@
       "closed_at": null
     }
   ],
-  "evidence": [],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_path_fast_image",
+      "claim_id": "clm_fixture_at01",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "minor-damage.jpg",
+      "media_type": "image/jpeg",
+      "size_bytes": 204800,
+      "source": "claimant",
+      "related_fields": ["vehicle.damage_description"],
+      "needed_for": ["current_action"],
+      "provenance": {"fixture_storage_ref": "fixture://path/fast/image"},
+      "claimant_note": "The damage image was received.",
+      "created_at": "2026-08-17T01:00:00Z",
+      "updated_at": "2026-08-17T01:00:00Z"
+    }
+  ],
   "messages": [
     {
       "message_id": "msg_at01_claimant",
@@ -70,7 +88,7 @@
       "actor": "claimant",
       "visibility": "shared",
       "content": {"type": "text", "text": "My parked car was hit at low speed."},
-      "evidence_refs": [],
+      "evidence_refs": ["evd_fixture_path_fast_image"],
       "in_reply_to": null,
       "created_at": "2026-08-12T00:02:00Z"
     }
