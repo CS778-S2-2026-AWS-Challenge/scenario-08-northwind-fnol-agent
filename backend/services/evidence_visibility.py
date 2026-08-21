@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from backend.domain.models import ClaimantEvidence, EvidenceSource, MessageVisibility
+from backend.domain.models import EvidenceRecord, EvidenceSource, MessageVisibility
 
 
 def default_evidence_visibility(source: EvidenceSource) -> MessageVisibility:
@@ -11,11 +11,11 @@ def default_evidence_visibility(source: EvidenceSource) -> MessageVisibility:
     return MessageVisibility.INTERNAL_ONLY
 
 
-def claimant_visible_evidence(items: Iterable[ClaimantEvidence]) -> list[ClaimantEvidence]:
-    """Keep only evidence records that the shared visibility policy allows claimants to see."""
+def claimant_visible_evidence(records: Iterable[EvidenceRecord]) -> list[EvidenceRecord]:
+    """Keep only authoritative evidence records that are safe for claimant projection."""
 
     return [
-        item
-        for item in items
-        if default_evidence_visibility(item.source) is not MessageVisibility.INTERNAL_ONLY
+        record
+        for record in records
+        if default_evidence_visibility(record.source) is not MessageVisibility.INTERNAL_ONLY
     ]
