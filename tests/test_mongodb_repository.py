@@ -130,6 +130,7 @@ def test_session_identity_cannot_be_overwritten_by_another_claim(
 ) -> None:
     first_claim = _claim()
     repository.create_claim(first_claim, _session(first_claim))
+    assert first_claim.active_session_id is not None
     second_claim = first_claim.model_copy(
         update={
             'claim_id': 'clm_mongo_002',
