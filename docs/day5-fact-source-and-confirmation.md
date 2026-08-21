@@ -38,15 +38,14 @@ Run `tests/fixtures/presentation/test_fact_source_and_confirmation.py`.
 
 - **"The fixture completes repeatedly."** Demonstrated in 4.
 - **"Fact source, confirmation state, and next step are correct."** Source and
-  confirmation state are demonstrated in 1, 2, and 3. **Next step is
-  `Ysoseri1224`'s half** — it belongs to the claimant and Agent path, and is not
-  claimed here.
+  confirmation state are demonstrated in 1, 2, and 3. The claimant and Agent
+  next-step path is independently demonstrated by merged PR #223.
 
 ## Boundary
 
-This covers source and confirmation state only. Issue #141 stays open until the
-claimant and Agent path demonstration lands, which is why this is a `Refs` and
-not a `Closes`.
+This covers source and confirmation state only. Merged PR #223 supplies the
+separate claimant and Agent path evidence, so the two independent slices now
+cover Issue #141 together.
 
 The overwrite rejection in 3 is the boundary introduced by Issue #120 after
 review: extraction may only fill a field the shared form does not hold yet.
