@@ -23,7 +23,6 @@ from backend.services.evidence import (
     register_evidence,
     request_upload,
 )
-from backend.services.evidence_visibility import claimant_visible_evidence
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant-evidence'])
 
@@ -42,8 +41,7 @@ def read_evidence(
     request: Request,
     principal: Principal = Depends(require_claimant),
 ) -> EvidenceListResponse:
-    response = list_evidence(repository_for(request), principal, claim_id)
-    return response.model_copy(update={'items': claimant_visible_evidence(response.items)})
+    return list_evidence(repository_for(request), principal, claim_id)
 
 
 @router.post(
