@@ -6,7 +6,10 @@ from backend.adapters.handoff_dispatch import (
     HandoffDispatchUnavailable,
     MockHandoffDispatchAdapter,
 )
-from backend.adapters.policy_history import MockPolicyHistoryAdapter, RetrievalUnavailable
+from backend.adapters.policy_history import (
+    MockPolicyHistoryAdapter,
+    RetrievalUnavailable,
+)
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
@@ -20,7 +23,9 @@ INCIDENT_DESCRIPTION = (
 )
 
 
-def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_context() -> None:
+def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_context() -> (
+    None
+):
     repository = FixtureRepository()
     retrieval = MockPolicyHistoryAdapter()
     dispatch = MockHandoffDispatchAdapter()
@@ -89,7 +94,9 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
             headers=support_headers,
             json=support_payload,
         )
-        workbench = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
+        workbench = client.get(
+            f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH
+        )
         claimant = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
 
         replay = client.post(
@@ -133,7 +140,9 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
     assert handoff['packet']['form_snapshot']['incident.description']['value'] == (
         INCIDENT_DESCRIPTION
     )
-    assert handoff['packet']['form_snapshot']['incident.description']['source'] == 'claimant'
+    assert (
+        handoff['packet']['form_snapshot']['incident.description']['source'] == 'claimant'
+    )
 
     assert claimant.status_code == 200
     claimant_text = json.dumps(claimant.json()).lower()
