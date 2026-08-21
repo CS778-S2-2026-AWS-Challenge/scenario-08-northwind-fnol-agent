@@ -1,66 +1,79 @@
-# Claim Creation and AWS Adapter Boundary
+# Claim Creation and Provider Adapter Boundary
 
 ## Purpose
 
-This record defines the Day 1 claim-creation boundary for Issue #102. It separates
-verified fixture behaviour from a future configured claims service and records unknown
-AWS behaviour without presenting it as fact.
+This document defines the provider-neutral boundary for creating and routing a claim. It
+separates authorised Northwind domain behaviour from fixture and configured external
+services. It does not confirm a Northwind provider schema, cloud service, credential,
+permission, or production connection.
 
-## Current capability status
+## Current Capability Classes
 
-| Capability | Current status | Evidence and boundary |
-|---|---|---|
-| Provider-neutral create contract | available | `POST /internal/v1/claims/create` accepts only domain fields and rejects provider-specific infrastructure fields. |
-| Controlled claimant creation path | available | `POST /api/v1/claims/{claim_id}/creation` derives its request from confirmed persisted state. |
-| Fixture claim creation and routing | using fixture | The deterministic adapter returns status, route, next step and `source: fixture`. |
-| Configured insurer claims service | unavailable | No insurer endpoint, credential or provider schema has been supplied. |
-| AWS claims-service implementation | pending confirmation | Account, region, service choice, IAM policy, network path and physical schema have not been verified. |
+| Capability | Meaning |
+| --- | --- |
+| Provider-neutral contract | Domain command and result are defined independently of a provider payload |
+| Controlled creation path | Current Claim State, revision, idempotency, and authority are checked before invocation |
+| Fixture adapter | Returns repeatable synthetic results labelled `fixture` |
+| Configured provider adapter | May report `configured_service` only after its connection, authority, schema, and result mapping are verified |
+| Unavailable capability | Preserves the working claim and returns the documented dependency limitation |
 
-`Unavailable` means a required provider input is absent now. `Pending confirmation`
-means the implementation choice or AWS environment has not yet been inspected. Neither
-state permits the system to fabricate a provider result.
+## Stable Create Contract
 
-## Stable create and route contract
+The creation service derives a provider-neutral command from the authorised Working
+Claim. A claimant or route handler cannot submit provider keys, table names, external
+schemas, or an unverified customer-supplied claim identifier as authority.
 
-The public creation operation has no provider payload. Lambda or another orchestration
-layer must derive the provider-neutral command from the authorised `WorkingClaim` and
-invoke a `ClaimsServiceAdapter` implementation.
+Every result contains:
 
-Every successful or pending result contains:
+- creation status such as `created`, `pending`, or `failed`;
+- configured processing route, not a coverage or liability decision;
+- claimant-visible next step;
+- source class such as `fixture` or `configured_service`;
+- provider reference and expected timing when available; and
+- limitations required to interpret the result honestly.
 
-- `creation_status`: `created`, `pending`, or `failed`;
-- `route`: the configured processing route, not a coverage or liability decision;
-- `next_step`: the claimant-visible action after the provider call;
-- `source`: `fixture` or `configured_service`;
-- provider references and expected timing when available.
+The public API remains unchanged when the active adapter changes.
 
-The fixture result uses `source: fixture`. A future adapter may use
-`source: configured_service` only after its endpoint, credentials, permissions and
-response mapping have been verified.
+## Authority, Revision, and Idempotency
 
-## Authority and failure behaviour
+- Required material facts and confirmations must satisfy the current controlled rule.
+- Claim creation requires the current Working Claim revision and an authorised
+  `CREATE_CLAIM` decision.
+- The provider-neutral operation identity and fingerprint enforce idempotency.
+- An identical retry returns the accepted claim identity and current authorised
+  projection; changed input under the same key is a conflict.
+- Pending evidence remains recorded and is not silently discarded.
+- Model output, severity, retrieval, or an adapter response cannot independently
+  authorise creation or assessor routing.
 
-- Claim creation requires confirmed required facts, the current revision and a
-  deterministic `CREATE_CLAIM` authorisation.
-- The working claim ID is the provider-neutral idempotency reference. A retry restores
-  the same result; changed input under the same reference is rejected.
-- Pending evidence remains outstanding work and is not silently discarded.
-- A model proposal, severity value or claimant-supplied identifier cannot authorise
-  creation or assessor routing.
-- An unavailable configured service must return the documented dependency error and
-  preserve the working claim. It must not be reported as a successful AWS call.
+## Failure Behaviour
 
-## Fixture fallback
+Timeout, unavailable, malformed, access-denied, partial, and conflicting provider
+responses preserve the working claim and return a bounded error or pending result. The
+service must not report success, fabricate a reference, or fall through to a second data
+runtime profile.
 
-The fixture adapter implements the same typed boundary as a future configured adapter.
-It generates synthetic claim references, preserves route and next-step fields and marks
-the response source explicitly. This keeps the demonstration repeatable without
-claiming that Northwind or AWS production integration exists.
+An explicitly configured fixture adapter may be used for controlled development. It is
+not a silent production fallback and its result remains labelled `fixture`.
 
-## Open AWS confirmations
+## Routing and External Participants
 
-The following remain outside the verified boundary until the provided environment is
-inspected: AWS service selection, region, account and IAM permissions, DynamoDB table
-layout, network connectivity, secrets handling, retry limits, provider timeout mapping,
-operational ownership and production retention. These are recorded as
-`pending_confirmation`, not inferred from the fixture implementation.
+Routing, assessor tasks, repair tasks, or another participant action require their own
+provider-neutral command, result, authority, idempotency, visibility, and failure
+contract. Claim creation does not automatically grant an external participant access to
+the complete claim.
+
+## Runtime-profile Relationship
+
+Cloudflare, MongoDB, AWS, and fixture data profiles are selected as complete, mutually
+exclusive runtime configurations according to `docs/data-architecture.md`. The claims
+system itself may remain a separately approved external integration, but its adapter
+cannot expose provider details to the domain or use another data profile as a silent
+fallback.
+
+## Open Confirmations
+
+Before a configured provider can be described as production-capable, verify endpoint and
+identity, authorised matching keys, schema and null semantics, retry and timeout
+behaviour, idempotency, service limits, ownership, visibility, retention, audit,
+reconciliation, rollback, and operational support.

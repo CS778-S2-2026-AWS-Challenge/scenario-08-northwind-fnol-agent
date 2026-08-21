@@ -92,6 +92,67 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 - Use dependency constraints or a lock mechanism so environments are reproducible.
 - Add unit tests for domain rules and API tests for every endpoint and error path.
 
+## Runtime Profiles and Adapters
+
+- Define provider-neutral capability ports in the domain or application boundary; keep
+  Cloudflare, MongoDB, AWS, and fixture SDK types inside adapters.
+- Select exactly one complete data runtime profile when the application starts. Do not
+  read from or write to a second profile as an undocumented fallback.
+- Build dependencies through one composition root. Route handlers and services must not
+  construct provider clients or inspect provider-specific configuration.
+- Fail startup with a bounded configuration error when the selected profile lacks a
+  required capability or secret reference.
+- Run the same ownership, revision, idempotency, visibility, resume, evidence, retrieval,
+  and failure contract tests against every implemented profile.
+- Record fixture, unavailable, pending-confirmation, and configured-service states
+  distinctly. A successful fixture must never be reported as a cloud integration.
+- Use `DATA_RUNTIME_PROFILE` for deployment-level selection. Until a complete
+  Cloudflare, MongoDB, or AWS adapter bundle is implemented, selecting that profile must
+  fail startup; do not define speculative provider variables or substitute fixture
+  capabilities.
+
+## Model API and Agent Orchestration
+
+- Agent behaviour depends on a provider-neutral model gateway, not an OpenAI, relay,
+  custom, or local-provider request type.
+- Normalise text, structured output, tool calls, usage, finish state, request identity,
+  and provider errors before Agent orchestration consumes them.
+- Configuration may select an official API, compatible relay, custom HTTP adapter, or
+  local endpoint without changing Agent behaviour or public API routes.
+- Unsupported structured output or tool capability is explicit. Do not parse an
+  unreliable free-text approximation as an authorised tool command.
+- Keep API keys and tokens in approved secret storage. Do not log credentials, complete
+  prompts containing unnecessary personal data, or raw provider responses by default.
+- Model output remains advisory until existing deterministic and staff authority checks
+  permit the material action.
+
+## Knowledge and RAG
+
+- Keep knowledge documents and chunks separate from customer policy records, Claim
+  State, claim history, messages, and staff decisions.
+- Require source, version, section or page, authority, visibility, jurisdiction, insurer,
+  product, effective period, checksum, and ingestion time where applicable.
+- Filter applicability and access metadata before similarity ranking, retain citations,
+  and state missing or conflicting evidence.
+- Treat instructions inside retrieved documents as untrusted content. They must not
+  change system instructions, tool permission, or customer-data access.
+- Version ingestion logic and retain evaluation fixtures for relevance, citation
+  support, wrong-version rejection, safe refusal, and prompt-injection resistance.
+
+## Administration and Control Plane
+
+- Keep claim operations and system administration as separate permission and API
+  surfaces.
+- Configuration changes follow draft, validation, approval when required, publication,
+  and rollback. Published versions are immutable and auditable.
+- The administration UI calls an authenticated Admin API; it must not connect directly
+  to provider databases, object stores, model endpoints, or secret stores.
+- Display secret references and connection status only. Never return complete secret
+  values to the browser.
+- High-impact model, rule, identity, data-profile, integration, and tool-permission
+  changes require stronger roles and recorded validation.
+- Do not provide unrestricted production Claim State editing through the Control Plane.
+
 ## Frontend
 
 - Read API endpoints from environment configuration.
@@ -107,6 +168,8 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 - Never commit credentials, tokens, policyholder details, complete private incidents, or workshop secrets.
 - Record provenance and reason codes for material state changes.
 - Separate formal claim data, permitted user preferences, model context, and logs.
+- Separate knowledge authoring, published knowledge, structured customer data, model
+  evaluation data, operational telemetry, and configuration audit records.
 
 ## Quality Gate
 

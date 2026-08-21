@@ -2,26 +2,66 @@
 
 ## Decision Authority
 
-Retrieval and model output provide evidence and recommendations, not unlimited authority. Deterministic policy checks or authorised staff must control high-impact actions.
+Model output, retrieved knowledge, structured provider results, and extracted evidence
+are inputs to a decision, not unlimited authority. Deterministic rules or authorised
+staff control high-impact actions.
 
-- Ambiguous coverage or excess moves to professional review before a related high-impact action.
-- A fraud signal requests review and includes evidence; it never declares the claimant fraudulent.
-- Severity supports routing and later staff evaluation; it is not an automatic claim decision.
-- The agent does not approve or reject claims.
-- The agent does not diagnose injury or imply emergency contact it did not perform.
+- Ambiguous coverage, excess, liability, or policy applicability moves to professional
+  review before a related high-impact action.
+- A fraud signal requests review and retains evidence; it never declares a claimant
+  fraudulent.
+- Severity may support prioritisation but is not approval, rejection, or liability.
+- The Agent does not approve or reject claims.
+- The Agent does not diagnose injury or imply emergency contact it did not perform.
 
 ## Safety Escalation
 
-Explicit injury, continuing danger, or urgent assistance signals interrupt ordinary intake. The customer receives concise, bounded safety guidance and a high-priority handoff. Prototype triggers are controlled demonstration rules and require validation before production use.
+Explicit injury, continuing danger, or another approved urgent signal interrupts ordinary
+intake. The claimant receives concise, bounded guidance and an urgent handoff. Trigger
+rules are versioned and tested; controlled fixture rules are not automatically approved
+production policy.
+
+## Knowledge and Model Safety
+
+- Knowledge retrieval must filter authority, visibility, insurer, product, jurisdiction,
+  version, and effective period before ranking.
+- Answers retain citations and state material limitations or conflict.
+- Instructions inside retrieved documents are untrusted content and cannot change system
+  authority or tool permissions.
+- Model providers receive only the minimum authorised context. Provider retention,
+  training use, region, and logging terms must be reviewed before real customer data is
+  sent.
+- Unsupported structured output, tool use, or model capability is an explicit error, not
+  a reason to bypass validation.
+
+## Configuration Governance
+
+Control Plane changes use versioned draft, validation, publication, and rollback. Every
+published change records actor, reason, scope, effective time, validation evidence, and
+previous version. Secrets are stored through an approved secret manager and cannot be
+returned by the administration API.
+
+High-impact rules, model changes, identity changes, data-profile changes, and external
+tool permissions require role-based approval. Emergency rollback must preserve the audit
+record.
 
 ## Evidence and Traceability
 
-Material fields, policy interpretations, history matches, review signals, routing, overrides, and handoffs must record their source and reason code. Staff changes retain who acted, when, why, and the previous state.
+Material facts, retrievals, interpretations, signals, routing, overrides, handoffs,
+configuration publications, and tool actions record source references, reason codes,
+actor, time, and outcome. A staff decision is stored separately from the source evidence
+that motivated it.
 
 ## Privacy and Access
 
-Access must follow role and task. Claimants see their appropriate claim status and next steps; authorised staff may see internal routing and review information. Prototype data must be anonymous or synthetic. Production identity, retention, encryption, consent, audit, and deletion controls remain required engineering work.
+Access follows role, task, claim ownership, and minimum necessity. Prototype and source
+control data are anonymous or synthetic. Production identity, consent, retention,
+encryption, deletion, residency, access review, incident response, and recovery remain
+required before production use.
 
 ## Research Governance
 
-Research must distinguish source facts, observations, participant statements, hypotheses, user needs, team decisions, and open questions. Consent and participant profiling must avoid unnecessary personal information. Public evidence may calibrate a pattern but cannot establish Northwind-specific prevalence without Northwind data.
+Source facts, participant statements, observations, hypotheses, team decisions, targets,
+and open questions remain distinguishable. Public evidence may support a design mechanism
+but cannot establish Northwind-specific prevalence or business value without Northwind
+evidence.

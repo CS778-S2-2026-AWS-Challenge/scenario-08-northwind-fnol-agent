@@ -45,6 +45,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -197,7 +198,7 @@ def list_evidence(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
-    evidence = repository.list_evidence(claim_id, principal.subject)
+    evidence = claimant_visible_evidence(repository.list_evidence(claim_id, principal.subject))
     return EvidenceListResponse(
         claim_id=claim_id,
         revision=claim.revision,

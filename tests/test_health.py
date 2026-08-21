@@ -22,6 +22,8 @@ def test_readiness_reports_every_dependency_honestly(client: TestClient) -> None
     assert payload['checks']['claim_history'] == 'using_fixture'
     assert payload['checks']['handoff_dispatch'] == 'using_fixture'
     assert payload['checks']['evidence_storage'] == 'using_fixture'
+    assert payload['checks']['knowledge_documents'] == 'using_fixture'
+    assert payload['checks']['knowledge_retrieval'] == 'using_fixture'
 
     # Every unconfirmed AWS capability stays visible as its own check, so a
     # working fixture can never be mistaken for confirmed AWS access.
@@ -29,8 +31,8 @@ def test_readiness_reports_every_dependency_honestly(client: TestClient) -> None
     assert payload['checks']['aws_policy_history'] == 'pending_confirmation'
     assert payload['checks']['aws_evidence_storage'] == 'pending_confirmation'
 
-    # These two have no adapter boundary yet and must not pretend otherwise.
-    assert payload['checks']['persistence'] == 'not_configured'
+    # Readiness identifies the adapter class without exposing deployment configuration.
+    assert payload['checks']['persistence'] == 'using_fixture'
     assert payload['checks']['agent'] == 'not_configured'
 
     assert datetime.fromisoformat(payload['checked_at'])
