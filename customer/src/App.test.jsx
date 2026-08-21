@@ -355,6 +355,63 @@ describe('claimant intake', () => {
     )
   })
 
+  it('finds a resumable report after a page with no resumable claims', async () => {
+    const { claim } = at08ResumeFixture
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        items: [
+          {
+            claim_id: 'clm_already_created',
+            revision: 5,
+            incident_type: 'motor',
+            workflow_state: 'created',
+            external_claim: { creation_status: 'created' },
+            customer_next_step: claim.customer_next_step,
+            created_at: claim.created_at,
+            updated_at: claim.updated_at,
+            can_resume: false,
+          },
+        ],
+        page: { next_cursor: 'page-2' },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        items: [
+          {
+            claim_id: claim.claim_id,
+            revision: claim.revision,
+            incident_type: claim.incident_type,
+            workflow_state: claim.workflow_state,
+            external_claim: claim.external_claim,
+            customer_next_step: claim.customer_next_step,
+            created_at: claim.created_at,
+            updated_at: claim.updated_at,
+            can_resume: true,
+          },
+        ],
+        page: { next_cursor: null },
+      }),
+    )
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
+
+    expect(await screen.findByRole('button', { name: 'Resume report' })).toBeVisible()
+    expect(screen.queryByText('No saved reports are available to resume.')).not.toBeInTheDocument()
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/claims?limit=25',
+      expect.any(Object),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/claims?limit=25&cursor=page-2',
+      expect.any(Object),
+    )
+  })
+
   it('uses the latest claim next step instead of a stale session snapshot', async () => {
     const staleSessionNextStep = {
       ...nextStep,

@@ -62,8 +62,10 @@ export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }
 
-export function listClaims() {
-  return apiRequest('/api/v1/claims?limit=25')
+export function listClaims({ cursor, limit = 25 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/claims?${params}`)
 }
 
 export function resumeClaimSession({

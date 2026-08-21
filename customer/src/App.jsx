@@ -359,8 +359,30 @@ function App() {
     setError('')
     setStatus('loading-reports')
     try {
-      const response = await listClaims()
-      setSavedReports(response.items.filter((item) => item.can_resume))
+      const reportsByClaimId = new Map()
+      const seenCursors = new Set()
+      let cursor
+
+      do {
+        const response = await listClaims({ cursor })
+        for (const item of response.items) {
+          if (item.can_resume && !reportsByClaimId.has(item.claim_id)) {
+            reportsByClaimId.set(item.claim_id, item)
+          }
+        }
+
+        const nextCursor = response.page?.next_cursor || null
+        if (nextCursor && seenCursors.has(nextCursor)) {
+          throw new ApiRequestError(
+            'We could not finish loading your saved reports. Please try again.',
+            { code: 'INVALID_PAGINATION' },
+          )
+        }
+        if (nextCursor) seenCursors.add(nextCursor)
+        cursor = nextCursor
+      } while (cursor)
+
+      setSavedReports([...reportsByClaimId.values()])
       setStatus('idle')
     } catch (requestError) {
       showError(requestError)
