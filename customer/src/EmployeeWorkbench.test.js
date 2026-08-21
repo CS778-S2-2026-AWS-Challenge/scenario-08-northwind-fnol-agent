@@ -490,6 +490,150 @@ it('clears stale write-back state when the post-mutation refresh fails', async (
   dom.window.close()
 })
 
+it('blocks incomplete evidence, saves signal findings sequentially, and isolates claimant updates', async () => {
+  let revision = 10
+  const signalDecisions = { sig_policy: [], sig_history: [] }
+  let completed = false
+  const listItem = {
+    claim_id: 'clm_review_path', revision, customer_reference: 'customer-review-path',
+    incident_type: 'home', workflow_state: 'professional_review', queue: 'professional_review',
+    priority: 'high', next_action: 'REVIEW', evidence_summary: { received: 1 },
+    open_handoff_count: 0, assignee_id: 'stf_demo',
+    created_at: '2026-08-13T00:00:00Z', updated_at: '2026-08-13T00:10:00Z',
+  }
+  const detail = () => ({
+    ...listItem,
+    revision,
+    channel: 'web_agent', locale: 'en-NZ',
+    claim_state: { workflow_state: completed ? 'ready_for_next' : 'professional_review' },
+    form: {}, route: 'professional_review', active_session_id: null,
+    evidence: [{
+      evidence_id: 'evd_damage', kind: 'incident_image', status: 'received', source: 'claimant',
+      original_filename: 'synthetic-damage.jpg',
+    }],
+    sessions: [], messages: [], decisions: [], retrievals: [],
+    signals: [
+      {
+        signal_id: 'sig_policy', code: 'POLICY_CAUSE_REVIEW',
+        summary: 'Does the evidence support the reported cause?',
+        source_refs: ['evd_damage'], decisions: signalDecisions.sig_policy,
+      },
+      {
+        signal_id: 'sig_history', code: 'HISTORY_REVIEW',
+        summary: 'Is the history record relevant?',
+        source_refs: ['his_synthetic'], decisions: signalDecisions.sig_history,
+      },
+    ],
+    handoffs: [],
+    staff_actions: [{
+      action_id: 'act_review_path', action_type: 'professional_review',
+      status: completed ? 'completed' : 'open', assigned_to: 'stf_demo',
+      source_refs: ['evd_damage'],
+    }],
+    customer_updates: [], external_claim: null, assessor_routing: null,
+    customer_next_step: {
+      status: 'under_review', summary: 'A professional is reviewing the claim.',
+      responsible_party: 'northwind',
+    },
+  })
+  const signalRequests = []
+  let completionRequest
+  const fetchMock = vi.fn((url, options = {}) => {
+    const path = String(url)
+    if (options.method === 'POST' && path.includes('/signals/')) {
+      const signalId = path.match(/\/signals\/([^/]+)\/decisions/)?.[1]
+      const body = JSON.parse(options.body)
+      signalRequests.push({ signalId, revision: options.headers['If-Match'], body })
+      revision += 1
+      listItem.revision = revision
+      signalDecisions[signalId].push({
+        decision: body.decision, reason_codes: body.reason_codes,
+        summary: body.summary, actor_id: 'stf_demo',
+      })
+      return response({ revision })
+    }
+    if (options.method === 'PATCH' && path.endsWith('/staff-actions/act_review_path')) {
+      completionRequest = {
+        revision: options.headers['If-Match'],
+        body: JSON.parse(options.body),
+      }
+      completed = true
+      revision += 1
+      listItem.revision = revision
+      return response({ revision })
+    }
+    if (path.endsWith('/clm_review_path')) return response(detail())
+    return response({ items: completed ? [] : [listItem], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'review-path-key'
+    },
+  })
+  const document = dom.window.document
+
+  await waitFor(() => {
+    expect(document.querySelector('#completeActionSelect').value).toBe('act_review_path')
+    expect(document.querySelectorAll('#evidenceReviewList .evidence-review-card')).toHaveLength(1)
+  })
+  fillProfessionalReviewCompletion(document)
+  document.querySelector('#completeStaffActionBtn').click()
+  await waitFor(() => {
+    expect(document.querySelector('#mutationStatus').textContent)
+      .toContain('Review every evidence item')
+  })
+  expect(completionRequest).toBeUndefined()
+
+  const evidenceCard = document.querySelector('#evidenceReviewList .evidence-review-card')
+  evidenceCard.querySelector('.evidence-review-disposition').value = 'accepted'
+  evidenceCard.querySelector('.evidence-review-disposition')
+    .dispatchEvent(new dom.window.Event('change'))
+  evidenceCard.querySelector('.evidence-review-summary').value =
+    'The image metadata and visible damage are consistent with the reported event.'
+
+  const signalSelect = document.querySelector('#signalDecisionSelect')
+  for (const [signalId, finding] of [
+    ['sig_policy', 'The damage image supports the reported cause.'],
+    ['sig_history', 'The history record concerns a different property and is not relevant.'],
+  ]) {
+    signalSelect.value = signalId
+    signalSelect.dispatchEvent(new dom.window.Event('change'))
+    const card = [...document.querySelectorAll('#signalDraftList .review-task-card')].at(-1)
+    card.querySelector('textarea').value = finding
+    card.querySelector('textarea').dispatchEvent(new dom.window.Event('input'))
+    card.querySelector('button').click()
+  }
+  document.querySelector('#saveAllSignalDecisionsBtn').click()
+
+  await waitFor(() => expect(signalRequests).toHaveLength(2))
+  expect(signalRequests.map(request => request.revision)).toEqual(['10', '11'])
+  expect(signalRequests.map(request => request.signalId)).toEqual(['sig_policy', 'sig_history'])
+  await waitFor(() => {
+    expect(document.querySelector('#signalActionStatus').textContent)
+      .toBe('All signal decisions saved.')
+  })
+
+  fillProfessionalReviewCompletion(document)
+  document.querySelector('#evidenceReviewList .evidence-review-disposition').value = 'accepted'
+  document.querySelector('#evidenceReviewList .evidence-review-summary').value =
+    'The image metadata and visible damage are consistent with the reported event.'
+  document.querySelector('#completeStaffActionBtn').click()
+
+  await waitFor(() => expect(completionRequest).toBeDefined())
+  expect(completionRequest.revision).toBe('12')
+  expect(completionRequest.body.result.summary).toContain('Evidence findings:')
+  expect(completionRequest.body.result.reason_codes).toEqual(['STAFF_REVIEW_COMPLETED'])
+  expect(completionRequest.body.customer_update.summary)
+    .toBe('We completed the policy review. Your report can continue and Northwind will prepare the next step.')
+  expect(completionRequest.body.customer_update).not.toHaveProperty('reason_codes')
+  expect(completionRequest.body.customer_update.summary).not.toContain('evd_damage')
+  expect(completionRequest.body.customer_update.summary).not.toContain('sig_policy')
+  expect(completionRequest.body.customer_update.summary).not.toContain('sig_history')
+  dom.window.close()
+})
+
 it('announces queue failures and exposes named keyboard controls', async () => {
   let releaseRequest
   const pendingResponse = new Promise((resolve) => {
