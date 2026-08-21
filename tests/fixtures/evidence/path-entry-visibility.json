@@ -1,6 +1,6 @@
 {
-  "fixture_set_id": "evidence-path-visibility-v1",
-  "description": "Synthetic evidence visibility and entry-state fixtures for the five primary Agent paths.",
+  "fixture_set_id": "evidence-path-visibility-v2",
+  "description": "Synthetic visibility classifications for the complete canonical evidence set on each of the five primary Agent paths.",
   "entries": [
     {
       "scenario_id": "AT-01-clear-motor",
@@ -10,69 +10,29 @@
         {
           "fixture_id": "EV-VIS-01-fast-claimant-image",
           "visibility": "claimant_visible",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_fast_image",
-            "kind": "incident_image",
-            "status": "received",
-            "file_status": "ready",
-            "original_filename": "minor-damage.jpg",
-            "media_type": "image/jpeg",
-            "size_bytes": 204800,
-            "source": "claimant",
-            "related_fields": ["vehicle.damage_description"],
-            "needed_for": ["current_action"],
-            "provenance": {"fixture_storage_ref": "fixture://path/fast/image"},
-            "claimant_note": "The damage image was received.",
-            "created_at": "2026-08-17T01:00:00Z",
-            "updated_at": "2026-08-17T01:00:00Z"
-          }
+          "evidence_id": "evd_fixture_path_fast_image"
         }
       ]
     },
     {
       "scenario_id": "AT-02-coverage-ambiguity",
       "business_path": "professional_review",
-      "description": "A coverage ambiguity with shared source evidence and an internal review aid.",
+      "description": "A coverage ambiguity whose canonical claimant evidence remains available for professional review.",
       "evidence": [
         {
-          "fixture_id": "EV-VIS-02-review-shared-document",
+          "fixture_id": "EV-VIS-02-review-damage-photos",
           "visibility": "shared",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_review_shared",
-            "kind": "other_document",
-            "status": "unofficial",
-            "file_status": "ready",
-            "original_filename": "claimant-policy-summary.pdf",
-            "media_type": "application/pdf",
-            "size_bytes": 122880,
-            "source": "claimant",
-            "related_fields": ["incident.description"],
-            "needed_for": ["coverage_review"],
-            "provenance": {"reported_context": "claimant_supplied_summary"},
-            "claimant_note": "This is the policy summary available to the claimant.",
-            "created_at": "2026-08-17T01:10:00Z",
-            "updated_at": "2026-08-17T01:10:00Z"
-          }
+          "evidence_id": "evd_fixture_at02_damage_photos"
         },
         {
-          "fixture_id": "EV-VIS-03-review-internal-aid",
-          "visibility": "internal_only",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_review_internal",
-            "kind": "other_document",
-            "status": "received",
-            "file_status": "ready",
-            "original_filename": null,
-            "media_type": null,
-            "size_bytes": null,
-            "source": "external_system",
-            "related_fields": ["incident.description"],
-            "needed_for": ["coverage_review"],
-            "provenance": {"internal_review_ref": "fixture://path/review/policy-citation"},
-            "claimant_note": null,
-            "created_at": "2026-08-17T01:11:00Z",
-            "updated_at": "2026-08-17T01:11:00Z"
-          }
+          "fixture_id": "EV-VIS-03-review-plumber-note",
+          "visibility": "shared",
+          "evidence_id": "evd_fixture_at02_plumber_note"
+        },
+        {
+          "fixture_id": "EV-VIS-07-review-weather-capture",
+          "visibility": "shared",
+          "evidence_id": "evd_fixture_at02_weather_capture"
         }
       ]
     },
@@ -84,22 +44,7 @@
         {
           "fixture_id": "EV-VIS-04-urgent-shared-image",
           "visibility": "shared",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_urgent_image",
-            "kind": "incident_image",
-            "status": "received",
-            "file_status": "ready",
-            "original_filename": "urgent-scene.jpg",
-            "media_type": "image/jpeg",
-            "size_bytes": 286720,
-            "source": "claimant",
-            "related_fields": ["incident.description"],
-            "needed_for": ["later_action"],
-            "provenance": {"fixture_storage_ref": "fixture://path/urgent/image"},
-            "claimant_note": "The scene image is available but does not delay urgent support.",
-            "created_at": "2026-08-17T01:20:00Z",
-            "updated_at": "2026-08-17T01:20:00Z"
-          }
+          "evidence_id": "evd_fixture_path_urgent_image"
         }
       ]
     },
@@ -111,49 +56,29 @@
         {
           "fixture_id": "EV-VIS-05-human-shared-image",
           "visibility": "shared",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_human_image",
-            "kind": "incident_image",
-            "status": "received",
-            "file_status": "ready",
-            "original_filename": "supplied-before-handoff.jpg",
-            "media_type": "image/jpeg",
-            "size_bytes": 196608,
-            "source": "claimant",
-            "related_fields": ["vehicle.damage_description"],
-            "needed_for": ["later_action"],
-            "provenance": {"fixture_storage_ref": "fixture://path/human/image"},
-            "claimant_note": "This image should remain attached during the human handoff.",
-            "created_at": "2026-08-17T01:30:00Z",
-            "updated_at": "2026-08-17T01:30:00Z"
-          }
+          "evidence_id": "evd_fixture_path_human_image"
         }
       ]
     },
     {
       "scenario_id": "AT-06-pending-evidence",
       "business_path": "pending_evidence",
-      "description": "A police report does not exist yet, while unrelated safe reporting work can continue.",
+      "description": "A police report does not exist yet, while unrelated safe reporting work can continue and internal pending work remains staff-only.",
       "evidence": [
         {
           "fixture_id": "EV-VIS-06-pending-claimant-report",
           "visibility": "claimant_visible",
-          "evidence": {
-            "evidence_id": "evd_fixture_path_pending_report",
-            "kind": "police_report",
-            "status": "pending_generation",
-            "file_status": "not_available",
-            "original_filename": null,
-            "media_type": null,
-            "size_bytes": null,
-            "source": "claimant",
-            "related_fields": ["authorities.police_report_reference"],
-            "needed_for": ["later_action"],
-            "provenance": {"availability_state": "awaiting_external_generation"},
-            "claimant_note": "Police advised that the report will be issued later.",
-            "created_at": "2026-08-17T01:40:00Z",
-            "updated_at": "2026-08-17T01:40:00Z"
-          }
+          "evidence_id": "evd_fixture_at06_police"
+        },
+        {
+          "fixture_id": "EV-VIS-08-pending-agency-record",
+          "visibility": "internal_only",
+          "evidence_id": "evd_fixture_at06_agency"
+        },
+        {
+          "fixture_id": "EV-VIS-09-pending-internal-history",
+          "visibility": "internal_only",
+          "evidence_id": "evd_fixture_at06_internal"
         }
       ]
     }
