@@ -1,55 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Protocol
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeChunk:
-    document_id: str
-    chunk_id: str
-    title: str
-    document_type: str
-    version: str
-    section_path: str
-    page: int | None
-    source_uri: str
-    jurisdiction: str
-    insurer: str | None
-    product: str | None
-    effective_from: datetime | None
-    effective_to: datetime | None
-    authority: str
-    visibility: str
-    checksum: str
-    ingested_at: datetime
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeSearch:
-    text: str
-    jurisdiction: str
-    visibility: str
-    insurer: str | None = None
-    product: str | None = None
-    effective_at: datetime | None = None
-    limit: int = 5
-
-
-class KnowledgeDocumentStore(Protocol):
-    def connection_status(self) -> str:
-        raise NotImplementedError
-
-    def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
-        raise NotImplementedError
-
-
-class KnowledgeRetriever(Protocol):
-    def connection_status(self) -> str:
-        raise NotImplementedError
-
-    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
-        raise NotImplementedError
+from backend.domain.knowledge import (
+    KnowledgeChunk,
+    KnowledgeDocumentStore,
+    KnowledgeRetriever,
+    KnowledgeSearch,
+)
 
 
 class FixtureKnowledgeDocumentStore(KnowledgeDocumentStore):
@@ -69,18 +23,23 @@ class FixtureKnowledgeDocumentStore(KnowledgeDocumentStore):
 
 
 def _applicable(chunk: KnowledgeChunk, request: KnowledgeSearch) -> bool:
+    if (
+        request.authority is None
+        or request.version is None
+        or request.insurer is None
+        or request.product is None
+        or request.effective_at is None
+    ):
+        return False
     if chunk.jurisdiction != request.jurisdiction or chunk.visibility != request.visibility:
         return False
-    if request.insurer is not None and chunk.insurer != request.insurer:
+    if chunk.authority != request.authority or chunk.version != request.version:
         return False
-    if request.product is not None and chunk.product != request.product:
+    if chunk.insurer != request.insurer or chunk.product != request.product:
         return False
-    if request.effective_at is not None:
-        if chunk.effective_from is not None and request.effective_at < chunk.effective_from:
-            return False
-        if chunk.effective_to is not None and request.effective_at >= chunk.effective_to:
-            return False
-    return True
+    if chunk.effective_from is not None and request.effective_at < chunk.effective_from:
+        return False
+    return chunk.effective_to is None or request.effective_at < chunk.effective_to
 
 
 class FixtureKnowledgeRetriever(KnowledgeRetriever):

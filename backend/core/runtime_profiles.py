@@ -4,11 +4,10 @@ from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStora
 from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
-    KnowledgeDocumentStore,
-    KnowledgeRetriever,
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
 from backend.core.config import DataRuntimeProfile, Settings
+from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import PersistenceRepository
 
@@ -35,6 +34,20 @@ class DataRuntimeBundle:
             'knowledge_documents': self.knowledge_documents.connection_status(),
             'knowledge_retrieval': self.knowledge_retrieval.connection_status(),
         }
+
+
+def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) -> None:
+    """Reject mislabeled or externally assembled unsupported provider bundles."""
+
+    if bundle.profile is not settings.data_runtime_profile:
+        raise RuntimeProfileConfigurationError(
+            'The data runtime bundle does not match DATA_RUNTIME_PROFILE.'
+        )
+    if bundle.profile is not DataRuntimeProfile.FIXTURE:
+        raise RuntimeProfileConfigurationError(
+            f'Externally supplied {bundle.profile.value!r} data runtime bundles are not '
+            'supported until that complete provider bundle is implemented and validated.'
+        )
 
 
 def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:

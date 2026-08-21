@@ -21,7 +21,11 @@ from backend.core.config import DataRuntimeProfile, Settings
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
-from backend.core.runtime_profiles import DataRuntimeBundle, build_data_runtime_bundle
+from backend.core.runtime_profiles import (
+    DataRuntimeBundle,
+    build_data_runtime_bundle,
+    validate_data_runtime_bundle,
+)
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
@@ -47,11 +51,8 @@ def create_app(
         raise ValueError(
             'Pass either data_runtime_bundle or individual test data dependencies, not both.'
         )
-    if (
-        data_runtime_bundle is not None
-        and data_runtime_bundle.profile is not resolved_settings.data_runtime_profile
-    ):
-        raise ValueError('The data runtime bundle does not match DATA_RUNTIME_PROFILE.')
+    if data_runtime_bundle is not None:
+        validate_data_runtime_bundle(resolved_settings, data_runtime_bundle)
     if injected_data_dependencies:
         if resolved_settings.data_runtime_profile is not DataRuntimeProfile.FIXTURE:
             raise ValueError(

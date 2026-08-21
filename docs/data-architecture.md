@@ -310,7 +310,13 @@ request time.
 - Retrieval results are evidence, not coverage, fraud, liability, approval, or
   rejection decisions.
 - Retrieval must filter insurer, jurisdiction, product, effective period,
-  document authority, and visibility before similarity ranking.
+  document authority, visibility, and exact source version before similarity
+  ranking.
+- The current fixture retriever fails closed when insurer, product, authority,
+  version, or effective time is omitted. It does not treat an omitted selector
+  as permission to broaden a search. Global documents with no insurer or product
+  are not executable retrieval candidates until an explicit governed scope and
+  applicability contract is introduced.
 - Answers must retain citations to the exact source version and section.
 - Missing, conflicting, expired, or inapplicable evidence must be stated as a
   limitation and may require professional review.

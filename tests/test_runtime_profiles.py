@@ -7,16 +7,39 @@ from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
-    KnowledgeChunk,
-    KnowledgeSearch,
 )
+from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
 from backend.core.config import DataRuntimeProfile, Settings
 from backend.core.runtime_profiles import (
+    DataRuntimeBundle,
     RuntimeProfileConfigurationError,
     build_data_runtime_bundle,
 )
+from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.repositories.fixture import FixtureRepository
+
+
+def knowledge_search(
+    *,
+    jurisdiction: str = 'NZ',
+    visibility: str = 'claimant',
+    authority: str | None = 'synthetic_demo',
+    version: str | None = '1.0',
+    insurer: str | None = 'Northwind',
+    product: str | None = 'motor',
+    effective_at: datetime | None = datetime(2026, 8, 21, tzinfo=UTC),
+) -> KnowledgeSearch:
+    return KnowledgeSearch(
+        text='excess',
+        jurisdiction=jurisdiction,
+        visibility=visibility,
+        authority=authority,
+        version=version,
+        insurer=insurer,
+        product=product,
+        effective_at=effective_at,
+    )
 
 
 def test_environment_selects_exactly_one_known_profile(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,21 +103,65 @@ def test_fixture_knowledge_retrieval_filters_metadata_before_text_matching() -> 
         chunk_id='chk_home_excess',
         product='home',
     )
-    store = FixtureKnowledgeDocumentStore((applicable, wrong_product))
+    unscoped_global = replace(
+        applicable,
+        document_id='doc_global_v1',
+        chunk_id='chk_global_excess',
+        insurer=None,
+        product=None,
+    )
+    store = FixtureKnowledgeDocumentStore((applicable, wrong_product, unscoped_global))
     retriever = FixtureKnowledgeRetriever(store)
 
-    results = retriever.search(
-        KnowledgeSearch(
-            text='excess',
-            jurisdiction='NZ',
-            visibility='claimant',
-            insurer='Northwind',
-            product='motor',
-            effective_at=datetime(2026, 8, 21, tzinfo=UTC),
-        )
-    )
+    results = retriever.search(knowledge_search())
 
     assert results == [applicable]
+
+
+@pytest.mark.parametrize(
+    'search_request',
+    [
+        knowledge_search(authority='unapproved'),
+        knowledge_search(version='2.0'),
+        knowledge_search(jurisdiction='AU'),
+        knowledge_search(visibility='internal_only'),
+        knowledge_search(insurer='Other Insurer'),
+        knowledge_search(product='home'),
+        knowledge_search(effective_at=datetime(2025, 12, 31, tzinfo=UTC)),
+        knowledge_search(effective_at=datetime(2027, 1, 1, tzinfo=UTC)),
+        knowledge_search(authority=None),
+        knowledge_search(version=None),
+        knowledge_search(insurer=None),
+        knowledge_search(product=None),
+        knowledge_search(effective_at=None),
+    ],
+)
+def test_fixture_knowledge_retrieval_fails_closed_for_inapplicable_or_missing_scope(
+    search_request: KnowledgeSearch,
+) -> None:
+    chunk = KnowledgeChunk(
+        document_id='doc_motor_v1',
+        chunk_id='chk_motor_excess',
+        title='Motor excess',
+        document_type='synthetic_policy_wording',
+        version='1.0',
+        section_path='Excess',
+        page=4,
+        source_uri='northwind://synthetic/motor-v1',
+        jurisdiction='NZ',
+        insurer='Northwind',
+        product='motor',
+        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+        effective_to=datetime(2027, 1, 1, tzinfo=UTC),
+        authority='synthetic_demo',
+        visibility='claimant',
+        checksum='sha256:synthetic',
+        ingested_at=datetime(2026, 8, 21, tzinfo=UTC),
+        text='A standard excess may apply to accidental damage.',
+    )
+    retriever = FixtureKnowledgeRetriever(FixtureKnowledgeDocumentStore((chunk,)))
+
+    assert retriever.search(search_request) == []
 
 
 @pytest.mark.parametrize(
@@ -126,6 +193,24 @@ def test_app_rejects_a_bundle_that_does_not_match_selected_profile() -> None:
         create_app(
             Settings(data_runtime_profile=DataRuntimeProfile.MONGODB),
             data_runtime_bundle=fixture_bundle,
+        )
+
+
+def test_matching_non_fixture_label_cannot_hide_fixture_or_mixed_dependencies() -> None:
+    fixture_bundle = build_data_runtime_bundle(Settings())
+    mislabeled_bundle = DataRuntimeBundle(
+        profile=DataRuntimeProfile.MONGODB,
+        repository=FixtureRepository(),
+        evidence_storage=MockEvidenceStorage(),
+        policy_history=MockPolicyHistoryAdapter(),
+        knowledge_documents=fixture_bundle.knowledge_documents,
+        knowledge_retrieval=fixture_bundle.knowledge_retrieval,
+    )
+
+    with pytest.raises(RuntimeProfileConfigurationError, match='not supported'):
+        create_app(
+            Settings(data_runtime_profile=DataRuntimeProfile.MONGODB),
+            data_runtime_bundle=mislabeled_bundle,
         )
 
 
