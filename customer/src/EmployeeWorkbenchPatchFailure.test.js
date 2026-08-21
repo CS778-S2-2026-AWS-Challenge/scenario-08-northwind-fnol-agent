@@ -174,7 +174,7 @@ it('preserves every entered professional-review field when the staff-action PATC
   const getCallsAfterPatch = fetchMock.mock.calls.filter(([, options = {}]) => !options.method).length
   expect(getCallsAfterPatch).toBe(getCallsBeforePatch)
   expect(document.querySelector('#claimCount').textContent).toBe('1 claim')
-  expect(document.querySelector('#detailContent').textContent).toContain('customer-patch-failure')
+  expect(document.querySelector('#detailContent').textContent).toContain(item.claim_id)
 
   dom.window.close()
 })
