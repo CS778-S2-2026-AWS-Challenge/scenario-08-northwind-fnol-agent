@@ -74,10 +74,9 @@ def test_every_defect_names_path_expected_actual_and_stack() -> None:
 
 
 def test_the_claimant_visibility_leak_no_longer_reproduces() -> None:
-    assert all(
-        defect.code != 'INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT'
-        for defect in check_path_evidence()
-    )
+    defect_codes = {defect.code for defect in check_path_evidence()}
+
+    assert 'INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT' not in defect_codes
 
 
 def test_the_report_is_readable_when_clean_and_when_not() -> None:
