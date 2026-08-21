@@ -192,9 +192,12 @@ def test_session_mutation_checks_identity_inside_mutation_boundary(
             **replacement_session.model_dump(mode='json'),
             '_id': repository._record_id('session', replacement_session.session_id),
             'kind': 'session',
-            'claim_id': 'different-claim',
+            'claim_id': claim.claim_id,
             'customer_id': claim.customer_id,
         }
+    )
+    existing_session = repository._collection.find_one(
+        {'_id': repository._record_id('session', replacement_session.session_id)}
     )
     from backend.repositories.protocols import IdempotencyRecord
 
@@ -213,3 +216,11 @@ def test_session_mutation_checks_identity_inside_mutation_boundary(
                 session_id=replacement_session.session_id,
             ),
         )
+    assert (
+        repository._collection.find_one(
+            {'_id': repository._record_id('session', replacement_session.session_id)}
+        )
+        == existing_session
+    )
+    assert repository.get_claim(claim.claim_id, claim.customer_id) is not None
+    assert repository.find_idempotency(claim.customer_id, '/sessions', 'mutation-key') is None
