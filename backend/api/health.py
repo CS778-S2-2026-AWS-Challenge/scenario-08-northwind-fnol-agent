@@ -4,9 +4,8 @@ from typing import Literal, cast
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
-from backend.adapters.policy_history import PolicyHistoryAdapter
+from backend.core.runtime_profiles import DataRuntimeBundle
 
 router = APIRouter(tags=['health'])
 
@@ -29,27 +28,20 @@ def liveness() -> LivenessResponse:
 
 @router.get('/health/ready', response_model=ReadinessResponse)
 def readiness(request: Request) -> ReadinessResponse:
-    # Retrieval reports what the configured adapter actually says, so an
-    # unavailable provider is visible here rather than only at call time.
-    retrieval = cast(
-        PolicyHistoryAdapter, request.app.state.policy_history_adapter
-    ).connection_status()
     handoff_dispatch = cast(
         HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter
     ).connection_status()
-    evidence_storage = cast(EvidenceStorage, request.app.state.evidence_storage).connection_status()
+    data_runtime = cast(DataRuntimeBundle, request.app.state.data_runtime_bundle)
+    data_checks = data_runtime.readiness_checks()
     return ReadinessResponse(
         status='degraded',
         checks={
-            'persistence': 'not_configured',
+            **data_checks,
             'agent': 'not_configured',
-            'policy': retrieval,
-            'claim_history': retrieval,
             'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',
             'handoff_dispatch': handoff_dispatch,
-            'evidence_storage': evidence_storage,
             'aws_evidence_storage': 'pending_confirmation',
         },
         checked_at=datetime.now(UTC),
