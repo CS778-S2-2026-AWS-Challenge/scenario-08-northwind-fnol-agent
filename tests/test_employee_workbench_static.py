@@ -166,6 +166,26 @@ def test_employee_workbench_groups_detail_with_progressive_disclosure() -> None:
     assert "byId('detailReview').open = hasReviewWork" in page
 
 
+def test_employee_workbench_uses_accessible_claim_detail_tabs() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'id="claimDetailTabs"' in page
+    assert 'data-detail-tab="overview"' in page
+    assert 'data-detail-tab="evidence"' in page
+    assert 'data-detail-tab="review"' in page
+    assert 'data-detail-tab="history"' in page
+    assert 'data-detail-page="overview"' in page
+    assert 'data-detail-page="evidence"' in page
+    assert 'data-detail-page="review"' in page
+    assert 'data-detail-page="history"' in page
+    assert 'id="detailNextStep" data-detail-page="history"' in page
+    assert 'function selectClaimDetailTab(tab, focus = false)' in page
+    assert 'section.inert = section.hidden' in page
+    assert "section.setAttribute('aria-hidden', String(section.hidden))" in page
+    assert '.claim-detail-tabs { position:sticky;' in page
+    assert "['ArrowLeft', 'ArrowRight', 'Home', 'End']" in page
+
+
 def test_employee_workbench_exposes_pending_queue_and_demo_recovery() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 

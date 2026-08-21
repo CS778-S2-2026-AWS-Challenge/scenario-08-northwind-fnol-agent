@@ -106,6 +106,13 @@
     .badge.waiting { background: #f8fafc; color: #334155; }
 
     .detail-panel { display: grid; gap: 16px; }
+    .claim-detail-tabs { position:sticky; top:12px; z-index:20; display:flex; gap:6px; overflow-x:auto; padding:6px; border:1px solid #dbe4ea; border-radius:14px; background:rgba(248,250,252,.96); box-shadow:0 8px 22px rgba(15,23,42,.12); backdrop-filter:blur(10px); scrollbar-width:thin; scroll-snap-type:x proximity; }
+    .claim-detail-tabs button { flex:0 0 auto; padding:10px 13px; border:0; border-radius:9px; background:transparent; color:#475569; font-weight:700; cursor:pointer; }
+    .claim-detail-tabs button { scroll-snap-align:center; }
+    .claim-detail-tabs button[aria-selected="true"] { background:#fff; color:#0f766e; box-shadow:0 1px 4px rgba(15,23,42,.12); }
+    .claim-detail-tabs button:focus-visible { outline:3px solid rgba(15,118,110,.25); outline-offset:2px; }
+    .detail-panel > #claimDetailTabs { order:-1; }
+    [data-detail-page][hidden] { display:none !important; }
     .detail-panel > #detailSummary { order:0; }
     .detail-panel > #detailStaffActions { order:1; }
     .detail-panel > #detailReview { order:2; }
@@ -374,6 +381,8 @@
       .queue-overview { grid-template-columns:1fr; }
       .detail-grid, .staff-form-grid, .context-row, .evidence-review-card { grid-template-columns:1fr; }
       .signal-draft-list, .signal-actions { margin-left:0; }
+      .claim-detail-tabs { top:8px; margin-inline:-4px; }
+      .claim-detail-tabs button { padding:9px 11px; font-size:12px; }
       .claim-list button { width:100%; }
       .customer-chat-content { grid-template-columns:1fr; }
       .customer-chat-list { display:none; }
@@ -465,30 +474,36 @@
         </section>
 
         <section class="detail-panel">
-          <div class="detail-section" id="detailSummary">
+          <nav id="claimDetailTabs" class="claim-detail-tabs" aria-label="Claim detail sections" role="tablist" hidden>
+            <button type="button" role="tab" data-detail-tab="overview" aria-selected="true">Claim detail &amp; review</button>
+            <button type="button" role="tab" data-detail-tab="evidence" aria-selected="false">Evidence and claim facts</button>
+            <button type="button" role="tab" data-detail-tab="review" aria-selected="false">Handoffs and internal review</button>
+            <button type="button" role="tab" data-detail-tab="history" aria-selected="false">History and continuity</button>
+          </nav>
+          <div class="detail-section" id="detailSummary" data-detail-page="overview">
             <h2>Claim detail</h2>
             <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
           </div>
-          <div class="detail-section" id="detailNextStep" style="display:none">
+          <div class="detail-section" id="detailNextStep" data-detail-page="history" style="display:none">
             <div class="claim-actions">
               <div class="action-copy"><strong>Continue this claim</strong><span>Communication and guidance tools</span></div>
               <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
               <button id="toggleAssistantBtn" class="customer-chat-close" type="button">Open assistant</button>
             </div>
           </div>
-          <details class="detail-section" id="detailEvidence" style="display:none" open>
+          <details class="detail-section" id="detailEvidence" data-detail-page="evidence" style="display:none" open>
             <summary>Evidence and claim facts <span class="detail-section-hint">What we know and what is still pending</span></summary>
             <div id="detailEvidenceContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailReview" style="display:none">
+          <details class="detail-section" id="detailReview" data-detail-page="review" style="display:none">
             <summary>Handoffs and internal review <span class="detail-section-hint">Assignments, signals and review context</span></summary>
             <div id="detailReviewContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailHistory" style="display:none">
+          <details class="detail-section" id="detailHistory" data-detail-page="history" style="display:none">
             <summary>History and continuity <span class="detail-section-hint">Previous sessions and communication</span></summary>
             <div id="detailHistoryContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section integrated-review-controls" id="detailStaffActions" style="display:none">
+          <details class="detail-section integrated-review-controls" id="detailStaffActions" data-detail-page="overview" style="display:none">
             <summary>Complete the professional review <span class="detail-section-hint">Three guided steps</span></summary>
             <div class="detail-section-body">
             <p class="staff-workflow-intro"><strong>How this works:</strong> review every file the claimant supplied, resolve any internal review signal, then record the outcome and a safe customer update. Your internal reasoning stays private.</p>
@@ -605,6 +620,8 @@
     let signalDraftClaimId = null;
     let actionableReviewSignals = [];
     const signalDecisionDrafts = new Map();
+    let activeDetailTab = 'overview';
+    let detailTabClaimId = null;
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -638,6 +655,30 @@
       }
       banner.style.display = 'block';
       banner.textContent = message;
+    }
+
+    function syncClaimDetailTabs() {
+      document.querySelectorAll('[data-detail-tab]').forEach(button => {
+        const selected = button.dataset.detailTab === activeDetailTab;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
+      document.querySelectorAll('[data-detail-page]').forEach(section => {
+        section.hidden = section.dataset.detailPage !== activeDetailTab;
+        section.inert = section.hidden;
+        section.setAttribute('aria-hidden', String(section.hidden));
+        if (!section.hidden && section.matches('details') && section.style.display !== 'none') {
+          section.open = true;
+        }
+      });
+    }
+
+    function selectClaimDetailTab(tab, focus = false) {
+      activeDetailTab = tab;
+      syncClaimDetailTabs();
+      const selectedTab = document.querySelector(`[data-detail-tab="${tab}"]`);
+      selectedTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      if (focus) selectedTab?.focus();
     }
 
     function setQueueLoading(loading) {
@@ -967,6 +1008,10 @@
       detailRevision = null;
       actionableReviewSignals = [];
       signalDecisionDrafts.clear();
+      byId('claimDetailTabs').hidden = true;
+      activeDetailTab = 'overview';
+      detailTabClaimId = null;
+      syncClaimDetailTabs();
       byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
       ['detailNextStep', 'detailEvidence', 'detailReview', 'detailHistory', 'detailStaffActions']
         .forEach(id => { byId(id).style.display = 'none'; });
@@ -1616,6 +1661,7 @@
         reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null;
         controls.style.display = shouldOpen ? 'block' : 'none';
         controls.open = shouldOpen;
+        syncClaimDetailTabs();
         action.setAttribute('aria-expanded', String(shouldOpen));
         action.textContent = shouldOpen ? 'Hide review controls' : 'Review and decide';
         if (shouldOpen) {
@@ -1657,6 +1703,10 @@
 
       return (providedDetail ? Promise.resolve(providedDetail) : fetchClaimDetail(claimId))
         .then(detail => {
+          if (detailTabClaimId !== detail.claim_id) {
+            detailTabClaimId = detail.claim_id;
+            activeDetailTab = 'overview';
+          }
           activeClaimDetail = detail;
           detailRevision = detail.revision;
           detailCache.set(detail.claim_id, detail);
@@ -1687,12 +1737,14 @@
           byId('detailEvidence').style.display = 'block';
           byId('detailReview').style.display = 'block';
           byId('detailHistory').style.display = 'block';
+          byId('claimDetailTabs').hidden = false;
           populateStaffControls(detail);
           const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
           byId('detailReview').open = isProfessionalReview || byId('detailReview').open;
           const showReviewControls = isProfessionalReview && reviewControlsOpenClaimId === detail.claim_id;
           byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none';
           byId('detailStaffActions').open = showReviewControls;
+          syncClaimDetailTabs();
           if (!customerChatView.hidden) renderCustomerChat();
         })
         .catch(error => {
@@ -2173,6 +2225,19 @@
       renderAttachmentPreview();
     });
     byId('openCustomerChatBtn').addEventListener('click', () => openCustomerChat());
+    document.querySelectorAll('[data-detail-tab]').forEach((button, index, buttons) => {
+      button.addEventListener('click', () => selectClaimDetailTab(button.dataset.detailTab));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        let nextIndex = index;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % buttons.length;
+        if (event.key === 'ArrowLeft') nextIndex = (index - 1 + buttons.length) % buttons.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = buttons.length - 1;
+        selectClaimDetailTab(buttons[nextIndex].dataset.detailTab, true);
+      });
+    });
     byId('workbenchNav').addEventListener('click', () => selectQueue('all'));
     byId('pendingEvidenceNav').addEventListener('click', () => selectQueue('awaiting_evidence'));
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
