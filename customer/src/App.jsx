@@ -380,7 +380,7 @@ function App() {
       setSessionId(session.session_id)
       setMessages(conversation.items)
       setForm(current.form)
-      setNextStep(session.resume.customer_next_step || current.customer_next_step)
+      setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
       setResumeContext(session.resume)
       setSavedReports(null)

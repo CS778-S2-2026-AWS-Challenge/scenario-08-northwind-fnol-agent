@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import at08ResumeFixture from '../../tests/fixtures/api/AT-08-resume-public.json'
 import App from './App.jsx'
 
 function jsonResponse(body, status = 200) {
@@ -92,6 +93,39 @@ function firstTurn() {
     },
     handoff: null,
   }
+}
+
+function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.customer_next_step) {
+  const { claim, messages, session } = at08ResumeFixture
+  fetch.mockImplementationOnce(() =>
+    jsonResponse({
+      items: [
+        {
+          claim_id: claim.claim_id,
+          revision: claim.revision,
+          incident_type: claim.incident_type,
+          workflow_state: claim.workflow_state,
+          external_claim: claim.external_claim,
+          customer_next_step: claim.customer_next_step,
+          created_at: claim.created_at,
+          updated_at: claim.updated_at,
+          can_resume: true,
+        },
+      ],
+      page: { next_cursor: null },
+    }),
+  )
+  fetch.mockImplementationOnce(() =>
+    jsonResponse(
+      {
+        ...session,
+        resume: { ...session.resume, customer_next_step: sessionNextStep },
+      },
+      201,
+    ),
+  )
+  fetch.mockImplementationOnce(() => jsonResponse(claim))
+  fetch.mockImplementationOnce(() => jsonResponse(messages))
 }
 
 describe('claimant intake', () => {
@@ -290,81 +324,58 @@ describe('claimant intake', () => {
     expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
   })
 
-  it('resumes a saved report with confirmed facts and focused context', async () => {
-    const resumedNextStep = {
+  it('resumes canonical AT-08 context without re-asking confirmed facts', async () => {
+    mockAt08Resume()
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
+    expect(
+      await screen.findByText(
+        'Confirm how the police report will be added when it becomes available.',
+      ),
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Resume report' }))
+
+    expect(await screen.findByText('Continue where you left off')).toBeVisible()
+    expect(
+      screen.getByText('Rear-end collision in Newmarket; incident and location are confirmed.'),
+    ).toBeVisible()
+    expect(screen.getByText('Police report expected after the original session.')).toBeVisible()
+    expect(
+      screen.getByText('The police report can be added later without restarting the claim.'),
+    ).toBeVisible()
+    expect(screen.getAllByText('Confirmed')).toHaveLength(2)
+    expect(screen.queryByLabelText('Incident description')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Incident location')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/claims/clm_fixture_at08/sessions',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('uses the latest claim next step instead of a stale session snapshot', async () => {
+    const staleSessionNextStep = {
       ...nextStep,
       status: 'provide_incident_location',
       summary: 'Where did the incident happen?',
       required_items: ['incident.location'],
     }
-    const confirmedDescription = {
-      ...firstTurn().form_changes[0].field,
-      status: 'confirmed',
-    }
-    fetch.mockImplementationOnce(() =>
-      jsonResponse({
-        items: [{
-          claim_id: 'clm_saved',
-          revision: 6,
-          incident_type: 'motor',
-          workflow_state: 'awaiting_evidence',
-          external_claim: null,
-          customer_next_step: resumedNextStep,
-          created_at: '2026-08-02T02:00:00Z',
-          updated_at: '2026-08-12T02:20:00Z',
-          can_resume: true,
-        }],
-        page: { next_cursor: null },
-      }),
-    )
-    fetch.mockImplementationOnce(() =>
-      jsonResponse({
-        session_id: 'ses_resumed',
-        claim_id: 'clm_saved',
-        status: 'active',
-        resume: {
-          summary: 'Rear-end collision; the incident description is confirmed.',
-          unresolved_questions: ['Where did the incident happen?'],
-          pending_items: ['Police report expected later.'],
-          prior_commitments: ['The police report can be added without restarting.'],
-          customer_next_step: resumedNextStep,
-        },
-        started_at: '2026-08-12T02:20:00Z',
-        last_active_at: '2026-08-12T02:20:00Z',
-        closed_at: null,
-      }, 201),
-    )
-    fetch.mockImplementationOnce(() =>
-      jsonResponse({
-        ...createdClaim().claim,
-        claim_id: 'clm_saved',
-        revision: 7,
-        incident_type: 'motor',
-        form: { 'incident.description': confirmedDescription },
-        customer_next_step: resumedNextStep,
-      }),
-    )
-    fetch.mockImplementationOnce(() =>
-      jsonResponse({ items: [], page: { next_cursor: null } }),
-    )
+    mockAt08Resume(staleSessionNextStep)
 
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
-    expect(await screen.findByText('Where did the incident happen?')).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Resume report' }))
+    await user.click(await screen.findByRole('button', { name: 'Resume report' }))
 
-    expect(await screen.findByText('Continue where you left off')).toBeVisible()
-    expect(screen.getByText('Rear-end collision; the incident description is confirmed.')).toBeVisible()
-    expect(screen.getByText('Police report expected later.')).toBeVisible()
-    expect(screen.getByText('The police report can be added without restarting.')).toBeVisible()
-    expect(screen.getByText('Confirmed')).toBeVisible()
-    expect(screen.getByLabelText('Incident location')).toBeEnabled()
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      '/api/v1/claims/clm_saved/sessions',
-      expect.objectContaining({ method: 'POST' }),
-    )
+    expect(screen.queryByText('Where did the incident happen?')).not.toBeInTheDocument()
+    expect(
+      screen.getAllByText(
+        'Confirm how the police report will be added when it becomes available.',
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 
   it('reuses the claim idempotency key when a failed submission is retried', async () => {
