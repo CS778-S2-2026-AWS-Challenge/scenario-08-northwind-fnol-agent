@@ -105,6 +105,12 @@ def test_a_mixed_source_evidence_set_survives_resume_unchanged(
     assert claim_after is not None
     assert claim_after.active_session_id == resumed_session_id
     assert claim_after.revision > paused_revision
+    active_sessions = [
+        session
+        for session in repository.list_sessions_for_claim(claim_id, CUSTOMER_ID)
+        if session.status is SessionStatus.ACTIVE
+    ]
+    assert [session.session_id for session in active_sessions] == [resumed_session_id]
 
     # Every record is byte-identical: resume neither rewrote nor recreated one.
     assert evidence_snapshot(repository, claim_id) == before
@@ -167,45 +173,61 @@ def test_internal_provenance_never_reaches_the_claimant_across_resume(
     assert sorted(note for note in staff_notes if note) == sorted(notes)
 
 
-def test_resume_does_not_widen_the_known_record_level_visibility_gap(
+def test_resume_preserves_role_safe_record_and_aggregate_boundaries(
     seeded: tuple[FixtureRepository, str],
 ) -> None:
-    """Records the claimant should not see are the same set before and after.
-
-    `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` in
-    `docs/day4-evidence-visibility-defects.md` is open: `EvidenceRecord` has no
-    visibility field, so the claimant list returns staff- and
-    external-system-sourced records. That is a record-level gap owned by the
-    evidence API and domain model.
-
-    This asserts what Issue #144 is actually responsible for — that resume does
-    not change the boundary — and pins the leak so a fix or a regression shows
-    up here rather than passing quietly.
-    """
+    """Claimant-safe and staff-complete projections stay stable across resume."""
     repository, claim_id = seeded
-    internal_ids = {
+    all_ids = {
         record.evidence_id
         for record in repository.list_evidence(claim_id, CUSTOMER_ID)
-        if record.source is not EvidenceSource.CLAIMANT
     }
-    assert internal_ids
+    claimant_ids = {'evd_fixture_at06_police'}
+    assert all_ids == {
+        'evd_fixture_at06_police',
+        'evd_fixture_at06_agency',
+        'evd_fixture_at06_internal',
+    }
 
     app = create_app(Settings(), repository)
     with TestClient(app) as client:
-        before = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
+        claimant_evidence_before = client.get(
+            f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
+        )
+        claimant_claim_before = client.get(
+            f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH
+        )
+        staff_before = client.get(
+            f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH
+        )
+
         pause_active_session(repository, claim_id)
-        client.post(
+        resumed = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**CLAIMANT_AUTH, 'Idempotency-Key': 'day5-visibility-resume'},
             json={'intent': 'resume'},
         )
-        after = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
+        claimant_evidence_after = client.get(
+            f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
+        )
+        claimant_claim_after = client.get(
+            f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH
+        )
+        staff_after = client.get(
+            f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH
+        )
 
-    visible_before = {item['evidence_id'] for item in before.json()['items']}
-    visible_after = {item['evidence_id'] for item in after.json()['items']}
+    assert resumed.status_code == 201
+    for response in (claimant_evidence_before, claimant_evidence_after):
+        assert response.status_code == 200
+        assert {item['evidence_id'] for item in response.json()['items']} == claimant_ids
+        assert {item['source'] for item in response.json()['items']} == {'claimant'}
 
-    assert visible_before == visible_after, 'resume changed which records the claimant sees'
-    assert internal_ids <= visible_before, (
-        'The recorded visibility gap no longer reproduces. Update '
-        'docs/day4-evidence-visibility-defects.md and this test together.'
-    )
+    for response in (claimant_claim_before, claimant_claim_after):
+        assert response.status_code == 200
+        assert response.json()['evidence_summary']['pending'] == 1
+
+    for response in (staff_before, staff_after):
+        assert response.status_code == 200
+        assert {item['evidence_id'] for item in response.json()['evidence']} == all_ids
+        assert response.json()['evidence_summary']['pending'] == 3

@@ -33,8 +33,11 @@ Run `tests/fixtures/presentation/test_evidence_source_state_visibility_on_resume
 2. **Internal provenance never reaches the claimant.** Each record carries an
    `internal_note`; none of the three appears in a claimant response before or
    after resume, while staff continue to receive all three.
-3. **Resume does not widen the record-level visibility gap.** The set of records
-   the claimant can see is identical before and after.
+3. **Resume preserves the corrected role boundary.** Before and after resume,
+   the claimant evidence list contains only the claimant-supplied police
+   report and its claimant-safe aggregate reports one pending item. The staff
+   projection contains all three authoritative records and reports three
+   pending items.
 
 ## Acceptance
 
@@ -44,25 +47,15 @@ Issue #144 acceptance conditions:
   re-confirmed here: the claim keeps its identity, gains the new active session,
   and advances its revision.
 - **"Saved evidence state and visibility remain intact."** Evidence state,
-  summary, source, and internal provenance are all intact across resume, and the
-  claimant-visible set is unchanged.
+  source, provenance, and the authoritative three-record set are unchanged
+  across resume. The claimant-safe one-record projection and the staff-complete
+  three-record projection also remain unchanged.
 
-## Known limitation, recorded not hidden
+## Visibility boundary
 
-`INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` in
-`docs/day4-evidence-visibility-defects.md` is open. `EvidenceRecord` has no
-visibility field, so `GET /api/v1/claims/{claim_id}/evidence` returns every
-persisted record, including the `staff` and `external_system` ones above.
-
-That gap is **not** caused by resume and is not this issue's to fix — it belongs
-to the evidence API and domain model. The distinction matters for reading this
-evidence honestly: "visibility remains intact" here means the boundary is the
-same before and after the session change, **not** that the boundary is correct.
-
-The third test pins the leak deliberately. If the owning stack fixes it, that
-test fails and points at the defect record, so the fix and this document are
-updated together rather than one drifting from the other.
-
-`main` now carries an `EvidenceWaitType` enum (`claimant`, `external_agency`,
-`internal`) that is close to what the record-level boundary needs, but it is not
-yet wired into the claimant projection.
+Issue #219 and PR #220 resolved the earlier claimant evidence leak. The shared
+visibility service now filters non-claimant records before the claimant list
+and recomputes the claimant-facing aggregate from that filtered set. The
+persisted Working Claim and Workbench retain the full aggregate. This validation
+consumes that current contract and proves that starting a new session neither
+narrows nor widens either role's projection.

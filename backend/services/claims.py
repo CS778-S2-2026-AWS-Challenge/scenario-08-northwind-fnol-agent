@@ -2,6 +2,7 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import next_controlled_intake_step
@@ -42,6 +43,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
@@ -70,6 +72,9 @@ def _session_not_found() -> ApiError:
 
 
 def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
+    claimant_evidence = claimant_visible_evidence(
+        repository.list_evidence(claim.claim_id, claim.customer_id)
+    )
     handoff: ClaimantHandoff | None = None
     if claim.active_session_id is not None:
         # Claimant receives only the public lifecycle state, never staff routing data.
@@ -87,7 +92,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         form=claim.form,
-        evidence_summary=claim.evidence_summary,
+        evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         customer_next_step=claim.customer_next_step,
         handoff=handoff,

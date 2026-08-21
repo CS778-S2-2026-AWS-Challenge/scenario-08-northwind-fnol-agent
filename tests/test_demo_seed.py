@@ -40,6 +40,26 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
         priorities = {items[claim_id]['priority'] for claim_id in body['claim_ids']}
         assert priorities == {'urgent', 'high', 'standard'}
 
+        review_detail = client.get('/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH)
+        assert review_detail.status_code == 200
+        evidence = review_detail.json()['evidence']
+        assert [item['original_filename'] for item in evidence] == [
+            'synthetic-ground-floor-water-damage.jpg',
+            'synthetic-plumber-site-note.pdf',
+            'synthetic-weather-history-capture.png',
+        ]
+        assert [item['status'] for item in evidence] == [
+            'received',
+            'received',
+            'inconsistent',
+        ]
+        signals = review_detail.json()['signals']
+        assert [item['signal_id'] for item in signals] == [
+            'sig_at02_policy_cause',
+            'sig_at02_weather_date',
+        ]
+        assert all(item['status'] == 'review_required' for item in signals)
+
 
 def test_seed_scenarios_rejects_non_staff_credentials() -> None:
     with TestClient(create_app(Settings(), FixtureRepository())) as client:
