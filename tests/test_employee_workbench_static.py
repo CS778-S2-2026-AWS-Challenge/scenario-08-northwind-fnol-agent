@@ -8,10 +8,10 @@ def test_employee_workbench_wires_audited_staff_mutations() -> None:
 
     assert "requestMutation('/staff-actions', 'POST'" in page
     assert "requestMutation(`/staff-actions/${encodeURIComponent(actionId)}`, 'PATCH'" in page
-    assert "requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST'" in page
-    assert "decideSignalFromForm('confirmed')" in page
-    assert "decideSignalFromForm('dismissed')" in page
-    assert "decideSignalFromForm('resolved')" in page
+    assert '`/signals/${encodeURIComponent(signalId)}/decisions`' in page
+    assert 'function prepareSelectedSignal()' in page
+    assert 'function saveAllSignalDecisions(button)' in page
+    assert "decision: draft.decision" in page
     assert "'Idempotency-Key': crypto.randomUUID()" in page
     assert "'If-Match': String(revision)" in page
     assert "path: 'claim_state.workflow_state'" in page
@@ -25,7 +25,7 @@ def test_employee_workbench_keeps_internal_and_claimant_text_separate() -> None:
     assert 'customerUpdateSummary' in page
     assert 'summary: customerSummary' in page
     assert 'reason_codes: reasonCodes' in page
-    assert 'evidence_refs: evidenceRefs' in page
+    assert 'evidence_refs: [...new Set(evidenceRefs)]' in page
     assert 'the internal result and reason codes stay in the staff record' in page
     assert 'Only the update immediately above is shown to the claimant.' in page
 
@@ -41,6 +41,17 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert 'decision.summary' in page
     assert "decision.reason_codes?.join(', ')" in page
     assert 'No actionable review signals' in page
+    assert 'signal.summary || signal.reason || formatLabel' in page
+    assert 'id="signalActionStatus"' in page
+    assert 'id="signalDraftList"' in page
+    assert 'Save all signal decisions' in page
+    assert 'Edit all findings' in page
+    assert 'function editAllSignalFindings()' in page
+    assert "draft.locked = false" in page
+    assert 'latestDecision.reason_codes?.[0]' in page
+    assert 'dirty: false' in page
+    assert 'if (!draft.dirty) continue' in page
+    assert "button.textContent = draft.locked ? 'Edit finding' : 'Save finding'" in page
     assert "section.setAttribute('aria-label', 'Professional review workspace')" in page
     assert "title.textContent = 'Professional review workspace'" in page
     assert "controlsAlreadyOpen ? 'Hide review controls' : 'Review and decide'" in page
@@ -58,20 +69,24 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     )
     assert '#detailStaffActions.integrated-review-controls > summary { display:none; }' in page
     assert '.detail-panel > #detailStaffActions { order:1; }' in page
-    assert 'Supporting records are linked automatically.' in page
-    assert "empty.textContent = 'No review task has been created yet.'" in page
-    assert 'supporting record(s) linked automatically.' in page
-    assert "'Review task already open'" in page
+    assert 'Create a review task if none is open' not in page
+    assert 'Review task to finish' not in page
+    assert 'Start this review before saving its final outcome.' in page
+    assert "actionSelect.value = activeAction?.action_id || ''" in page
+    assert "byId('reviewRecordBar').hidden = !activeClaimDetail || hasOpenReviewTask" in page
     assert 'Choose the next claim stage' in page
-    assert 'placeholder="For example: Does section 4.2 apply' in page
     assert 'placeholder="For example: Policy section 4.2 applies' in page
     assert (
         'result: { outcome: outcomeCode, summary: persistedResultSummary, '
         'reason_codes: reasonCodes, source_refs: sourceRefs }' in page
     )
     assert 'id="evidenceReviewList"' in page
-    assert "new Option('Can be relied on', 'accepted')" in page
-    assert "new Option('Claimant must resubmit', 'resubmission_required')" in page
+    assert "<h3>Review the claimant's existing evidence</h3>" in page
+    assert page.index('id="evidenceReviewList"') < page.index('id="signalDecisionSelect"')
+    assert "new Option('Credible — can be relied on', 'accepted')" in page
+    assert "new Option('Cannot verify — request resubmission', 'resubmission_required')" in page
+    assert "'AI credibility · Future assessment'" in page
+    assert 'Staff remain responsible for the finding.' in page
     assert 'function deriveWorkflowFromEvidenceFindings()' in page
 
 

@@ -269,7 +269,20 @@
     .review-task-card-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; }
     .review-task-card-head strong { margin-right:auto; color:#134e4a; }
     .review-task-card p { margin:4px 0 0; color:#334155; font-size:12px; line-height:1.5; }
+    .evidence-review-card { display:grid; grid-template-columns:minmax(0,1fr) minmax(190px,.6fr); gap:10px 14px; }
+    .evidence-review-card .evidence-review-head, .evidence-review-card > p { grid-column:1 / -1; }
+    .evidence-review-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .evidence-review-head strong { margin-right:auto; color:#134e4a; }
+    .ai-credibility-tag { display:inline-flex; align-items:center; padding:4px 8px; border:1px dashed #94a3b8; border-radius:999px; background:#f8fafc; color:#64748b; font-size:11px; font-weight:700; }
+    .signal-question-picker { margin-bottom:18px; }
+    .signal-draft-list { gap:16px; margin:0 0 20px 40px; }
+    .signal-draft-list .review-task-card { padding:16px; row-gap:14px; }
+    .signal-draft-list .review-task-card label { gap:7px; }
+    .signal-draft-list .review-task-card .wide { margin-top:2px; }
+    .signal-actions { margin:0 0 0 40px; padding-top:16px; border-top:1px solid #e2e8f0; }
     .review-task-empty { margin:0 0 14px 40px; color:#64748b; font-size:12px; }
+    .review-record-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 20px 40px; padding:11px 12px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:#475569; font-size:12px; }
+    .review-record-bar .staff-action-button { flex:0 0 auto; margin:0; }
     .staff-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .staff-control label { display:grid; gap:5px; color:#475569; font-size:12px; }
     .staff-control input, .staff-control select, .staff-control textarea { width:100%; padding:9px 10px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#0f172a; font:inherit; }
@@ -359,7 +372,8 @@
     @media(max-width:720px) {
       .content { min-width:0; padding:16px; }
       .queue-overview { grid-template-columns:1fr; }
-      .detail-grid, .staff-form-grid, .context-row { grid-template-columns:1fr; }
+      .detail-grid, .staff-form-grid, .context-row, .evidence-review-card { grid-template-columns:1fr; }
+      .signal-draft-list, .signal-actions { margin-left:0; }
       .claim-list button { width:100%; }
       .customer-chat-content { grid-template-columns:1fr; }
       .customer-chat-list { display:none; }
@@ -477,39 +491,36 @@
           <details class="detail-section integrated-review-controls" id="detailStaffActions" style="display:none">
             <summary>Complete the professional review <span class="detail-section-hint">Three guided steps</span></summary>
             <div class="detail-section-body">
-            <p class="staff-workflow-intro"><strong>How this works:</strong> define the question, record what the evidence shows, then finish the review with a safe customer update. Your internal reasoning stays private.</p>
+            <p class="staff-workflow-intro"><strong>How this works:</strong> review every file the claimant supplied, resolve any internal review signal, then record the outcome and a safe customer update. Your internal reasoning stays private.</p>
             <div class="staff-controls">
               <section class="staff-control">
-                <div class="staff-step-head"><span class="staff-step-number">1</span><h3>Define the review question</h3></div>
-                <p class="staff-step-purpose">Create a review task only when this claim does not already have one. State the exact question another claims professional must answer.</p>
-                <div id="reviewTaskList" class="review-task-list" aria-live="polite"></div>
-                <div class="staff-form-grid">
-                  <label>What kind of review is needed?<select id="createActionType"><option value="professional_review">General professional review</option><option value="coverage_review">Policy coverage review</option><option value="history_review">Previous claim history review</option><option value="evidence_review">Conflicting evidence review</option></select></label>
-                  <label class="wide">What question must the reviewer answer? <span class="field-help">Name the policy point, evidence conflict, or history match that needs a decision.</span><textarea id="createActionOutcome" placeholder="For example: Does section 4.2 apply to the confirmed incident date and vehicle use?"></textarea></label>
-                  <div class="linked-records"><strong>Supporting records are linked automatically.</strong> <span id="linkedRecordSummary">The current policy, history, evidence and handoff records will be attached to the task.</span><input id="createActionRefs" type="hidden"></div>
-                </div>
-                <button id="createStaffActionBtn" class="staff-action-button" type="button">Create review task</button>
-              </section>
-              <section class="staff-control">
-                <div class="staff-step-head"><span class="staff-step-number">2</span><h3>Record what the evidence shows</h3></div>
-                <p class="staff-step-purpose">A signal is a question raised by the system, not a claim decision or fraud finding. Choose the signal, explain your finding, then confirm, dismiss, or resolve it.</p>
-                <div class="staff-form-grid">
-                  <label class="wide">Question raised for review<select id="signalDecisionSelect"></select></label>
-                  <label>Why are you making this finding?<select id="signalReasonCodes"><option value="STAFF_SIGNAL_REVIEWED">Evidence reviewed by a claims professional</option><option value="POLICY_SECTION_CONFIRMED">Relevant policy wording confirmed</option><option value="SOURCE_RECORD_NOT_COMPARABLE">Source record does not apply to this claim</option><option value="CONFLICT_REQUIRES_REVIEW">Evidence conflict still needs review</option></select></label>
-                  <label class="wide">What did you find? <span class="field-help">Internal only. Name the evidence you compared and the fact that supports your finding.</span><textarea id="signalDecisionSummary" placeholder="For example: History record HIST-204 concerns vehicle ABC123, while this claim is for XYZ789, so the records are not comparable."></textarea></label>
-                </div>
-                <div class="button-row" role="group" aria-label="Review signal decision">
-                  <button id="confirmSignalBtn" class="staff-action-button" type="button">Keep for further review</button>
-                  <button id="dismissSignalBtn" class="secondary-button" type="button">Not relevant — dismiss</button>
-                  <button id="resolveSignalBtn" class="secondary-button" type="button">Reviewed — resolve</button>
-                </div>
-              </section>
-              <section class="staff-control">
-                <div class="staff-step-head"><span class="staff-step-number">3</span><h3>Review every evidence item and move the claim</h3></div>
-                <p class="staff-step-purpose">Record whether each item can be relied on, must be resubmitted, is still pending, or contains an unresolved conflict. These findings determine whether the claim can continue.</p>
+                <div class="staff-step-head"><span class="staff-step-number">1</span><h3>Review the claimant's existing evidence</h3></div>
+                <p class="staff-step-purpose">Work through every file supplied for this claim. Choose how credible and usable it is, then record the reason for your judgement. The AI credibility tag is reserved for a future agent assessment and does not make the decision.</p>
                 <div id="evidenceReviewList" class="review-task-list" aria-live="polite"></div>
+              </section>
+              <section class="staff-control">
+                <div class="staff-step-head"><span class="staff-step-number">2</span><h3>Resolve internal review signals</h3></div>
+                <p class="staff-step-purpose">A signal is a question raised by the system, not a claim decision or fraud finding. Choose the signal, explain your finding, then confirm, dismiss, or resolve it.</p>
+                <div class="staff-form-grid signal-question-picker">
+                  <label class="wide">Question raised for review<select id="signalDecisionSelect"></select></label>
+                </div>
+                <div id="signalDraftList" class="review-task-list signal-draft-list" aria-live="polite"></div>
+                <div class="button-row signal-actions">
+                  <button id="saveAllSignalDecisionsBtn" class="staff-action-button" type="button" disabled>Save all signal decisions</button>
+                  <button id="editAllSignalFindingsBtn" class="secondary-button" type="button" disabled>Edit all findings</button>
+                </div>
+                <p id="signalActionStatus" class="mutation-status" aria-live="polite">Select each question and save its finding before submitting.</p>
+              </section>
+              <section class="staff-control">
+                <div class="staff-step-head"><span class="staff-step-number">3</span><h3>Record the outcome and move the claim</h3></div>
+                <p class="staff-step-purpose">The evidence findings above determine whether the claim can continue or must wait. Record the internal outcome, then provide a separate claimant-safe update.</p>
+                <div id="reviewRecordBar" class="review-record-bar" hidden>
+                  <span id="reviewTaskList" aria-live="polite">Start this review before saving its final outcome.</span>
+                  <button id="createStaffActionBtn" class="staff-action-button" type="button">Start review</button>
+                </div>
+                <input id="createActionRefs" type="hidden">
+                <input id="completeActionSelect" type="hidden">
                 <div class="staff-form-grid">
-                  <label class="wide">Review task to finish<select id="completeActionSelect"></select></label>
                   <label>Review result<select id="completeOutcomeCode"><option value="professional_review_completed">Review completed</option><option value="more_information_required">More information is required</option><option value="referred_for_further_review">Further specialist review is required</option></select></label>
                   <label>Reason for completing it<select id="completeReasonCodes"><option value="STAFF_REVIEW_COMPLETED">Professional review completed</option><option value="POLICY_SECTION_CONFIRMED">Relevant policy wording confirmed</option><option value="SOURCE_RECORD_NOT_COMPARABLE">Source record does not apply</option><option value="EVIDENCE_INCOMPLETE">More evidence is needed</option></select></label>
                   <label class="wide">Internal review result <span class="field-help">State the decision, the supporting record, and why the claim can proceed or must wait.</span><textarea id="completeResultSummary" placeholder="For example: Policy section 4.2 applies to the confirmed incident facts, so coverage ambiguity is cleared."></textarea></label>
@@ -591,6 +602,9 @@
     const detailCache = new Map();
     let detailRevision = null;
     let reviewControlsOpenClaimId = null;
+    let signalDraftClaimId = null;
+    let actionableReviewSignals = [];
+    const signalDecisionDrafts = new Map();
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -700,54 +714,27 @@
         item => !['completed', 'cancelled'].includes(item.status)
       );
       byId('createStaffActionBtn').disabled = !activeClaimDetail || hasOpenReviewTask;
-      byId('createStaffActionBtn').textContent = hasOpenReviewTask
-        ? 'Review task already open'
-        : 'Create review task';
+      byId('reviewRecordBar').hidden = !activeClaimDetail || hasOpenReviewTask;
+      byId('createStaffActionBtn').textContent = 'Start review';
       byId('completeStaffActionBtn').disabled = !activeClaimDetail || !byId('completeActionSelect').value;
-      const signalDecisionDisabled = !activeClaimDetail || !byId('signalDecisionSelect').value;
-      ['confirmSignalBtn', 'dismissSignalBtn', 'resolveSignalBtn']
-        .forEach(id => { byId(id).disabled = signalDecisionDisabled; });
+      const completedDrafts = actionableReviewSignals.filter(signal =>
+        signalDecisionDrafts.get(signal.signal_id || signal.code)?.locked
+      ).length;
+      const changedDrafts = actionableReviewSignals.filter(signal =>
+        signalDecisionDrafts.get(signal.signal_id || signal.code)?.dirty
+      ).length;
+      byId('saveAllSignalDecisionsBtn').disabled = !activeClaimDetail
+        || !actionableReviewSignals.length
+        || completedDrafts !== actionableReviewSignals.length
+        || changedDrafts === 0;
+      byId('editAllSignalFindingsBtn').disabled = completedDrafts === 0;
     }
 
     function populateStaffControls(detail) {
       const openActions = (detail.staff_actions || []).filter(item => !['completed', 'cancelled'].includes(item.status));
       const taskList = byId('reviewTaskList');
-      taskList.replaceChildren();
-      if (!detail.staff_actions?.length) {
-        const empty = document.createElement('p');
-        empty.className = 'review-task-empty';
-        empty.textContent = 'No review task has been created yet.';
-        taskList.append(empty);
-      } else {
-        detail.staff_actions.forEach(action => {
-          const card = document.createElement('article');
-          card.className = 'review-task-card';
-          const head = document.createElement('div');
-          head.className = 'review-task-card-head';
-          const title = document.createElement('strong');
-          title.textContent = formatLabel(action.action_type);
-          const status = document.createElement('span');
-          status.className = 'badge review';
-          status.textContent = formatLabel(action.status);
-          head.append(title, status);
-          const question = document.createElement('p');
-          question.textContent = `Review question: ${action.requested_outcome}`;
-          const owner = document.createElement('p');
-          owner.textContent = `Assigned to: ${action.assigned_to || 'Current staff member'}`;
-          card.append(head, question, owner);
-          if (action.source_refs?.length) {
-            const sources = document.createElement('p');
-            sources.textContent = `${action.source_refs.length} supporting record(s) linked automatically.`;
-            card.append(sources);
-          }
-          if (action.result) {
-            const result = document.createElement('p');
-            result.textContent = `Result: ${action.result.summary}`;
-            card.append(result);
-          }
-          taskList.append(card);
-        });
-      }
+      const activeAction = openActions[0];
+      taskList.textContent = 'Start this review before saving its final outcome.';
 
       const automaticRefs = [
         ...(detail.retrievals || []).map(item => item.retrieval_id),
@@ -755,27 +742,148 @@
         ...(detail.handoffs || []).filter(item => !['resolved', 'cancelled'].includes(item.status)).map(item => item.handoff_id),
       ].filter(Boolean);
       byId('createActionRefs').value = [...new Set(automaticRefs)].join(', ');
-      byId('linkedRecordSummary').textContent = automaticRefs.length
-        ? `${new Set(automaticRefs).size} current supporting record(s) will be attached automatically.`
-        : 'No supporting record is available yet; the task can still be created.';
       const actionSelect = byId('completeActionSelect');
-      actionSelect.replaceChildren();
-      openActions.forEach(action => actionSelect.add(new Option(`${action.action_type} · ${action.status}`, action.action_id)));
-      if (!openActions.length) actionSelect.add(new Option('No open staff actions', ''));
+      actionSelect.value = activeAction?.action_id || '';
 
       const signalSelect = byId('signalDecisionSelect');
       signalSelect.replaceChildren();
-      (detail.signals || []).filter(signal => {
-        const decisions = signal.decisions || [];
-        const latestDecision = decisions[decisions.length - 1]?.decision;
-        return !['dismissed', 'overridden', 'resolved'].includes(latestDecision);
-      }).forEach(signal => {
+      if (signalDraftClaimId !== detail.claim_id) {
+        signalDraftClaimId = detail.claim_id;
+        signalDecisionDrafts.clear();
+      }
+      actionableReviewSignals = detail.signals || [];
+      actionableReviewSignals.forEach(signal => {
         const signalId = signal.signal_id || signal.code;
-        if (signalId) signalSelect.add(new Option(signal.code || signal.signal_id, signalId));
+        const decisions = signal.decisions || [];
+        const latestDecision = decisions[decisions.length - 1];
+        if (signalId && latestDecision && !signalDecisionDrafts.has(signalId)) {
+          signalDecisionDrafts.set(signalId, {
+            decision: latestDecision.decision,
+            reason_code: latestDecision.reason_codes?.[0] || 'STAFF_SIGNAL_REVIEWED',
+            summary: latestDecision.summary || '',
+            locked: true,
+            dirty: false,
+          });
+        }
       });
-      if (!signalSelect.options.length) signalSelect.add(new Option('No actionable review signals', ''));
+      signalSelect.add(new Option('Choose a question to prepare its finding', ''));
+      actionableReviewSignals.forEach(signal => {
+        const signalId = signal.signal_id || signal.code;
+        const signalLabel = signal.summary || signal.reason || formatLabel(signal.code || signalId);
+        if (signalId) signalSelect.add(new Option(signalLabel, signalId));
+      });
+      if (!actionableReviewSignals.length) {
+        signalSelect.replaceChildren(new Option('No actionable review signals', ''));
+      }
+      renderSignalDrafts();
       renderEvidenceReviewForm(detail.evidence || []);
       syncStaffControlState();
+    }
+
+    function prepareSelectedSignal() {
+      const signalId = byId('signalDecisionSelect').value;
+      if (!signalId) return;
+      if (!signalDecisionDrafts.has(signalId)) {
+        signalDecisionDrafts.set(signalId, {
+          decision: 'resolved',
+          reason_code: 'STAFF_SIGNAL_REVIEWED',
+          summary: '',
+          locked: false,
+          dirty: false,
+        });
+      }
+      renderSignalDrafts();
+      syncStaffControlState();
+    }
+
+    function renderSignalDrafts() {
+      const list = byId('signalDraftList');
+      list.replaceChildren();
+      actionableReviewSignals.forEach(signal => {
+        const signalId = signal.signal_id || signal.code;
+        const draft = signalDecisionDrafts.get(signalId);
+        if (!draft) return;
+        const card = document.createElement('article');
+        card.className = 'review-task-card evidence-review-card';
+        const head = document.createElement('div');
+        head.className = 'evidence-review-head';
+        const title = document.createElement('strong');
+        title.textContent = signal.summary || signal.reason || formatLabel(signal.code || signalId);
+        const state = document.createElement('span');
+        state.className = `badge ${draft.locked ? 'success' : 'review'}`;
+        state.textContent = draft.locked ? 'Finding ready' : 'Draft';
+        head.append(title, state);
+
+        const decisionLabel = document.createElement('label');
+        decisionLabel.textContent = 'Decision';
+        const decision = document.createElement('select');
+        decision.add(new Option('Reviewed — resolve', 'resolved'));
+        decision.add(new Option('Not relevant — dismiss', 'dismissed'));
+        decision.value = draft.decision;
+        decision.disabled = draft.locked;
+        decision.addEventListener('change', () => { draft.decision = decision.value; });
+        decisionLabel.append(decision);
+
+        const reasonLabel = document.createElement('label');
+        reasonLabel.textContent = 'Why are you making this finding?';
+        const reason = document.createElement('select');
+        [
+          ['Evidence reviewed by a claims professional', 'STAFF_SIGNAL_REVIEWED'],
+          ['Relevant policy wording confirmed', 'POLICY_SECTION_CONFIRMED'],
+          ['Source record does not apply to this claim', 'SOURCE_RECORD_NOT_COMPARABLE'],
+          ['Evidence conflict was investigated', 'CONFLICT_REVIEWED'],
+        ].forEach(([label, value]) => reason.add(new Option(label, value)));
+        reason.value = draft.reason_code;
+        reason.disabled = draft.locked;
+        reason.addEventListener('change', () => { draft.reason_code = reason.value; });
+        reasonLabel.append(reason);
+
+        const summaryLabel = document.createElement('label');
+        summaryLabel.className = 'wide';
+        summaryLabel.textContent = 'What did you find?';
+        const summary = document.createElement('textarea');
+        summary.placeholder = 'Name the evidence you compared and the fact that supports this finding.';
+        summary.value = draft.summary;
+        summary.disabled = draft.locked;
+        summary.addEventListener('input', () => { draft.summary = summary.value.trim(); });
+        summaryLabel.append(summary);
+
+        const button = document.createElement('button');
+        button.className = draft.locked ? 'secondary-button' : 'staff-action-button';
+        button.type = 'button';
+        button.textContent = draft.locked ? 'Edit finding' : 'Save finding';
+        button.addEventListener('click', () => {
+          if (draft.locked) {
+            draft.locked = false;
+          } else if (!draft.summary) {
+            byId('signalActionStatus').style.color = '#991b1b';
+            byId('signalActionStatus').textContent = 'Write a specific finding before saving this question.';
+            return;
+          } else {
+            draft.locked = true;
+            draft.dirty = true;
+          }
+          renderSignalDrafts();
+          syncStaffControlState();
+        });
+        card.append(head, decisionLabel, reasonLabel, summaryLabel, button);
+        list.append(card);
+      });
+      const completed = actionableReviewSignals.filter(signal =>
+        signalDecisionDrafts.get(signal.signal_id || signal.code)?.locked
+      ).length;
+      byId('signalActionStatus').style.color = '#475569';
+      byId('signalActionStatus').textContent = actionableReviewSignals.length
+        ? `${completed} of ${actionableReviewSignals.length} question findings ready.`
+        : 'There are no unresolved review signals to decide.';
+    }
+
+    function editAllSignalFindings() {
+      signalDecisionDrafts.forEach(draft => { draft.locked = false; });
+      renderSignalDrafts();
+      syncStaffControlState();
+      byId('signalActionStatus').style.color = '#475569';
+      byId('signalActionStatus').textContent = 'All prepared findings are editable again.';
     }
 
     function renderEvidenceReviewForm(evidenceItems) {
@@ -784,7 +892,7 @@
       if (!evidenceItems.length) {
         const empty = document.createElement('p');
         empty.className = 'review-task-empty';
-        empty.textContent = 'No evidence items are attached to this claim. Complete the professional judgement below.';
+        empty.textContent = 'The claimant has not supplied any evidence files for this claim.';
         list.append(empty);
         return;
       }
@@ -792,28 +900,37 @@
         const card = document.createElement('article');
         card.className = 'review-task-card evidence-review-card';
         card.dataset.evidenceId = item.evidence_id;
+        const head = document.createElement('div');
+        head.className = 'evidence-review-head';
         const title = document.createElement('strong');
         title.textContent = `${index + 1}. ${formatLabel(item.kind)}`;
+        const aiTag = document.createElement('span');
+        aiTag.className = 'ai-credibility-tag';
+        aiTag.textContent = item.ai_credibility
+          ? `AI credibility · ${formatLabel(item.ai_credibility)}`
+          : 'AI credibility · Future assessment';
+        aiTag.title = 'Reserved for a future AI agent recommendation. Staff remain responsible for the finding.';
+        head.append(title, aiTag);
         const context = document.createElement('p');
-        context.textContent = `${item.original_filename || item.evidence_id} · ${formatLabel(item.status)} · ${formatLabel(item.source)}`;
+        context.textContent = `${item.original_filename || 'File name unavailable'} · ${formatLabel(item.kind)} · ${formatLabel(item.status)} · Supplied by ${formatLabel(item.source)}`;
         const dispositionLabel = document.createElement('label');
-        dispositionLabel.textContent = 'Finding';
+        dispositionLabel.textContent = 'Staff credibility finding';
         const disposition = document.createElement('select');
         disposition.className = 'evidence-review-disposition';
-        disposition.add(new Option('Choose a finding', ''));
-        disposition.add(new Option('Can be relied on', 'accepted'));
-        disposition.add(new Option('Claimant must resubmit', 'resubmission_required'));
-        disposition.add(new Option('Still pending from source', 'pending_source'));
-        disposition.add(new Option('Conflict needs further review', 'conflict_requires_review'));
+        disposition.add(new Option('Select credibility', ''));
+        disposition.add(new Option('Credible — can be relied on', 'accepted'));
+        disposition.add(new Option('Cannot verify — request resubmission', 'resubmission_required'));
+        disposition.add(new Option('Not available yet — wait for source', 'pending_source'));
+        disposition.add(new Option('Conflicts with claim — investigate', 'conflict_requires_review'));
         dispositionLabel.append(disposition);
         const summaryLabel = document.createElement('label');
-        summaryLabel.textContent = 'Evidence-specific reason';
+        summaryLabel.textContent = 'Staff evaluation';
         const summary = document.createElement('textarea');
         summary.className = 'evidence-review-summary';
         summary.placeholder = 'State what you checked and why this finding is appropriate.';
         summaryLabel.append(summary);
         disposition.addEventListener('change', deriveWorkflowFromEvidenceFindings);
-        card.append(title, context, dispositionLabel, summaryLabel);
+        card.append(head, context, dispositionLabel, summaryLabel);
         list.append(card);
       });
       deriveWorkflowFromEvidenceFindings();
@@ -848,6 +965,8 @@
       activeClaimId = null;
       activeClaimDetail = null;
       detailRevision = null;
+      actionableReviewSignals = [];
+      signalDecisionDrafts.clear();
       byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
       ['detailNextStep', 'detailEvidence', 'detailReview', 'detailHistory', 'detailStaffActions']
         .forEach(id => { byId(id).style.display = 'none'; });
@@ -873,19 +992,61 @@
       }
     }
 
+    async function saveAllSignalDecisions(button) {
+      button.disabled = true;
+      const status = byId('signalActionStatus');
+      status.style.color = '#475569';
+      status.textContent = 'Saving all signal decisions…';
+      try {
+        let revision = activeClaimDetail.revision;
+        for (const signal of actionableReviewSignals) {
+          const signalId = signal.signal_id || signal.code;
+          const draft = signalDecisionDrafts.get(signalId);
+          if (!draft?.locked) throw new Error('Save a finding for every question first.');
+          if (!draft.dirty) continue;
+          const evidenceRefs = [
+            ...(signal.source_refs || []),
+            ...(signal.source_evidence || []).map(item => item.retrieval_id),
+          ].filter(Boolean);
+          const response = await requestMutation(
+            `/signals/${encodeURIComponent(signalId)}/decisions`,
+            'POST',
+            revision,
+            {
+              decision: draft.decision,
+              reason_codes: [draft.reason_code],
+              summary: draft.summary,
+              evidence_refs: [...new Set(evidenceRefs)],
+            },
+          );
+          revision = response.revision;
+        }
+        signalDecisionDrafts.clear();
+        await refreshAfterStaffMutation('All signal decisions were saved with their findings.');
+        status.style.color = '#166534';
+        status.textContent = 'All signal decisions saved.';
+      } catch (error) {
+        status.style.color = '#991b1b';
+        status.textContent = error.message;
+      } finally {
+        syncStaffControlState();
+      }
+    }
+
     async function createStaffActionFromForm() {
       if (!activeClaimDetail) throw new Error('Select a claim before creating an action.');
-      const actionType = byId('createActionType').value.trim();
-      const requestedOutcome = byId('createActionOutcome').value.trim();
-      if (!actionType || !requestedOutcome) throw new Error('Action type and outcome are required.');
-      await requestMutation('/staff-actions', 'POST', activeClaimDetail.revision, { action_type: actionType, requested_outcome: requestedOutcome, source_refs: commaSeparatedValues(byId('createActionRefs').value) });
-      await refreshAfterStaffMutation('Staff action created and recorded in the shared claim state.');
+      await requestMutation('/staff-actions', 'POST', activeClaimDetail.revision, {
+        action_type: 'evidence_review',
+        requested_outcome: 'Assess every current evidence item and record whether the claim can proceed or needs further evidence.',
+        source_refs: commaSeparatedValues(byId('createActionRefs').value),
+      });
+      await refreshAfterStaffMutation('Review record started with the current evidence attached.');
     }
 
     async function completeStaffActionFromForm() {
       if (!activeClaimDetail) throw new Error('Select a claim before completing an action.');
       const actionId = byId('completeActionSelect').value;
-      if (!actionId) throw new Error('Choose an open staff action.');
+      if (!actionId) throw new Error('Start a review record before saving the outcome.');
       const reasonCodes = commaSeparatedValues(byId('completeReasonCodes').value);
       const outcomeCode = byId('completeOutcomeCode').value.trim();
       const resultSummary = byId('completeResultSummary').value.trim();
@@ -920,23 +1081,6 @@
         customer_update: { summary: customerSummary, responsible_party: byId('customerResponsibleParty').value, related_refs: [actionId] },
       });
       await refreshAfterStaffMutation('Action completed; claim state and claimant-safe update persisted.');
-    }
-
-    async function decideSignalFromForm(decision) {
-      if (!activeClaimDetail) throw new Error('Select a claim before deciding a signal.');
-      const signalId = byId('signalDecisionSelect').value;
-      if (!signalId) throw new Error('Choose an undecided review signal.');
-      const reasonCodes = commaSeparatedValues(byId('signalReasonCodes').value);
-      const summary = byId('signalDecisionSummary').value.trim();
-      if (!reasonCodes.length || !summary) throw new Error('Decision reason and summary are required.');
-      const selectedSignal = (activeClaimDetail.signals || []).find(
-        signal => (signal.signal_id || signal.code) === signalId
-      );
-      const evidenceRefs = (selectedSignal?.source_evidence || [])
-        .map(item => item.retrieval_id)
-        .filter(Boolean);
-      await requestMutation(`/signals/${encodeURIComponent(signalId)}/decisions`, 'POST', activeClaimDetail.revision, { decision, reason_codes: reasonCodes, summary, evidence_refs: evidenceRefs });
-      await refreshAfterStaffMutation(`${formatLabel(decision)} signal decision recorded with its reason and evidence.`);
     }
 
     async function fetchClaims(view) {
@@ -1681,9 +1825,9 @@
     });
     byId('createStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, createStaffActionFromForm));
     byId('completeStaffActionBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, completeStaffActionFromForm));
-    byId('confirmSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('confirmed')));
-    byId('dismissSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('dismissed')));
-    byId('resolveSignalBtn').addEventListener('click', event => runStaffMutation(event.currentTarget, () => decideSignalFromForm('resolved')));
+    byId('signalDecisionSelect').addEventListener('change', prepareSelectedSignal);
+    byId('saveAllSignalDecisionsBtn').addEventListener('click', event => saveAllSignalDecisions(event.currentTarget));
+    byId('editAllSignalFindingsBtn').addEventListener('click', editAllSignalFindings);
 
     loadClaims();
 
