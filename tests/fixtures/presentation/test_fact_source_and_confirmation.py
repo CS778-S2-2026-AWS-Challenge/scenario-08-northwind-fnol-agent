@@ -9,6 +9,7 @@ claim can still say *who* said it and whether a person has agreed to it. A
 system that loses either can present an extracted guess as a confirmed fact.
 """
 
+import json
 from typing import Any, cast
 
 import pytest
@@ -135,8 +136,12 @@ def test_an_extracted_fact_names_its_source_and_waits_for_a_person(
 
     # The claimant sees the same unconfirmed state, not a settled fact.
     assert projection.status_code == 200
-    assert projection.json()['form'][FIELD]['status'] == 'proposed'
-    assert projection.json()['form'][FIELD]['source'] == 'image'
+    projected_body = projection.json()
+    projected_field = projected_body['form'][FIELD]
+    assert projected_field['status'] == 'proposed'
+    assert projected_field['source'] == 'image'
+    assert projected_field['source_refs'] == [evidence_id]
+    assert 'provenance' not in json.dumps(projected_body).lower()
 
 
 @pytest.mark.parametrize(
