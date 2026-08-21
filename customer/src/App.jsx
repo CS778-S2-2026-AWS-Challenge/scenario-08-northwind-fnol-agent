@@ -6,8 +6,10 @@ import {
   createExternalClaim,
   getClaim,
   getClaimMessages,
+  listClaims,
   requestId,
   requestHumanSupport,
+  resumeClaimSession,
   submitClaimMessage,
   updateClaimField,
 } from './api.js'
@@ -74,6 +76,8 @@ function App() {
   const [editingField, setEditingField] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
+  const [savedReports, setSavedReports] = useState(null)
+  const [resumeContext, setResumeContext] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
@@ -88,6 +92,8 @@ function App() {
     'requesting-support',
     'refreshing',
     'creating-claim',
+    'loading-reports',
+    'resuming',
   ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
@@ -334,6 +340,42 @@ function App() {
     }
   }
 
+  async function loadSavedReports() {
+    if (isBusy) return
+    setError('')
+    setStatus('loading-reports')
+    try {
+      const response = await listClaims()
+      setSavedReports(response.items.filter((item) => item.can_resume))
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
+  async function resumeSavedReport(claimId) {
+    if (isBusy) return
+    setError('')
+    setStatus('resuming')
+    try {
+      const session = await resumeClaimSession({ claimId })
+      const current = await getClaim(claimId)
+      const conversation = await getClaimMessages(claimId, session.session_id)
+      latestRevision.current = current.revision
+      setClaim(current)
+      setSessionId(session.session_id)
+      setMessages(conversation.items)
+      setForm(current.form)
+      setNextStep(session.resume.customer_next_step || current.customer_next_step)
+      setHandoff(current.handoff || null)
+      setResumeContext(session.resume)
+      setSavedReports(null)
+      setStatus('idle')
+    } catch (requestError) {
+      showError(requestError)
+    }
+  }
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -374,6 +416,43 @@ function App() {
                 buttonLabel={status === 'starting' ? 'Starting report...' : 'Continue claim'}
                 error={error}
               />
+              <div className="resume-entry">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={loadSavedReports}
+                  disabled={isBusy}
+                >
+                  {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
+                </button>
+                {savedReports !== null && (
+                  <section className="saved-reports" aria-labelledby="saved-reports-title">
+                    <h2 id="saved-reports-title">Saved reports</h2>
+                    {savedReports.length === 0 ? (
+                      <p>No saved reports are available to resume.</p>
+                    ) : (
+                      <ul>
+                        {savedReports.map((report) => (
+                          <li key={report.claim_id}>
+                            <div>
+                              <strong>{report.incident_type || 'Incident report'}</strong>
+                              <span>{report.customer_next_step.summary}</span>
+                            </div>
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => resumeSavedReport(report.claim_id)}
+                              disabled={isBusy}
+                            >
+                              {status === 'resuming' ? 'Resuming...' : 'Resume report'}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                )}
+              </div>
             </div>
           </section>
           <HelpfulDetails />
@@ -395,6 +474,25 @@ function App() {
                 </article>
               ))}
             </div>
+
+            {resumeContext && (
+              <section className="resume-summary" aria-labelledby="resume-summary-title">
+                <p className="transfer-label">Report resumed</p>
+                <h2 id="resume-summary-title">Continue where you left off</h2>
+                {resumeContext.summary && <p>{resumeContext.summary}</p>}
+                {resumeContext.pending_items.length > 0 && (
+                  <dl>
+                    <div>
+                      <dt>Pending</dt>
+                      <dd>{resumeContext.pending_items.join(', ')}</dd>
+                    </div>
+                  </dl>
+                )}
+                {resumeContext.prior_commitments.length > 0 && (
+                  <p>{resumeContext.prior_commitments.join(' ')}</p>
+                )}
+              </section>
+            )}
 
             {handoff && ['queued', 'accepted'].includes(handoff.status) && (
               <section

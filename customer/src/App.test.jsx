@@ -201,6 +201,83 @@ describe('claimant intake', () => {
     expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
   })
 
+  it('resumes a saved report with confirmed facts and focused context', async () => {
+    const resumedNextStep = {
+      ...nextStep,
+      status: 'provide_incident_location',
+      summary: 'Where did the incident happen?',
+      required_items: ['incident.location'],
+    }
+    const confirmedDescription = {
+      ...firstTurn().form_changes[0].field,
+      status: 'confirmed',
+    }
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        items: [{
+          claim_id: 'clm_saved',
+          revision: 6,
+          incident_type: 'motor',
+          workflow_state: 'awaiting_evidence',
+          external_claim: null,
+          customer_next_step: resumedNextStep,
+          created_at: '2026-08-02T02:00:00Z',
+          updated_at: '2026-08-12T02:20:00Z',
+          can_resume: true,
+        }],
+        page: { next_cursor: null },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        session_id: 'ses_resumed',
+        claim_id: 'clm_saved',
+        status: 'active',
+        resume: {
+          summary: 'Rear-end collision; the incident description is confirmed.',
+          unresolved_questions: ['Where did the incident happen?'],
+          pending_items: ['Police report expected later.'],
+          prior_commitments: ['The police report can be added without restarting.'],
+          customer_next_step: resumedNextStep,
+        },
+        started_at: '2026-08-12T02:20:00Z',
+        last_active_at: '2026-08-12T02:20:00Z',
+        closed_at: null,
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        claim_id: 'clm_saved',
+        revision: 7,
+        incident_type: 'motor',
+        form: { 'incident.description': confirmedDescription },
+        customer_next_step: resumedNextStep,
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({ items: [], page: { next_cursor: null } }),
+    )
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
+    expect(await screen.findByText('Where did the incident happen?')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Resume report' }))
+
+    expect(await screen.findByText('Continue where you left off')).toBeVisible()
+    expect(screen.getByText('Rear-end collision; the incident description is confirmed.')).toBeVisible()
+    expect(screen.getByText('Police report expected later.')).toBeVisible()
+    expect(screen.getByText('The police report can be added without restarting.')).toBeVisible()
+    expect(screen.getByText('Confirmed')).toBeVisible()
+    expect(screen.getByLabelText('Incident location')).toBeEnabled()
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/claims/clm_saved/sessions',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   it('reuses the claim idempotency key when a failed submission is retried', async () => {
     fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Response lost')))
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
