@@ -125,6 +125,11 @@ it('preserves every entered professional-review field when the staff-action PATC
     expect(document.querySelectorAll('#evidenceReviewList .evidence-review-card')).toHaveLength(1)
   })
 
+  const reviewToggle = document.querySelector('[aria-controls="detailStaffActions"]')
+  reviewToggle.click()
+  expect(document.querySelector('#detailStaffActions').style.display).toBe('block')
+  expect(reviewToggle.getAttribute('aria-expanded')).toBe('true')
+
   const resultSummary =
     'The supplied image is consistent with the reported damage, but the write-back must be retried.'
   const customerSummary =
@@ -152,7 +157,7 @@ it('preserves every entered professional-review field when the staff-action PATC
       expect.stringContaining('/staff-actions/act_patch_failure'),
       expect.objectContaining({ method: 'PATCH' }),
     )
-    expect(document.querySelector('#errorBanner').textContent)
+    expect(document.querySelector('#mutationStatus').textContent)
       .toContain('The claim changed after this page was loaded.')
   })
 
@@ -164,6 +169,7 @@ it('preserves every entered professional-review field when the staff-action PATC
   expect(document.querySelector('#completeActionSelect').value).toBe('act_patch_failure')
   expect(document.querySelector('#completeStaffActionBtn').disabled).toBe(false)
   expect(document.querySelector('#detailStaffActions').style.display).toBe('block')
+  expect(reviewToggle.getAttribute('aria-expanded')).toBe('true')
 
   const getCallsAfterPatch = fetchMock.mock.calls.filter(([, options = {}]) => !options.method).length
   expect(getCallsAfterPatch).toBe(getCallsBeforePatch)
