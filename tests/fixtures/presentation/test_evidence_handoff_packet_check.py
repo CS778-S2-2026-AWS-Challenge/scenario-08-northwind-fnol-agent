@@ -140,9 +140,7 @@ def test_the_packet_classifies_visibility_by_source(
         repository.save_evidence(staff_record, CUSTOMER_ID)
 
         request_support(active, claim_id, 'packet-visibility-support', 2)
-        claimant_evidence = active.get(
-            f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
-        )
+        claimant_evidence = active.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
 
     packet = stored_packet(repository, claim_id)
     item = next(entry for entry in packet.evidence if entry.evidence_id == evidence_id)
@@ -162,9 +160,7 @@ def test_the_packet_classifies_visibility_by_source(
 
     # The claimant projection uses the same source boundary below the route.
     assert claimant_evidence.status_code == 200
-    assert {entry['evidence_id'] for entry in claimant_evidence.json()['items']} == {
-        evidence_id
-    }
+    assert {entry['evidence_id'] for entry in claimant_evidence.json()['items']} == {evidence_id}
 
 
 def test_a_dispatch_outage_does_not_lose_the_packet_or_its_context(
@@ -185,9 +181,7 @@ def test_a_dispatch_outage_does_not_lose_the_packet_or_its_context(
         evidence_id = register_pending_evidence(active, claim_id, 'packet-outage-evidence', 1)
         response = request_support(active, claim_id, 'packet-outage-support', 2)
         replay = request_support(active, claim_id, 'packet-outage-support', 2)
-        repeated_request = request_support(
-            active, claim_id, 'packet-outage-support-repeat', 3
-        )
+        repeated_request = request_support(active, claim_id, 'packet-outage-support-repeat', 3)
         detail = active.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
 
     assert response.status_code == 201
@@ -195,9 +189,9 @@ def test_a_dispatch_outage_does_not_lose_the_packet_or_its_context(
     assert replay.status_code == 201
     assert replay.json() == response.json()
     assert repeated_request.status_code == 201
-    assert repeated_request.json()['handoff']['handoff_id'] == response.json()['handoff'][
-        'handoff_id'
-    ]
+    assert (
+        repeated_request.json()['handoff']['handoff_id'] == response.json()['handoff']['handoff_id']
+    )
 
     # The structured context is intact despite the notification failing.
     packet = stored_packet(repository, claim_id)
