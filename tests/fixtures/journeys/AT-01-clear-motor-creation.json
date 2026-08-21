@@ -98,15 +98,15 @@
   ],
   "correction_branch": {
     "from_state": "confirm",
-    "input": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
-    "correction_reason": "The collision happened outside Queen Street, not on Queen Street.",
+    "input": "Another car hit the rear of mine while I was stopped at Queen Street and damaged the rear bumper.",
+    "correction_reason": "I was stopped when the other car hit mine.",
     "state": {
       "name": "correct",
       "action": "UPDATE",
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
+          "value": "Another car hit the rear of mine while I was stopped at Queen Street and damaged the rear bumper.",
           "status": "confirmed",
           "source": "claimant"
         },
