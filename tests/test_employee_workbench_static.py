@@ -11,7 +11,7 @@ def test_employee_workbench_wires_audited_staff_mutations() -> None:
     assert '`/signals/${encodeURIComponent(signalId)}/decisions`' in page
     assert 'function prepareSelectedSignal()' in page
     assert 'function saveAllSignalDecisions(button)' in page
-    assert "decision: draft.decision" in page
+    assert 'decision: draft.decision' in page
     assert "'Idempotency-Key': crypto.randomUUID()" in page
     assert "'If-Match': String(revision)" in page
     assert "path: 'claim_state.workflow_state'" in page
@@ -47,7 +47,7 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert 'Save all signal decisions' in page
     assert 'Edit all findings' in page
     assert 'function editAllSignalFindings()' in page
-    assert "draft.locked = false" in page
+    assert 'draft.locked = false' in page
     assert 'latestDecision.reason_codes?.[0]' in page
     assert 'dirty: false' in page
     assert 'if (!draft.dirty) continue' in page

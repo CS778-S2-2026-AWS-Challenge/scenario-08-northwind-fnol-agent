@@ -40,9 +40,7 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
         priorities = {items[claim_id]['priority'] for claim_id in body['claim_ids']}
         assert priorities == {'urgent', 'high', 'standard'}
 
-        review_detail = client.get(
-            '/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH
-        )
+        review_detail = client.get('/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH)
         assert review_detail.status_code == 200
         evidence = review_detail.json()['evidence']
         assert [item['original_filename'] for item in evidence] == [
