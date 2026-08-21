@@ -178,10 +178,7 @@ def test_resume_preserves_role_safe_record_and_aggregate_boundaries(
 ) -> None:
     """Claimant-safe and staff-complete projections stay stable across resume."""
     repository, claim_id = seeded
-    all_ids = {
-        record.evidence_id
-        for record in repository.list_evidence(claim_id, CUSTOMER_ID)
-    }
+    all_ids = {record.evidence_id for record in repository.list_evidence(claim_id, CUSTOMER_ID)}
     claimant_ids = {'evd_fixture_at06_police'}
     assert all_ids == {
         'evd_fixture_at06_police',
@@ -194,12 +191,8 @@ def test_resume_preserves_role_safe_record_and_aggregate_boundaries(
         claimant_evidence_before = client.get(
             f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
         )
-        claimant_claim_before = client.get(
-            f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH
-        )
-        staff_before = client.get(
-            f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH
-        )
+        claimant_claim_before = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
+        staff_before = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
 
         pause_active_session(repository, claim_id)
         resumed = client.post(
@@ -210,12 +203,8 @@ def test_resume_preserves_role_safe_record_and_aggregate_boundaries(
         claimant_evidence_after = client.get(
             f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
         )
-        claimant_claim_after = client.get(
-            f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH
-        )
-        staff_after = client.get(
-            f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH
-        )
+        claimant_claim_after = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
+        staff_after = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
 
     assert resumed.status_code == 201
     for response in (claimant_evidence_before, claimant_evidence_after):
