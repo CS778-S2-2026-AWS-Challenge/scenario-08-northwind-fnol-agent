@@ -14,10 +14,7 @@ from backend.repositories.fixture import FixtureRepository
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
-INCIDENT_DESCRIPTION = (
-    'My parked car was hit at low speed and I want help '
-    'continuing the report.'
-)
+INCIDENT_DESCRIPTION = 'My parked car was hit at low speed and I want help continuing the report.'
 
 
 def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_context() -> None:
