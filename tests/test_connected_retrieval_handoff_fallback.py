@@ -14,6 +14,10 @@ from backend.repositories.fixture import FixtureRepository
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
+INCIDENT_DESCRIPTION = (
+    'My parked car was hit at low speed and I want help '
+    'continuing the report.'
+)
 
 
 def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_context() -> None:
@@ -43,7 +47,7 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
                 'updates': [
                     {
                         'field_code': 'incident.description',
-                        'value': 'My parked car was hit at low speed and I want help continuing the report.',
+                        'value': INCIDENT_DESCRIPTION,
                         'status': 'confirmed',
                     }
                 ]
@@ -125,11 +129,9 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
     assert handoff['handoff_id'] == handoff_id
     assert handoff['status'] == 'queued'
     assert handoff['support_need'] == 'human_requested'
-    assert handoff['packet']['incident_summary'] == (
-        'My parked car was hit at low speed and I want help continuing the report.'
-    )
+    assert handoff['packet']['incident_summary'] == INCIDENT_DESCRIPTION
     assert handoff['packet']['form_snapshot']['incident.description']['value'] == (
-        'My parked car was hit at low speed and I want help continuing the report.'
+        INCIDENT_DESCRIPTION
     )
     assert handoff['packet']['form_snapshot']['incident.description']['source'] == 'claimant'
 
