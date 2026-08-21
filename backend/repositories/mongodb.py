@@ -109,8 +109,7 @@ class MongoDBRepository:
             raise KeyError(claim.claim_id)
         if self.get_claim_internal(claim.claim_id) is not None:
             raise IdempotencyConflict(claim.claim_id)
-        if self.get_session(claim.claim_id, session.session_id, claim.customer_id) is not None:
-            raise IdempotencyConflict(session.session_id)
+        self._reject_session_identity_conflict(session)
         self._put(
             'claim', claim.claim_id, claim, customer_id=claim.customer_id, claim_id=claim.claim_id
         )
@@ -169,6 +168,7 @@ class MongoDBRepository:
     def save_session(self, session: SessionRecord) -> None:
         if self.get_claim(session.claim_id, session.customer_id) is None:
             raise KeyError(session.claim_id)
+        self._reject_session_identity_conflict(session)
         self._put(
             'session',
             session.session_id,
@@ -176,6 +176,20 @@ class MongoDBRepository:
             customer_id=session.customer_id,
             claim_id=session.claim_id,
         )
+
+    def _reject_session_identity_conflict(self, session: SessionRecord) -> None:
+        """Protect the global session identity before an upsert can overwrite it."""
+        existing = self._collection.find_one(
+            {'_id': self._record_id('session', session.session_id), 'kind': 'session'},
+            projection={'claim_id': 1, 'customer_id': 1},
+        )
+        if existing is None:
+            return
+        if (
+            existing.get('claim_id') != session.claim_id
+            or existing.get('customer_id') != session.customer_id
+        ):
+            raise IdempotencyConflict(session.session_id)
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         claim = self.get_claim(claim_id, customer_id)

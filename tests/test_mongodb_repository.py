@@ -123,3 +123,47 @@ def test_session_mutation_rejects_cross_record_relationships_before_transaction(
                 session_id=session.session_id,
             ),
         )
+
+
+def test_session_identity_cannot_be_overwritten_by_another_claim(
+    repository: MongoDBRepository,
+) -> None:
+    first_claim = _claim()
+    repository.create_claim(first_claim, _session(first_claim))
+    second_claim = first_claim.model_copy(
+        update={
+            'claim_id': 'clm_mongo_002',
+            'active_session_id': first_claim.active_session_id,
+        }
+    )
+    second_session = _session(second_claim)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.create_claim(second_claim, second_session)
+
+    stored = repository._collection.find_one(
+        {'_id': repository._record_id('session', first_claim.active_session_id)}
+    )
+    assert stored is not None
+    assert stored['claim_id'] == first_claim.claim_id
+    assert stored['customer_id'] == first_claim.customer_id
+
+
+def test_save_session_rejects_existing_session_for_another_customer(
+    repository: MongoDBRepository,
+) -> None:
+    first_claim = _claim()
+    repository.create_claim(first_claim, _session(first_claim))
+    second_claim = first_claim.model_copy(
+        update={
+            'claim_id': 'clm_mongo_002',
+            'active_session_id': 'ses_mongo_002',
+            'customer_id': 'another-customer',
+        }
+    )
+    second_session = _session(second_claim).model_copy(update={'session_id': 'ses_mongo_002'})
+    repository.create_claim(second_claim, second_session)
+    conflicting = second_session.model_copy(update={'session_id': first_claim.active_session_id})
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_session(conflicting)
