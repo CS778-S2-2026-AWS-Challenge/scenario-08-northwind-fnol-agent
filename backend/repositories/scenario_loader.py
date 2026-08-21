@@ -80,6 +80,16 @@ class ScenarioFixture(ContractModel):
 
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
+        if self.claim.claim_state.evidence is not evidence_state_for(self.evidence):
+            raise ValueError(
+                f'{self.scenario_id}: claim_state.evidence must derive from the '
+                'scenario evidence records.'
+            )
+        if self.claim.evidence_summary != evidence_summary_for(self.evidence):
+            raise ValueError(
+                f'{self.scenario_id}: evidence_summary must derive from the '
+                'scenario evidence records.'
+            )
         retrieval_ids = {record.retrieval_id for record in self.retrievals}
         if len(retrieval_ids) != len(self.retrievals):
             raise ValueError('Scenario retrieval identifiers must be unique.')
@@ -309,20 +319,40 @@ def load_evidence_path_fixtures(
         if scenario is None:
             raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
 
+        canonical_evidence = {record.evidence_id: record for record in scenario.evidence}
+        raw_fixtures = entry.get('evidence', [])
+        referenced_ids: list[str] = []
+        for fixture in raw_fixtures:
+            if 'evidence' in fixture:
+                raise ValueError(
+                    'Path evidence payloads must derive from the canonical scenario; '
+                    'store only evidence_id and visibility in the path fixture.'
+                )
+            evidence_id = fixture.pop('evidence_id', None)
+            if not isinstance(evidence_id, str) or not evidence_id:
+                raise ValueError('Path evidence entries require a canonical evidence_id.')
+            record = canonical_evidence.get(evidence_id)
+            if record is None:
+                raise ValueError(
+                    f'{scenario_id}: path evidence_id {evidence_id} is not present '
+                    'in the canonical scenario.'
+                )
+            referenced_ids.append(evidence_id)
+            fixture['evidence'] = record.model_dump(mode='json')
+
+        if len(referenced_ids) != len(set(referenced_ids)):
+            raise ValueError(f'{scenario_id}: path evidence_id values must be unique.')
+        if set(referenced_ids) != set(canonical_evidence):
+            missing = sorted(set(canonical_evidence) - set(referenced_ids))
+            extra = sorted(set(referenced_ids) - set(canonical_evidence))
+            raise ValueError(
+                f'{scenario_id}: path visibility must classify the complete canonical '
+                f'evidence set; missing={missing or "none"}, extra={extra or "none"}.'
+            )
+
         entry['claim_id'] = scenario.claim.claim_id
-        for fixture in entry.get('evidence', []):
-            evidence = fixture.get('evidence', {})
-            if 'claim_id' in evidence:
-                raise ValueError('Evidence claim_id must derive from the canonical scenario claim.')
-            evidence['claim_id'] = scenario.claim.claim_id
-        records = [
-            EvidenceRecord.model_validate(fixture['evidence'])
-            for fixture in entry.get('evidence', [])
-        ]
-        entry['claim_state'] = scenario.claim.claim_state.model_copy(
-            update={'evidence': evidence_state_for(records)}
-        ).model_dump(mode='json')
-        entry['evidence_summary'] = evidence_summary_for(records).model_dump(mode='json')
+        entry['claim_state'] = scenario.claim.claim_state.model_dump(mode='json')
+        entry['evidence_summary'] = scenario.claim.evidence_summary.model_dump(mode='json')
         entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
     return EvidencePathFixtureSet.model_validate(payload)
 
