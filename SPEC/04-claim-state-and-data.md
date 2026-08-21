@@ -1,8 +1,12 @@
 # Claim State and Data
 
-## Multi-dimensional State
+## Authoritative Claim State
 
-A claim is not assigned to one mutually exclusive path. At minimum, the system maintains:
+A claim has one authoritative current state shared by claimant, Agent, staff, and
+authorised integrations. A session, frontend, workbench, or external adapter must not
+maintain a competing private claim record.
+
+The claim uses independent dimensions rather than one mutually exclusive path:
 
 ```text
 severity: fast_track | standard | complex
@@ -15,44 +19,73 @@ workflow_state: collecting | ready_for_next | awaiting_evidence | professional_r
 next_action
 ```
 
-An evidence item pending generation must not erase clear coverage or incorrectly block a claim that is otherwise ready to create.
+Pending evidence must not erase another clear state or block work that does not depend
+on it.
 
-## Form Fields
+## Structured Facts
 
-Each structured field contains:
+Each material fact retains:
 
 ```text
 value
-source: claimant | image | document | policy | claim_history | inference
+source: claimant | image | document | policy | claim_history | staff | inference
 status: proposed | confirmed | disputed | missing | pending_generation
 needed_for: current_action | later_action
+source_refs
 updated_at
 ```
 
-## Minimum Domain Records
+Extracted and inferred values remain proposed until the applicable confirmation or
+professional authority accepts them.
 
-- customers and permitted communication preferences;
-- claims, form, workflow state, route, and next action;
-- claim attributes for the independent state dimensions;
-- sessions and compact working summaries;
-- complete messages stored outside the model context;
-- evidence, provenance, status, and related fields;
-- decisions, reason codes, authority checks, and outcomes;
-- internal tags and review signals;
-- handoffs and their lifecycle;
-- staff actions and claimant-visible updates;
-- append-only claim events for audit.
+## Data Separation
 
-Shared tables or collections are partitioned and related by `customer_id`, `claim_id`, and `session_id`; the system must not create a separate physical table for every customer.
+The system separates:
 
-## Context Management
+- customer identity and permitted communication preferences;
+- formal Claim State and structured facts;
+- sessions, complete messages, compact summaries, and working context;
+- evidence metadata, original evidence objects, and extracted proposals;
+- structured customer policy and claim-history records;
+- approved knowledge documents, versions, chunks, indexes, and citations;
+- model requests, outputs, usage, and evaluation results;
+- internal signals, handoffs, staff actions, and claimant-safe updates;
+- versioned system configuration and publication records; and
+- append-only audit and operational events.
 
-Complete conversation history remains in durable storage. Each model call receives only the current claim snapshot, unresolved questions, recent necessary messages, and relevant policy or history evidence. Formal claim records, customer preferences, and model working memory remain separate.
+Physical storage may combine logical records, but it must preserve ownership,
+visibility, retention, provenance, and authority boundaries. Detailed storage and
+runtime-profile rules are defined in `docs/data-architecture.md`.
 
-## Internal Tag Model
+## Knowledge and Structured Retrieval
 
-An internal tag or signal contains code, category, visibility, source, evidence references, confidence, lifecycle status, required action, queue, and audit timestamps. High-impact signals start as proposed or review-required and can be confirmed, dismissed, overridden, resolved, and audited.
+Policy wording, legislation, industry guidance, and approved procedures may enter the
+knowledge base for metadata-filtered, cited retrieval. A customer's actual policy
+schedule, endorsements, identity link, and claim history require structured,
+authorised queries. A knowledge document alone cannot prove that wording applies to a
+customer.
 
-## Data Boundaries
+## Administration and Configuration
 
-The prototype must separate customer-visible, shared, and internal-only data. Secrets, real personal information, and unnecessary full histories must not enter prompts, logs, fixtures, or demonstration screens.
+The Control Plane manages versioned model, knowledge, rule, integration, access,
+evaluation, feature, and operational configuration. A configuration record retains its
+author, validation result, approval, publication state, effective time, and rollback
+target. Secrets remain in an approved secret store and are referenced, not displayed or
+stored as ordinary configuration.
+
+Changing a data runtime profile requires validation of capability, migration, and
+deployment impact. It is not a per-request switch.
+
+## Context and Memory
+
+Complete conversation history remains durable. Routine model calls receive bounded
+working context. Formal claim records, customer preferences, model working memory,
+knowledge, and operational logs remain separate. Returning users continue from the
+latest authorised Claim State, not from an old session copy.
+
+## Visibility
+
+Every record and field is claimant-visible, shared, internal-only, or restricted
+administration data. Secrets, real personal information, internal review labels, raw
+provider payloads, and unnecessary full histories must not enter prompts, logs,
+fixtures, or claimant responses.

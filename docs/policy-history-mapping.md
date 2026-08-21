@@ -1,154 +1,121 @@
-# Policy and History Mapping Boundary
+# Policy and Claim-History Retrieval Contract
 
 ## Purpose
 
-Issue #108 establishes the provider-to-domain mapping contract for policy and
-claim-history retrieval. It does not confirm an AWS service, provider schema,
-permission, table, index, or production integration.
+This document defines the boundary between provider responses and Northwind's structured
+policy and claim-history domain records. It is separate from knowledge-document RAG:
 
-The mapping boundary is intentionally split into two layers:
+- structured retrieval answers which authorised policy or history record belongs to a
+  customer or claim; and
+- RAG retrieves approved wording, legislation, guidance, or procedures with citations.
 
-1. `ProviderLookupEnvelope` is an internal adapter input. Its `payload` may
-   contain provider-specific transport fields and must not cross into shared
-   Claim State or a public API response.
-2. `PolicyRetrievalRecord` and `ClaimHistoryRetrievalRecord` are
-   provider-neutral domain records containing only allow-listed facts,
-   provenance, retrieval time, and explicit uncertainty.
+Neither path independently authorises coverage, fraud, liability, approval, or rejection.
 
-## Domain provenance
+## Provider Boundary
 
-Every mapped retrieval record contains:
+`ProviderLookupEnvelope` is an internal adapter input. It may contain provider-specific
+transport fields but must not enter shared Claim State, model context, audit summaries,
+or public responses as an untyped payload.
 
-- an opaque `retrieval_id` owned by Northwind;
-- the parent `claim_id`;
-- the retrieval kind (`policy` or `claim_history`);
-- `source.system`, naming the adapter/provider boundary;
-- `source.reference`, an opaque source record reference;
-- `source.retrieved_at`, recording when the lookup result was obtained;
+Adapters map allow-listed facts into:
+
+- `PolicyRetrievalRecord`; or
+- `ClaimHistoryRetrievalRecord`.
+
+Unknown fields are discarded rather than copied into a generic metadata object.
+
+## Provenance
+
+Every mapped record retains:
+
+- a Northwind-owned retrieval ID;
+- the parent claim ID;
+- retrieval kind;
+- source system and opaque source reference;
+- retrieval time;
 - typed provider-neutral facts;
-- zero or more uncertainty entries containing a code and bounded detail.
+- explicit limitations or uncertainty; and
+- the visibility and authority required to use the result.
 
-A retrieval source is evidence, not decision authority. Policy interpretation,
-history matching, coverage decisions, and professional-review signals remain
-subject to the authority rules in the SPEC.
+A source is evidence, not decision authority. A successful provider response proves only
+what the mapped source returned at that time.
 
-## Allow-listed mapping
+## Allow-listed Policy Facts
 
-`backend/adapters/policy_history.py` copies only the fields required by the
-provider-neutral domain models. Unknown provider data is discarded rather than
-stored inside an untyped metadata object.
-
-The current synthetic policy example maps:
+The contract may map verified fields such as:
 
 - policy reference;
+- customer-policy match result;
 - product and status;
 - effective dates;
-- excess amount and currency;
+- schedule and endorsement references;
+- excess amount and currency; and
 - coverage-section identifiers.
 
-The current synthetic history example maps:
+Policy wording excerpts belong to the knowledge and citation contract, not inside a
+structured policy record. Missing customer matching or applicability remains an explicit
+limitation.
+
+## Allow-listed Claim-History Facts
+
+The contract may map verified fields such as:
 
 - history reference;
 - incident type;
 - occurrence time;
-- status;
-- outcome.
+- status; and
+- recorded outcome.
 
-Provider-only notes, risk scores, fraud labels, AWS/storage identifiers, and
-other raw payload fields are deliberately not mapped.
+Provider-only risk scores, fraud labels, demographic attributes, internal notes,
+accounting fields, infrastructure identifiers, and unsupported conclusions are not
+mapped.
 
-## Retrieval persistence and professional-review signals
+## Persistence and Review Signals
 
-Issue #126 persists the provider-neutral retrieval records from #108 together
-with any review-only signal derived from their explicit uncertainty.
+A retrieval bundle contains one mapped record and zero or more supported review signals
+derived only from explicit mapped uncertainty. The bundle is persisted atomically.
 
-A retrieval bundle contains one `PolicyRetrievalRecord` or
-`ClaimHistoryRetrievalRecord` and zero or more `ReviewSignalRecord` values. The
-fixture repository writes the bundle as one persistence operation and future
-adapters must preserve the same all-or-nothing relationship.
+A review signal retains:
 
-A persisted review signal contains:
+- stable signal and parent claim identities;
+- professional-review type and supported reason code;
+- source references including the retrieval record;
+- a bounded staff-facing summary; and
+- lifecycle and audit timestamps.
 
-- a stable `signal_id`;
-- the parent `claim_id`;
-- `review_type=professional_review`;
-- a supported signal code;
-- one or more `source_refs`, including the retrieval record that produced it;
-- one or more reason codes copied from explicit retrieval uncertainty;
-- a bounded staff-facing summary;
-- the retrieval timestamp used as the signal creation time.
+No uncertainty means no retrieval-derived signal. Discarded provider fields cannot create
+a signal because they never cross the adapter boundary.
 
-The current supported mappings are deliberately narrow:
+Saving retrieval evidence does not advance Working Claim revision, change workflow,
+approve or reject a claim, set a fraud conclusion, or block unrelated progress. A later
+staff decision is a separate, revision-aware record.
 
-- policy retrieval uncertainty -> `POLICY_RETRIEVAL_UNCERTAINTY`;
-- claim-history retrieval uncertainty ->
-  `CLAIM_HISTORY_RETRIEVAL_UNCERTAINTY`.
+## Staff Review and Write-back
 
-No uncertainty means no review signal. Provider-only risk scores, fraud labels,
-notes, or other discarded raw payload fields cannot create a signal because
-they never cross the #108 mapping boundary.
+- Retrieval and signal records are immutable evidence.
+- Staff see the provider-neutral record and source references required for review.
+- A staff decision retains actor, decision, reason, summary, and source-backed evidence
+  separately from the original retrieval uncertainty.
+- Source references that caused the review cannot be silently omitted from the decision.
+- Material write-back uses current Working Claim revision and produces an appropriate
+  claimant-safe update.
+- High-impact state changes require their own authorised contract and cannot be implied by
+  resolving a signal.
 
-Retrieval persistence is evidence/audit persistence, not a material Claim State
-write. Saving a retrieval bundle does not increment `WorkingClaim.revision`,
-change workflow state, set `fraud_signal`, approve or reject a claim, or block a
-claim. Any later staff decision about a persisted signal remains an authorised
-professional action and belongs to the Day 4 integration path.
+## API and Visibility
 
-Retrieval and review records are claim/customer scoped. Repeating an identical
-retrieval bundle is idempotent; attempting to reuse a retrieval or signal ID
-for different content is a persistence conflict. Every persisted review signal
-must identify its parent retrieval record in `source_refs`.
+Raw provider payloads, provider scores, infrastructure identifiers, internal signals,
+and other customers' history never appear in claimant responses. A claimant-facing
+projection may expose approved customer-relevant facts, citations, or plain-language
+limitations only when the API and authority contract permit it.
 
-## Staff review integration and source-preserving write-back
+Provider unavailable, timeout, no-match, malformed, and access-denied outcomes are
+limitations, not evidence records containing invented facts. They preserve claim progress
+and produce bounded errors or professional follow-up as required.
 
-Issue #136 connects the persisted #126 review records to the existing staff
-workbench and revision-aware staff write-back boundary without redefining the
-general staff-action contract.
+## Conformance
 
-- A persisted `ReviewSignalRecord` is projected only to the staff workbench.
-  Its `source_refs` remain intact and the workbench adds the provider-neutral
-  retrieval record referenced by the retrieval ID as `source_evidence`.
-- Retrieval and review-signal source records are immutable evidence. Staff
-  decisions are persisted separately as `SignalDecisionRecord` values and do
-  not rewrite the retrieval facts, uncertainty, signal reason codes, or source
-  provenance.
-- When staff decide a persisted review signal, the signal's original
-  `source_refs` are automatically unioned into the decision's `evidence_refs`
-  before persistence. Staff may add evidence references, but cannot
-  accidentally omit the source evidence that caused the review signal.
-- The persisted decision retains the authenticated staff actor, the staff's
-  decision, staff reason codes, and staff summary. These fields remain distinct
-  from the original retrieval uncertainty and original review-signal reasons.
-- A staff review decision is a revision-aware shared write: it uses the current
-  `WorkingClaim.revision` through `If-Match`, advances that parent revision once,
-  and persists through the existing `save_staff_mutation(...)` boundary.
-- The review decision itself does not set `fraud_signal`, change workflow state,
-  approve or reject the claim, or block progression. Any such high-impact state
-  transition requires its own authorised contract and reasoned staff action.
-- Signals that are not persisted #126 retrieval-review signals continue through
-  the pre-existing legacy signal-decision service. Issue #136 therefore adds
-  the retrieval integration path without replacing Agent/message review
-  behaviour.
-- Issue #109 owns the general staff-action and state-write-back contract/fixtures.
-  Issue #136 consumes that revisioned persistence boundary rather than
-  redefining it.
-
-## Public API boundary
-
-Issue #108 and #126 do not add retrieval records to `ClaimantClaim` or another
-claimant response model. Raw provider payloads therefore remain behind the
-adapter boundary. A later public projection may expose customer-relevant,
-contract-approved facts or uncertainty, but must never return the adapter
-`payload` or provider-only scoring/internal metadata.
-
-## Relationship to later work
-
-- Issue #107 owns verification of actual AWS access, schemas, permissions, API
-  boundaries, and fallbacks. The synthetic envelope in #108 must not be read as
-  a statement of available AWS capability.
-- Issue #108 owns provider-neutral retrieval mapping and intentionally excludes
-  persistence and professional-review signal generation.
-- Issue #126 owns persistence of retrieval records, evidence provenance,
-  uncertainty, and supported review-only signal mappings.
-- Issue #136 owns connecting these persisted retrieval/review records into the
-  staff workbench, staff review decisions, and revision-aware integration flow.
+Every provider adapter must pass the same mapping, discarded-field, provenance,
+idempotency, visibility, unavailable-provider, atomic persistence, and staff write-back
+contract tests. A fixture result is labelled as a fixture and cannot be reported as a
+confirmed Northwind, Cloudflare, MongoDB, or AWS result.
