@@ -90,6 +90,7 @@ def test_workbench_review_decision_preserves_actor_reason_revision_and_source_ev
     assert projected['reason_codes'] == ['POLICY_WORDING_REVIEW_REQUIRED']
     assert projected['source_refs'] == [record.retrieval_id, record.source.reference]
     assert projected['source_evidence'] == [record.model_dump(mode='json')]
+    assert detail.json()['retrievals'] == [record.model_dump(mode='json')]
 
     payload = {
         'decision': 'confirmed',
