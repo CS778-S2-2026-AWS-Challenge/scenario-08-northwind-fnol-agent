@@ -106,6 +106,10 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
   and failure contract tests against every implemented profile.
 - Record fixture, unavailable, pending-confirmation, and configured-service states
   distinctly. A successful fixture must never be reported as a cloud integration.
+- Use `DATA_RUNTIME_PROFILE` for deployment-level selection. Until a complete
+  Cloudflare, MongoDB, or AWS adapter bundle is implemented, selecting that profile must
+  fail startup; do not define speculative provider variables or substitute fixture
+  capabilities.
 
 ## Model API and Agent Orchestration
 

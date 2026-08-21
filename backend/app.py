@@ -6,9 +6,9 @@ from backend.adapters.claims_service import (
     MockAssessorServiceAdapter,
     MockClaimsServiceAdapter,
 )
-from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
+from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
-from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
+from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
@@ -17,11 +17,11 @@ from backend.api.health import router as health_router
 from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
 from backend.api.workbench import router as workbench_router
-from backend.core.config import Settings
+from backend.core.config import DataRuntimeProfile, Settings
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
-from backend.repositories.fixture import FixtureRepository
+from backend.core.runtime_profiles import DataRuntimeBundle, build_data_runtime_bundle
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
@@ -36,8 +36,38 @@ def create_app(
     evidence_storage: EvidenceStorage | None = None,
     policy_history_adapter: PolicyHistoryAdapter | None = None,
     handoff_dispatch_adapter: HandoffDispatchAdapter | None = None,
+    data_runtime_bundle: DataRuntimeBundle | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
+    injected_data_dependencies = any(
+        dependency is not None
+        for dependency in (repository, evidence_storage, policy_history_adapter)
+    )
+    if data_runtime_bundle is not None and injected_data_dependencies:
+        raise ValueError(
+            'Pass either data_runtime_bundle or individual test data dependencies, not both.'
+        )
+    if (
+        data_runtime_bundle is not None
+        and data_runtime_bundle.profile is not resolved_settings.data_runtime_profile
+    ):
+        raise ValueError('The data runtime bundle does not match DATA_RUNTIME_PROFILE.')
+    if injected_data_dependencies:
+        if resolved_settings.data_runtime_profile is not DataRuntimeProfile.FIXTURE:
+            raise ValueError(
+                'Individual data dependency injection is allowed only for the fixture profile.'
+            )
+        fixture_bundle = build_data_runtime_bundle(resolved_settings)
+        bundle = DataRuntimeBundle(
+            profile=resolved_settings.data_runtime_profile,
+            repository=repository or fixture_bundle.repository,
+            evidence_storage=evidence_storage or fixture_bundle.evidence_storage,
+            policy_history=policy_history_adapter or fixture_bundle.policy_history,
+            knowledge_documents=fixture_bundle.knowledge_documents,
+            knowledge_retrieval=fixture_bundle.knowledge_retrieval,
+        )
+    else:
+        bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
     app = FastAPI(
         title='Northwind FNOL Backend',
         version='0.1.0',
@@ -45,16 +75,19 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = resolved_settings
+    app.state.data_runtime_bundle = bundle
+    app.state.knowledge_document_store = bundle.knowledge_documents
+    app.state.knowledge_retriever = bundle.knowledge_retrieval
     # Every application consumer reads the repository from app.state, so the
     # handoff lifecycle and ownership invariants are applied once here rather
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
-    app.state.claim_repository = guarded_handoff_repository(repository or FixtureRepository())
+    app.state.claim_repository = guarded_handoff_repository(bundle.repository)
     app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
-    app.state.evidence_storage = evidence_storage or MockEvidenceStorage()
-    app.state.policy_history_adapter = policy_history_adapter or MockPolicyHistoryAdapter()
+    app.state.evidence_storage = bundle.evidence_storage
+    app.state.policy_history_adapter = bundle.policy_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
 
     configure_cors(app, resolved_settings)
