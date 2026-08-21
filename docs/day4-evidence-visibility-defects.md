@@ -77,7 +77,7 @@ and affects everyone's scenario expectations.
 
 **Path:** pending_evidence / AT-06-pending-evidence.
 **Code:** `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT`.
-**Original responsible stack:** evidence API and domain model.
+**Original responsible stack:** evidence API and claimant projection.
 **Status:** resolved by Issue #219.
 
 At the time of the Day 4 check, `GET /api/v1/claims/{claim_id}/evidence`
@@ -91,31 +91,45 @@ returned every persisted record on the claim. For AT-06 the claimant received:
 
 The last two were records the claimant never provided and could not act on. The
 third is an internal Northwind archive lookup. Internal provenance was already
-stripped, so the defect was specifically the record-level projection boundary.
+stripped, so the primary defect was the record-level projection boundary.
+
+A stricter review of the same boundary found a related aggregate leak: the
+claimant claim projection returned the authoritative internal `evidence_summary`
+computed from all three records. Filtering only the list would therefore have
+left a contradictory side channel — one visible evidence item but a claimant
+summary reporting three pending items.
 
 ### Resolution
 
 Issue #219 centralises the existing safe default in
-`backend/services/evidence_visibility.py` and applies it to the claimant evidence
-endpoint. The same policy remains the source for handoff visibility through
-`default_handoff_visibility()`:
+`backend/services/evidence_visibility.py`:
 
 ```python
 claimant source -> shared
 non-claimant source -> internal_only
 ```
 
-Under that current safe default, the AT-06 claimant evidence response contains
-only `evd_fixture_at06_police`. The Workbench still receives all three evidence
-records, including the `external_system` and `staff` records.
+That policy is applied below HTTP routing in the evidence service, so direct
+service callers receive the claimant-safe record set rather than relying on a
+single route handler to remember the filter. The same policy remains the source
+for handoff visibility through `default_handoff_visibility()`.
 
-`tests/test_claimant_evidence_visibility_regression.py` directly verifies the
-claimant and staff projections, and `tests/test_evidence_visibility_check.py`
-now asserts that `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` no longer reproduces.
+The claimant claim projection derives its `evidence_summary` from the same
+visible record set. Under the current safe default, AT-06 therefore presents:
+
+- claimant evidence list: only `evd_fixture_at06_police`;
+- claimant `evidence_summary.pending`: `1`;
+- Workbench evidence list: all three records;
+- internal / staff `evidence_summary.pending`: `3`.
+
+`tests/test_claimant_evidence_visibility_regression.py` directly verifies both
+record and aggregate boundaries. `tests/test_day3_scenarios.py` now expects the
+claimant-safe aggregate while preserving the authoritative internal count, and
+`tests/test_evidence_visibility_check.py` asserts that
+`INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` no longer reproduces.
 
 This resolution deliberately does not change evidence persistence, lifecycle
-state, or staff access, and it does not edit canonical fixtures to hide the
-runtime defect.
+state, canonical fixture data, or staff access.
 
 ### Longer-term policy boundary
 
@@ -131,5 +145,8 @@ in a single endpoint.
 - **Staff projection.** The Workbench returns every persisted record on every
   path, which is correct; staff are entitled to the full set.
 - **Internal provenance.** Never present in a claimant response on any path.
+- **Authoritative internal aggregate.** The persisted claim summary continues to
+  reflect the full evidence set for internal workflow and staff operations; only
+  the claimant projection is narrowed.
 - **Derived state.** Evidence state and summary recompute correctly from the
   records on every path, checked by Issue #139's service.
