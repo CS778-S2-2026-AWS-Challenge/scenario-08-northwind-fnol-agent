@@ -135,7 +135,8 @@ def test_fast_and_pending_evidence_scenarios_use_claimant_safe_shared_state() ->
     assert fast.json()['customer_next_step']['status'] == 'ready_to_create'
     assert pending.status_code == 200
     assert pending.json()['workflow_state'] == 'ready_for_next'
-    assert pending.json()['evidence_summary']['pending'] == 3
+    assert pending.json()['evidence_summary']['pending'] == 1
+    assert len(evidence.json()['items']) == 1
     assert evidence.json()['items'][0]['status'] == 'pending_generation'
     assert 'provenance' not in evidence.json()['items'][0]
 
