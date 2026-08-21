@@ -7,12 +7,19 @@ rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical sch
 Physical mappings belong inside the selected runtime-profile adapters and must preserve
 this contract.
 
-The current MongoDB work is an unselected foundation slice. It covers only the Claim,
-Session, and Idempotency document primitives and is not a complete runtime profile.
-`DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until every repository
-operation, evidence/object boundary, and transaction contract is implemented and
-verified against a supported MongoDB deployment. The fixture profile remains the only
-complete profile at this stage.
+The current MongoDB work remains an unselected adapter implementation. Its repository
+method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
+Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
+Idempotency records. Mock-backed tests verify document mapping, ownership filters,
+relationship checks, revision conflicts, and mutation ordering. These tests do not prove
+MongoDB transaction rollback or concurrency behaviour.
+
+`DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
+verified against a transaction-capable supported MongoDB deployment, the protected
+evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
+The fixture profile remains the only complete profile at this stage. MongoDB adapter
+documents use `record_type` as their internal discriminator so domain fields such as
+Evidence `kind` and Retrieval `kind` remain unchanged.
 
 Public APIs expose domain identifiers and typed projections only. They never expose
 collection names, table names, partition keys, indexes, bucket keys, vector-index names,

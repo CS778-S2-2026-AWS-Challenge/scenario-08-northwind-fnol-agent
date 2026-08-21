@@ -4,16 +4,43 @@ import mongomock
 import pytest
 
 from backend.domain.models import (
+    ActorType,
+    AgentAction,
+    AgentAuthority,
+    AgentDecisionRecord,
+    AuthorityOutcome,
     Channel,
     ClaimState,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
+    MessageRecord,
+    MessageVisibility,
     ResponsibleParty,
     SessionRecord,
     SessionStatus,
+    StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.retrieval import (
+    PolicyFacts,
+    PolicyRetrievalRecord,
+    RetrievalSource,
+    ReviewSignalRecord,
+)
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict, RevisionConflict
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    PersistenceRepository,
+    RevisionConflict,
+)
+
+
+def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
+    return repository
 
 
 def _claim(revision: int = 1) -> WorkingClaim:
@@ -49,9 +76,80 @@ def _session(claim: WorkingClaim) -> SessionRecord:
     )
 
 
+def _message(claim: WorkingClaim, session: SessionRecord) -> MessageRecord:
+    return MessageRecord(
+        message_id='msg_mongo_001',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        client_message_id='client-mongo-001',
+        actor='claimant',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'A synthetic incident.'},
+        created_at=claim.created_at,
+    )
+
+
+def _decision(
+    claim: WorkingClaim,
+    session: SessionRecord,
+    message: MessageRecord,
+) -> AgentDecisionRecord:
+    return AgentDecisionRecord(
+        decision_id='dec_mongo_001',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        trigger_message_id=message.message_id,
+        action=AgentAction.CONFIRM,
+        reason_codes=['MATERIAL_FACTS_PROPOSED'],
+        customer_reason='Please confirm the proposed detail.',
+        customer_response='Please confirm the proposed detail.',
+        customer_next_step=claim.customer_next_step,
+        authority=AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=claim.revision,
+        created_at=claim.created_at,
+    )
+
+
+def _evidence(claim: WorkingClaim) -> EvidenceRecord:
+    return EvidenceRecord(
+        evidence_id='evd_mongo_001',
+        claim_id=claim.claim_id,
+        kind='incident_image',
+        status=EvidenceStatus.RECEIVED,
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.CLAIMANT,
+        created_at=claim.created_at,
+        updated_at=claim.updated_at,
+    )
+
+
+def _retrieval(claim: WorkingClaim) -> PolicyRetrievalRecord:
+    return PolicyRetrievalRecord(
+        retrieval_id='ret_mongo_001',
+        claim_id=claim.claim_id,
+        source=RetrievalSource(
+            system='synthetic-policy',
+            reference='POL-MONGO-001',
+            retrieved_at=claim.created_at,
+        ),
+        facts=PolicyFacts(
+            policy_reference='POL-MONGO-001',
+            status='active',
+            excess_amount=500,
+            currency='NZD',
+        ),
+    )
+
+
 @pytest.fixture
 def repository() -> MongoDBRepository:
-    return MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
+    repository = MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    return repository
 
 
 def test_claim_and_session_round_trip_enforces_customer_ownership(
@@ -191,7 +289,7 @@ def test_session_mutation_checks_identity_inside_mutation_boundary(
         {
             **replacement_session.model_dump(mode='json'),
             '_id': repository._record_id('session', replacement_session.session_id),
-            'kind': 'session',
+            'record_type': 'session',
             'claim_id': claim.claim_id,
             'customer_id': claim.customer_id,
         }
@@ -224,3 +322,253 @@ def test_session_mutation_checks_identity_inside_mutation_boundary(
     )
     assert repository.get_claim(claim.claim_id, claim.customer_id) is not None
     assert repository.find_idempotency(claim.customer_id, '/sessions', 'mutation-key') is None
+
+
+def test_message_decision_and_evidence_round_trips_preserve_ownership(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    decision = _decision(claim, session, message)
+    evidence = _evidence(claim)
+
+    repository.save_message(message, claim.customer_id)
+    repository.save_agent_decision(decision, claim.customer_id)
+    repository.save_evidence(evidence, claim.customer_id)
+
+    assert (
+        repository.get_message(
+            claim.claim_id, session.session_id, message.message_id, claim.customer_id
+        )
+        == message
+    )
+    assert (
+        repository.find_message_by_client_id(
+            claim.claim_id, message.client_message_id or '', claim.customer_id
+        )
+        == message
+    )
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == [
+        message
+    ]
+    assert (
+        repository.find_agent_decision_for_trigger(
+            claim.claim_id, message.message_id, claim.customer_id
+        )
+        == decision
+    )
+    assert repository.list_agent_decisions(claim.claim_id, claim.customer_id) == [decision]
+    assert (
+        repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) == evidence
+    )
+    assert repository.list_evidence(claim.claim_id, claim.customer_id) == [evidence]
+    assert repository.list_messages(claim.claim_id, session.session_id, 'other-customer') == []
+    assert repository.list_agent_decisions(claim.claim_id, 'other-customer') == []
+    assert repository.list_evidence(claim.claim_id, 'other-customer') == []
+
+
+def test_message_mutation_is_revision_checked_before_child_writes(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+    from backend.repositories.protocols import IdempotencyRecord
+
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/messages',
+        key='message-mutation',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=message.message_id,
+    )
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    repository.save_message_mutation(updated_claim, 1, updated_session, message, idempotency)
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert (
+        repository.get_message(
+            claim.claim_id, session.session_id, message.message_id, claim.customer_id
+        )
+        == message
+    )
+
+    retry = message.model_copy(update={'message_id': 'msg_mongo_retry'})
+    with pytest.raises(RevisionConflict):
+        repository.save_message_mutation(
+            updated_claim.model_copy(update={'revision': 2}),
+            1,
+            updated_session,
+            retry,
+            idempotency.__class__(
+                **{**idempotency.__dict__, 'key': 'stale-key', 'message_id': retry.message_id}
+            ),
+        )
+    assert (
+        repository.get_message(
+            claim.claim_id, session.session_id, retry.message_id, claim.customer_id
+        )
+        is None
+    )
+
+
+def test_evidence_mutation_rejects_stale_revision_without_partial_write(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    from backend.repositories.protocols import IdempotencyRecord
+
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    stale_claim = claim.model_copy(update={'revision': 3})
+    evidence = _evidence(claim)
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/evidence',
+        key='evidence-key',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    with pytest.raises(RevisionConflict):
+        repository.save_evidence_mutation(stale_claim, 2, evidence, idempotency)
+    assert repository.get_evidence(claim.claim_id, evidence.evidence_id, claim.customer_id) is None
+    assert (
+        repository.find_idempotency(idempotency.actor_id, idempotency.route, idempotency.key)
+        is None
+    )
+
+
+def test_retrieval_bundle_preserves_sources_and_rejects_conflicting_replay(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    retrieval = _retrieval(claim)
+    signal = ReviewSignalRecord(
+        signal_id='sig_mongo_001',
+        claim_id=claim.claim_id,
+        code='POLICY_REVIEW_REQUIRED',
+        source_refs=[retrieval.retrieval_id],
+        reason_codes=['POLICY_DETAIL_REQUIRES_STAFF'],
+        summary='A staff member should review the policy detail.',
+        created_at=claim.created_at,
+    )
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+
+    repository.save_retrieval_bundle(retrieval, [signal], claim.customer_id)
+    assert repository.list_retrieval_records(claim.claim_id, claim.customer_id) == [retrieval]
+    assert repository.list_review_signals(claim.claim_id, claim.customer_id) == [signal]
+    assert repository.list_retrieval_records(claim.claim_id, 'other-customer') == []
+
+    changed = retrieval.model_copy(
+        update={'facts': retrieval.facts.model_copy(update={'excess_amount': 900})}
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_retrieval_bundle(changed, [signal], claim.customer_id)
+    assert repository.list_retrieval_records(claim.claim_id, claim.customer_id) == [retrieval]
+
+
+def test_staff_mutation_persists_audited_record_with_claim_revision(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    action = StaffActionRecord(
+        action_id='act_mongo_001',
+        claim_id=claim.claim_id,
+        action_type='review_claim',
+        status=StaffActionStatus.OPEN,
+        assigned_to='staff-001',
+        requested_outcome='Review the collected FNOL information.',
+        created_at=claim.created_at,
+    )
+    from backend.repositories.protocols import IdempotencyRecord
+
+    idempotency = IdempotencyRecord(
+        actor_id='staff-001',
+        route='/staff-actions',
+        key='staff-action-key',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+    updated_claim = claim.model_copy(update={'revision': 2})
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+
+    repository.save_staff_mutation(
+        updated_claim,
+        1,
+        idempotency,
+        staff_action=action,
+    )
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert repository.get_staff_action(claim.claim_id, action.action_id) == action
+    assert repository.list_staff_actions(claim.claim_id) == [action]
+
+
+def test_agent_turn_persists_linked_records_as_one_mutation(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+    claimant_message = _message(claim, session)
+    agent_message = claimant_message.model_copy(
+        update={
+            'message_id': 'msg_mongo_agent',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'content': {'type': 'text', 'text': 'Please confirm the incident.'},
+            'in_reply_to': claimant_message.message_id,
+        }
+    )
+    decision = _decision(updated_claim, updated_session, claimant_message)
+    from backend.repositories.protocols import IdempotencyRecord
+
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-turn',
+        key='agent-turn-key',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        decision_id=decision.decision_id,
+    )
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+
+    repository.save_agent_turn(
+        updated_claim,
+        1,
+        updated_session,
+        claimant_message,
+        agent_message,
+        decision,
+        idempotency,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == [
+        claimant_message,
+        agent_message,
+    ]
+    assert (
+        repository.get_agent_decision(claim.claim_id, decision.decision_id, claim.customer_id)
+        == decision
+    )
