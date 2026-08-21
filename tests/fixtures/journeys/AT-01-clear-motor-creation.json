@@ -20,6 +20,18 @@
           "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
           "status": "proposed",
           "source": "claimant"
+        },
+        {
+          "field_code": "incident.location",
+          "value": "Queen Street",
+          "status": "proposed",
+          "source": "inference"
+        },
+        {
+          "field_code": "loss.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "status": "proposed",
+          "source": "inference"
         }
       ],
       "next_step": {
@@ -36,32 +48,61 @@
           "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
           "status": "confirmed",
           "source": "claimant"
-        }
-      ],
-      "next_step": {
-        "status": "provide_incident_location",
-        "responsible_party": "claimant"
-      }
-    },
-    {
-      "name": "correct",
-      "action": "UPDATE",
-      "facts": [
+        },
         {
-          "field_code": "incident.description",
-          "value": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
+          "field_code": "incident.location",
+          "value": "Queen Street",
           "status": "confirmed",
-          "source": "claimant"
+          "source": "inference"
+        },
+        {
+          "field_code": "loss.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "status": "confirmed",
+          "source": "inference"
         }
       ],
       "next_step": {
-        "status": "provide_incident_location",
+        "status": "ready_to_create",
         "responsible_party": "claimant"
       }
     },
     {
       "name": "proceed",
       "action": "PROCEED",
+      "facts": [
+        {
+          "field_code": "incident.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.location",
+          "value": "Queen Street",
+          "status": "confirmed",
+          "source": "inference"
+        },
+        {
+          "field_code": "loss.description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "status": "confirmed",
+          "source": "inference"
+        }
+      ],
+      "next_step": {
+        "status": "ready_to_create",
+        "responsible_party": "claimant"
+      }
+    }
+  ],
+  "correction_branch": {
+    "from_state": "confirm",
+    "input": "Another car hit the rear of mine outside Queen Street and damaged the rear bumper.",
+    "correction_reason": "The collision happened outside Queen Street, not on Queen Street.",
+    "state": {
+      "name": "correct",
+      "action": "UPDATE",
       "facts": [
         {
           "field_code": "incident.description",
@@ -73,13 +114,13 @@
           "field_code": "incident.location",
           "value": "Queen Street",
           "status": "confirmed",
-          "source": "claimant"
+          "source": "inference"
         },
         {
           "field_code": "loss.description",
-          "value": "Damage to the rear bumper",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
           "status": "confirmed",
-          "source": "claimant"
+          "source": "inference"
         }
       ],
       "next_step": {
@@ -87,5 +128,5 @@
         "responsible_party": "claimant"
       }
     }
-  ]
+  }
 }
