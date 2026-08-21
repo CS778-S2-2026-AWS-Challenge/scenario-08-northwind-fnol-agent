@@ -25,6 +25,7 @@ def _claim(revision: int = 1) -> WorkingClaim:
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
         claim_state=ClaimState(),
+        active_session_id='ses_mongo_001',
         customer_next_step=CustomerNextStep(
             status='describe_incident',
             summary='Tell me what happened.',
@@ -98,4 +99,27 @@ def test_idempotency_rejects_changed_replay(repository: MongoDBRepository) -> No
     with pytest.raises(IdempotencyConflict):
         repository.save_idempotency(
             record.__class__(**{**record.__dict__, 'request_fingerprint': 'fingerprint-b'})
+        )
+
+
+def test_session_mutation_rejects_cross_record_relationships_before_transaction(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim).model_copy(update={'customer_id': 'another-customer'})
+    from backend.repositories.protocols import IdempotencyRecord
+
+    with pytest.raises(KeyError):
+        repository.save_session_mutation(
+            claim.model_copy(update={'revision': 2}),
+            expected_revision=1,
+            session=session,
+            idempotency=IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route='/sessions',
+                key='session-key',
+                request_fingerprint='fingerprint',
+                claim_id=claim.claim_id,
+                session_id=session.session_id,
+            ),
         )

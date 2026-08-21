@@ -14,7 +14,7 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 
-from backend.domain.models import SessionRecord, WorkingClaim
+from backend.domain.models import SessionRecord, SessionStatus, WorkingClaim
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -99,6 +99,18 @@ class MongoDBRepository:
         return model_type.model_validate(document)
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
+        if (
+            session.claim_id != claim.claim_id
+            or session.customer_id != claim.customer_id
+            or claim.active_session_id != session.session_id
+            or session.status is not SessionStatus.ACTIVE
+            or session.context_revision != claim.revision
+        ):
+            raise KeyError(claim.claim_id)
+        if self.get_claim_internal(claim.claim_id) is not None:
+            raise IdempotencyConflict(claim.claim_id)
+        if self.get_session(claim.claim_id, session.session_id, claim.customer_id) is not None:
+            raise IdempotencyConflict(session.session_id)
         self._put(
             'claim', claim.claim_id, claim, customer_id=claim.customer_id, claim_id=claim.claim_id
         )
@@ -216,11 +228,32 @@ class MongoDBRepository:
         session: SessionRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
+        self._validate_session_mutation(claim, expected_revision, session, idempotency)
         self._atomic(
             lambda mongo_session: self._save_session_mutation(
                 claim, expected_revision, session, idempotency, mongo_session
             )
         )
+
+    def _validate_session_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            claim.revision != expected_revision + 1
+            or claim.active_session_id != session.session_id
+            or session.claim_id != claim.claim_id
+            or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
+            or session.context_revision != expected_revision
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != session.session_id
+        ):
+            raise KeyError(claim.claim_id)
 
     def _save_session_mutation(
         self,
@@ -230,6 +263,8 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         mongo_session: Any,
     ) -> None:
+        if self.get_active_session(claim.claim_id, claim.customer_id) is not None:
+            raise IdempotencyConflict(session.session_id)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),

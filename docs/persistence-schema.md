@@ -7,6 +7,13 @@ rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical sch
 Physical mappings belong inside the selected runtime-profile adapters and must preserve
 this contract.
 
+The current MongoDB work is an unselected foundation slice. It covers only the Claim,
+Session, and Idempotency document primitives and is not a complete runtime profile.
+`DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until every repository
+operation, evidence/object boundary, and transaction contract is implemented and
+verified against a supported MongoDB deployment. The fixture profile remains the only
+complete profile at this stage.
+
 Public APIs expose domain identifiers and typed projections only. They never expose
 collection names, table names, partition keys, indexes, bucket keys, vector-index names,
 provider payloads, or SDK types.
