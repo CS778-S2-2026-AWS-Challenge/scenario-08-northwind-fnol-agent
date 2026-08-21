@@ -17,14 +17,13 @@ from backend.services.evidence_visibility_check import (
     paths_checked,
 )
 
-# (business_path, scenario_id, code) for every defect recorded on 2026-08-19.
+# (business_path, scenario_id, code) for every defect still open after Issue #219.
 KNOWN_DEFECTS = {
     ('fast', 'AT-01-clear-motor', 'PATH_FIXTURE_NOT_ANCHORED'),
     ('professional_review', 'AT-02-coverage-ambiguity', 'PATH_FIXTURE_NOT_ANCHORED'),
     ('urgent', 'AT-04-urgent', 'PATH_FIXTURE_NOT_ANCHORED'),
     ('human_request', 'AT-05-human-request', 'PATH_FIXTURE_NOT_ANCHORED'),
     ('pending_evidence', 'AT-06-pending-evidence', 'PATH_FIXTURE_NOT_ANCHORED'),
-    ('pending_evidence', 'AT-06-pending-evidence', 'INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT'),
 }
 
 
@@ -74,23 +73,11 @@ def test_every_defect_names_path_expected_actual_and_stack() -> None:
             assert label in rendered
 
 
-def test_the_claimant_leak_is_reported_against_the_evidence_stack() -> None:
-    """The one defect that is not a fixture problem.
-
-    `EvidenceRecord` carries no visibility field, so the claimant evidence list
-    cannot filter and returns records the claimant never provided. That belongs
-    to the evidence API and domain model, and must not be papered over by
-    editing the fixture.
-    """
-    leak = next(
-        defect
+def test_the_claimant_visibility_leak_no_longer_reproduces() -> None:
+    assert all(
+        defect.code != 'INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT'
         for defect in check_path_evidence()
-        if defect.code == 'INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT'
     )
-
-    assert 'evidence API and domain model' in leak.responsible_stack
-    assert 'evd_fixture_at06_internal' in leak.actual
-    assert 'source=staff' in leak.actual
 
 
 def test_the_report_is_readable_when_clean_and_when_not() -> None:
