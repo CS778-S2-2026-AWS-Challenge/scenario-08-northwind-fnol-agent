@@ -62,6 +62,25 @@ def _run_clear_claim_journey(
         == (expected_describe['next_step']['status'])
     )
     assert described_body['agent_message']['actor'] == 'agent'
+    assert described_body['agent_message']['message_id']
+    assert (
+        described_body['agent_message']['in_reply_to']
+        == described_body['claimant_message']['message_id']
+    )
+    persisted_messages = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=auth_headers,
+    )
+    assert persisted_messages.status_code == 200
+    persisted_by_id = {
+        message['message_id']: message for message in persisted_messages.json()['items']
+    }
+    assert described_body['claimant_message']['message_id'] in persisted_by_id
+    assert described_body['agent_message']['message_id'] in persisted_by_id
+    assert (
+        persisted_by_id[described_body['agent_message']['message_id']]['in_reply_to']
+        == described_body['claimant_message']['message_id']
+    )
     agent_text = described_body['agent_message']['content']['text'].lower()
     assert 'structured' in agent_text
     assert not any(
