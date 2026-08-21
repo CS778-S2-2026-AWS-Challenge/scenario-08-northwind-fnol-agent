@@ -6,8 +6,18 @@ This is the `bdfa123` Day 4 check: compare the evidence state and visibility
 each business path *declares* against what the runtime API actually projects to
 a claimant and to staff, and record every difference with its owner.
 
-Nothing here is fixed in fixture data. Two of the findings are fixture problems
-and one is not, and editing the fixture would have hidden the one that matters.
+The original check found one runtime claimant-visibility defect and a separate
+fixture-to-scenario anchoring defect across all five paths. The runtime visibility
+defect was resolved by Issue #219; the fixture anchoring defect remains open.
+
+## Current status
+
+- `PATH_FIXTURE_NOT_ANCHORED`: still open across all five paths.
+- `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT`: resolved by Issue #219.
+
+`tests/test_evidence_visibility_check.py` pins only the defect set that still
+reproduces. A fixed defect is removed from that set in the same change that
+updates this record.
 
 ## How to reproduce
 
@@ -20,10 +30,6 @@ The script seeds each canonical scenario named by
 `GET /api/v1/claims/{claim_id}/evidence` as a claimant and
 `GET /api/v1/workbench/claims/{claim_id}` as staff, and compares both against
 the declared set. It exits non-zero while any defect is open.
-
-`tests/test_evidence_visibility_check.py` pins the recorded set. It fails if a
-new defect appears **and** if a recorded one stops reproducing, so this document
-cannot drift away from the code in either direction.
 
 ## Why the existing verifiers did not catch these
 
@@ -67,15 +73,15 @@ the way they already derive claim state, or the canonical scenarios gain the
 evidence the paths are supposed to demonstrate. The second is the larger change
 and affects everyone's scenario expectations.
 
-## Defect 2 — the claimant evidence list returns internal records
+## Defect 2 — claimant evidence list returned internal records — resolved by #219
 
 **Path:** pending_evidence / AT-06-pending-evidence.
 **Code:** `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT`.
-**Responsible stack:** evidence API and domain model — `liyang6620`, `bdfa123`.
-**This one is not a fixture problem and must not be fixed in fixture data.**
+**Original responsible stack:** evidence API and domain model.
+**Status:** resolved by Issue #219.
 
-`GET /api/v1/claims/{claim_id}/evidence` returns every persisted record on the
-claim. For AT-06 the claimant receives:
+At the time of the Day 4 check, `GET /api/v1/claims/{claim_id}/evidence`
+returned every persisted record on the claim. For AT-06 the claimant received:
 
 | Evidence | Kind | Source |
 | --- | --- | --- |
@@ -83,57 +89,42 @@ claim. For AT-06 the claimant receives:
 | `evd_fixture_at06_agency` | `agency_incident_record` | `external_system` |
 | `evd_fixture_at06_internal` | `internal_policy_history` | `staff` |
 
-The last two are records the claimant never provided and cannot act on. The
-third is an internal Northwind archive lookup.
+The last two were records the claimant never provided and could not act on. The
+third is an internal Northwind archive lookup. Internal provenance was already
+stripped, so the defect was specifically the record-level projection boundary.
 
-Internal **provenance** is correctly stripped — `internal_note` does not appear
-in the response — so the field-level boundary added for Issue #110 works. The
-gap is at record level: `_claimant_evidence` applies no record-level rule, so
-the claimant projection cannot be narrower than the full list.
+### Resolution
 
-**Expected:** the claimant evidence list excludes records the claimant did not
-provide and cannot act on.
-**Actual:** it returns all three, including a staff-sourced internal record.
-
-### The runtime already has a rule; the claimant endpoint does not apply it
-
-An earlier draft of this record said the fix needed a domain decision because
-`EvidenceRecord` has no visibility field. That understated what already exists,
-and is corrected here.
-
-`backend/services/evidence_handoff.py` contains `default_handoff_visibility()`:
+Issue #219 centralises the existing safe default in
+`backend/services/evidence_visibility.py` and applies it to the claimant evidence
+endpoint. The same policy remains the source for handoff visibility through
+`default_handoff_visibility()`:
 
 ```python
-if evidence.source is EvidenceSource.CLAIMANT:
-    return MessageVisibility.SHARED
-return MessageVisibility.INTERNAL_ONLY
+claimant source -> shared
+non-claimant source -> internal_only
 ```
 
-That is a record-level visibility rule derived from `source`. It is applied by
-both the claimant support handoff path and the professional-review path, and
-handoff packets have carried a per-item `visibility` field since Issue #129.
-The fixture layer states the same intent with `FixtureVisibility`, and
-`tests/fixtures/evidence/README.md` describes the claimant projection as
-excluding internal-only evidence.
+Under that current safe default, the AT-06 claimant evidence response contains
+only `evd_fixture_at06_police`. The Workbench still receives all three evidence
+records, including the `external_system` and `staff` records.
 
-So the gap is narrower than "no rule exists": **the repository has one rule, in
-one place, with two callers, and `GET /api/v1/claims/{claim_id}/evidence` does
-not apply it.**
+`tests/test_claimant_evidence_visibility_regression.py` directly verifies the
+claimant and staff projections, and `tests/test_evidence_visibility_check.py`
+now asserts that `INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` no longer reproduces.
 
-Still to decide, and why this is assigned rather than patched:
+This resolution deliberately does not change evidence persistence, lifecycle
+state, or staff access, and it does not edit canonical fixtures to hide the
+runtime defect.
 
-- whether `shared` / `internal_only` are the right classes for the claimant
-  list, or whether it needs the third class the fixtures use
-  (`claimant_visible`);
-- whether deriving from `source` is correct permanently. It couples "who
-  supplied it" to "who may see it", which is not obviously right for an
-  external record a claimant is actively waiting on;
-- whether the `EvidenceWaitType` enum now on `main` (`claimant`,
-  `external_agency`, `internal`) is meant to become this boundary, in which case
-  it and `default_handoff_visibility` must not diverge.
+### Longer-term policy boundary
 
-Whoever picks this up should start from `default_handoff_visibility`, not from a
-blank design. See also `docs/day5-evidence-handoff-packet.md` (Issue #146).
+The current rule is a safe MVP default, not an assertion that source and
+visibility must always be identical in production. A later product decision may
+introduce an explicit `claimant_visible` class or a richer rule for authorised
+external-agency evidence. If that happens, it must replace the shared rule
+across claimant projection and handoff consumers together rather than diverging
+in a single endpoint.
 
 ## Not defects
 
