@@ -7,13 +7,13 @@
 | Contract version | `0.1.0` |
 | API base path | `/api/v1` |
 | Internal base path | `/internal/v1` |
-| Status | Target contract for Sprint 1 implementation |
+| Status | Current versioned transport contract |
 | Data | Anonymous or synthetic data only |
 | Authority | Initial SPEC, then this contract for transport and schema details |
 
-This document is the normative API contract for the Northwind FNOL prototype. It defines the boundary shared by the claimant client, claim operations workbench, agent orchestration, backend domain layer, and replaceable integration adapters.
+This document is the normative API contract for the current Northwind FNOL service. It defines the boundary shared by the claimant client, claim operations workbench, agent orchestration, backend domain layer, and replaceable integration adapters.
 
-The current backend implements only a connectivity shell. Endpoint implementation status is recorded in [Current Shell Migration](#current-shell-migration); the shell does not override this contract.
+This contract defines the normative routes under `/api/v1` and `/internal/v1`. A route is treated as implemented only when the verification requirements in this document are satisfied; historical shell routes and dated delivery evidence do not override the contract. New Administration and Control Plane, model-gateway, or knowledge-management routes become normative only when their implementation, consumers, fixtures, tests, and this document change together.
 
 The key words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** describe requirement strength. A contract change MUST update affected clients, server code, fixtures, automated contract tests, and this document in the same pull request.
 
@@ -21,7 +21,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** describe requireme
 
 The API supports a trusted, adaptive first-notice-of-loss service. It must preserve one shared claim state while allowing:
 
-- natural-language intake and a claimant-correctable structured form;
+- natural-language intake with internal structured Claim State and correction of material misunderstandings;
 - fast, guided, professional-review, urgent, human-request, pending-evidence, resume, and fraud-review paths;
 - image and document evidence;
 - policy and relevant claim-history retrieval with source evidence;
@@ -29,6 +29,8 @@ The API supports a trusted, adaptive first-notice-of-loss service. It must prese
 - mock or configured claim creation and conditional assessor routing;
 - an internal workbench derived from the same claim state;
 - measurement of claimant, agent, and staff effort.
+
+The broader product includes an Administration and Control Plane for versioned system configuration, but this version of the API contract does not yet define an Admin API. Administration must remain separate from claimant and staff claim operations.
 
 The API does not authorise the agent to approve or reject claims, make an unreviewed high-impact coverage decision, determine fraud, diagnose injury, or claim that emergency services were contacted when they were not.
 
@@ -39,22 +41,23 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 | Claimant | Their own claimant-visible claim data, sessions, messages, form corrections, evidence, support requests, and status updates |
 | Claims professional | Assigned or permitted workbench claims, internal evidence, handoffs, signals, staff actions, and claimant updates |
 | Claims operations | Workbench data, routing and service metrics, subject to operational role permissions |
+| System administrator | Versioned system configuration, knowledge, integrations, access, evaluation, health, and audit through a separately contracted Admin API |
 | Agent service | Claim-scoped orchestration commands and approved internal tools; no unlimited decision authority |
 | Integration service | Narrow adapter operation for policy, history, claim creation, evidence storage, or assessor systems |
 
 ### Authentication and Authorisation
 
 - All endpoints except liveness and readiness MUST require an authenticated principal.
-- Production identity is expected to use the AWS-provided identity environment or another approved OIDC provider. The exact provider is open.
-- Sprint 1 MAY use signed synthetic identities, but the server MUST still enforce role and claim ownership. A client-supplied `customer_id`, role, or staff identity MUST NOT grant access.
+- Production identity requires an approved identity provider; the exact provider and deployment remain open.
+- Development and fixture environments MAY use signed synthetic identities, but the server MUST still enforce role and claim ownership. A client-supplied `customer_id`, role, or staff identity MUST NOT grant access.
 - Claimant access MUST be restricted to claims linked to the authenticated claimant.
 - Internal routes MUST reject claimant credentials.
-- In the Sprint 1 fixture environment, internal integration routes use a separate
+- In the fixture environment, internal integration routes use a separate
   `NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN`. This synthetic token is not a production
   identity design and is disabled outside development and test environments.
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
-Prototype scopes:
+Current scopes:
 
 | Scope | Purpose |
 |---|---|
@@ -274,7 +277,7 @@ A session has one of three states:
 - `paused`: temporarily inactive while resumable context is retained;
 - `closed`: the interaction has ended and the session no longer accepts new messages.
 
-Session lifecycle transitions are server-controlled in Sprint 1.
+Session lifecycle transitions are server-controlled.
 
 A session MAY move from `active` to `paused` after claimant inactivity or when the current interaction is interrupted.
 
@@ -830,7 +833,7 @@ Creates an external claim through the configured provider-neutral claims adapter
 accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,
 and controlled prototype route from the persisted Working Claim.
 
-Sprint 1 deterministic creation is limited to the controlled motor fixture path. Other incident
+Current deterministic fixture creation is limited to the controlled motor path. Other incident
 types remain unconfigured until approved routing rules are available.
 
 The request requires `If-Match` and `Idempotency-Key` headers and has no body. The service rejects
@@ -951,8 +954,8 @@ Response `201`:
 ```
 
 This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative
-and is never stored in fixtures or claim records. The adapter MAY use local
-storage in Sprint 1 and object storage later without changing the client
+and is never stored in fixtures or claim records. The adapter MAY use fixture
+storage or the active profile's object storage without changing the client
 contract.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/complete`
@@ -1032,7 +1035,7 @@ idempotency key returns the same handoff and does not notify twice.
 `GET /health/ready` reports the notification service under the
 `handoff_dispatch` check.
 
-The Sprint 1 controlled prototype rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
+The current controlled fixture rule transfers the first explicit human request immediately and records `prototype_immediate_transfer` as the applied rule. A repeated request, distress, urgent condition, or accessibility need MUST also transfer immediately. Whether production keeps immediate transfer or offers one brief, transparent choice to finish the current step remains an open product decision.
 
 ### `GET /api/v1/claims/{claim_id}/updates`
 
@@ -1547,13 +1550,16 @@ Each reports `using_fixture` when the adapter answers under the production
 contract, and `unavailable` while it is in an outage. A fixture says it is a
 fixture; it never claims to be the real provider.
 
-Every unconfirmed AWS capability stays visible as its own check —
-`aws_policy_history`, `aws_evidence_storage`, `aws_claims_service` — and remains
-`pending_confirmation` until AWS access is confirmed, so a working fixture can
-never be mistaken for confirmed AWS access.
+Every unconfirmed provider capability stays visible as its own check and remains
+`pending_confirmation` until its access is verified, so a working fixture can never be
+mistaken for a confirmed Cloudflare, MongoDB, AWS, or Northwind service.
 
-`persistence` and `agent` have no adapter boundary yet and report
-`not_configured`.
+The application already exposes provider-neutral seams for `persistence` and `agent`:
+`create_app()` injects a `PersistenceRepository` and an `AgentTurnProvider`, defaulting
+to the current `FixtureRepository` and `ControlledAgent` implementations. The remaining
+gap is provider and model readiness, not the existence of an adapter boundary. Until a
+real provider profile or model gateway is configured and verified, those checks report
+the bounded readiness state `not_configured`.
 
 An evidence-storage outage is reported to the caller as `503`
 `DEPENDENCY_UNAVAILABLE` with `retryable: true`, never as a media-type or size
@@ -1636,12 +1642,12 @@ Response `201` or `200` for an idempotent replay:
 
 The adapter MUST use the working claim ID as its idempotency reference. `creation_status` is `created`, `pending`, or `failed`. Pending evidence is preserved as outstanding work rather than silently dropped.
 
-`source` is `fixture` for the deterministic fallback or `configured_service` for a
+`source` is `fixture` for the explicitly selected deterministic adapter or `configured_service` for a
 confirmed provider adapter. A result MUST NOT claim `configured_service` merely because
-an AWS integration is planned. Current AWS claims-service availability is
-`pending_confirmation`; the fixture remains the active fallback under the same contract.
+an integration is planned. An unavailable configured service remains explicit and MUST
+NOT silently fall through to another data runtime profile.
 
-The request and response above are the provider-neutral boundary. AWS table names,
+The request and response above are the provider-neutral boundary. Provider table names,
 partition keys, regions, SDK payloads, ARNs, credentials and vendor error bodies MUST
 remain inside a future adapter and are rejected if supplied as request fields.
 
@@ -1774,9 +1780,9 @@ Returns readiness without secrets or private configuration:
 
 Readiness is `ok`, `degraded`, or `unavailable`. A fixture is not reported as a real connected service.
 
-## Persistence and AWS Boundary
+## Persistence and Provider Boundary
 
-The public API does not expose DynamoDB partition keys, sort keys, table names, indexes, S3 object keys, model provider payloads, or external claims-system schemas.
+The public API does not expose physical keys, collection or table names, indexes, object-store keys, vector-index names, model-provider payloads, runtime-profile configuration, or external claims-system schemas.
 
 The persistence layer MUST support at least:
 
@@ -1793,20 +1799,15 @@ The persistence layer MUST support at least:
 - append-only claim events and aggregate metric events;
 - idempotency records and optimistic-concurrency revisions.
 
-Sprint 1 fixture repositories and mock services MUST implement the same domain interfaces as future DynamoDB, S3, policy, history, claims, and assessor adapters. AWS data schema, access method, region, identity, and service availability remain open until the provided environment is inspected.
+Fixture and configured adapters MUST implement the same provider-neutral domain ports.
+Exactly one complete data runtime profile is selected when a process starts. Cloudflare,
+MongoDB, AWS, and fixture profiles are alternatives; the API MUST NOT silently combine
+their persistence or retrieval stores. Detailed data classes, profile composition, and
+RAG boundaries are defined in `docs/data-architecture.md`.
 
-## Current Shell Migration
-
-Current implementation on 10 August 2026:
-
-| Existing route | Status | Migration |
-|---|---|---|
-| `GET /health` | Deprecated compatibility alias | Replace consumers with `/health/live`, then remove before `1.0.0` |
-| `GET /health/live` | Implemented process liveness check | Retain as the unauthenticated liveness endpoint |
-| `GET /health/ready` | Implemented foundation readiness check | Reports `degraded` and `not_configured` until persistence and integration adapters are introduced |
-| `POST /api/claims/message` | Temporary echo-style connectivity route | Replace with claim creation, session, and versioned message routes; do not extend this payload |
-
-The existing message route accepts only `message` and returns a fixed acknowledgement. It has no claim identity, session, persistence, form, evidence, decision, authorisation, or concurrency behaviour. New product code MUST NOT depend on it.
+The model gateway and future Admin API also remain provider-neutral. Their HTTP routes
+and payloads are added to this contract only with the corresponding implementation,
+consumer, fixture, and contract-test changes.
 
 ## Contract Verification
 
@@ -1823,9 +1824,9 @@ Before an endpoint is treated as implemented:
 
 ## Open Decisions
 
-These decisions do not prevent Sprint 1 implementation, but production behaviour cannot be claimed until they are resolved:
+These decisions do not prevent continued MVP implementation, but production behaviour cannot be claimed until they are resolved:
 
-1. AWS identity provider, data schemas, access method, region, and available managed services.
+1. Production identity, Northwind data schemas, matching keys, access methods, regions, and available provider services.
 2. Production field registry and required fields by motor, home, and contents claim type.
 3. Approved coverage, severity, fraud-review, urgent escalation, claim-creation, and assessor-routing rules.
 4. Whether the first explicit human request transfers immediately or offers one brief choice to finish the current step.
@@ -1833,3 +1834,5 @@ These decisions do not prevent Sprint 1 implementation, but production behaviour
 6. External claims-system and assessor-system response semantics and service-level expectations.
 7. Production rate limits, idempotency retention, audit retention, and operational metric access thresholds.
 8. Final deployment topology: in-process adapters or separately deployed internal services.
+9. Admin API resources, configuration approval levels, publication, rollback, secret references, and audit access.
+10. Model-gateway and knowledge-management API capabilities introduced by issues #204 and the Control Plane delivery plan.
