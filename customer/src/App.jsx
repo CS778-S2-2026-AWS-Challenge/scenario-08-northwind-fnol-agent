@@ -533,6 +533,7 @@ function App() {
                     ) : (
                       <>
                         <p className="field-value">{fieldValueText(field)}</p>
+                        <p className="field-source">Source: {field.source}</p>
                         <button
                           className="text-button"
                           type="button"
