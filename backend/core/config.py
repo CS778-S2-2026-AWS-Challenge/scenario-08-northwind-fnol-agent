@@ -1,5 +1,13 @@
 import os
 from dataclasses import dataclass
+from enum import Enum
+
+
+class DataRuntimeProfile(str, Enum):
+    FIXTURE = 'fixture'
+    CLOUDFLARE = 'cloudflare'
+    MONGODB = 'mongodb'
+    AWS = 'aws'
 
 
 def _csv_setting(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -33,8 +41,11 @@ class Settings:
     synthetic_claimant_token: str = 'synthetic-claimant'
     synthetic_staff_token: str = 'synthetic-staff'
     synthetic_integration_token: str = 'synthetic-integration'
+    data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
 
     def __post_init__(self) -> None:
+        if not isinstance(self.data_runtime_profile, DataRuntimeProfile):
+            raise ValueError('data_runtime_profile must be a DataRuntimeProfile value.')
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
             raise ValueError('Wildcard CORS origins cannot be used with credentials.')
         synthetic_tokens = {
@@ -50,6 +61,12 @@ class Settings:
     @classmethod
     def from_environment(cls) -> 'Settings':
         environment = os.getenv('NORTHWIND_ENVIRONMENT', 'development').strip().lower()
+        raw_profile = os.getenv('DATA_RUNTIME_PROFILE', DataRuntimeProfile.FIXTURE.value)
+        try:
+            data_runtime_profile = DataRuntimeProfile(raw_profile.strip().lower())
+        except ValueError as error:
+            allowed = ', '.join(profile.value for profile in DataRuntimeProfile)
+            raise ValueError(f'DATA_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
         return cls(
             environment=environment,
             cors_allow_origins=_csv_setting('NORTHWIND_CORS_ALLOW_ORIGINS', ('*',)),
@@ -70,4 +87,5 @@ class Settings:
                 'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',
                 'synthetic-integration',
             ),
+            data_runtime_profile=data_runtime_profile,
         )

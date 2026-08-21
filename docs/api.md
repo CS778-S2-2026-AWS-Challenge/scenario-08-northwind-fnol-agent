@@ -1546,7 +1546,9 @@ adapter:
 
 | Check | Meaning |
 |---|---|
+| `persistence` | the selected transactional repository adapter |
 | `policy`, `claim_history` | the retrieval adapter |
+| `knowledge_documents`, `knowledge_retrieval` | the knowledge store and retrieval adapters |
 | `handoff_dispatch` | the staff queue notification service |
 | `evidence_storage` | the evidence object store |
 | `claims_service` | the external claim-creation service |
@@ -1561,10 +1563,10 @@ mistaken for a confirmed Cloudflare, MongoDB, AWS, or Northwind service.
 
 The application already exposes provider-neutral seams for `persistence` and `agent`:
 `create_app()` injects a `PersistenceRepository` and an `AgentTurnProvider`, defaulting
-to the current `FixtureRepository` and `ControlledAgent` implementations. The remaining
-gap is provider and model readiness, not the existence of an adapter boundary. Until a
-real provider profile or model gateway is configured and verified, those checks report
-the bounded readiness state `not_configured`.
+to the current `FixtureRepository` and `ControlledAgent` implementations. The fixture
+data runtime reports `persistence`, evidence, policy/history, and knowledge capabilities
+as `using_fixture`. The remaining Agent gap is model-provider readiness, so `agent`
+continues to report `not_configured` until a model gateway is configured and verified.
 
 An evidence-storage outage is reported to the caller as `503`
 `DEPENDENCY_UNAVAILABLE` with `retryable: true`, never as a media-type or size
@@ -1771,13 +1773,15 @@ Returns readiness without secrets or private configuration:
 {
   "status": "degraded",
   "checks": {
-    "persistence": "ok",
-    "agent": "ok",
+    "persistence": "using_fixture",
+    "agent": "not_configured",
     "policy": "using_fixture",
     "claim_history": "using_fixture",
+    "knowledge_documents": "using_fixture",
+    "knowledge_retrieval": "using_fixture",
     "claims_service": "using_fixture",
     "aws_claims_service": "pending_confirmation",
-    "evidence_storage": "ok"
+    "evidence_storage": "using_fixture"
   },
   "checked_at": "2026-08-10T03:58:00Z"
 }
@@ -1809,6 +1813,11 @@ Exactly one complete data runtime profile is selected when a process starts. Clo
 MongoDB, AWS, and fixture profiles are alternatives; the API MUST NOT silently combine
 their persistence or retrieval stores. Detailed data classes, profile composition, and
 RAG boundaries are defined in `docs/data-architecture.md`.
+
+The current composition root implements the complete fixture bundle. Selecting an
+unimplemented Cloudflare, MongoDB, or AWS profile fails process startup explicitly; it
+does not create a partial provider bundle or fall back to fixture capabilities. The
+selected deployment profile itself is not returned by the public API.
 
 The model gateway and future Admin API also remain provider-neutral. Their HTTP routes
 and payloads are added to this contract only with the corresponding implementation,
