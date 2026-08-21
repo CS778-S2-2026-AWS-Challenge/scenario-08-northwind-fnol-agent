@@ -143,7 +143,7 @@ Collection response:
 | `415` | Unsupported media type |
 | `422` | Schema validation failed |
 | `429` | Rate limit exceeded |
-| `500` | Unexpected server failure |
+| `500` | Unexpected server error |
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
 
