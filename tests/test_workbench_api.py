@@ -175,6 +175,7 @@ def test_staff_reads_complete_claim_detail_from_shared_state(
     assert detail['sessions'][0]['pending_items'] == ['police_report']
     assert detail['evidence'][0]['provenance']['internal_object_ref'].startswith('fixture://')
     assert detail['decisions'][0]['required_tools'][0]['tool'] == 'claim_history_lookup'
+    assert detail['retrievals'] == []
     assert detail['signals'][0]['code'] == 'HISTORY_INCONSISTENCY_REVIEW'
     assert any(message['message_id'] == 'msg_internal_note' for message in detail['messages'])
     assert detail['handoffs'] == []
