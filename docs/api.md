@@ -143,7 +143,7 @@ Collection response:
 | `415` | Unsupported media type |
 | `422` | Schema validation failed |
 | `429` | Rate limit exceeded |
-| `500` | Unexpected server error |
+| `500` | Unexpected server failure |
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
 
@@ -242,6 +242,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `incident_type` | string | No | Registered claim type; may be unknown at creation |
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
+| `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
 | `active_session_id` | string | No | Current active session when one exists |
 | `external_claim` | object | No | Claim service result after creation begins |
@@ -672,6 +673,8 @@ Response `200`:
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
 The `form` contains claimant-visible structured field records. `external_claim`, when present, contains `claim_number`, `creation_status`, `route`, `created_at`, and claimant-visible expected timing.
 
@@ -1126,6 +1129,8 @@ claimant routes:
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+The Workbench `evidence_summary` is the authoritative aggregate over the full persisted evidence set, including authorised internal evidence. It MUST NOT be recomputed from the narrower claimant-visible evidence projection.
 
 `sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
 and context revisions. `messages` includes the complete persisted communication history,
