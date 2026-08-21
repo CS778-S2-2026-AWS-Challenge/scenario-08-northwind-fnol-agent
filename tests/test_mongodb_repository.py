@@ -168,3 +168,48 @@ def test_save_session_rejects_existing_session_for_another_customer(
 
     with pytest.raises(IdempotencyConflict):
         repository.save_session(conflicting)
+
+
+def test_session_mutation_checks_identity_inside_mutation_boundary(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    original_session = _session(claim)
+    repository.create_claim(claim, original_session)
+    replacement_claim = claim.model_copy(
+        update={'revision': 2, 'active_session_id': 'ses_mongo_replacement'}
+    )
+    replacement_session = original_session.model_copy(
+        update={'session_id': 'ses_mongo_replacement', 'context_revision': 1}
+    )
+    repository._collection.update_one(
+        {'_id': repository._record_id('claim', claim.claim_id)},
+        {'$set': {'active_session_id': replacement_session.session_id}},
+    )
+    repository._collection.insert_one(
+        {
+            **replacement_session.model_dump(mode='json'),
+            '_id': repository._record_id('session', replacement_session.session_id),
+            'kind': 'session',
+            'claim_id': 'different-claim',
+            'customer_id': claim.customer_id,
+        }
+    )
+    from backend.repositories.protocols import IdempotencyRecord
+
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    with pytest.raises(IdempotencyConflict):
+        repository.save_session_mutation(
+            replacement_claim,
+            expected_revision=1,
+            session=replacement_session,
+            idempotency=IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route='/sessions',
+                key='mutation-key',
+                request_fingerprint='fingerprint',
+                claim_id=claim.claim_id,
+                session_id=replacement_session.session_id,
+            ),
+        )

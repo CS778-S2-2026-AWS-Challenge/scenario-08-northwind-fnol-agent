@@ -177,11 +177,17 @@ class MongoDBRepository:
             claim_id=session.claim_id,
         )
 
-    def _reject_session_identity_conflict(self, session: SessionRecord) -> None:
+    def _reject_session_identity_conflict(
+        self,
+        session: SessionRecord,
+        *,
+        mongo_session: Any = None,
+    ) -> None:
         """Protect the global session identity before an upsert can overwrite it."""
         existing = self._collection.find_one(
             {'_id': self._record_id('session', session.session_id), 'kind': 'session'},
             projection={'claim_id': 1, 'customer_id': 1},
+            session=mongo_session,
         )
         if existing is None:
             return
@@ -191,11 +197,26 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(session.session_id)
 
-    def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
-        claim = self.get_claim(claim_id, customer_id)
+    def get_active_session(
+        self,
+        claim_id: str,
+        customer_id: str,
+        *,
+        mongo_session: Any = None,
+    ) -> SessionRecord | None:
+        claim = self._get(
+            'claim', claim_id, WorkingClaim, customer_id=customer_id, session=mongo_session
+        )
         if claim is None or claim.active_session_id is None:
             return None
-        return self.get_session(claim_id, claim.active_session_id, customer_id)
+        record = self._get(
+            'session',
+            claim.active_session_id,
+            SessionRecord,
+            customer_id=customer_id,
+            session=mongo_session,
+        )
+        return record if record is not None and record.claim_id == claim_id else None
 
     def list_sessions_for_claim(self, claim_id: str, customer_id: str) -> list[SessionRecord]:
         return self._list(
@@ -277,8 +298,12 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         mongo_session: Any,
     ) -> None:
-        if self.get_active_session(claim.claim_id, claim.customer_id) is not None:
+        if (
+            self.get_active_session(claim.claim_id, claim.customer_id, mongo_session=mongo_session)
+            is not None
+        ):
             raise IdempotencyConflict(session.session_id)
+        self._reject_session_identity_conflict(session, mongo_session=mongo_session)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
