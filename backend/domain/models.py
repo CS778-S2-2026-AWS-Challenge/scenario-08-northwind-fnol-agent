@@ -645,6 +645,7 @@ class WorkbenchClaimDetail(ContractModel):
     sessions: list[WorkbenchSession]
     messages: list[MessageRecord]
     decisions: list[AgentDecisionRecord]
+    retrievals: list[dict[str, Any]]
     signals: list[dict[str, Any]]
     handoffs: list[WorkbenchHandoff]
     staff_actions: list[dict[str, Any]]
