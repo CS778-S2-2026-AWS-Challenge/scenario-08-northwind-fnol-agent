@@ -3,12 +3,12 @@ from collections.abc import Iterable
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
-    EvidenceSource,
     EvidenceStatus,
     HandoffEvidenceItem,
     HandoffPacket,
     MessageVisibility,
 )
+from backend.services.evidence_visibility import default_evidence_visibility
 
 PENDING_EVIDENCE_STATUSES = {
     EvidenceStatus.UNOFFICIAL,
@@ -22,11 +22,9 @@ PENDING_FILE_STATUSES = set(EvidenceFileStatus) - {
 
 
 def default_handoff_visibility(evidence: EvidenceRecord) -> MessageVisibility:
-    """Apply the safe runtime default until an adapter supplies explicit visibility."""
+    """Apply the shared safe runtime default to a handoff evidence record."""
 
-    if evidence.source is EvidenceSource.CLAIMANT:
-        return MessageVisibility.SHARED
-    return MessageVisibility.INTERNAL_ONLY
+    return default_evidence_visibility(evidence.source)
 
 
 def assemble_evidence_handoff_packet(

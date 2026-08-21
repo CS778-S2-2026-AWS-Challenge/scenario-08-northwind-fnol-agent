@@ -21,7 +21,9 @@ Run `tests/fixtures/presentation/test_evidence_handoff_packet_check.py`.
    queue notification service refusing connections, the claimant still receives
    `201`, delivery reports `queued_locally`, the packet keeps every reference
    and gap, and staff still reach the handoff through the Workbench, because
-   that queue reads persisted claim state rather than the notification.
+   that queue reads persisted claim state rather than the notification. A retry
+   and a repeated request reuse the same handoff and do not advance the claim a
+   second time.
 4. **An urgent transfer is not blocked by outstanding intake.** A claim with
    evidence still pending transfers at urgent priority, and the outstanding item
    travels with the packet instead of holding the transfer.
@@ -36,7 +38,7 @@ Run `tests/fixtures/presentation/test_evidence_handoff_packet_check.py`.
   Demonstrated in 3, against the real adapter boundary from Issue #123 rather
   than a stub.
 
-## Finding: the visibility rule already exists
+## Shared visibility boundary
 
 `backend/services/evidence_handoff.py` contains `default_handoff_visibility()`:
 
@@ -46,30 +48,10 @@ if evidence.source is EvidenceSource.CLAIMANT:
 return MessageVisibility.INTERNAL_ONLY
 ```
 
-That is a record-level visibility rule, applied by both the claimant support
-handoff path and the professional-review path, and the packet has carried a
-`visibility` field per evidence item since Issue #129.
-
-`INTERNAL_EVIDENCE_VISIBLE_TO_CLAIMANT` in
-`docs/day4-evidence-visibility-defects.md` describes the claimant evidence list
-returning records the claimant never supplied, and records it as needing a
-domain decision about where visibility should live.
-
-**That decision is narrower than the record suggests.** The repository already
-has one rule, in one place, agreed by two callers. The gap is that
-`GET /api/v1/claims/{claim_id}/evidence` does not apply it — not that the rule
-needs inventing.
-
-This is recorded rather than fixed, for the same reason as before: the claimant
-evidence projection belongs to the evidence API stack, and Issue #146 is a
-check. But whoever picks the defect up should start from
-`default_handoff_visibility` rather than from a blank design.
-
-Two things worth deciding at the same time:
-
-- Whether `shared` and `internal_only` are the right classes for the claimant
-  list, or whether it needs the third class the fixtures use
-  (`claimant_visible`).
-- Whether the `EvidenceWaitType` enum now on `main` (`claimant`,
-  `external_agency`, `internal`) is meant to become that boundary, in which case
-  it and `default_handoff_visibility` should not diverge.
+That record-level rule is now shared by the handoff service and the claimant
+evidence projection through `backend/services/evidence_visibility.py`. Issue
+#219 and PR #220 fixed the earlier claimant-list and aggregate leak. The
+validation therefore seeds both claimant- and staff-sourced evidence, proves
+the packet carries each with the appropriate visibility, and proves the
+claimant list returns only the claimant-supplied record. Storage provenance is
+still absent from every handoff-packet item.

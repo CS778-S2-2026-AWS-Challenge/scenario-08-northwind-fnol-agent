@@ -1,29 +1,34 @@
 # Northwind FNOL Agent
 
-Northwind FNOL Agent is a trusted, adaptive First Notice of Loss service for Northwind Insurance. It helps a claimant describe an incident in their own words, turns that account into a visible and correctable claim record, and chooses the next safe action according to the claim, evidence, user, and system state.
+Northwind FNOL Agent is a trusted, adaptive First Notice of Loss service for Northwind Insurance. A claimant explains a loss in their own words while the system handles insurance structure, evidence tracking, authorised knowledge retrieval, and next-step planning internally.
 
-The product is designed to sit between a rigid web form and a fully manual phone process. Straightforward claims can move quickly, while ambiguity, urgency, support needs, or high-impact decisions are transferred to staff with the claimant's confirmed context intact.
+The product is designed to sit between a rigid web form and a fully manual phone process. Straightforward work can progress with minimal questioning, while ambiguity, urgency, support needs, and high-impact decisions are transferred to staff with a source-preserving claim context. The claimant should not have to manage the insurer's process or repeat confirmed information when work changes hands.
 
 ## Product Goal
 
 The service should:
 
-- reduce avoidable claimant questions, repetition, and waiting;
+- reduce avoidable claimant questions, process interpretation, repetition, and waiting;
 - progress a claim when the information is sufficient for the next safe action, even if later evidence is still pending;
 - preserve context across sessions and human handoffs;
-- give claims staff a workbench backed by the same claim state seen by the agent;
+- give claims staff a workbench backed by the same claim state used by the Agent;
+- provide a governed administration and control plane for versioned model, data, knowledge, rule, integration, access, evaluation, and operational configuration as the product direction develops;
 - keep coverage, fraud, safety, and other high-impact decisions within explicit business and human-review boundaries;
 - make claimant effort, human effort, and agent cost observable.
 
 ## Users
 
-- **Claimants** report an incident, confirm the structured account, provide evidence, and follow progress.
+- **Claimants** report an incident naturally, correct material misunderstandings, provide evidence, and follow progress without managing the internal process.
 - **Claims professionals** review ambiguity, risk signals, handoffs, and claim actions without recollecting known facts.
 - **Claims operations** owns the process, service quality, governance, and operating efficiency.
+- **System administrators and approved knowledge managers** validate and publish system configuration, knowledge, integrations, and access through the Control Plane.
+- **Approved service participants** may later receive task-specific claim context for assessment, repair, or another authorised downstream action.
 
 ## Current Stage
 
-The project is in Sprint 1 and is building a full-path prototype. The prototype may use controlled scenarios and mock integrations, but each demonstrated path must change shared system state and remain traceable. Production integrations, security controls, and final business rules will be refined as Northwind data and AWS service availability are confirmed.
+The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, and staff review. Control Plane implementation is product-direction work tracked separately as extra backlog, not a committed Sprint 2 capacity item.
+
+Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
 Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
@@ -142,8 +147,13 @@ DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
 
 `docs/api.md` is the normative transport and schema contract. A contract change must update affected backend models, clients, fixtures, tests, and API documentation in the same pull request. Product scope changes belong in `SPEC/`; sprint commitments belong in `sprint/`.
 
-The Day 3 claimant, Agent, API, fixture, and observable-state dependency map is [documented here](docs/day3-implementation-map.md). It is a planning contract, not a claim that full frontend-backend integration is complete.
+The current provider-neutral data, knowledge, RAG, and runtime-profile contract is
+documented in [Data Architecture](docs/data-architecture.md).
 
-The assembled Sprint 1 shared-runtime baseline, including verified employee
-workbench write-back and the known claimant/Agent journey blockers, is recorded
-in the [Day 4 prototype integration baseline](docs/day4-assembled-prototype-integration-results.md).
+## Historical Delivery Evidence
+
+The Day 3 implementation map, Day 4 integration and demonstration records, Day 5
+validation records, screenshots, and static prototypes preserve Sprint 1 evidence. They
+remain useful for regression and provenance, but they do not override the current
+`SPEC/`, `docs/api.md`, data architecture, or sprint commitments. The documentation
+index separates current engineering contracts from these historical records.

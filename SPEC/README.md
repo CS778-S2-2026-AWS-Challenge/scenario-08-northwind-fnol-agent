@@ -1,6 +1,6 @@
 # Initial Product Specification
 
-This directory is the initial product specification for Northwind FNOL Agent. It describes stable product intent and constraints; implementation details belong in engineering documentation, and time-bound commitments belong in sprint plans.
+This directory is the current product specification for Northwind's FNOL service. It describes stable product intent, user outcomes, behaviour, authority, and acceptance boundaries. Implementation details belong in engineering documentation, and time-bound commitments belong in sprint plans.
 
 ## Modules
 
@@ -8,7 +8,7 @@ This directory is the initial product specification for Northwind FNOL Agent. It
 2. [Users and Service Journeys](02-users-and-journeys.md)
 3. [Agent Behaviour](03-agent-behaviour.md)
 4. [Claim State and Data](04-claim-state-and-data.md)
-5. [Workbench and Handoff](05-workbench-and-handoff.md)
+5. [Workbench, Handoff, and Administration](05-workbench-and-handoff.md)
 6. [Safety and Governance](06-safety-and-governance.md)
 7. [Non-functional Requirements](07-non-functional-requirements.md)
 8. [Acceptance Scenarios](08-acceptance-scenarios.md)
@@ -16,7 +16,7 @@ This directory is the initial product specification for Northwind FNOL Agent. It
 ## Interpretation
 
 - **Requirement** means an agreed product capability or constraint.
-- **Prototype rule** means a controlled condition used to make Sprint 1 repeatable; it is not automatically a production business rule.
+- **Controlled rule** means a repeatable fixture or development condition; it is not automatically a production business rule.
 - **Open decision** means the team lacks sufficient Northwind data, policy authority, or user evidence to decide safely.
 - Research findings become requirements only after their evidence and limits are recorded.
 

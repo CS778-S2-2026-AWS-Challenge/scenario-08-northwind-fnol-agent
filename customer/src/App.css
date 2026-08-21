@@ -119,6 +119,51 @@
   line-height: 1.6;
 }
 
+.resume-entry {
+  max-width: 680px;
+  margin-top: 16px;
+}
+
+.saved-reports {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #c9ddd5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.saved-reports h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.saved-reports ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-reports li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px solid #e1ece8;
+}
+
+.saved-reports li div {
+  display: grid;
+  gap: 3px;
+}
+
+.saved-reports li span {
+  color: #60746d;
+  font-size: 12px;
+}
+
 .report-box {
   max-width: 680px;
   padding: 20px;
@@ -195,6 +240,40 @@
 .backend-status.is-error {
   color: #8a3f39;
   background: #fff3f1;
+}
+
+.resume-summary {
+  margin: 0 0 18px;
+  padding: 16px;
+  border-left: 3px solid #2c806a;
+  background: #eef8f4;
+}
+
+.resume-summary h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+
+.resume-summary p {
+  margin: 6px 0;
+  color: #40564f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.resume-summary dl {
+  margin: 10px 0;
+}
+
+.resume-summary dt {
+  color: #60746d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resume-summary dd {
+  margin: 2px 0 0;
+  font-size: 13px;
 }
 
 .status-dot {
@@ -595,6 +674,13 @@
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.field-source {
+  margin: -2px 0 8px;
+  color: #687b74;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .text-button {

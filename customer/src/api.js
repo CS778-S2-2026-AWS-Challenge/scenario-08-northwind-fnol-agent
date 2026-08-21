@@ -62,6 +62,23 @@ export function getClaim(claimId) {
   return apiRequest(`/api/v1/claims/${claimId}`)
 }
 
+export function listClaims({ cursor, limit = 25 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set('cursor', cursor)
+  return apiRequest(`/api/v1/claims?${params}`)
+}
+
+export function resumeClaimSession({
+  claimId,
+  idempotencyKey = requestId('resume'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ intent: 'resume' }),
+  })
+}
+
 export function getClaimMessages(claimId, sessionId) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions/${sessionId}/messages?limit=100`)
 }
