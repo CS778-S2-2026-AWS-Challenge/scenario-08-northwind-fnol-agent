@@ -226,8 +226,33 @@ describe('claimant intake', () => {
     await user.click(screen.getByRole('button', { name: 'Save correction' }))
 
     expect(await screen.findByText(correctedValue)).toBeVisible()
-    expect(screen.getByText('Source: claimant')).toBeVisible()
+    expect(screen.getByText('Provided by you')).toBeVisible()
     expect(screen.getByText('Confirmed')).toBeVisible()
+  })
+
+  it('presents an inferred field source in claimant-safe language', async () => {
+    const inferredTurn = {
+      ...firstTurn(),
+      form_changes: [
+        {
+          ...firstTurn().form_changes[0],
+          field: {
+            ...firstTurn().form_changes[0].field,
+            source: 'inference',
+          },
+        },
+      ],
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(inferredTurn))
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(await screen.findByText('Suggested from your description')).toBeVisible()
+    expect(screen.queryByText('Source: inference')).not.toBeInTheDocument()
   })
 
   it('shows an actionable failure state', async () => {

@@ -31,6 +31,16 @@ const HANDOFF_STATUS_LABELS = {
   in_progress: 'Support conversation in progress',
 }
 
+const FIELD_SOURCE_LABELS = {
+  claimant: 'Provided by you',
+  inference: 'Suggested from your description',
+  image: 'Suggested from your image',
+  document: 'Suggested from your document',
+  policy: 'From your policy information',
+  claim_history: 'From your previous claim information',
+  staff: 'Provided by Northwind support',
+}
+
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
 }
@@ -39,6 +49,10 @@ function fieldStatusLabel(status) {
   if (status === 'confirmed') return 'Confirmed'
   if (status === 'pending_generation') return 'Pending'
   return 'Check this'
+}
+
+function fieldSourceLabel(source) {
+  return FIELD_SOURCE_LABELS[source] || 'Source recorded by Northwind'
 }
 
 function fieldValueText(field) {
@@ -533,7 +547,7 @@ function App() {
                     ) : (
                       <>
                         <p className="field-value">{fieldValueText(field)}</p>
-                        <p className="field-source">Source: {field.source}</p>
+                        <p className="field-source">{fieldSourceLabel(field.source)}</p>
                         <button
                           className="text-button"
                           type="button"
