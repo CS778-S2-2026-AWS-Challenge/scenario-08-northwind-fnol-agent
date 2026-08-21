@@ -166,6 +166,95 @@ describe('claimant intake', () => {
     expect(screen.getByLabelText('Incident location')).toBeEnabled()
   })
 
+  it('shows the corrected value and its source after saving a form correction', async () => {
+    const correctedValue = 'Another vehicle hit my parked car outside Queen Street.'
+    const correctedField = {
+      ...firstTurn().form_changes[0].field,
+      value: correctedValue,
+      status: 'proposed',
+      source: 'claimant',
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        claim_id: 'clm_test',
+        revision: 3,
+        updated_fields: {
+          'incident.description': correctedField,
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'confirmation_required',
+          summary: 'Please check the incident description.',
+          required_items: ['incident.description'],
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        claim_id: 'clm_test',
+        revision: 4,
+        confirmed_fields: {
+          'incident.description': {
+            ...correctedField,
+            status: 'confirmed',
+          },
+        },
+        decision: null,
+        customer_next_step: {
+          ...nextStep,
+          status: 'provide_incident_location',
+          summary: 'Where did the incident happen?',
+          required_items: ['incident.location'],
+        },
+      }),
+    )
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(
+      screen.getByLabelText('Incident description'),
+      'Another vehicle hit my parked car.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Edit' }))
+
+    const correction = screen.getByRole('textbox', { name: 'Correct What happened' })
+    await user.clear(correction)
+    await user.type(correction, correctedValue)
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+
+    expect(await screen.findByText(correctedValue)).toBeVisible()
+    expect(screen.getByText('Provided by you')).toBeVisible()
+    expect(screen.getByText('Confirmed')).toBeVisible()
+  })
+
+  it('presents an inferred field source in claimant-safe language', async () => {
+    const inferredTurn = {
+      ...firstTurn(),
+      form_changes: [
+        {
+          ...firstTurn().form_changes[0],
+          field: {
+            ...firstTurn().form_changes[0].field,
+            source: 'inference',
+          },
+        },
+      ],
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(inferredTurn))
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(await screen.findByText('Suggested from your description')).toBeVisible()
+    expect(screen.queryByText('Source: inference')).not.toBeInTheDocument()
+  })
+
   it('shows an actionable failure state', async () => {
     fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')))
     const user = userEvent.setup()
