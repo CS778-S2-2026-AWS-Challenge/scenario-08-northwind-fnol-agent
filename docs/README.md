@@ -23,6 +23,13 @@ These documents are normative only for the boundaries they explicitly own. A con
 change must update affected implementation, consumers, fixtures, and tests in the same
 pull request when the changed behaviour is implemented.
 
+## Current Delivery Evidence
+
+- [Week 4 compatibility and integration inputs](week4-integration-inputs.md) — current
+  provider/consumer/readiness, five-path compatibility, fallback, blocker, and Day 5
+  closure snapshot for Issue #150. This is delivery evidence, not a normative contract;
+  incomplete items remain explicitly `NOT READY` until their recorded closure gates pass.
+
 ## User Research
 
 - [Research directory](User_Research_and_Pain_Points/)
