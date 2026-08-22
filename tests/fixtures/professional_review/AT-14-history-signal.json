@@ -10,11 +10,11 @@
     "incident_type": "motor",
     "claim_state": {
       "coverage": "not_assessed",
-      "evidence": "received",
+      "evidence": "not_started",
       "workflow_state": "professional_review",
       "next_action": "HANDOFF"
     },
-    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
     "route": "history_review",
     "active_session_id": "ses_fixture_at14",
     "customer_next_step": {
@@ -76,7 +76,7 @@
   ],
   "expected": {
     "action": "HANDOFF",
-    "evidence_state": "received",
+    "evidence_state": "not_started",
     "review_reason": "RELEVANT_HISTORY_REVIEW",
     "visibility": {
       "claimant_message_count": 1,
