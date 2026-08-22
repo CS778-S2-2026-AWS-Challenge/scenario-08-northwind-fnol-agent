@@ -4,95 +4,140 @@
 
 This runbook is the `jxu316-arch` validation slice for Issue #147. It
 demonstrates the provider-neutral mapping, persistence, professional-review
-record, and staff write-back chain built by Issues #108, #126, and #136.
+record, unavailable-data boundary, and staff write-back chain.
 
-It does not replace the API / AWS adapter-boundary check owned by
-`liyang6620`, and it does not claim the external timeout/unavailable fallback
-owned by Issue #134 is complete before that dependency lands.
+The original version of this runbook predated completion of Issue #134 and
+therefore described timeout/unavailable behaviour as pending. That statement is
+no longer current. Issue #134 is completed, the retrieval API failure contract
+is merged on `main`, and PR #231 supplies the remaining connected
+retrieval-to-handoff outage/recovery regression. PR #231 is currently Draft
+under the repository's newer PR policy until its exact-head local full gate is
+recorded and the assigned API/adapter owner review is complete.
 
-## Automated demonstration
+Nothing in this runbook claims a live AWS policy/history integration. Current
+AWS capability remains `pending_confirmation`.
 
-Run the presentation validation test:
+## Focused demonstrations
+
+Provider-neutral source/authority traceability:
 
 ```text
 python -m pytest tests/fixtures/presentation/test_policy_review_traceability.py -q
 ```
 
-The full repository CI remains the merge gate. The focused command is only a
-convenient Day 5 demonstration path.
+Retrieval API success, ambiguity, no-evidence, and unavailable behaviour:
 
-## Demonstration path
+```text
+python -m pytest tests/test_retrieval_api.py -q
+```
 
-The first presentation test walks one policy lookup through the full domain
-chain:
+Connected retrieval + handoff degraded path after PR #231 is on the checked-out
+branch:
 
-1. Create a synthetic working claim at revision 1.
+```text
+python -m pytest tests/test_connected_retrieval_handoff_fallback.py -q
+```
+
+The complete repository gate remains the merge requirement. Focused commands
+are demonstration aids, not substitutes for `./scripts/check.ps1`.
+
+## Source and authority path
+
+The presentation validation walks a policy lookup through the domain boundary:
+
+1. Create a synthetic working claim at a known revision.
 2. Receive a synthetic provider payload containing allow-listed policy facts
-   plus deliberately unsafe provider-only values:
-   - `fraud_label`
-   - `fraud_finding`
-   - `risk_score`
-   - `policy_conclusion`
-   - `provider_internal_note`
-3. Map only the provider-neutral policy facts, source provenance, retrieval
-   timestamp, and explicit uncertainty.
-4. Persist the retrieval record and the sourced professional-review signal.
-5. Read the staff Workbench projection and show:
-   - the review signal has reason codes;
-   - the review signal has source references;
-   - the matching provider-neutral retrieval record appears as source evidence;
-   - none of the provider-only risk/fraud/conclusion keys appear anywhere in
-     the Workbench response.
-6. Submit a staff review decision with `If-Match: 1`.
-7. Show that the stored decision preserves:
-   - authenticated staff actor;
-   - staff reason code;
-   - staff summary;
-   - the original review signal source references, even though the staff
-     request did not repeat them.
-8. Show that the claim advances to revision 2 while:
-   - `fraud_signal` remains `none`;
-   - workflow remains `collecting`;
-   - the original retrieval and review-signal records are unchanged.
+   plus deliberately unsafe provider-only values such as `fraud_label`,
+   `risk_score`, `policy_conclusion`, and provider notes.
+3. Map only provider-neutral facts, source provenance, retrieval time, and
+   explicit uncertainty.
+4. Persist the retrieval record and a sourced professional-review signal when
+   human judgment is required.
+5. Read the Workbench projection and prove the review signal carries reason
+   codes and source references while provider-only conclusion/risk fields do
+   not cross the boundary.
+6. Submit staff review with optimistic revision control.
+7. Prove staff actor, reason, summary, and source references persist through
+   write-back.
+8. Prove the write-back does not silently create a fraud finding or provider
+   policy decision.
 
-This demonstrates that retrieval evidence can request professional review but
-cannot silently become a fraud finding, policy decision, or high-impact state
-transition.
+This demonstrates the intended authority boundary: retrieval evidence can ask
+for professional review but cannot become a high-impact policy/fraud decision
+without a sourced, authorised staff action.
 
-## Fail-closed adapter check
+## Fail-closed mapping check
 
-The second presentation test supplies policy/history payloads that contain
-provider-only status/risk/conclusion fields but omit the required domain
-reference (`policy_reference` or `history_reference`).
+Provider payloads that omit required domain references are rejected rather
+than turned into records. Provider-only status/risk/conclusion values are not a
+substitute for a source.
 
-The adapter must reject both mappings through domain validation. It must not
-manufacture a policy/history record or preserve the provider-only conclusion.
-This is the local contract proof for the Issue #147 acceptance statement that
-no policy or fraud conclusion appears without a source.
+The acceptance statement "no policy or fraud conclusion appears without a
+source" is therefore enforced both at mapping time and at the review/write-back
+boundary.
 
-## What Issue #147 can claim from this slice
+## Retrieval API unavailable-data contract
 
-After this validation passes, the `jxu316-arch` portion can demonstrate:
+`tests/test_retrieval_api.py` now provides the merged Issue #134 behaviour that
+this runbook previously marked as pending:
 
-- the adapter follows the allow-listed domain contract;
-- every persisted professional-review signal has a source and a reason;
+- sourced success returns provider-neutral facts plus source;
+- ambiguity produces a sourced professional-review signal rather than an
+  automatic coverage decision;
+- no-evidence remains no-evidence;
+- timeout/unavailable returns `facts=None`, `source=None`, and limitations;
+- unavailable retrieval does not persist a retrieval record or review signal;
+- claim-history retrieval is purpose-limited and cannot be expanded into fraud
+  screening by caller-supplied provider fields.
+
+An unavailable provider therefore cannot create an unsupported policy or fraud
+conclusion.
+
+## Connected degraded path — PR #231
+
+PR #231 composes the existing retrieval and handoff boundaries on one real
+application/repository/claim:
+
+1. Persist confirmed claimant incident context.
+2. Force policy retrieval timeout and prove it fails closed without facts,
+   source, retrieval persistence, or review signal.
+3. Force handoff dispatch outage on the same claim.
+4. Prove the human-support request and structured transfer context are durable
+   before notification and the API reports `queued_locally`.
+5. Prove the Workbench sees one queued handoff and claimant projection does not
+   leak provider timeout/internal details.
+6. Replay with the same idempotency key and prove no duplicate handoff or
+   revision advance.
+7. Restore dispatch and prove delivery recovers on the same durable handoff.
+
+The regression has green GitHub CI and an independent `bdfa123` approval on its
+current code head. It is deliberately **not** represented as merged/current-main
+evidence until the newer PR policy requirement is satisfied: exact-head
+`./scripts/check.ps1` local PASS, current template metadata, assigned API/adapter
+owner review, and merge.
+
+## What Issue #147 can claim now
+
+The technical evidence supports these statements:
+
+- the adapter follows an allow-listed provider-neutral domain contract;
+- persisted professional-review signals have sources and reasons;
 - source evidence remains traceable through staff write-back;
-- provider-only fraud/risk/policy conclusions do not cross the adapter
+- provider-only fraud/risk/policy conclusions do not cross the adapter/API
   boundary;
-- review persistence alone does not set fraud state or block/transition a
-  claim;
-- missing required source facts fail closed rather than creating an
-  unsupported conclusion.
+- missing source facts and unavailable providers fail closed;
+- the claim remains available for safe human fallback instead of receiving a
+  fabricated answer;
+- durable handoff fallback/recovery is implemented in #231 but remains a
+  pre-merge validation until its new local-gate/review requirements are met.
 
-## Dependency still owned by Issue #134
+## Remaining closure boundary
 
-Issue #147 also lists unavailable-data fallback in its overall deliverable.
-The HTTP/service behaviour for successful retrieval, timeout, unavailable, and
-retry states belongs to Issue #134 (`Connect handoff, retrieval, and fallback
-APIs`) owned by `liyang6620`.
+Issue #147 should remain open until:
 
-Until #134 lands, this validation slice intentionally does not fake an
-unavailable provider response or invent an AWS/provider API. When #134 is
-available, its fallback result should be added to the final Issue #147 Day 5
-run by the API/AWS-boundary owner and checked against the same rule: failure
-must not create an unsourced policy or fraud conclusion.
+- PR #231 records an exact-head `./scripts/check.ps1` PASS under the current PR
+  policy;
+- the assigned API/AWS boundary owner (`liyang6620`) completes the independent
+  check;
+- PR #231 merges; and
+- no live AWS/provider capability is claimed unless it is separately verified.
