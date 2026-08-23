@@ -92,16 +92,18 @@ def _assert_no_message_side_effect(
     original_claim: WorkingClaim,
     idempotency: IdempotencyRecord,
 ) -> None:
-    assert (
-        repository.get_claim(original_claim.claim_id, original_claim.customer_id)
-        == original_claim
-    )
+    assert repository.get_claim(
+        original_claim.claim_id, original_claim.customer_id
+    ) == original_claim
     assert repository.list_messages('clm_tx', 'ses_tx', 'cus_tx') == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def test_message_mutation_rejects_revision_jump_without_partial_write() -> None:
@@ -211,11 +213,14 @@ def test_agent_turn_rejects_revision_jump_before_any_child_write() -> None:
         == []
     )
     assert repository.list_agent_decisions(claim.claim_id, claim.customer_id) == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def test_evidence_mutation_rejects_revision_jump_without_partial_write() -> None:
@@ -249,11 +254,14 @@ def test_evidence_mutation_rejects_revision_jump_without_partial_write() -> None
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_evidence(claim.claim_id, claim.customer_id) == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def _handoff(claim: WorkingClaim) -> HandoffRecord:
@@ -302,11 +310,14 @@ def test_handoff_mutation_rejects_revision_jump_without_partial_write() -> None:
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_handoffs(claim.claim_id, claim.customer_id) == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def _staff_action(claim: WorkingClaim) -> StaffActionRecord:
@@ -343,11 +354,14 @@ def test_staff_mutation_rejects_revision_jump_without_partial_write() -> None:
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_staff_actions(claim.claim_id) == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def test_staff_mutation_rejects_cross_claim_idempotency_without_partial_write() -> None:
@@ -372,8 +386,76 @@ def test_staff_mutation_rejects_cross_claim_idempotency_without_partial_write() 
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
     assert repository.list_staff_actions(claim.claim_id) == []
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
+
+
+def test_staff_mutation_allows_session_agnostic_staff_action() -> None:
+    repository, claim, _session = _repository()
+    action = _staff_action(claim)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    idempotency = IdempotencyRecord(
+        actor_id='stf_demo',
+        route='/api/v1/workbench/claims/clm_tx/staff-actions',
+        key='staff-no-session',
+        request_fingerprint='staff-no-session',
+        claim_id=claim.claim_id,
+        session_id='',
+    )
+
+    repository.save_staff_mutation(
+        updated_claim,
+        expected_revision=1,
+        idempotency=idempotency,
+        staff_action=action,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert repository.list_staff_actions(claim.claim_id) == [action]
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+
+
+def test_staff_mutation_rejects_non_staff_message_without_partial_write() -> None:
+    repository, claim, _session = _repository()
+    message = _message()
+    idempotency = IdempotencyRecord(
+        actor_id='stf_demo',
+        route='/api/v1/workbench/claims/clm_tx/messages',
+        key='staff-wrong-message-actor',
+        request_fingerprint='staff-wrong-message-actor',
+        claim_id=claim.claim_id,
+        session_id='ses_tx',
+        message_id=message.message_id,
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            claim.model_copy(update={'revision': 2}),
+            expected_revision=1,
+            idempotency=idempotency,
+            message=message,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.list_messages(claim.claim_id, 'ses_tx', claim.customer_id) == []
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
