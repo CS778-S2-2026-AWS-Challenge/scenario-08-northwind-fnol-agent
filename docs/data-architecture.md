@@ -118,6 +118,10 @@ physically:
    retrieval records, handoffs, staff actions, follow-up tasks, active branch and
    rule references, revisions, idempotency records, retention work, and audit events.
 2. **Object store** holds original evidence and other large binary objects.
+   For the local MVP, the object-store port may use the S3-compatible MinIO
+   adapter defined in [MinIO Object-Storage Boundary](minio-object-storage.md).
+   MinIO is an object-store choice, not a separate data runtime profile; it
+   does not change the provider-neutral domain or API contract.
 3. **Knowledge document store** holds approved source documents, parsed text,
    versions, authority metadata, and chunk records.
 4. **Retrieval index** supports metadata-filtered keyword and vector search over
