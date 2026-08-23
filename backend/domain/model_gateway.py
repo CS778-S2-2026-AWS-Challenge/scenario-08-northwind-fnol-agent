@@ -1,7 +1,22 @@
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from backend.domain.models import (
+    AgentAction,
+    Channel,
+    CustomerNextStep,
+    CustomerSupport,
+    EvidenceState,
+    EvidenceSummary,
+    FormSource,
+    FormStatus,
+    NeededFor,
+    StateChange,
+    Urgency,
+    WorkflowState,
+)
 
 
 class ModelContract(BaseModel):
@@ -57,6 +72,60 @@ class ModelResponse(ModelContract):
     usage: ModelUsage | None = None
     provider_model: str | None = None
     provider_request_id: str | None = None
+
+
+class ModelClaimStateContext(ModelContract):
+    evidence: EvidenceState
+    customer_support: CustomerSupport
+    urgency: Urgency
+    workflow_state: WorkflowState
+    next_action: AgentAction
+
+
+class ModelFormFieldContext(ModelContract):
+    value: Any
+    source: FormSource
+    status: FormStatus
+    needed_for: NeededFor
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class ModelClaimContext(ModelContract):
+    channel: Channel
+    locale: str
+    incident_type: str | None = None
+    claim_state: ModelClaimStateContext
+    form: dict[str, ModelFormFieldContext] = Field(default_factory=dict)
+    evidence_summary: EvidenceSummary
+    customer_next_step: CustomerNextStep
+
+
+class ModelTurnContext(ModelContract):
+    claim: ModelClaimContext
+    message_text: str | None = None
+    evidence_reference_count: int = Field(ge=0)
+    professional_review_required: bool = False
+
+
+class ModelProposedFormChange(ModelContract):
+    field_code: str = Field(min_length=1, max_length=100)
+    value: Any
+    needed_for: NeededFor = NeededFor.CURRENT_ACTION
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class ModelAgentProposal(ModelContract):
+    action: AgentAction
+    reason_codes: list[str] = Field(min_length=1)
+    customer_reason: str = Field(min_length=1, max_length=1000)
+    customer_response: str = Field(min_length=1, max_length=5000)
+    customer_next_step: CustomerNextStep
+    form_changes: list[ModelProposedFormChange] = Field(default_factory=list)
+    state_changes: list[StateChange] = Field(default_factory=list)
+    proposed_signals: list[dict[str, object]] = Field(default_factory=list)
+    required_tools: list[dict[str, object]] = Field(default_factory=list)
+    next_action_requirements: list[str] = Field(default_factory=list)
+    handoff_priority: str | None = None
 
 
 class ModelGatewayErrorCode(str, Enum):

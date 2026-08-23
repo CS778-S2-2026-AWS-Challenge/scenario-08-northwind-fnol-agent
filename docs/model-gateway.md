@@ -20,11 +20,23 @@ normalise:
 requires review for the proposal. A model response never executes a tool, writes claim
 state, creates a claim, or authorises a handoff by itself.
 
-The gateway boundary always removes the server-only `controlled_rule_authorised` marker
-from model proposals. Because the current Agent request does not expose an approved tool
-manifest, any model-proposed `required_tools` entry is rejected before orchestration.
-This prevents a structured model response from invoking a tool path that deterministic
-server policy has not exposed.
+The model receives an explicit minimum context projection rather than the durable
+`WorkingClaim`. The projection contains the channel, locale, incident type, customer-safe
+workflow state, structured form values without source references or actor identities,
+evidence counts, and the current customer next step. It excludes Claim, Customer, Session,
+Message, and Evidence identifiers; internal fraud, coverage, and severity signals; provider
+fingerprints; routes; timestamps; and external Claim or assessor results.
+
+The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
+but it cannot set fact provenance or confirmation state. The server converts every accepted
+model form suggestion to `source: inference` and `status: proposed`. Claimant, staff, policy,
+or document provenance and confirmed state require their existing trusted server-side paths.
+
+The model-facing schema does not contain the server-only `controlled_rule_authorised`
+marker, and rejects a response that tries to provide it. Because the current Agent request
+does not expose an approved tool manifest, provider tool calls and any model-proposed
+`required_tools` entry are rejected before orchestration. This prevents a structured model
+response from invoking a tool path that deterministic server policy has not exposed.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -82,6 +94,13 @@ The gateway distinguishes:
 
 Only bounded, provider-neutral messages leave the adapter. Timeout, rate-limit, and
 retryable provider failures retain a retryable flag for later orchestration policy.
+
+At the claimant message API boundary, a timeout, rate limit, or other retryable provider
+failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`. Authentication,
+configuration, unsupported capability, malformed response, and other non-retryable model
+failures return `502 DEPENDENCY_FAILED` with `retryable: false`. These responses expose no
+provider detail and leave the Claim revision, messages, decisions, and idempotency records
+unchanged.
 
 ## Current Limitations
 

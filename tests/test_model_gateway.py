@@ -24,13 +24,21 @@ from backend.domain.model_gateway import (
     ModelTool,
 )
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
     AgentAction,
     AuthorityOutcome,
     Channel,
     CustomerNextStep,
+    FormSource,
+    FormStatus,
+    FraudSignal,
+    NeededFor,
     ResponsibleParty,
+    StructuredFormField,
     WorkingClaim,
 )
+from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnContext, authorised_state_changes, validate_proposal
 from backend.services.model_agent import GatewayAgent
 
@@ -276,6 +284,85 @@ class StaticGateway:
         return self.response
 
 
+class FailingGateway:
+    def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
+        self.code = code
+        self.retryable = retryable
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=False)
+
+    def complete(self, _request: ModelRequest) -> ModelResponse:
+        raise ModelGatewayError(self.code, retryable=self.retryable)
+
+
+def model_gateway_settings(protocol: str) -> Settings:
+    return Settings(
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter=protocol,
+        model_base_url='https://model.example.test/v1',
+        model_identifier='northwind-test-model',
+    )
+
+
+def submit_model_message(
+    gateway: StaticGateway | FailingGateway,
+    *,
+    protocol: str,
+) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
+    registry = ModelGatewayRegistry()
+    registry.register(protocol, lambda _config: gateway)
+    repository = FixtureRepository()
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    with TestClient(
+        create_app(
+            model_gateway_settings(protocol),
+            repository=repository,
+            model_gateway_registry=registry,
+        ),
+        raise_server_exceptions=False,
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**headers, 'Idempotency-Key': f'{protocol}-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_id = created.json()['claim']['claim_id']
+        session_id = created.json()['session']['session_id']
+        before_claim = repository.get_claim(claim_id, 'cus_demo')
+        assert before_claim is not None
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **headers,
+                'Idempotency-Key': f'{protocol}-message',
+                'If-Match': '1',
+            },
+            json={
+                'client_message_id': f'{protocol}-client-message',
+                'content': {'type': 'text', 'text': 'A synthetic rear-end incident.'},
+                'evidence_refs': [],
+            },
+        )
+    return response, repository, before_claim, claim_id, session_id
+
+
+def assert_model_message_failure_is_atomic(
+    repository: FixtureRepository,
+    before_claim: WorkingClaim,
+    claim_id: str,
+    session_id: str,
+    protocol: str,
+) -> None:
+    assert repository.get_claim(claim_id, 'cus_demo') == before_claim
+    assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+    assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
+    assert repository.find_idempotency('cus_demo', route, f'{protocol}-message') is None
+
+
 def _working_claim() -> WorkingClaim:
     timestamp = datetime.now(UTC)
     return WorkingClaim(
@@ -307,30 +394,104 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
                     'responsible_party': 'northwind',
                     'required_items': [],
                 },
-                'form_changes': [],
+                'form_changes': [
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'A proposed incident description.',
+                        'needed_for': 'current_action',
+                        'confidence': 0.8,
+                    }
+                ],
                 'state_changes': [{'path': 'claim_state.next_action', 'to': 'CREATE_CLAIM'}],
                 'proposed_signals': [],
                 'required_tools': [],
                 'next_action_requirements': [],
                 'handoff_priority': None,
-                'controlled_rule_authorised': False,
             }
         )
     )
     agent = GatewayAgent(gateway)
+    timestamp = datetime.now(UTC)
+    claim = _working_claim().model_copy(
+        update={
+            'claim_id': 'clm_private_gateway',
+            'customer_id': 'cus_private_gateway',
+            'route': 'internal-model-route',
+            'active_session_id': 'ses_private_gateway',
+            'external_claim_fingerprint': 'private-external-fingerprint',
+            'assessor_routing_fingerprint': 'private-assessor-fingerprint',
+            'claim_state': _working_claim().claim_state.model_copy(
+                update={'fraud_signal': FraudSignal.REVIEW_REQUIRED}
+            ),
+            'form': {
+                'incident.location': StructuredFormField(
+                    value='Synthetic Road',
+                    source=FormSource.CLAIMANT,
+                    source_refs=['msg_private_gateway'],
+                    status=FormStatus.CONFIRMED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    confidence=1.0,
+                    updated_at=timestamp,
+                    updated_by=ActorReference(
+                        actor_type=ActorType.CLAIMANT,
+                        actor_id='cus_private_gateway',
+                    ),
+                )
+            },
+        }
+    )
     proposal = agent.propose_turn(
         AgentTurnContext(
-            claim=_working_claim(),
+            claim=claim,
             session_id='ses-gateway',
             trigger_message_id='msg-gateway',
             message_text='Please create the claim.',
-            evidence_refs=[],
+            evidence_refs=['evd_private_gateway'],
         )
     )
 
     assert gateway.last_request is not None
     assert gateway.last_request.response_schema is not None
+    model_context = json.loads(gateway.last_request.messages[1].content)
+    assert set(model_context) == {
+        'claim',
+        'message_text',
+        'evidence_reference_count',
+        'professional_review_required',
+    }
+    assert model_context['evidence_reference_count'] == 1
+    assert set(model_context['claim']) == {
+        'channel',
+        'locale',
+        'incident_type',
+        'claim_state',
+        'form',
+        'evidence_summary',
+        'customer_next_step',
+    }
+    assert 'fraud_signal' not in model_context['claim']['claim_state']
+    assert set(model_context['claim']['form']['incident.location']) == {
+        'value',
+        'source',
+        'status',
+        'needed_for',
+        'confidence',
+    }
+    serialised_context = json.dumps(model_context)
+    for private_value in (
+        'clm_private_gateway',
+        'cus_private_gateway',
+        'ses_private_gateway',
+        'msg_private_gateway',
+        'evd_private_gateway',
+        'private-external-fingerprint',
+        'private-assessor-fingerprint',
+        'internal-model-route',
+    ):
+        assert private_value not in serialised_context
     assert proposal.action is AgentAction.CREATE_CLAIM
+    assert proposal.form_changes[0].source is FormSource.INFERENCE
+    assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(proposal, authority) == []
@@ -361,18 +522,163 @@ def test_gateway_agent_cannot_claim_controlled_rule_authority() -> None:
         )
     )
 
-    proposal = GatewayAgent(gateway).propose_turn(
-        AgentTurnContext(
-            claim=_working_claim(),
-            session_id='ses-gateway',
-            trigger_message_id='msg-gateway',
-            message_text='I want a person.',
-            evidence_refs=[],
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-gateway',
+                trigger_message_id='msg-gateway',
+                message_text='I want a person.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+@pytest.mark.parametrize(
+    ('metadata_name', 'metadata_value'),
+    [
+        ('source', 'claimant'),
+        ('source', 'staff'),
+        ('source', 'policy'),
+        ('status', 'confirmed'),
+    ],
+)
+def test_gateway_agent_rejects_model_controlled_fact_metadata(
+    metadata_name: str,
+    metadata_value: str,
+) -> None:
+    form_change = {
+        'field_code': 'incident.description',
+        'value': 'A model-proposed description.',
+        metadata_name: metadata_value,
+    }
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output={
+                'action': 'UPDATE',
+                'reason_codes': ['MODEL_FACT_PROPOSAL'],
+                'customer_reason': 'A fact was proposed.',
+                'customer_response': 'Please review the proposed information.',
+                'customer_next_step': {
+                    'status': 'review_proposal',
+                    'summary': 'Review the proposed information.',
+                    'responsible_party': 'claimant',
+                    'required_items': [],
+                },
+                'form_changes': [form_change],
+                'state_changes': [],
+                'proposed_signals': [],
+                'required_tools': [],
+                'next_action_requirements': [],
+                'handoff_priority': None,
+            }
         )
     )
 
-    assert proposal.controlled_rule_authorised is False
-    assert validate_proposal(proposal).outcome is AuthorityOutcome.REVIEW_REQUIRED
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-gateway',
+                trigger_message_id='msg-gateway',
+                message_text='A synthetic incident.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+
+def test_model_fact_metadata_rejection_is_bounded_and_atomic_at_message_api() -> None:
+    protocol = 'malicious_fact_metadata'
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output={
+                'action': 'UPDATE',
+                'reason_codes': ['MODEL_FACT_PROPOSAL'],
+                'customer_reason': 'A fact was proposed.',
+                'customer_response': 'Please review the proposed information.',
+                'customer_next_step': {
+                    'status': 'review_proposal',
+                    'summary': 'Review the proposed information.',
+                    'responsible_party': 'claimant',
+                    'required_items': [],
+                },
+                'form_changes': [
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'A model-controlled description.',
+                        'source': 'claimant',
+                        'status': 'confirmed',
+                    }
+                ],
+                'state_changes': [],
+                'proposed_signals': [],
+                'required_tools': [],
+                'next_action_requirements': [],
+                'handoff_priority': None,
+            }
+        )
+    )
+
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+    )
+
+    assert response.status_code == 502
+    assert response.json()['error'] == {
+        'code': 'DEPENDENCY_FAILED',
+        'message': 'The model service could not complete the request. The claim is unchanged.',
+        'request_id': response.headers['X-Request-ID'],
+        'retryable': False,
+    }
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
+
+
+@pytest.mark.parametrize(
+    ('gateway_code', 'gateway_retryable', 'status_code', 'api_code', 'api_retryable'),
+    [
+        (ModelGatewayErrorCode.TIMEOUT, True, 503, 'DEPENDENCY_UNAVAILABLE', True),
+        (ModelGatewayErrorCode.RATE_LIMIT, True, 503, 'DEPENDENCY_UNAVAILABLE', True),
+        (ModelGatewayErrorCode.AUTHENTICATION, False, 502, 'DEPENDENCY_FAILED', False),
+        (ModelGatewayErrorCode.CONFIGURATION, False, 502, 'DEPENDENCY_FAILED', False),
+    ],
+)
+def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
+    gateway_code: ModelGatewayErrorCode,
+    gateway_retryable: bool,
+    status_code: int,
+    api_code: str,
+    api_retryable: bool,
+) -> None:
+    protocol = f'failing_{gateway_code.value}'
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        FailingGateway(gateway_code, retryable=gateway_retryable),
+        protocol=protocol,
+    )
+
+    assert response.status_code == status_code
+    error = response.json()['error']
+    assert error['code'] == api_code
+    assert error['retryable'] is api_retryable
+    assert 'model.example.test' not in response.text
+    assert gateway_code.value not in response.text
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
 
 
 def test_gateway_agent_rejects_model_requested_server_tools() -> None:
@@ -395,7 +701,6 @@ def test_gateway_agent_rejects_model_requested_server_tools() -> None:
                 'required_tools': [{'tool': 'policy_history', 'operation': 'search_policy'}],
                 'next_action_requirements': [],
                 'handoff_priority': None,
-                'controlled_rule_authorised': False,
             }
         )
     )
@@ -433,7 +738,6 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
             'required_tools': [],
             'next_action_requirements': [],
             'handoff_priority': None,
-            'controlled_rule_authorised': False,
         }
     )
     registry = ModelGatewayRegistry()
