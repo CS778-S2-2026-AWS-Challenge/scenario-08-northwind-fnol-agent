@@ -8,12 +8,22 @@ const repo = 'scenario-08-northwind-fnol-agent';
 
 test('accepts a Draft pull request with a valid issue reference', () => {
   const result = validatePullRequestBody({
-    body: '## Linked issue\n\nRefs #192',
+    body: '## Linked issue\n\nRefs #192\n\n## Summary\n\nImplements the first bounded part; verification remains pending.',
     isDraft: true,
     owner,
     repo,
   });
   assert.deepEqual(result, { errors: [], references: [192] });
+});
+
+test('rejects an empty placeholder Draft pull request', () => {
+  const result = validatePullRequestBody({
+    body: '## Linked issue\n\nRefs #192\n\n## Summary\n\n<!-- pending -->',
+    isDraft: true,
+    owner,
+    repo,
+  });
+  assert.ok(result.errors.some((error) => error.includes('Summary')));
 });
 
 test('accepts a complete ready-for-review pull request', () => {
