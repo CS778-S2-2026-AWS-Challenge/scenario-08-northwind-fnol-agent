@@ -268,6 +268,99 @@ def test_save_session_rejects_existing_session_for_another_customer(
         repository.save_session(conflicting)
 
 
+def test_child_record_identity_cannot_cross_claims(repository: MongoDBRepository) -> None:
+    first_claim = _claim()
+    first_session = _session(first_claim)
+    repository.create_claim(first_claim, first_session)
+    repository.save_evidence(_evidence(first_claim), first_claim.customer_id)
+    repository.save_message(_message(first_claim, first_session), first_claim.customer_id)
+
+    second_claim = first_claim.model_copy(
+        update={
+            'claim_id': 'clm_mongo_002',
+            'customer_id': 'cus_mongo_002',
+            'active_session_id': 'ses_mongo_002',
+        }
+    )
+    second_session = first_session.model_copy(
+        update={
+            'session_id': 'ses_mongo_002',
+            'claim_id': second_claim.claim_id,
+            'customer_id': second_claim.customer_id,
+        }
+    )
+    repository.create_claim(second_claim, second_session)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_evidence(_evidence(second_claim), second_claim.customer_id)
+    with pytest.raises(IdempotencyConflict):
+        repository.save_message(_message(second_claim, second_session), second_claim.customer_id)
+
+    assert repository.get_evidence(
+        first_claim.claim_id, 'evd_mongo_001', first_claim.customer_id
+    ) == _evidence(first_claim)
+    assert repository.get_message(
+        first_claim.claim_id,
+        first_session.session_id,
+        'msg_mongo_001',
+        first_claim.customer_id,
+    ) == _message(first_claim, first_session)
+
+
+def test_client_message_id_is_unique_within_claim(repository: MongoDBRepository) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    first = _message(claim, session)
+    repository.save_message(first, claim.customer_id)
+
+    duplicate = first.model_copy(update={'message_id': 'msg_mongo_duplicate'})
+    with pytest.raises(IdempotencyConflict):
+        repository.save_message(duplicate, claim.customer_id)
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == [
+        first
+    ]
+
+
+def test_client_message_id_conflict_is_prechecked_before_mutation(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    first = _message(claim, session)
+    repository.save_message(first, claim.customer_id)
+    duplicate = first.model_copy(update={'message_id': 'msg_mongo_duplicate_mutation'})
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+
+    from backend.repositories.protocols import IdempotencyRecord
+
+    monkeypatch.setattr(repository, '_atomic', lambda operation: operation(None))
+    with pytest.raises(IdempotencyConflict):
+        repository.save_message_mutation(
+            updated_claim,
+            1,
+            updated_session,
+            duplicate,
+            IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route='/messages',
+                key='duplicate-client-key',
+                request_fingerprint='fingerprint',
+                claim_id=claim.claim_id,
+                session_id=session.session_id,
+                message_id=duplicate.message_id,
+            ),
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert (
+        repository.find_idempotency(claim.customer_id, '/messages', 'duplicate-client-key') is None
+    )
+
+
 def test_session_mutation_checks_identity_inside_mutation_boundary(
     repository: MongoDBRepository,
     monkeypatch: pytest.MonkeyPatch,

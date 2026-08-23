@@ -67,6 +67,14 @@ class MongoDBRepository:
             unique=True,
             partialFilterExpression={'record_type': 'idempotency'},
         )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('client_message_id', 1)],
+            unique=True,
+            partialFilterExpression={
+                'record_type': 'message',
+                'client_message_id': {'$type': 'string'},
+            },
+        )
 
     @staticmethod
     def _record_id(kind: str, identifier: str) -> str:
@@ -91,12 +99,47 @@ class MongoDBRepository:
                 'claim_id': claim_id,
             }
         )
-        self._collection.replace_one(
-            {'_id': document['_id']},
-            document,
-            upsert=True,
+        existing = self._collection.find_one(
+            {'_id': document['_id'], 'record_type': kind},
+            projection={'claim_id': 1, 'customer_id': 1},
             session=session,
         )
+        if existing is not None and (
+            existing.get('claim_id') != claim_id or existing.get('customer_id') != customer_id
+        ):
+            raise IdempotencyConflict(identifier)
+        self._reject_client_message_conflict(document, session=session)
+        try:
+            self._collection.replace_one(
+                {'_id': document['_id']},
+                document,
+                upsert=True,
+                session=session,
+            )
+        except DuplicateKeyError as error:
+            conflict_key = document.get('client_message_id') or identifier
+            raise IdempotencyConflict(str(conflict_key)) from error
+
+    def _reject_client_message_conflict(
+        self,
+        document: dict[str, Any],
+        *,
+        session: Any = None,
+    ) -> None:
+        client_message_id = document.get('client_message_id')
+        if document.get('record_type') != 'message' or not client_message_id:
+            return
+        existing = self._collection.find_one(
+            {
+                'record_type': 'message',
+                'claim_id': document.get('claim_id'),
+                'client_message_id': client_message_id,
+            },
+            projection={'_id': 1},
+            session=session,
+        )
+        if existing is not None and existing.get('_id') != document.get('_id'):
+            raise IdempotencyConflict(str(client_message_id))
 
     def _get(
         self,
@@ -846,6 +889,7 @@ class MongoDBRepository:
         session: SessionRecord | None = None,
     ) -> None:
         self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         stored_session: SessionRecord | None = None
         if session is not None:
             stored_session = self._get(
@@ -857,6 +901,27 @@ class MongoDBRepository:
             )
             if stored_session is None or stored_session.claim_id != claim.claim_id:
                 raise KeyError(claim.claim_id)
+        for kind, identifier, record in records:
+            document = record.model_dump(mode='json')
+            document.update(
+                {
+                    '_id': self._record_id(kind, identifier),
+                    'record_type': kind,
+                    'customer_id': claim.customer_id,
+                    'claim_id': claim.claim_id,
+                }
+            )
+            existing = self._collection.find_one(
+                {'_id': document['_id'], 'record_type': kind},
+                projection={'claim_id': 1, 'customer_id': 1},
+                session=mongo_session,
+            )
+            if existing is not None and (
+                existing.get('claim_id') != claim.claim_id
+                or existing.get('customer_id') != claim.customer_id
+            ):
+                raise IdempotencyConflict(identifier)
+            self._reject_client_message_conflict(document, session=mongo_session)
         result = self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session)
         if result == 0:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
@@ -879,6 +944,26 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(idempotency, mongo_session)
+
+    def _ensure_claim_revision(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        current = self._collection.find_one(
+            {
+                '_id': self._record_id('claim', claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': claim.customer_id,
+                'revision': expected_revision,
+            },
+            projection={'revision': 1},
+            session=mongo_session,
+        )
+        if current is None:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
 
     def _replace_claim_revision(
         self,
