@@ -243,6 +243,23 @@ startup with an explicit unsupported-profile error. Those profiles must remain
 unavailable until one complete provider-specific bundle and its conformance tests exist;
 the application does not fill missing capabilities from `fixture`.
 
+The runtime capability table used by the composition root is:
+
+| Capability | `fixture` | `cloudflare` | `mongodb` | `aws` |
+| --- | --- | --- | --- | --- |
+| `persistence` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `evidence_storage` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `policy` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `claim_history` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+
+This table is a startup contract, not a provider availability claim. A profile with any
+status other than `using_fixture` is rejected with the named missing capabilities, and
+the process never assembles a mixed bundle. The table is intentionally conservative:
+MongoDB repository code exists, but the complete transaction-capable persistence,
+protected object-storage, and runtime bundle verification is still outstanding.
+
 `DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
 connection and secret-reference variable names will be added with the corresponding
 adapter contract rather than invented before topology and access are verified.

@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
 from backend.adapters.knowledge import (
@@ -14,6 +16,52 @@ from backend.repositories.protocols import PersistenceRepository
 
 class RuntimeProfileConfigurationError(ValueError):
     """The selected deployment profile cannot provide one coherent adapter bundle."""
+
+
+RUNTIME_CAPABILITIES = (
+    'persistence',
+    'evidence_storage',
+    'policy',
+    'claim_history',
+    'knowledge_documents',
+    'knowledge_retrieval',
+)
+
+
+# These are capability statuses, not claims that a provider service is available.
+# A non-fixture profile remains unavailable until its complete bundle is verified.
+_PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, str]] = MappingProxyType(
+    {
+        DataRuntimeProfile.FIXTURE: MappingProxyType(
+            {capability: 'using_fixture' for capability in RUNTIME_CAPABILITIES}
+        ),
+        DataRuntimeProfile.CLOUDFLARE: MappingProxyType(
+            {capability: 'pending_confirmation' for capability in RUNTIME_CAPABILITIES}
+        ),
+        DataRuntimeProfile.MONGODB: MappingProxyType(
+            {capability: 'unavailable' for capability in RUNTIME_CAPABILITIES}
+        ),
+        DataRuntimeProfile.AWS: MappingProxyType(
+            {capability: 'pending_confirmation' for capability in RUNTIME_CAPABILITIES}
+        ),
+    }
+)
+
+
+def runtime_capability_statuses(profile: DataRuntimeProfile) -> dict[str, str]:
+    """Return a copy of the verified status table for one selected profile."""
+
+    return dict(_PROFILE_CAPABILITIES[profile])
+
+
+def missing_runtime_capabilities(profile: DataRuntimeProfile) -> tuple[str, ...]:
+    """List capabilities that prevent a profile from being assembled."""
+
+    return tuple(
+        capability
+        for capability, status in _PROFILE_CAPABILITIES[profile].items()
+        if status != 'using_fixture'
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +112,9 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
 
+    missing = ', '.join(missing_runtime_capabilities(settings.data_runtime_profile))
     raise RuntimeProfileConfigurationError(
-        f'Data runtime profile {settings.data_runtime_profile.value!r} is not implemented. '
-        'Startup refused; no fixture or second-provider fallback was assembled.'
+        f'Data runtime profile {settings.data_runtime_profile.value!r} cannot start; '
+        f'missing or unverified capabilities: {missing}. Startup refused; no fixture '
+        'or second-provider fallback was assembled.'
     )
