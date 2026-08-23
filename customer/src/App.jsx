@@ -79,6 +79,8 @@ function mergeFields(current, changes) {
 }
 
 function App() {
+  const [page, setPage] = useState('home')
+  const [claimType, setClaimType] = useState('motor')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -119,6 +121,12 @@ function App() {
   )
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
+
+  const claimTypePrompts = {
+    motor: 'For example: Another car reversed into mine while it was parked.',
+    home: 'For example: A pipe burst overnight and damaged the kitchen floor.',
+    contents: 'For example: My laptop and camera were stolen from my apartment.',
+  }
 
   useEffect(() => {
     if (claim?.revision) {
@@ -415,10 +423,17 @@ function App() {
   return (
     <div className="customer-app">
       <header className="product-header">
-        <a className="brand" href="/" aria-label="Northwind home">
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
           <span className="brand-mark">N</span>
-          <span>Northwind</span>
+          <span>Northwind Insurance</span>
         </a>
+        {!hasStarted && page === 'home' && (
+          <nav className="public-nav" aria-label="Main navigation">
+            <a href="#claims">Claims</a>
+            <a href="#how-it-works">How it works</a>
+            <button className="login-button" type="button" onClick={() => setPage('login')}>Log in</button>
+          </nav>
+        )}
         {hasStarted && (
           <div className="header-actions">
             <span className="draft-label">Draft report</span>
@@ -434,15 +449,56 @@ function App() {
         )}
       </header>
 
-      {!hasStarted ? (
+      {!hasStarted && page === 'login' ? (
+        <main className="login-page">
+          <section className="login-card" aria-labelledby="login-title">
+            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
+            <p className="eyebrow">Your Northwind account</p>
+            <h1 id="login-title">Welcome back</h1>
+            <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
+            <form className="login-form" onSubmit={(event) => event.preventDefault()}>
+              <label htmlFor="customer-email">Email address</label>
+              <input id="customer-email" name="email" type="email" autoComplete="email" />
+              <label htmlFor="customer-password">Password</label>
+              <input id="customer-password" name="password" type="password" autoComplete="current-password" />
+              <button className="primary-button login-submit" type="submit" disabled>Log in</button>
+              <p className="prototype-note" role="note">Customer account authentication is not connected in this prototype. You can still start a claim without logging in.</p>
+            </form>
+            <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
+              Start a claim without logging in
+            </button>
+            <div className="employee-access">
+              <span>Northwind team member?</span>
+              <a href="http://127.0.0.1:8002/">Employee access</a>
+            </div>
+          </section>
+        </main>
+      ) : !hasStarted ? (
         <main className="entry-page">
           <section className="entry-main">
             <div className="entry-content">
-              <p className="eyebrow">Start a new claim</p>
-              <h1>Tell us what happened in your own words</h1>
+              <p className="eyebrow">Claims, made a little easier</p>
+              <h1>We&apos;ll help you get back on track</h1>
               <p className="entry-intro">
-                You do not need to use insurance terms. Start with the details you know now.
+                Start your claim online in a few minutes. No account or insurance jargon needed.
               </p>
+              <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
+                <h2 id="claim-starter-title">What would you like to claim for?</h2>
+                <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                  {['motor', 'home', 'contents'].map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      role="tab"
+                      aria-selected={claimType === type}
+                      className={claimType === type ? 'is-selected' : ''}
+                      onClick={() => setClaimType(type)}
+                    >
+                      <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
+                      {type[0].toUpperCase() + type.slice(1)}
+                    </button>
+                  ))}
+                </div>
               <MessageComposer
                 draft={draft}
                 setDraft={setDraft}
@@ -451,7 +507,9 @@ function App() {
                 busy={isBusy}
                 buttonLabel={status === 'starting' ? 'Starting report...' : 'Continue claim'}
                 error={error}
+                placeholder={claimTypePrompts[claimType]}
               />
+              </section>
               <div className="resume-entry">
                 <button
                   className="secondary-button"
@@ -488,6 +546,11 @@ function App() {
                     )}
                   </section>
                 )}
+              </div>
+              <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
+                <span>Securely saved</span>
+                <span>Pause anytime</span>
+                <span>Human help available</span>
               </div>
             </div>
           </section>
@@ -730,6 +793,7 @@ function MessageComposer({
   disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
+  placeholder = 'Write the details you know...',
 }) {
   return (
     <form className="report-box" onSubmit={onSubmit}>
@@ -739,7 +803,7 @@ function MessageComposer({
         className="report-text"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        placeholder="Write the details you know..."
+        placeholder={placeholder}
         rows="4"
         disabled={busy || disabled}
       />

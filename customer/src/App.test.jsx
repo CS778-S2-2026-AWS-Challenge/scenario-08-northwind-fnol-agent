@@ -137,6 +137,27 @@ describe('claimant intake', () => {
     vi.unstubAllGlobals()
   })
 
+  it('lets claimants start without login and keeps employee access inside the login page', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
+    expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Employee access' })).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:8002/',
+    )
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
   it('creates shared claim state, submits the first message, and requires confirmation', async () => {
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
     fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
@@ -313,6 +334,12 @@ describe('claimant intake', () => {
 
     await user.tab()
     expect(screen.getByRole('link', { name: 'Northwind home' })).toHaveFocus()
+    await user.tab() // Claims navigation
+    await user.tab() // How it works navigation
+    await user.tab() // Log in
+    await user.tab() // Motor
+    await user.tab() // Home
+    await user.tab() // Contents
     await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()

@@ -24,6 +24,32 @@
   text-decoration: none;
 }
 
+.public-nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.public-nav a {
+  color: #50655e;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.login-button {
+  min-height: 38px;
+  padding: 0 17px;
+  border: 1px solid #2c806a;
+  border-radius: 999px;
+  color: #246f5c;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .brand-mark {
   display: grid;
   width: 31px;
@@ -87,6 +113,166 @@
 
 .entry-content {
   width: min(100%, 720px);
+}
+
+.claim-starter {
+  max-width: 680px;
+}
+
+.claim-starter h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.claim-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.claim-tabs button {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border: 1px solid #c7d9d3;
+  border-radius: 9px;
+  color: #40564f;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.claim-tabs button.is-selected {
+  border-color: #2c806a;
+  color: #1f6554;
+  background: #eaf6f1;
+  box-shadow: 0 0 0 1px #2c806a;
+}
+
+.claim-tab-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf8f3;
+  font-size: 17px;
+}
+
+.claim-tabs .is-selected .claim-tab-icon {
+  color: #fff;
+  background: #2c806a;
+}
+
+.trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin-top: 24px;
+  color: #60746d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trust-row span::before {
+  content: '✓';
+  margin-right: 6px;
+  color: #2c806a;
+}
+
+.login-page {
+  min-height: calc(100svh - 66px);
+  display: grid;
+  place-items: center;
+  padding: 42px 20px;
+  background: linear-gradient(145deg, #edf8f3, #f9fcfa 58%, #e5f2ed);
+}
+
+.login-card {
+  width: min(100%, 440px);
+  padding: 34px;
+  border: 1px solid #d4e3de;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 22px 60px rgba(35, 82, 68, .11);
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.login-intro {
+  margin: 10px 0 24px;
+  color: #60746d;
+  line-height: 1.55;
+}
+
+.back-link {
+  margin: 0 0 28px;
+  padding: 0;
+  border: 0;
+  color: #50655e;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.login-form {
+  display: grid;
+  gap: 8px;
+}
+
+.login-form label {
+  margin-top: 7px;
+  color: #40564f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-form input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #c7d9d3;
+  border-radius: 7px;
+  color: #20312d;
+  background: #fbfefc;
+  font: inherit;
+}
+
+.login-submit,
+.start-without-login {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.prototype-note {
+  margin: 4px 0 0;
+  color: #7a6a43;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.employee-access {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 32px;
+  padding-top: 17px;
+  border-top: 1px solid #edf2f0;
+  color: #98a59f;
+  font-size: 10px;
+}
+
+.employee-access a {
+  color: #7f918a;
 }
 
 .eyebrow,
@@ -794,6 +980,26 @@ textarea:focus-visible {
     max-width: 170px;
     min-height: 40px;
     line-height: 1.2;
+  }
+
+  .public-nav > a {
+    display: none;
+  }
+
+  .public-nav {
+    gap: 8px;
+  }
+
+  .claim-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .claim-tabs button {
+    min-height: 50px;
+  }
+
+  .login-card {
+    padding: 25px 20px;
   }
 
   .entry-main,
