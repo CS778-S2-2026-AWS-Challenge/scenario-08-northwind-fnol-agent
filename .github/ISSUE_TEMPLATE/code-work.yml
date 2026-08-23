@@ -1,0 +1,80 @@
+name: Code work
+description: Record a feature, defect, regression, integration gap, or security concern in the repository.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic or non-sensitive details only. Do not post credentials, personal claim data,
+        private incident records, or exploit instructions in a public issue.
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue type
+      description: Choose the primary reason for this repository issue.
+      options:
+        - Feature
+        - Bug
+        - Regression validation
+        - Integration gap
+        - Security concern
+        - Maintenance or documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or reason
+      description: State the observable problem, risk, or reason this issue is needed.
+      placeholder: What is missing, failing, or requiring explicit verification?
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+      description: Describe the concrete repository change or verification result expected.
+      placeholder: Identify the code, test, documentation, or workflow outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, checkable conditions for closing this issue.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issue or PR
+      description: Link the existing repository issue or pull request when this is follow-up work. Write None when this is standalone.
+      placeholder: "Refs #123, or None - standalone repository work."
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: List repository issues, contracts, or inputs that must exist first. Write None when there are no dependencies.
+      placeholder: "- #123: documented response fields, or None."
+    validations:
+      required: true
+
+  - type: input
+    id: owner
+    attributes:
+      label: Owner or responsible contributor
+      description: Identify the person responsible for moving this issue forward.
+      placeholder: "@username"
+    validations:
+      required: true

@@ -1,0 +1,61 @@
+name: Issue policy
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-policy-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository issue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Test issue policy validator
+        run: node --test .github/scripts/issue_policy.test.cjs
+
+      - name: Validate issue content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const policy = require('./.github/scripts/issue_policy.cjs');
+            const issue = context.payload.issue;
+            const result = policy.validateIssueBody({body: issue.body || ''});
+            const marker = '<!-- issue-policy -->';
+
+            if (result.errors.length === 0) {
+              core.info(`Issue #${issue.number} satisfies the repository issue policy.`);
+              return;
+            }
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+            const alreadyNotified = comments.data.some((comment) => comment.body.includes(marker));
+            if (!alreadyNotified) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `${marker}\nThe issue policy check found:\n${result.errors.map((error) => `- ${error}`).join('\n')}\n\nUpdate this issue using the **Code work** form. This check does not close or delete issues.`,
+              });
+            }
+
+            core.setFailed(`Issue policy failed:\n- ${result.errors.join('\n- ')}`);

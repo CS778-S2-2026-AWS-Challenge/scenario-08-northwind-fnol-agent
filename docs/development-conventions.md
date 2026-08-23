@@ -24,6 +24,11 @@ Kanban collaboration details within that boundary.
 
 - Every pull request must reference a valid repository issue. Use a closing keyword only for a
   complete delivery, and use `Refs #123` for partial work that must leave the issue open.
+- Every contributor may open a pull request for a coherent repository change. Do not open an empty
+  placeholder or split a change to avoid an issue's acceptance criteria or independent review.
+- A Draft pull request must still identify its linked issue, current outcome, and incomplete work.
+  Draft means the implementation, dependency, or complete quality gate is not ready; it is not a
+  substitute for a meaningful description.
 - The pull request description must identify the issue, purpose, behaviour change, acceptance evidence, exact verification commands and results, contract or data impact, UI screenshots when relevant, dependencies, and remaining risks.
 - Before pushing and before requesting review, run the repository baseline check from the repository root and record the exact command and result in the pull request:
 
@@ -34,6 +39,18 @@ Kanban collaboration details within that boundary.
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
+
+## Repository Issues
+
+- Create code issues with the `Code work` Issue Form so the problem, deliverable, acceptance
+  criteria, relationship, dependencies, and responsible contributor are explicit.
+- Keep unfinished acceptance work on the original issue. Use a new issue only for a separate bug,
+  regression validation, integration gap, or security concern with its own acceptance boundary.
+- A follow-up issue must explain why it is separate and link the originating issue or pull request.
+- The Issue policy workflow is an audit and notification mechanism. It does not close issues,
+  delete content, or decide whether an issue belongs in a broader delivery plan.
+- All contributors may create issues and pull requests. Review and merge authority remain governed
+  by the repository operation rules.
 
 ## Kanban Workflow
 
