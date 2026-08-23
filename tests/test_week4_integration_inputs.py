@@ -78,12 +78,17 @@ def test_persistence_and_agent_are_documented_as_seams_not_missing_boundaries() 
     assert '`AgentTurnProvider`' in text
 
 
-def test_known_incomplete_inputs_remain_explicitly_visible() -> None:
-    """The compilation must not turn open delivery work into implied readiness."""
+def test_delivery_status_remains_explicit_and_does_not_reopen_completed_work() -> None:
+    """Open work stays visible while completed Day-5 work stays completed."""
     text = DOCUMENT.read_text(encoding='utf-8')
 
-    for token in ('#200', '#224', '#225', '#230', '#231'):
+    for token in ('#141', '#200', '#224', '#225', '#230', '#231'):
         assert token in text
+
+    assert '| #141 clear claim | **Closed / completed**' in text
+    assert 'completed via #200 merge' in text
+    assert 'Closure of #142, #143, #145, #146, #147, or #149' in text
+    assert 'Closure of #141' not in text
     assert 'MongoDB runtime' in text
     assert 'Production Agent/model' in text
     assert 'Final #150 Ready gate' in text
