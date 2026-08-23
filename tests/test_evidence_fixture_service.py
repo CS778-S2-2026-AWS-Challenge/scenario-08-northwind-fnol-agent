@@ -43,7 +43,10 @@ def test_one_service_answers_for_every_business_path(service: EvidenceFixtureSer
     assert len(paths) == 5
     for path in paths:
         assert path.records, f'{path.business_path.value} has no evidence'
-        assert len(path.stages) == len(path.records)
+        entry_records = tuple(
+            record for record in path.records if record.status is not EvidenceStatus.INCONSISTENT
+        )
+        assert path.stages == tuple(lifecycle_stage_for(record) for record in entry_records)
         # Derived state is recomputed from the records by the runtime rules, so
         # a path cannot state an evidence state its own records contradict.
         assert path.evidence_state is evidence_domain.evidence_state_for(list(path.records))

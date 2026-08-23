@@ -42,8 +42,22 @@ def test_human_and_urgent_handoff_packets_carry_evidence_state_and_visibility() 
         assert packet.missing_items
 
 
-def test_professional_review_packet_keeps_internal_evidence_for_staff_only() -> None:
-    entry, packet = _assembled_packet('AT-02-coverage-ambiguity')
+def test_handoff_packet_keeps_non_claimant_evidence_for_staff_only() -> None:
+    fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
+    entry = next(
+        item for item in fixture_set.entries if item.scenario_id == 'AT-06-pending-evidence'
+    )
+    packet = assemble_evidence_handoff_packet(
+        HandoffPacket(
+            form_revision=1,
+            promised_next_step='Continue now while later evidence is gathered safely.',
+        ),
+        entry.claim_id,
+        (
+            (fixture.evidence, MessageVisibility(fixture.visibility.value))
+            for fixture in entry.evidence
+        ),
+    )
 
     staff_ids = {item.evidence_id for item in packet.evidence}
     internal_ids = {
@@ -54,10 +68,14 @@ def test_professional_review_packet_keeps_internal_evidence_for_staff_only() -> 
     claimant_ids = {item.evidence_id for item in claimant_evidence_for(entry)}
 
     assert staff_ids == {fixture.evidence.evidence_id for fixture in entry.evidence}
-    assert internal_ids
+    assert internal_ids == {'evd_fixture_at06_agency', 'evd_fixture_at06_internal'}
+    assert claimant_ids == {'evd_fixture_at06_police'}
     assert internal_ids.issubset(staff_ids)
     assert claimant_ids.isdisjoint(internal_ids)
-    assert {item.visibility.value for item in packet.evidence} == {'shared', 'internal_only'}
+    assert {item.visibility.value for item in packet.evidence} == {
+        'claimant_visible',
+        'internal_only',
+    }
     assert all('provenance' not in item.model_dump() for item in packet.evidence)
 
 
