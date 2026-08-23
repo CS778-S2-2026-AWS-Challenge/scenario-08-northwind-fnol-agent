@@ -1,8 +1,10 @@
 # Documentation
 
 This directory contains current engineering contracts, development guidance, user
-research, and dated delivery evidence. Product requirements belong in `SPEC/`, and
-time-bound commitments belong in `sprint/`.
+research, and dated delivery evidence. Product requirements belong in `SPEC/`. Dated
+sprint documents under `sprint/` preserve approved commitment baselines; the current
+GitHub Project/Issues provide live assignment and progress state when a newer sprint
+baseline has not yet been published.
 
 ## Current Engineering Contracts
 
