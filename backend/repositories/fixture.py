@@ -106,10 +106,7 @@ class FixtureRepository(PersistenceRepository):
             raise KeyError(claim.claim_id)
         if stored_claim.revision != expected_revision:
             raise RevisionConflict(stored_claim.revision)
-        if (
-            stored_claim.customer_id != claim.customer_id
-            or claim.revision != expected_revision + 1
-        ):
+        if stored_claim.customer_id != claim.customer_id or claim.revision != expected_revision + 1:
             raise KeyError(claim.claim_id)
         return stored_claim
 
