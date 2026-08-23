@@ -71,8 +71,8 @@ until explicitly classified.
 Likewise, a normal-mode deployment with no configured identity verifier must fail closed
 for protected routes. It must not recover by accepting repository synthetic claimant,
 staff, administrator, or integration credentials. Health endpoints may remain available
-for diagnosis, but readiness must not imply that a missing production identity boundary
-is usable authentication.
+for diagnosis. If readiness later includes identity capability, it must report the
+missing verifier honestly rather than imply protected requests are usable.
 
 ## Principal Contract
 
