@@ -124,16 +124,14 @@ def test_message_mutation_rejects_revision_jump_without_partial_write() -> None:
     assert repository.get_session('clm_tx', 'ses_tx', 'cus_tx') == session
 
 
-def test_message_mutation_rejects_cross_record_idempotency_link_without_partial_write() -> (
-    None
-):
+def test_message_mutation_rejects_cross_record_idempotency_link_without_partial_write() -> None:
     repository, claim, session = _repository()
     message = _message()
     idempotency = IdempotencyRecord(
         **{
             **_claimant_idempotency(message_id='msg_other').__dict__,
             'key': 'wrong-message-link',
-        }
+        },
     )
     updated_claim = claim.model_copy(update={'revision': 2})
     updated_session = session.model_copy(update={'context_revision': 2})
