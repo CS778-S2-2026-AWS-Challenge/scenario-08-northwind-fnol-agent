@@ -618,18 +618,18 @@ class FixtureRepository(PersistenceRepository):
         if not any((staff_action, customer_update, signal_decision, handoff, message)):
             raise KeyError(claim.claim_id)
         records = (staff_action, customer_update, signal_decision, handoff, message)
+        active_session_id = claim.active_session_id or ''
         records_match = (
             all(item is None or item.claim_id == claim.claim_id for item in records)
             and idempotency.claim_id == claim.claim_id
-            and idempotency.session_id == (claim.active_session_id or '')
-            and (
-                handoff is None
-                or idempotency.handoff_id == handoff.handoff_id
-            )
+            and idempotency.session_id in {'', active_session_id}
+            and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and (
                 message is None
                 or (
-                    message.session_id == idempotency.session_id
+                    message.actor is ActorType.STAFF
+                    and message.session_id == active_session_id
+                    and message.session_id == idempotency.session_id
                     and idempotency.message_id == message.message_id
                 )
             )
