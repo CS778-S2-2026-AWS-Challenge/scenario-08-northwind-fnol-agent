@@ -194,7 +194,7 @@
     {
       "handoff_id": "hnd_fixture_at02",
       "claim_id": "clm_fixture_at02",
-      "type": "human_support",
+      "type": "professional_review",
       "status": "queued",
       "priority": "high",
       "queue": "professional_review",
