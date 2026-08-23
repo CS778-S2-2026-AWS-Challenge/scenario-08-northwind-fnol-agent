@@ -92,7 +92,10 @@ def _assert_no_message_side_effect(
     original_claim: WorkingClaim,
     idempotency: IdempotencyRecord,
 ) -> None:
-    assert repository.get_claim(original_claim.claim_id, original_claim.customer_id) == original_claim
+    assert (
+        repository.get_claim(original_claim.claim_id, original_claim.customer_id)
+        == original_claim
+    )
     assert repository.list_messages('clm_tx', 'ses_tx', 'cus_tx') == []
     assert repository.find_idempotency(
         idempotency.actor_id,
@@ -121,7 +124,9 @@ def test_message_mutation_rejects_revision_jump_without_partial_write() -> None:
     assert repository.get_session('clm_tx', 'ses_tx', 'cus_tx') == session
 
 
-def test_message_mutation_rejects_cross_record_idempotency_link_without_partial_write() -> None:
+def test_message_mutation_rejects_cross_record_idempotency_link_without_partial_write() -> (
+    None
+):
     repository, claim, session = _repository()
     message = _message()
     idempotency = IdempotencyRecord(
@@ -203,7 +208,10 @@ def test_agent_turn_rejects_revision_jump_before_any_child_write() -> None:
         )
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
-    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == []
+    assert (
+        repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
+        == []
+    )
     assert repository.list_agent_decisions(claim.claim_id, claim.customer_id) == []
     assert repository.find_idempotency(
         idempotency.actor_id,
