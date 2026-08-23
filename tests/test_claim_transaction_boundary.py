@@ -92,9 +92,9 @@ def _assert_no_message_side_effect(
     original_claim: WorkingClaim,
     idempotency: IdempotencyRecord,
 ) -> None:
-    assert repository.get_claim(
-        original_claim.claim_id, original_claim.customer_id
-    ) == original_claim
+    assert (
+        repository.get_claim(original_claim.claim_id, original_claim.customer_id) == original_claim
+    )
     assert repository.list_messages('clm_tx', 'ses_tx', 'cus_tx') == []
     assert (
         repository.find_idempotency(
@@ -208,10 +208,7 @@ def test_agent_turn_rejects_revision_jump_before_any_child_write() -> None:
         )
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
-    assert (
-        repository.list_messages(claim.claim_id, session.session_id, claim.customer_id)
-        == []
-    )
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == []
     assert repository.list_agent_decisions(claim.claim_id, claim.customer_id) == []
     assert (
         repository.find_idempotency(
