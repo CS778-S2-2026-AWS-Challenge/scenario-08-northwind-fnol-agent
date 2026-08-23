@@ -34,7 +34,7 @@ older.
 | Evidence | `claim_id`, `evidence_id`, source/provenance kept separately from object bytes |
 | Retrieval / review signal | `claim_id`, retrieval identity, source references |
 | Handoff | `claim_id`, `handoff_id`, immutable reason/type/creation context plus lifecycle owner/status |
-| Staff action / customer update | `claim_id`, work identity, staff actor and source references |
+| Staff action / customer update | `claim_id`, work identity, staff actor and source references; session identity only when the operation is interaction-scoped |
 | Idempotency record | authenticated `actor_id`, route/operation, key, request fingerprint, affected `claim_id`, relevant child identities |
 
 A mutation must validate these links before writing any member of the bundle. A record
@@ -79,7 +79,7 @@ sequence of unrelated `save_*` calls.
 | Validated Agent turn | claim + session + claimant message + Agent message + decision + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision links agree |
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary |
 | Handoff mutation | claim + handoff + idempotency | claim `N -> N+1`; handoff identity and idempotency handoff reference agree |
-| Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency | claim `N -> N+1`; all supplied records belong to the claim and staff actor is preserved |
+| Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency | claim `N -> N+1`; all supplied records belong to the claim; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor |
 | Retrieval + directly derived review signals | retrieval + zero or more source-linked review signals | no claim revision change merely for recording evidence; the bundle itself is atomic |
 
 A caller must not emulate these bundles by writing the claim first and then appending
@@ -112,7 +112,10 @@ and relevant child records.
 
 - same actor + route + key + same request may return the recorded authoritative result;
 - same actor + route + key + changed request is an `IdempotencyConflict`;
-- a key cannot be reused to attach a result from another claim/session/message/handoff;
+- a key cannot be reused to attach a result from another claim or from another relevant
+  session/message/handoff child;
+- a session-agnostic operation leaves the session identity empty rather than fabricating
+  an interaction-session dependency;
 - a failed precondition does not reserve a new idempotency result;
 - a retry after a partial external dependency failure must not create a second durable
   domain operation when the first operation was already committed.
@@ -134,8 +137,9 @@ valid against current Claim State.
   cannot roll the claim back;
 - an Agent decision links to the claimant message that triggered it and records the
   resulting revision;
-- staff messages use the staff mutation boundary so staff actor/ownership and any active
-  handoff transition are committed with the same claim revision.
+- a staff message is interaction-scoped: it uses the active session, retains
+  `ActorType.STAFF`, and binds its session/message identities in the same staff mutation
+  that advances the claim revision.
 
 ## Handoff and Staff Coordination
 
@@ -146,6 +150,11 @@ A handoff is a child work record, not a second claim status store.
   revision-checked claim mutations;
 - one staff mutation may atomically store the updated handoff, staff action, customer-safe
   update, shared message, or signal decision that belong to the same operation;
+- staff actions, customer updates, and signal decisions that do not belong to a claimant
+  interaction may use an empty idempotency `session_id`; they still require the same
+  authoritative `claim_id`, staff actor identity, and relevant child identity;
+- when a staff mutation includes a message, the message must be a staff-authored record
+  on the claim's active session and the idempotency session/message links must match it;
 - claimant-visible updates are separate from internal reason/result data even though both
   may be committed in one transaction;
 - a failed staff or handoff mutation leaves the claim and every supplied child record at
@@ -200,7 +209,8 @@ boundary.
 
 ## Current-Main Implementation Audit
 
-Current `main` already contains the correct repository shape and several strong guards:
+The Issue #237 baseline `main@8834fdd` already contains the correct repository shape and
+several strong guards:
 
 - `save_session_mutation` requires one revision advance and validates claim/customer/
   session/idempotency links before writing;
@@ -211,18 +221,18 @@ Current `main` already contains the correct repository shape and several strong 
 - existing tests prove stale session mutations and inconsistent Agent-turn bundles do not
   partially write state.
 
-The current fixture adapter is not yet fully uniform, however. The Day 1 audit found:
+The baseline fixture adapter is not yet fully uniform, however. The Day 1 audit found:
 
 - `save_message_mutation` does not yet enforce the complete claim/session/customer/
   context/idempotency relationship set;
 - `save_staff_mutation` does not yet require exactly-one claim revision advance or fully
-  bind its idempotency record to the mutated claim/session;
+  bind its idempotency record to the mutated claim and any interaction-scoped child;
 - `save_agent_turn`, `save_evidence_mutation`, and `save_handoff_mutation` validate many
   relationships but do not all explicitly reject a proposed claim revision jump greater
   than one.
 
-Those are implementation gaps in the current fixture runtime, not reasons to redefine the
-contract. The #237 implementation should harden those preconditions and add adversarial
+Those are implementation gaps in the baseline fixture runtime, not reasons to redefine
+the contract. The #237 implementation hardens those preconditions and adds adversarial
 snapshot tests. Provider-specific work such as Draft MongoDB #225 must later conform to
 this same boundary and must not be enabled merely because it has a partial mapping.
 
@@ -235,10 +245,12 @@ The #237 implementation is complete when another contributor can repeat tests pr
 3. cross-claim/customer/session/message/handoff/idempotency links fail before any write;
 4. an invalid Agent or staff bundle does not leave a message, decision, update, handoff,
    or idempotency record behind;
-5. retrieval + review-signal atomicity remains source-preserving without advancing claim
+5. session-agnostic staff work remains valid without inventing a claimant-session link,
+   while staff messages require a staff actor and the active interaction session;
+6. retrieval + review-signal atomicity remains source-preserving without advancing claim
    revision merely for retrieval;
-6. existing claimant ownership, role-safe projection, resume, handoff, and staff-writeback
-   regressions remain green.
+7. existing claimant ownership, role-safe projection, resume, handoff, staff-writeback,
+   and canonical-scenario regressions remain green.
 
 A green provider-specific happy-path test alone is insufficient. The acceptance result
 must include failure atomicity and cross-record mismatch cases.
