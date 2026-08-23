@@ -2,14 +2,15 @@
 
 Issue: #150
 
-Compiled from `main@98715b5ac85447748700d49d093e6ab626fe175c` after the canonical
-path-evidence fix in #227.
+Runtime and canonical-path facts were compiled from the post-#227 baseline
+`main@98715b5ac85447748700d49d093e6ab626fe175c`. The Day 5 process snapshot
+below is refreshed after #200 merged as `main@0de12c3b7f5bc1deb1f8bc4f85f1964eae820bd5`.
 
 ## Status: Draft / NOT READY
 
 This is a current integration compilation, not a declaration that Week 4 is
-ready. Issue #150 depends on the other Day 5 validation cards. Incomplete PRs,
-owner checks, provider confirmations, and production-provider gaps remain
+ready. Issue #150 depends on the remaining Day 5 validation cards. Incomplete
+PRs, owner checks, provider confirmations, and production-provider gaps remain
 visible below and must not be inferred as complete from a green fixture path.
 
 The runtime and canonical fixture rows in this document are guarded by tests.
@@ -118,13 +119,13 @@ record appropriate to the claimant projection.
 
 ## Day 5 closure matrix
 
-Snapshot after #227 merged on 22 August 2026. `Acceptance met` means the
-behaviour has direct technical evidence; it does not override an outstanding
-review, local-gate, owner-confirmation, or merge requirement.
+Snapshot refreshed on 23 August 2026 after #200 merged. `Acceptance met` means
+the behaviour has direct technical evidence; it does not override an
+outstanding review, local-gate, owner-confirmation, or merge requirement.
 
 | Card | Technical state | Remaining closure blocker | Owner / current action |
 | --- | --- | --- | --- |
-| #141 clear claim | Acceptance met; #223 merged; #200 independent provenance test approved on its prior base | #200 is now behind the post-#227 `main` and needs current-main replay/merge | `bdfa123` / refresh #200 against current main |
+| #141 clear claim | **Closed / completed**; #223 and #200 merged; provenance/confirmation replay passed on post-#227 main | None | completed via #200 merge |
 | #142 claim creation | Acceptance met on provider-neutral/fixture path | assigned API/routing/AWS current-main confirmation not yet recorded | `liyang6620` / owner check requested |
 | #143 pending evidence | Acceptance met | assigned staff-visible pending-status check not yet recorded | `LLL263` / owner check requested |
 | #144 session + evidence | **Closed / completed** | None | #227 merged; canonical evidence contract is on `main` |
@@ -132,8 +133,8 @@ review, local-gate, owner-confirmation, or merge requirement.
 | #146 handoff API/fallback | Acceptance met; #227 merged | #231 is Draft under the new PR policy until exact local gate; API/adapter owner sign-off and merge remain | `liyang6620`; `jxu316-arch` local-gate evidence |
 | #147 adapter/review records | Acceptance met for sourced provider-neutral contract | #231 local gate/sign-off/merge; API/AWS owner confirmation; stale Day-5 runbook refreshed in this branch | `liyang6620`, `jxu316-arch` |
 | #148 authority/visibility | **Closed / completed** | None | completed before this compilation |
-| #149 staff write-back | Acceptance met | #230 is Draft under the new PR policy until exact local gate; Staff Workbench owner review/merge remain | `LLL263`; `jxu316-arch` local-gate evidence |
-| #150 integration inputs | **Draft / NOT READY** | other Day-5 closure rules, current-main final gate, API/AWS input confirmation | `bdfa123`, `liyang6620` plus current compiler |
+| #149 staff write-back | Acceptance met | #230 is Draft until exact local gate; Staff Workbench owner review/merge remain | `LLL263`; `jxu316-arch` local-gate evidence |
+| #150 integration inputs | **Draft / NOT READY** | remaining Day-5 closure rules, current-main final gate, API/AWS input confirmation | `bdfa123`, `liyang6620` plus current compiler |
 
 ## Provider and deployment blockers
 
@@ -152,6 +153,8 @@ review, local-gate, owner-confirmation, or merge requirement.
   data runtime that fails closed for unsupported profiles.
 - One canonical evidence set per business path, with zero known path anchoring
   defects and explicit claimant/internal visibility classification.
+- The clear-claim claimant/Agent path plus an independently validated
+  source/confirmation contract, both merged on post-#227 main.
 - Optimistic Claim revision and idempotency boundaries across creation,
   persistence, support requests, and staff write-back.
 - Fail-closed policy/history retrieval: unavailable data cannot become an
@@ -168,8 +171,8 @@ review, local-gate, owner-confirmation, or merge requirement.
   integration.
 - A complete MongoDB production runtime or verified Atlas transaction model.
 - A production Agent/model provider.
-- Closure of #141, #142, #143, #145, #146, #147, or #149 while their explicit
-  closure rules above remain outstanding.
+- Closure of #142, #143, #145, #146, #147, or #149 while their explicit closure
+  rules above remain outstanding.
 - Final #150 Ready status before the current-main full gate and assigned API/AWS
   confirmation are recorded.
 
@@ -177,12 +180,11 @@ review, local-gate, owner-confirmation, or merge requirement.
 
 Do not mark #150 Ready until all of the following are true:
 
-1. The dependent Day-5 cards satisfy their recorded closure rules.
-2. #200 is replayed/merged on the post-#227 main.
-3. #230 and #231 record exact-head `./scripts/check.ps1` local PASS results,
+1. The remaining dependent Day-5 cards satisfy their recorded closure rules.
+2. #230 and #231 record exact-head `./scripts/check.ps1` local PASS results,
    meet the current PR template, receive their assigned owner reviews, and merge.
-4. `liyang6620` records the assigned API/AWS integration-input confirmation,
+3. `liyang6620` records the assigned API/AWS integration-input confirmation,
    leaving unavailable provider capabilities explicitly `pending_confirmation`.
-5. This document still matches `/health/ready` and `EvidenceFixtureService`.
-6. The final current-main branch passes the complete local repository gate,
+4. This document still matches `/health/ready` and `EvidenceFixtureService`.
+5. The final current-main branch passes the complete local repository gate,
    GitHub CI, and PR Policy.
