@@ -1,6 +1,6 @@
 import pytest
 
-from backend.core.config import Settings
+from backend.core.config import AgentRuntimeProfile, Settings
 
 
 def test_environment_settings_parse_cors_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,3 +61,38 @@ def test_production_hides_interactive_api_docs(monkeypatch: pytest.MonkeyPatch) 
     settings = Settings.from_environment()
 
     assert settings.expose_api_docs is False
+
+
+def test_model_gateway_settings_use_only_a_secret_environment_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('AGENT_RUNTIME_PROFILE', 'model_gateway')
+    monkeypatch.setenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible')
+    monkeypatch.setenv('MODEL_BASE_URL', 'http://127.0.0.1:11434/v1')
+    monkeypatch.setenv('MODEL_IDENTIFIER', 'local-model')
+    monkeypatch.setenv('MODEL_API_KEY_ENV', 'LOCAL_MODEL_API_KEY')
+    monkeypatch.setenv('MODEL_TIMEOUT_SECONDS', '12.5')
+    monkeypatch.setenv('MODEL_SUPPORTS_STRUCTURED_OUTPUT', 'true')
+    monkeypatch.setenv('MODEL_SUPPORTS_TOOLS', 'false')
+
+    settings = Settings.from_environment()
+
+    assert settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+    assert settings.model_base_url == 'http://127.0.0.1:11434/v1'
+    assert settings.model_identifier == 'local-model'
+    assert settings.model_api_key_env == 'LOCAL_MODEL_API_KEY'
+    assert settings.model_timeout_seconds == 12.5
+    assert settings.model_supports_structured_output is True
+    assert settings.model_supports_tools is False
+
+
+def test_model_gateway_runtime_requires_endpoint_and_model() -> None:
+    with pytest.raises(ValueError, match='MODEL_BASE_URL'):
+        Settings(agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY)
+
+
+def test_invalid_model_timeout_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('MODEL_TIMEOUT_SECONDS', 'not-a-number')
+
+    with pytest.raises(ValueError, match='MODEL_TIMEOUT_SECONDS must be a number'):
+        Settings.from_environment()

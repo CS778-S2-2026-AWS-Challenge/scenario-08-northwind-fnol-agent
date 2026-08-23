@@ -33,11 +33,12 @@ def readiness(request: Request) -> ReadinessResponse:
     ).connection_status()
     data_runtime = cast(DataRuntimeBundle, request.app.state.data_runtime_bundle)
     data_checks = data_runtime.readiness_checks()
+    agent_runtime_status = cast(str, request.app.state.agent_runtime_status)
     return ReadinessResponse(
         status='degraded',
         checks={
             **data_checks,
-            'agent': 'not_configured',
+            'agent': agent_runtime_status,
             'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',

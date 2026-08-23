@@ -1793,6 +1793,25 @@ Returns readiness without secrets or private configuration:
 
 Readiness is `ok`, `degraded`, or `unavailable`. A fixture is not reported as a real connected service.
 
+The `agent` check is `not_configured` for the default controlled prototype provider and
+`configured` when the provider-neutral model gateway has composed successfully. The
+latter reports local configuration only; it does not claim remote connectivity, valid
+credentials, model quality, or production readiness. Readiness never returns the model
+base URL, model identifier, credential reference, or credential value.
+
+## Model Provider Boundary
+
+Model transport is an internal dependency and does not add a public API route. Agent
+orchestration consumes the provider-neutral `ModelRequest` and `ModelResponse` contracts,
+then converts structured output to the existing `AgentProposal`. Existing deterministic
+authority and state validation still controls execution.
+
+The implemented `openai_compatible` adapter supports official, relay, and local
+compatible chat-completions endpoints through configuration. Non-compatible protocols
+register another adapter against the same internal contract without changing claimant
+or staff routes. Capability and failure semantics are documented in
+[Model Gateway](model-gateway.md).
+
 ## Persistence and Provider Boundary
 
 The public API does not expose physical keys, collection or table names, indexes, object-store keys, vector-index names, model-provider payloads, runtime-profile configuration, or external claims-system schemas.
