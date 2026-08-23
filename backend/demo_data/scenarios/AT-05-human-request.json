@@ -11,7 +11,7 @@
     "claim_state": {
       "severity": "standard",
       "coverage": "not_assessed",
-      "evidence": "not_started",
+      "evidence": "received",
       "fraud_signal": "none",
       "customer_support": "human_requested",
       "urgency": "normal",
@@ -50,7 +50,7 @@
         "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
       }
     },
-    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
     "route": null,
     "active_session_id": "ses_fixture_at05",
     "external_claim": null,
@@ -80,7 +80,25 @@
       "closed_at": null
     }
   ],
-  "evidence": [],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_path_human_image",
+      "claim_id": "clm_fixture_at05",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "supplied-before-handoff.jpg",
+      "media_type": "image/jpeg",
+      "size_bytes": 196608,
+      "source": "claimant",
+      "related_fields": ["vehicle.damage_description"],
+      "needed_for": ["later_action"],
+      "provenance": {"fixture_storage_ref": "fixture://path/human/image"},
+      "claimant_note": "This image should remain attached during the human handoff.",
+      "created_at": "2026-08-17T01:30:00Z",
+      "updated_at": "2026-08-17T01:30:00Z"
+    }
+  ],
   "messages": [
     {
       "message_id": "msg_at05_claimant_1",
@@ -90,7 +108,7 @@
       "actor": "claimant",
       "visibility": "shared",
       "content": {"type": "text", "text": "A synthetic vehicle hit my parked car. Nobody was injured."},
-      "evidence_refs": [],
+      "evidence_refs": ["evd_fixture_path_human_image"],
       "in_reply_to": null,
       "created_at": "2026-08-13T10:01:00Z"
     },
@@ -157,7 +175,23 @@
             "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
           }
         },
-        "evidence_refs": [],
+        "evidence_refs": ["evd_fixture_path_human_image"],
+        "evidence": [
+          {
+            "evidence_id": "evd_fixture_path_human_image",
+            "kind": "incident_image",
+            "status": "received",
+            "file_status": "ready",
+            "source": "claimant",
+            "visibility": "shared",
+            "original_filename": "supplied-before-handoff.jpg",
+            "media_type": "image/jpeg",
+            "size_bytes": 196608,
+            "related_fields": ["vehicle.damage_description"],
+            "needed_for": ["later_action"],
+            "claimant_note": "This image should remain attached during the human handoff."
+          }
+        ],
         "missing_items": ["incident.location"],
         "pending_items": [],
         "conflicts": [],
