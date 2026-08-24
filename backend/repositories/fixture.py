@@ -11,6 +11,7 @@ from backend.domain.models import (
     SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
@@ -620,6 +621,19 @@ class FixtureRepository(PersistenceRepository):
             all(item is None or item.claim_id == claim.claim_id for item in records)
             and idempotency.claim_id == claim.claim_id
             and idempotency.session_id in {'', active_session_id}
+            and (
+                staff_action is None
+                or (
+                    staff_action.status is not StaffActionStatus.COMPLETED
+                    and staff_action.completed_by is None
+                )
+                or (
+                    staff_action.status is StaffActionStatus.COMPLETED
+                    and staff_action.completed_by == idempotency.actor_id
+                )
+            )
+            and (customer_update is None or customer_update.created_by == idempotency.actor_id)
+            and (signal_decision is None or signal_decision.actor_id == idempotency.actor_id)
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and (
                 message is None
