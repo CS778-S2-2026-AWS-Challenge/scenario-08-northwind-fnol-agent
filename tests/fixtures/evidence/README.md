@@ -47,6 +47,16 @@ The fixture owns only entry expectations and visibility classifications.
 Evidence and handoff values, source, lifecycle state, provenance, timing, and
 relationship data remain owned by the canonical scenario.
 
+### Current workflow-state limitation
+
+AT-04 urgent support and AT-05 claimant-requested human support currently use
+`workflow_state=professional_review` as a coarse implementation state. They are
+not the same business path as professional coverage review: urgency,
+customer-support state, handoff type, priority, queue, and trigger preserve the
+separate semantics. The entry baseline records that current implementation
+limitation; a future workflow-registry change must update the scenarios and
+baselines deliberately rather than keeping the old value only to satisfy tests.
+
 The claimant fixture projection includes `claimant_visible` and `shared`, strips
 internal provenance, and excludes `internal_only` evidence. Validate all five
 path entries and print their workflow, action, evidence, and handoff baselines
