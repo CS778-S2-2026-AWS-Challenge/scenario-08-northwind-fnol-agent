@@ -680,6 +680,14 @@ class MongoDBRepository:
             or not any(item is not None for item in supplied)
             or any(item is not None and item.claim_id != claim.claim_id for item in supplied)
             or idempotency.claim_id != claim.claim_id
+            or (
+                message is not None
+                and (
+                    idempotency.session_id != message.session_id
+                    or idempotency.message_id != message.message_id
+                    or idempotency.agent_message_id is not None
+                )
+            )
         ):
             raise KeyError(claim.claim_id)
         records: list[tuple[str, str, BaseModel]] = []

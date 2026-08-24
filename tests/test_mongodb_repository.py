@@ -813,6 +813,44 @@ def test_staff_message_mutation_rejects_invalid_idempotency_link_without_writes(
     )
 
 
+def test_staff_message_mutation_rejects_agent_message_alias_without_writes(
+    repository: MongoDBRepository,
+) -> None:
+    from backend.repositories.protocols import IdempotencyRecord
+
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session).model_copy(
+        update={'client_message_id': None, 'actor': ActorType.STAFF}
+    )
+    idempotency = IdempotencyRecord(
+        actor_id='stf_mongo_001',
+        route='/staff-messages',
+        key='staff-message-agent-alias',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id='wrong-message',
+        agent_message_id=message.message_id,
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            claim.model_copy(update={'revision': 2}),
+            1,
+            idempotency,
+            message=message,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == []
+    assert (
+        repository.find_idempotency(idempotency.actor_id, idempotency.route, idempotency.key)
+        is None
+    )
+
+
 def test_agent_turn_persists_linked_records_as_one_mutation(
     repository: MongoDBRepository,
     monkeypatch: pytest.MonkeyPatch,
