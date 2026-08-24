@@ -97,15 +97,11 @@ def _verify_principal(
     credential_label: str,
 ) -> Principal:
     if not authorization or not authorization.startswith('Bearer '):
-        raise _authentication_required(
-            f'A {credential_label} bearer token is required.'
-        )
+        raise _authentication_required(f'A {credential_label} bearer token is required.')
 
     token = authorization.removeprefix('Bearer ').strip()
     if not token:
-        raise _authentication_required(
-            f'A {credential_label} bearer token is required.'
-        )
+        raise _authentication_required(f'A {credential_label} bearer token is required.')
 
     settings: Settings = request.app.state.settings
     if settings.identity_mode is IdentityMode.NORMAL:
