@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 
 from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
@@ -28,30 +29,57 @@ RUNTIME_CAPABILITIES = (
 )
 
 
-# These are capability statuses, not claims that a provider service is available.
-# A non-fixture profile remains unavailable until its complete bundle is verified.
-_PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, str]] = MappingProxyType(
-    {
-        DataRuntimeProfile.FIXTURE: MappingProxyType(
-            {capability: 'using_fixture' for capability in RUNTIME_CAPABILITIES}
-        ),
-        DataRuntimeProfile.CLOUDFLARE: MappingProxyType(
-            {capability: 'pending_confirmation' for capability in RUNTIME_CAPABILITIES}
-        ),
-        DataRuntimeProfile.MONGODB: MappingProxyType(
-            {capability: 'unavailable' for capability in RUNTIME_CAPABILITIES}
-        ),
-        DataRuntimeProfile.AWS: MappingProxyType(
-            {capability: 'pending_confirmation' for capability in RUNTIME_CAPABILITIES}
-        ),
-    }
+class RuntimeCapabilityStatus(StrEnum):
+    USING_FIXTURE = 'using_fixture'
+    VERIFIED = 'verified'
+    PENDING_CONFIRMATION = 'pending_confirmation'
+    UNAVAILABLE = 'unavailable'
+
+    @property
+    def start_capable(self) -> bool:
+        return self in {self.USING_FIXTURE, self.VERIFIED}
+
+
+# This table records readiness honestly: fixture and verified provider capabilities can
+# start, while pending or unavailable capabilities cannot.
+_PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, RuntimeCapabilityStatus]] = (
+    MappingProxyType(
+        {
+            DataRuntimeProfile.FIXTURE: MappingProxyType(
+                {
+                    capability: RuntimeCapabilityStatus.USING_FIXTURE
+                    for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+            DataRuntimeProfile.CLOUDFLARE: MappingProxyType(
+                {
+                    capability: RuntimeCapabilityStatus.PENDING_CONFIRMATION
+                    for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+            DataRuntimeProfile.MONGODB: MappingProxyType(
+                {
+                    capability: RuntimeCapabilityStatus.UNAVAILABLE
+                    for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+            DataRuntimeProfile.AWS: MappingProxyType(
+                {
+                    capability: RuntimeCapabilityStatus.PENDING_CONFIRMATION
+                    for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+        }
+    )
 )
 
 
 def runtime_capability_statuses(profile: DataRuntimeProfile) -> dict[str, str]:
-    """Return a copy of the verified status table for one selected profile."""
+    """Return a serialisable copy of the capability status table for one profile."""
 
-    return dict(_PROFILE_CAPABILITIES[profile])
+    return {
+        capability: status.value for capability, status in _PROFILE_CAPABILITIES[profile].items()
+    }
 
 
 def missing_runtime_capabilities(profile: DataRuntimeProfile) -> tuple[str, ...]:
@@ -60,7 +88,7 @@ def missing_runtime_capabilities(profile: DataRuntimeProfile) -> tuple[str, ...]
     return tuple(
         capability
         for capability, status in _PROFILE_CAPABILITIES[profile].items()
-        if status != 'using_fixture'
+        if not status.start_capable
     )
 
 
@@ -85,7 +113,7 @@ class DataRuntimeBundle:
 
 
 def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) -> None:
-    """Reject mislabeled or externally assembled unsupported provider bundles."""
+    """Apply the independent composition guard for externally supplied bundles."""
 
     if bundle.profile is not settings.data_runtime_profile:
         raise RuntimeProfileConfigurationError(

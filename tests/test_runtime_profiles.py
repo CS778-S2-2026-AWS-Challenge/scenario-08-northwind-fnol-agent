@@ -14,6 +14,7 @@ from backend.core.config import DataRuntimeProfile, Settings
 from backend.core.runtime_profiles import (
     RUNTIME_CAPABILITIES,
     DataRuntimeBundle,
+    RuntimeCapabilityStatus,
     RuntimeProfileConfigurationError,
     build_data_runtime_bundle,
     missing_runtime_capabilities,
@@ -79,7 +80,7 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
     }
 
 
-def test_capability_table_is_complete_and_fixture_is_the_only_verified_profile() -> None:
+def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_profile() -> None:
     for profile in DataRuntimeProfile:
         statuses = runtime_capability_statuses(profile)
         assert tuple(statuses) == RUNTIME_CAPABILITIES
@@ -99,6 +100,14 @@ def test_capability_status_table_is_returned_as_a_copy() -> None:
     statuses['persistence'] = 'tampered'
 
     assert runtime_capability_statuses(DataRuntimeProfile.FIXTURE)['persistence'] == 'using_fixture'
+
+
+def test_verified_non_fixture_capability_is_start_capable_without_fixture_label() -> None:
+    assert RuntimeCapabilityStatus.USING_FIXTURE.start_capable
+    assert RuntimeCapabilityStatus.VERIFIED.start_capable
+    assert RuntimeCapabilityStatus.VERIFIED.value == 'verified'
+    assert not RuntimeCapabilityStatus.PENDING_CONFIRMATION.start_capable
+    assert not RuntimeCapabilityStatus.UNAVAILABLE.start_capable
 
 
 def test_fixture_knowledge_retrieval_filters_metadata_before_text_matching() -> None:

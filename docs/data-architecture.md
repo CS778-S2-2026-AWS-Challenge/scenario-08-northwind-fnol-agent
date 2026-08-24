@@ -254,11 +254,20 @@ The runtime capability table used by the composition root is:
 | `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
 | `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
 
-This table is a startup contract, not a provider availability claim. A profile with any
-status other than `using_fixture` is rejected with the named missing capabilities, and
-the process never assembles a mixed bundle. The table is intentionally conservative:
-MongoDB repository code exists, but the complete transaction-capable persistence,
-protected object-storage, and runtime bundle verification is still outstanding.
+The capability-status vocabulary separates readiness from implementation source.
+`using_fixture` means that the controlled fixture capability is ready, while `verified`
+means that a non-fixture provider capability has passed its required verification. Both
+statuses are start-capable. `pending_confirmation` and `unavailable` are not
+start-capable and appear in the named missing-capability error.
+
+The table currently provides diagnostic input to `build_data_runtime_bundle`; it is not
+the sole composition gate. `validate_data_runtime_bundle` independently rejects every
+externally supplied non-fixture bundle until a complete provider-specific composition
+path and its conformance tests are implemented. Changing a table entry to `verified`
+alone therefore cannot enable a provider or assemble a mixed bundle. The current table
+is intentionally conservative: MongoDB repository code exists, but transaction-capable
+persistence, protected object storage, and runtime bundle verification are still
+outstanding.
 
 `DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
 connection and secret-reference variable names will be added with the corresponding
