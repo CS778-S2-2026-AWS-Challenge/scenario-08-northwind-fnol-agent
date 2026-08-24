@@ -96,41 +96,37 @@ def _verify_principal(
     required_scopes: frozenset[str],
     credential_label: str,
 ) -> Principal:
+    required_message = f'A {credential_label} bearer token is required.'
+    failure_message = f'The {credential_label} identity could not be authenticated.'
+
     if not authorization or not authorization.startswith('Bearer '):
-        raise _authentication_required(f'A {credential_label} bearer token is required.')
+        raise _authentication_required(required_message)
 
     token = authorization.removeprefix('Bearer ').strip()
     if not token:
-        raise _authentication_required(f'A {credential_label} bearer token is required.')
+        raise _authentication_required(required_message)
 
     settings: Settings = request.app.state.settings
     if settings.identity_mode is IdentityMode.NORMAL:
         # No production verifier is configured in this bounded Week-4 slice. Normal mode
-        # is therefore deliberately fail-closed instead of falling back to repository
-        # synthetic credentials.
-        raise _authentication_required(
-            f'The {credential_label} identity could not be authenticated.'
-        )
+        # is deliberately fail-closed instead of falling back to synthetic credentials.
+        raise _authentication_required(failure_message)
 
-    principal = next(
-        (
-            profile.principal
-            for profile in _synthetic_profiles(settings)
-            if profile.token == token
-        ),
-        None,
-    )
+    principal: Principal | None = None
+    for profile in _synthetic_profiles(settings):
+        if profile.token == token:
+            principal = profile.principal
+            break
+
     if principal is None:
-        raise _authentication_required(
-            f'The {credential_label} identity could not be authenticated.'
-        )
+        raise _authentication_required(failure_message)
 
-    if principal.actor_type != required_actor or not required_scopes.issubset(
-        principal.scopes
-    ):
-        raise _access_denied(
-            f'The authenticated identity cannot access the {credential_label} boundary.'
-        )
+    actor_mismatch = principal.actor_type != required_actor
+    scope_mismatch = not required_scopes.issubset(principal.scopes)
+    if actor_mismatch or scope_mismatch:
+        denied_message = f'The authenticated identity cannot access the {credential_label} boundary.'
+        raise _access_denied(denied_message)
+
     return principal
 
 
