@@ -1,4 +1,4 @@
-const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
+const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
 
 export class ApiRequestError extends Error {
   constructor(message, { code, status, retryable = false, currentRevision = null } = {}) {
@@ -22,7 +22,7 @@ async function apiRequest(path, options = {}) {
     response = await fetch(path, {
       ...options,
       headers: {
-        Authorization: `Bearer ${CLAIMANT_TOKEN}`,
+        ...(CLAIMANT_TOKEN ? { Authorization: `Bearer ${CLAIMANT_TOKEN}` } : {}),
         'Content-Type': 'application/json',
         ...options.headers,
       },
