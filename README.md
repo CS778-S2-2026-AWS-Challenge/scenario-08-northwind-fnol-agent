@@ -88,6 +88,11 @@ $env:NORTHWIND_IDENTITY_MODE='developer'
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+The default object store remains the deterministic fixture adapter. To run the same
+FastAPI evidence flow against local MinIO, start the packaged service and configure the
+`s3_compatible` adapter as described in
+[MinIO Object-Storage Boundary](docs/minio-object-storage.md).
+
 In another terminal, start the claimant client with its explicit local synthetic credential:
 
 ```powershell

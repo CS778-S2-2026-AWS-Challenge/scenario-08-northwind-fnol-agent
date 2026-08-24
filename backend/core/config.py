@@ -10,6 +10,11 @@ class DataRuntimeProfile(str, Enum):
     AWS = 'aws'
 
 
+class ObjectStorageAdapter(str, Enum):
+    FIXTURE = 'fixture'
+    S3_COMPATIBLE = 's3_compatible'
+
+
 class IdentityMode(str, Enum):
     NORMAL = 'normal'
     DEVELOPER = 'developer'
@@ -49,10 +54,13 @@ class Settings:
     synthetic_admin_token: str = 'synthetic-admin'
     synthetic_integration_token: str = 'synthetic-integration'
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
+    object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
         if not isinstance(self.data_runtime_profile, DataRuntimeProfile):
             raise ValueError('data_runtime_profile must be a DataRuntimeProfile value.')
+        if not isinstance(self.object_storage_adapter, ObjectStorageAdapter):
+            raise ValueError('object_storage_adapter must be an ObjectStorageAdapter value.')
         if not isinstance(self.identity_mode, IdentityMode):
             raise ValueError('identity_mode must be an IdentityMode value.')
         if self.identity_mode is IdentityMode.DEVELOPER and self.environment not in {
@@ -100,6 +108,17 @@ class Settings:
         except ValueError as error:
             allowed = ', '.join(profile.value for profile in DataRuntimeProfile)
             raise ValueError(f'DATA_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
+        raw_object_storage = os.getenv(
+            'NORTHWIND_OBJECT_STORAGE_ADAPTER',
+            ObjectStorageAdapter.FIXTURE.value,
+        )
+        try:
+            object_storage_adapter = ObjectStorageAdapter(raw_object_storage.strip().lower())
+        except ValueError as error:
+            allowed = ', '.join(adapter.value for adapter in ObjectStorageAdapter)
+            raise ValueError(
+                f'NORTHWIND_OBJECT_STORAGE_ADAPTER must be exactly one of: {allowed}.'
+            ) from error
         return cls(
             environment=environment,
             identity_mode=identity_mode,
@@ -126,4 +145,5 @@ class Settings:
                 'synthetic-integration',
             ),
             data_runtime_profile=data_runtime_profile,
+            object_storage_adapter=object_storage_adapter,
         )
