@@ -70,8 +70,8 @@ class ModelResponse(ModelContract):
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
     finish_reason: str | None = None
     usage: ModelUsage | None = None
-    provider_model: str | None = None
-    provider_request_id: str | None = None
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
 
 
 class ModelClaimStateContext(ModelContract):
@@ -122,7 +122,7 @@ class ModelAgentProposal(ModelContract):
     customer_next_step: CustomerNextStep
     form_changes: list[ModelProposedFormChange] = Field(default_factory=list)
     state_changes: list[StateChange] = Field(default_factory=list)
-    proposed_signals: list[dict[str, object]] = Field(default_factory=list)
+    proposed_signals: list[dict[str, object]] = Field(default_factory=list, max_length=0)
     required_tools: list[dict[str, object]] = Field(default_factory=list)
     next_action_requirements: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None

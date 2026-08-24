@@ -22,15 +22,39 @@ state, creates a claim, or authorises a handoff by itself.
 
 The model receives an explicit minimum context projection rather than the durable
 `WorkingClaim`. The projection contains the channel, locale, incident type, customer-safe
-workflow state, structured form values without source references or actor identities,
-evidence counts, and the current customer next step. It excludes Claim, Customer, Session,
-Message, and Evidence identifiers; internal fraud, coverage, and severity signals; provider
-fingerprints; routes; timestamps; and external Claim or assessor results.
+workflow state, evidence counts, the current customer next step, the current claimant text,
+and only current-action form values from this allow-list: incident type, occurrence time,
+description, injury or danger, cause, loss description, vehicle damage, vehicle drivability,
+and affected property areas. A field marked for a later action is not sent even when its code
+is allow-listed. Policy numbers, contact preferences, incident and property addresses, other
+parties, police references, emergency-service records, vehicle registrations, and every
+unregistered field remain outside routine model context.
+
+The projection also excludes Claim, Customer, Session, Message, and Evidence identifiers;
+source references and actor identities; internal fraud, coverage, and severity signals;
+provider fingerprints; routes; timestamps; and external Claim or assessor results.
 
 The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
 but it cannot set fact provenance or confirmation state. The server converts every accepted
 model form suggestion to `source: inference` and `status: proposed`. Claimant, staff, policy,
 or document provenance and confirmed state require their existing trusted server-side paths.
+The resulting field actor is `model_gateway`, not `controlled_agent`.
+
+The model-facing `proposed_signals` collection has a maximum length of zero. Any response that
+attempts to create an internal signal is malformed and the entire turn is rejected before a
+message, decision, Workbench signal, or idempotency record is written. Signals continue to use
+their existing deterministic, retrieval, or staff-owned paths.
+
+Model-authored customer prose is not response authority. Before persistence, the server renders
+`customer_reason`, the conversational reply, and the next-step summary from the validated action
+and authority outcome. Review-required and blocked proposals always use fixed bounded responses;
+authorised low-impact actions use action-specific server responses. This prevents a model from
+presenting approval, rejection, liability, fraud, or emergency-service claims to a claimant.
+
+Each persisted model-backed decision records `proposal_source: model_gateway` and bounded audit
+provenance containing the runtime profile, provider-reported model identifier, and provider request
+identifier when supplied. These provider references are internal-only and are absent from claimant
+messages and decision projections. Token usage persistence remains a current limitation.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. Because the current Agent request

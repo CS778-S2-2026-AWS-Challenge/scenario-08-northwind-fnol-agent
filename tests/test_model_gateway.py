@@ -12,6 +12,7 @@ from backend.adapters.model_gateway import (
     OpenAICompatibleModelGateway,
 )
 from backend.app import create_app
+from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
 from backend.domain.model_gateway import (
     ModelCapabilities,
@@ -27,6 +28,7 @@ from backend.domain.models import (
     ActorReference,
     ActorType,
     AgentAction,
+    AgentProposalSource,
     AuthorityOutcome,
     Channel,
     CustomerNextStep,
@@ -41,6 +43,7 @@ from backend.domain.models import (
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnContext, authorised_state_changes, validate_proposal
 from backend.services.model_agent import GatewayAgent
+from backend.services.workbench import get_workbench_claim_detail
 
 
 def gateway_config(
@@ -269,6 +272,27 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
         malformed_gateway.complete(ModelRequest(messages=[]))
     assert malformed_error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
 
+    oversized_provenance_gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'model': 'm' * 301,
+                    'choices': [
+                        {
+                            'finish_reason': 'stop',
+                            'message': {'role': 'assistant', 'content': 'ok'},
+                        }
+                    ],
+                },
+            )
+        ),
+    )
+    with pytest.raises(ModelGatewayError) as oversized_provenance_error:
+        oversized_provenance_gateway.complete(ModelRequest(messages=[]))
+    assert oversized_provenance_error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
 
 class StaticGateway:
     def __init__(self, response: ModelResponse) -> None:
@@ -380,9 +404,62 @@ def _working_claim() -> WorkingClaim:
     )
 
 
+def _form_field(
+    value: object,
+    timestamp: datetime,
+    *,
+    needed_for: NeededFor = NeededFor.CURRENT_ACTION,
+) -> StructuredFormField:
+    return StructuredFormField(
+        value=value,
+        source=FormSource.CLAIMANT,
+        source_refs=['msg_private_gateway'],
+        status=FormStatus.CONFIRMED,
+        needed_for=needed_for,
+        confidence=1.0,
+        updated_at=timestamp,
+        updated_by=ActorReference(
+            actor_type=ActorType.CLAIMANT,
+            actor_id='cus_private_gateway',
+        ),
+    )
+
+
+def _model_proposal_output(
+    *,
+    action: str = 'UPDATE',
+    customer_reason: str = 'The claimant supplied an update.',
+    customer_response: str = 'The update was recorded.',
+    next_step_summary: str = 'Continue the report.',
+    form_changes: list[dict[str, object]] | None = None,
+    state_changes: list[dict[str, object]] | None = None,
+    proposed_signals: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        'action': action,
+        'reason_codes': ['MODEL_UPDATE'],
+        'customer_reason': customer_reason,
+        'customer_response': customer_response,
+        'customer_next_step': {
+            'status': 'continue',
+            'summary': next_step_summary,
+            'responsible_party': 'claimant',
+            'required_items': [],
+        },
+        'form_changes': form_changes or [],
+        'state_changes': state_changes or [],
+        'proposed_signals': proposed_signals or [],
+        'required_tools': [],
+        'next_action_requirements': [],
+        'handoff_priority': None,
+    }
+
+
 def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> None:
     gateway = StaticGateway(
         ModelResponse(
+            provider_model='provider-model-private',
+            provider_request_id='provider-request-private',
             structured_output={
                 'action': 'CREATE_CLAIM',
                 'reason_codes': ['MODEL_SAYS_READY'],
@@ -407,7 +484,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
                 'required_tools': [],
                 'next_action_requirements': [],
                 'handoff_priority': None,
-            }
+            },
         )
     )
     agent = GatewayAgent(gateway)
@@ -424,19 +501,20 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
                 update={'fraud_signal': FraudSignal.REVIEW_REQUIRED}
             ),
             'form': {
-                'incident.location': StructuredFormField(
-                    value='Synthetic Road',
-                    source=FormSource.CLAIMANT,
-                    source_refs=['msg_private_gateway'],
-                    status=FormStatus.CONFIRMED,
-                    needed_for=NeededFor.CURRENT_ACTION,
-                    confidence=1.0,
-                    updated_at=timestamp,
-                    updated_by=ActorReference(
-                        actor_type=ActorType.CLAIMANT,
-                        actor_id='cus_private_gateway',
-                    ),
-                )
+                'incident.description': _form_field('A synthetic rear-end incident.', timestamp),
+                'incident.location': _form_field('Synthetic Road', timestamp),
+                'policy.policy_number': _form_field(
+                    'POLICY-PRIVATE', timestamp, needed_for=NeededFor.LATER_ACTION
+                ),
+                'vehicle.registration': _form_field(
+                    'REG-PRIVATE', timestamp, needed_for=NeededFor.LATER_ACTION
+                ),
+                'authorities.police_report_reference': _form_field(
+                    'POLICE-PRIVATE', timestamp, needed_for=NeededFor.LATER_ACTION
+                ),
+                'incident.cause': _form_field(
+                    'Cause for later action', timestamp, needed_for=NeededFor.LATER_ACTION
+                ),
             },
         }
     )
@@ -470,7 +548,8 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'customer_next_step',
     }
     assert 'fraud_signal' not in model_context['claim']['claim_state']
-    assert set(model_context['claim']['form']['incident.location']) == {
+    assert set(model_context['claim']['form']) == {'incident.description'}
+    assert set(model_context['claim']['form']['incident.description']) == {
         'value',
         'source',
         'status',
@@ -487,14 +566,156 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'private-external-fingerprint',
         'private-assessor-fingerprint',
         'internal-model-route',
+        'Synthetic Road',
+        'POLICY-PRIVATE',
+        'REG-PRIVATE',
+        'POLICE-PRIVATE',
+        'Cause for later action',
     ):
         assert private_value not in serialised_context
     assert proposal.action is AgentAction.CREATE_CLAIM
+    assert proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
+    assert proposal.model_provenance is not None
+    assert proposal.model_provenance.provider_model == 'provider-model-private'
+    assert proposal.model_provenance.provider_request_id == 'provider-request-private'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(proposal, authority) == []
+
+
+@pytest.mark.parametrize(
+    ('action', 'state_changes', 'expected_outcome'),
+    [
+        ('UPDATE', [{'path': 'claim_state.next_action', 'to': 'UPDATE'}], 'authorised'),
+        (
+            'CREATE_CLAIM',
+            [{'path': 'claim_state.next_action', 'to': 'CREATE_CLAIM'}],
+            'review_required',
+        ),
+        ('UPDATE', [{'path': 'claim_state.coverage', 'to': 'clear'}], 'blocked'),
+    ],
+)
+def test_model_claimant_text_is_rendered_by_deterministic_authority(
+    action: str,
+    state_changes: list[dict[str, object]],
+    expected_outcome: str,
+) -> None:
+    unsafe_text = (
+        'Your claim is approved and not rejected. Northwind accepts liability, you are '
+        'fraudulent, and emergency services were contacted.'
+    )
+    protocol = f'unsafe_claimant_text_{expected_outcome}'
+    gateway = StaticGateway(
+        ModelResponse(
+            provider_model='private-provider-model',
+            provider_request_id='private-provider-request',
+            structured_output=_model_proposal_output(
+                action=action,
+                customer_reason=unsafe_text,
+                customer_response=unsafe_text,
+                next_step_summary=unsafe_text,
+                state_changes=state_changes,
+            ),
+        )
+    )
+
+    response, repository, _before_claim, claim_id, session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+    )
+
+    assert response.status_code == 200
+    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
+    assert decision.authority.outcome.value == expected_outcome
+    claimant_payload = response.text.lower()
+    for unsafe_fragment in (
+        'approved',
+        'rejected',
+        'accepts liability',
+        'fraudulent',
+        'emergency services were contacted',
+        'private-provider-model',
+        'private-provider-request',
+    ):
+        assert unsafe_fragment not in claimant_payload
+    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
+    assert unsafe_text not in str([message.content for message in messages])
+    assert unsafe_text not in decision.customer_reason
+    assert unsafe_text not in decision.customer_response
+    assert unsafe_text not in decision.customer_next_step.summary
+
+
+def test_model_signal_injection_is_rejected_before_workbench_persistence() -> None:
+    protocol = 'invented_model_signal'
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output=_model_proposal_output(
+                proposed_signals=[
+                    {
+                        'signal_id': 'fraud_confirmed',
+                        'code': 'FRAUD_CONFIRMED',
+                        'status': 'confirmed',
+                    }
+                ]
+            )
+        )
+    )
+
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+    )
+
+    assert response.status_code == 502
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
+    detail = get_workbench_claim_detail(
+        repository,
+        Principal(subject='stf_demo', actor_type='staff'),
+        claim_id,
+    )
+    assert detail.signals == []
+
+
+def test_model_provenance_is_persisted_without_claimant_exposure() -> None:
+    protocol = 'model_provenance'
+    gateway = StaticGateway(
+        ModelResponse(
+            provider_model='provider-model-audit-only',
+            provider_request_id='provider-request-audit-only',
+            structured_output=_model_proposal_output(
+                form_changes=[
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'A model-proposed incident description.',
+                    }
+                ],
+                state_changes=[{'path': 'claim_state.next_action', 'to': 'UPDATE'}],
+            ),
+        )
+    )
+
+    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+    )
+
+    assert response.status_code == 200
+    assert 'provider-model-audit-only' not in response.text
+    assert 'provider-request-audit-only' not in response.text
+    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
+    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
+    assert decision.model_provenance is not None
+    assert decision.model_provenance.provider_model == 'provider-model-audit-only'
+    assert decision.model_provenance.provider_request_id == 'provider-request-audit-only'
+    assert decision.form_changes['incident.description'].updated_by.actor_id == 'model_gateway'
 
 
 def test_gateway_agent_cannot_claim_controlled_rule_authority() -> None:

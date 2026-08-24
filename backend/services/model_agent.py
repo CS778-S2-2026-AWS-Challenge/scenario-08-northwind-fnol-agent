@@ -15,7 +15,14 @@ from backend.domain.model_gateway import (
     ModelRole,
     ModelTurnContext,
 )
-from backend.domain.models import FormSource, FormStatus, ProposedFormChange
+from backend.domain.models import (
+    AgentProposalSource,
+    FormSource,
+    FormStatus,
+    ModelDecisionProvenance,
+    NeededFor,
+    ProposedFormChange,
+)
 from backend.services.agent import AgentProposal, AgentTurnContext
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
@@ -26,6 +33,20 @@ liability, emergency-service contact, or a completed claim unless the supplied s
 Keep internal risk signals and model reasoning out of customer-facing fields. Form changes are
 always treated as inferred proposals; provenance and confirmation are assigned only by the
 server."""
+
+_MODEL_CONTEXT_FIELD_CODES = frozenset(
+    {
+        'incident.type',
+        'incident.occurred_at',
+        'incident.description',
+        'incident.injury_or_danger',
+        'incident.cause',
+        'loss.description',
+        'vehicle.damage_description',
+        'vehicle.drivable',
+        'property.affected_areas',
+    }
+)
 
 
 def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
@@ -51,6 +72,8 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                     confidence=field.confidence,
                 )
                 for field_code, field in claim.form.items()
+                if field_code in _MODEL_CONTEXT_FIELD_CODES
+                and field.needed_for is NeededFor.CURRENT_ACTION
             },
             evidence_summary=claim.evidence_summary,
             customer_next_step=claim.customer_next_step,
@@ -61,7 +84,12 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
     )
 
 
-def _agent_proposal(proposal: ModelAgentProposal) -> AgentProposal:
+def _agent_proposal(
+    proposal: ModelAgentProposal,
+    *,
+    provider_model: str | None,
+    provider_request_id: str | None,
+) -> AgentProposal:
     return AgentProposal(
         action=proposal.action,
         reason_codes=proposal.reason_codes,
@@ -80,11 +108,16 @@ def _agent_proposal(proposal: ModelAgentProposal) -> AgentProposal:
             for change in proposal.form_changes
         ],
         state_changes=proposal.state_changes,
-        proposed_signals=proposal.proposed_signals,
+        proposed_signals=[],
         required_tools=proposal.required_tools,
         next_action_requirements=proposal.next_action_requirements,
         handoff_priority=proposal.handoff_priority,
         controlled_rule_authorised=False,
+        proposal_source=AgentProposalSource.MODEL_GATEWAY,
+        model_provenance=ModelDecisionProvenance(
+            provider_model=provider_model,
+            provider_request_id=provider_request_id,
+        ),
     )
 
 
@@ -115,4 +148,8 @@ class GatewayAgent:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
         if response.tool_calls or proposal.required_tools:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        return _agent_proposal(proposal)
+        return _agent_proposal(
+            proposal,
+            provider_model=response.provider_model,
+            provider_request_id=response.provider_request_id,
+        )

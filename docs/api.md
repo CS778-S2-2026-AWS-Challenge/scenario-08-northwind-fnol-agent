@@ -1445,7 +1445,19 @@ The persisted decision records both `customer_response` and
 reply to the triggering message. `customer_next_step` is the structured status,
 responsibility, required work, and timing shown outside the conversation. The
 Agent message uses `customer_response`; clients must not manufacture a chat
-reply by repeating the next-step summary.
+reply by repeating the next-step summary. For a model-backed proposal, these
+claimant-visible fields and `customer_reason` are server-rendered from the
+validated action and authority outcome; untrusted model prose is not persisted
+as the claimant response. The internal decision records `proposal_source` and
+bounded model provenance when applicable. Provider model and request identifiers
+must not appear in claimant projections.
+
+Routine model context is task-minimal. It includes the current claimant text and
+only explicitly allow-listed, current-action form values. Policy numbers, contact
+preferences, addresses and incident locations, other parties, police references,
+emergency-service records, and vehicle registrations are excluded. A model proposal
+cannot create internal review signals; a non-empty model `proposed_signals` value
+invalidates the complete turn before persistence.
 
 ### `POST /internal/v1/policy/search`
 
