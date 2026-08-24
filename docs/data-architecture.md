@@ -269,9 +269,12 @@ the sole composition gate. `validate_data_runtime_bundle` independently rejects 
 externally supplied non-fixture bundle until a complete provider-specific composition
 path and its conformance tests are implemented. Changing a table entry to `verified`
 alone therefore cannot enable a provider or assemble a mixed bundle. The current table
-is intentionally conservative: MongoDB repository code exists, but transaction-capable
-persistence, protected object storage, and runtime bundle verification are still
-outstanding.
+is intentionally conservative: MongoDB repository code exists, but complete provider
+conformance, protected object storage, and runtime bundle verification are still
+outstanding. MongoDB persistence is recorded as `pending_confirmation` after a bounded
+Atlas connection and transaction probe. This does not make the profile start-capable.
+Runtime bundles close provider repositories at application shutdown when the selected
+repository exposes a close operation.
 
 The `fixture` capability row is the default baseline. When the local fixture profile
 explicitly selects the S3-compatible object adapter, the assembled bundle and readiness
