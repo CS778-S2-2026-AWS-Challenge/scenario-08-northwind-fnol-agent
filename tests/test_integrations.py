@@ -482,3 +482,27 @@ def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() 
     assert response.json()['external_claim_id'] is None
     assert response.json()['claim_number'] is None
     assert response.json()['source'] == 'configured_service'
+
+
+def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() -> None:
+    claim_adapter = MockClaimsServiceAdapter()
+    claim_command = CreateExternalClaimRequest.model_validate(
+        creation_payload('clm_fixture', 1, 'dec_fixture')
+    )
+    claim_adapter.create_claim(claim_command, 'fingerprint-a')
+
+    with pytest.raises(AdapterIdempotencyConflict):
+        claim_adapter.create_claim(claim_command, 'fingerprint-b')
+
+    assessor_adapter = MockAssessorServiceAdapter()
+    route_command = RouteAssessorRequest(
+        claim_id='clm_fixture',
+        external_claim_id='ext_fixture',
+        authorisation_ref='dec_route',
+        requested_action='vehicle_damage_assessment',
+        location={'region': 'Auckland'},
+    )
+    assessor_adapter.route_assessor(route_command, 'fingerprint-a')
+
+    with pytest.raises(AdapterIdempotencyConflict):
+        assessor_adapter.route_assessor(route_command, 'fingerprint-b')
