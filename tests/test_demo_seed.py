@@ -1,15 +1,16 @@
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
         body = seeded.json()
@@ -62,14 +63,14 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
 
 
 def test_seed_scenarios_rejects_non_staff_credentials() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         response = client.post('/api/v1/workbench/demo/seed-scenarios', headers=CLAIMANT_AUTH)
 
     assert response.status_code == 403
 
 
 def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         assert (
             client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH).status_code
             == 200
@@ -81,7 +82,7 @@ def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
 
 
 def test_claimant_reads_seeded_coverage_review_without_an_internal_handoff() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
 

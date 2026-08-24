@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -17,6 +17,7 @@ from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
 SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def seeded_scenario(name: str) -> tuple[FixtureRepository, str, str]:
@@ -72,7 +73,7 @@ def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     assert source is not None
     pause_active_session(repository, claim_id, active_session_id)
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at08-again'},
@@ -128,7 +129,7 @@ def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> N
         'cus_demo',
     )
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at06-durable'},
@@ -157,7 +158,7 @@ def test_resume_uses_confirmed_description_when_session_summary_is_empty() -> No
     description = claim.form['incident.description'].value
     assert isinstance(description, str)
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at08-description'},
@@ -206,7 +207,7 @@ def test_resume_rebuilds_question_and_generic_pending_item() -> None:
         'cus_demo',
     )
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at06-question'},

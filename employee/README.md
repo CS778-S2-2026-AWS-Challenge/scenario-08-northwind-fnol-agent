@@ -16,15 +16,17 @@ This static page provides the employee-facing workbench over the backend workben
 
 ## Local use
 
-1. Start the backend from the repository root:
+1. Start the backend in explicit local developer identity mode:
 
-```bash
+```powershell
+$env:NORTHWIND_ENVIRONMENT='development'
+$env:NORTHWIND_IDENTITY_MODE='developer'
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 2. Serve the employee page from the `employee/` folder:
 
-```bash
+```powershell
 cd employee
 py -3.12 -m http.server 8002
 ```
@@ -33,9 +35,12 @@ py -3.12 -m http.server 8002
 
 ## Staff credentials
 
-- `Authorization: Bearer synthetic-staff`
+- Local fixture credential: `Authorization: Bearer synthetic-staff`
 
-The page is hard-coded for the local prototype staff token.
+The static page currently carries that fixed synthetic staff credential for the bounded local demo.
+It cannot switch the backend into developer mode. If the backend uses the default normal identity
+mode, the credential is rejected with `401 AUTHENTICATION_REQUIRED`. It is not a production staff
+authentication path.
 
 ## Notes
 
@@ -47,8 +52,9 @@ The page is hard-coded for the local prototype staff token.
 - All write-back requests carry an idempotency key and the currently displayed claim revision;
   the queue and detail are reloaded after each successful mutation.
 - The queue is never populated automatically. For a local walkthrough, staff must explicitly use
-  **Load workbench demo queue** while the queue is empty. The action is available only in development
-  and test environments and loads the bounded AT-02, AT-04, AT-05, AT-06, and AT-10 demo set.
+  **Load workbench demo queue** while the queue is empty. The action is available only when the
+  backend is both in a development/test environment and explicitly configured for developer
+  identity mode; it loads the bounded AT-02, AT-04, AT-05, AT-06, and AT-10 demo set.
   If local claims already exist, the page offers an explicit, confirmed **Reset and load demo queue**
   action because resetting clears the current local demo state.
 - It does not expose claimant-only private data.

@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import FormSource, FormStatus
 from backend.repositories.fixture import FixtureRepository
 
@@ -34,7 +34,8 @@ def repository() -> FixtureRepository:
 
 @pytest.fixture
 def client(repository: FixtureRepository) -> TestClient:
-    return TestClient(create_app(Settings(), repository))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    return TestClient(create_app(settings, repository))
 
 
 def create_claim(client: TestClient, key: str) -> str:
@@ -125,16 +126,12 @@ def test_an_extracted_fact_names_its_source_and_waits_for_a_person(
     assert claim is not None
     field = claim.form[FIELD]
 
-    # Source: the claim can say the image produced this, and which image.
     assert field.source is FormSource.IMAGE
     assert field.source_refs == [evidence_id]
     assert field.confidence == 0.87
-
-    # Confirmation state: nobody has agreed to it yet.
     assert field.status is FormStatus.PROPOSED
     assert field.value == EXTRACTED
 
-    # The claimant sees the same unconfirmed state, not a settled fact.
     assert projection.status_code == 200
     projected_body = projection.json()
     projected_field = projected_body['form'][FIELD]
@@ -162,17 +159,13 @@ def test_a_decision_changes_confirmation_state_without_losing_the_source(
         assert before is not None
         source_before = before.form[FIELD].source
         refs_before = list(before.form[FIELD].source_refs)
-
         decided = decide(active, claim_id, evidence_id, f'{decision}-source', decision)
 
     assert decided.status_code == 200
     claim = repository.get_claim(claim_id, CUSTOMER_ID)
     assert claim is not None
     field = claim.form[FIELD]
-
     assert field.status is expected_status
-    # A rejected value stays disputed rather than disappearing, so the
-    # disagreement itself remains visible.
     assert field.value == EXTRACTED
     assert field.source is source_before
     assert field.source_refs == refs_before
@@ -192,26 +185,17 @@ def test_a_claimant_stated_fact_is_not_relabelled_as_machine_read(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    """Extraction may not take over a field the claimant already owns.
-
-    The field is created through the claimant form, so it genuinely carries
-    `source: claimant` and `status: confirmed` before any evidence exists. An
-    earlier version of this test called the upload-and-process helper first,
-    which made the field image-derived and therefore only proved that one
-    extraction cannot overwrite another. That is a weaker claim than the name.
-    """
+    """Extraction may not take over a field the claimant already owns."""
     claimant_value = 'I was rear-ended while stopped at the lights.'
 
     with client as active:
         claim_id = create_claim(active, 'claimant-owned-claim')
-
         stated = state_claimant_fact(active, claim_id, 1, claimant_value)
         assert stated.status_code == 200
 
         before = repository.get_claim(claim_id, CUSTOMER_ID)
         assert before is not None
         owned = before.form[FIELD]
-        # The precondition the test name depends on.
         assert owned.source is FormSource.CLAIMANT
         assert owned.status is FormStatus.CONFIRMED
         assert owned.value == claimant_value
@@ -227,9 +211,6 @@ def test_a_claimant_stated_fact_is_not_relabelled_as_machine_read(
 
     conflicting = repository.get_claim(claim_id, CUSTOMER_ID)
     assert conflicting is not None
-
-    # The claimant's own words, source, and confirmation state are untouched,
-    # and no image reference was attached to them.
     assert conflicting.form[FIELD].model_dump(mode='json') == snapshot
     assert conflicting.form[FIELD].source is FormSource.CLAIMANT
     assert conflicting.form[FIELD].status is FormStatus.CONFIRMED
@@ -240,12 +221,7 @@ def test_the_source_and_confirmation_check_is_repeatable(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
-    """Issue #141: the fixture completes repeatedly.
-
-    Two independent claims driven through the same path land in identical
-    source and confirmation state, so the demonstration does not depend on
-    residue from an earlier run.
-    """
+    """Issue #141: the fixture completes repeatedly."""
     results = []
     with client as active:
         for run in ('first', 'second'):
