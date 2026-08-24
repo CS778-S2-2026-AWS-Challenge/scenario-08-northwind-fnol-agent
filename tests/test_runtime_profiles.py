@@ -10,7 +10,7 @@ from backend.adapters.knowledge import (
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
-from backend.core.config import DataRuntimeProfile, Settings
+from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.core.runtime_profiles import (
     RUNTIME_CAPABILITIES,
     DataRuntimeBundle,
@@ -229,6 +229,19 @@ def test_app_rejects_a_bundle_that_does_not_match_selected_profile() -> None:
     with pytest.raises(ValueError, match='does not match DATA_RUNTIME_PROFILE'):
         create_app(
             Settings(data_runtime_profile=DataRuntimeProfile.MONGODB),
+            data_runtime_bundle=fixture_bundle,
+        )
+
+
+def test_app_rejects_a_bundle_that_does_not_match_selected_object_storage() -> None:
+    fixture_bundle = build_data_runtime_bundle(Settings())
+
+    with pytest.raises(
+        RuntimeProfileConfigurationError,
+        match='does not match NORTHWIND_OBJECT_STORAGE_ADAPTER',
+    ):
+        create_app(
+            Settings(object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE),
             data_runtime_bundle=fixture_bundle,
         )
 

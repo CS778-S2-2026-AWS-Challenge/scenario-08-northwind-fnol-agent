@@ -34,8 +34,11 @@ def readiness(request: Request) -> ReadinessResponse:
     data_runtime = cast(DataRuntimeBundle, request.app.state.data_runtime_bundle)
     data_checks = data_runtime.readiness_checks()
     agent_runtime_status = cast(str, request.app.state.agent_runtime_status)
+    status: Literal['degraded', 'unavailable'] = (
+        'unavailable' if 'unavailable' in data_checks.values() else 'degraded'
+    )
     return ReadinessResponse(
-        status='degraded',
+        status=status,
         checks={
             **data_checks,
             'agent': agent_runtime_status,

@@ -15,6 +15,11 @@ class AgentRuntimeProfile(str, Enum):
     MODEL_GATEWAY = 'model_gateway'
 
 
+class ObjectStorageAdapter(str, Enum):
+    FIXTURE = 'fixture'
+    S3_COMPATIBLE = 's3_compatible'
+
+
 def _csv_setting(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -65,12 +70,15 @@ class Settings:
     model_timeout_seconds: float = 30.0
     model_supports_structured_output: bool = True
     model_supports_tools: bool = False
+    object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
         if not isinstance(self.data_runtime_profile, DataRuntimeProfile):
             raise ValueError('data_runtime_profile must be a DataRuntimeProfile value.')
         if not isinstance(self.agent_runtime_profile, AgentRuntimeProfile):
             raise ValueError('agent_runtime_profile must be an AgentRuntimeProfile value.')
+        if not isinstance(self.object_storage_adapter, ObjectStorageAdapter):
+            raise ValueError('object_storage_adapter must be an ObjectStorageAdapter value.')
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
             raise ValueError('Wildcard CORS origins cannot be used with credentials.')
         synthetic_tokens = {
@@ -108,6 +116,17 @@ class Settings:
             allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
             raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
         credential_environment_variable = os.getenv('MODEL_API_KEY_ENV', '').strip() or None
+        raw_object_storage = os.getenv(
+            'NORTHWIND_OBJECT_STORAGE_ADAPTER',
+            ObjectStorageAdapter.FIXTURE.value,
+        )
+        try:
+            object_storage_adapter = ObjectStorageAdapter(raw_object_storage.strip().lower())
+        except ValueError as error:
+            allowed = ', '.join(adapter.value for adapter in ObjectStorageAdapter)
+            raise ValueError(
+                f'NORTHWIND_OBJECT_STORAGE_ADAPTER must be exactly one of: {allowed}.'
+            ) from error
         return cls(
             environment=environment,
             cors_allow_origins=_csv_setting('NORTHWIND_CORS_ALLOW_ORIGINS', ('*',)),
@@ -139,4 +158,5 @@ class Settings:
                 'MODEL_SUPPORTS_STRUCTURED_OUTPUT', True
             ),
             model_supports_tools=_boolean_setting('MODEL_SUPPORTS_TOOLS', False),
+            object_storage_adapter=object_storage_adapter,
         )
