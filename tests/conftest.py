@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
 
@@ -25,7 +25,11 @@ def app(
     repository: FixtureRepository,
     agent_turn_provider: AgentTurnProvider,
 ) -> FastAPI:
-    return create_app(Settings(), repository, agent_turn_provider)
+    return create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        repository,
+        agent_turn_provider,
+    )
 
 
 @pytest.fixture
