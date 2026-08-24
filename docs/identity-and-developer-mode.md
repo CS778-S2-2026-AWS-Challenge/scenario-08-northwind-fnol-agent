@@ -9,7 +9,8 @@ and the implementation input for Issue #247.
 It defines roles, scopes, principal metadata, synthetic developer identities, production
 guards, resource-authorisation boundaries, migration requirements, and audit metadata. It
 does **not** select a production identity provider, create an Admin API, implement staff
-entitlement policy, or claim that production authentication is configured.
+entitlement policy, implement complete operation-specific integration authorisation, or
+claim that production authentication is configured.
 
 ## Core Rules
 
@@ -132,6 +133,12 @@ allows the requested operation and purpose. A credential intended for policy loo
 for example, must not gain claim-creation or evidence-processing authority merely because
 both routes share the same base scope.
 
+This is a target authorisation boundary, not an expansion of #247 into a complete
+operation-specific integration policy. #247 must establish the integration principal and
+its server-derived base scope, preserve any narrower route/domain checks that already
+exist, and avoid broadening access. Full operation/purpose least privilege remains a
+separate policy slice unless deliberately added with its own acceptance evidence.
+
 Similarly, `workbench:read` does not mean that every staff identity may read every claim,
 and `workbench:write` does not mean that every staff identity may mutate every staff work
 item.
@@ -175,6 +182,11 @@ Integration services use operation- and purpose-limited authority in addition to
 base integration role/scope. Business-state preconditions such as an authorised
 `CREATE_CLAIM` decision remain required, but they do not replace caller authorisation.
 A valid domain command and a permitted caller are independent checks and both must pass.
+
+The current Week-4 identity slice does not claim that this complete operation/purpose
+policy is implemented. Until that policy exists, existing internal route and deterministic
+domain guards remain authoritative and #247 must not weaken them or describe the base
+`tools:invoke` scope as unrestricted tool authority.
 
 ## Client Entry-Point Boundaries
 
@@ -232,7 +244,7 @@ Each synthetic credential maps to exactly one registered principal profile, for 
 | claimant fixture | claimant | `cus_demo` | claimant self-service only |
 | staff fixture | staff | `stf_demo` | Workbench base scopes; resource policy still applies |
 | admin fixture | administrator | `adm_demo` | Admin only, once Admin routes exist |
-| integration fixture | integration_service | `integration_fixture` | allow-listed internal operation(s) only |
+| integration fixture | integration_service | `integration_fixture` | `tools:invoke` base scope; operation/purpose policy remains separate |
 
 There is intentionally no synthetic Agent-service credential in the current in-process
 runtime.
@@ -244,8 +256,9 @@ Requirements:
 - a known token presented to another actor boundary is access denied;
 - the principal is marked `synthetic=true` and has a non-secret `auth_source` indicating
   developer mode;
-- synthetic scopes and operation permissions come from the registered server profile,
-  never from request data;
+- synthetic base scopes come from the registered server profile; any operation/purpose
+  permissions that are already implemented also remain server-derived, but #247 does not
+  invent a complete operation-specific integration policy merely to populate the profile;
 - synthetic subjects and fixture data remain anonymous and must not resemble real
   customer credentials; and
 - any environment outside the explicit `development`/`test` developer-mode allow-list
@@ -392,6 +405,11 @@ administrator guard needed by the future Admin API, preserve existing cross-role
 claimant-ownership behaviour, add the production/non-production startup guard, and make
 the synthetic/auth-source metadata available for audit.
 
+For integration-service identity specifically, #247 establishes the fixed synthetic
+principal and its base scope, preserves existing caller/domain checks, and must not turn
+`tools:invoke` into wildcard operation authority. It does not need to complete the future
+operation/purpose policy in order to satisfy the bounded Day-2 identity slice.
+
 #247 must not be described as completing production identity, staff entitlement policy,
 operation-specific integration authorisation, or persisted access audit unless those
 capabilities and their tests are deliberately added to that issue's scope. The contract
@@ -415,8 +433,9 @@ A repeatable implementation check should prove at least:
 7. claimant ownership and claimant/internal projection regressions remain green;
 8. staff Workbench tests do not treat role authentication as proof of a future complete
    assignment/task authorisation policy;
-9. integration tests preserve both domain-action authority checks and a separately
-   documented caller-operation boundary; and
+9. integration tests preserve existing domain-action/caller checks and prove the base
+   integration scope is not treated as evidence that complete operation-specific policy
+   has been implemented; and
 10. local demo and automated tests opt into developer mode explicitly rather than relying
     on the environment name.
 
