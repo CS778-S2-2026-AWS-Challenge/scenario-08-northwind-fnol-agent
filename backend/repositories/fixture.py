@@ -391,8 +391,20 @@ class FixtureRepository(PersistenceRepository):
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
+        existing_children = (
+            self._messages.get(claimant_message.message_id),
+            self._messages.get(agent_message.message_id),
+            self._decisions.get(decision.decision_id),
+            self._handoffs.get(handoff.handoff_id) if handoff is not None else None,
+            self._evidence.get(evidence.evidence_id) if evidence is not None else None,
+        )
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id for existing in existing_children
+        )
         records_match = (
-            stored_claim.customer_id == claim.customer_id
+            child_ownership_matches
+            and claimant_message.message_id != agent_message.message_id
+            and stored_claim.customer_id == claim.customer_id
             and stored_session is not None
             and stored_session.claim_id == claim.claim_id
             and stored_session.customer_id == claim.customer_id
@@ -489,8 +501,10 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
             evidence.claim_id != claim.claim_id
+            or (existing_evidence is not None and existing_evidence.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')
@@ -617,8 +631,34 @@ class FixtureRepository(PersistenceRepository):
             raise KeyError(claim.claim_id)
         records = (staff_action, customer_update, signal_decision, handoff, message)
         active_session_id = claim.active_session_id or ''
+        existing_staff_action = (
+            self._staff_actions.get(staff_action.action_id) if staff_action is not None else None
+        )
+        existing_customer_update = (
+            self._customer_updates.get(customer_update.update_id)
+            if customer_update is not None
+            else None
+        )
+        existing_signal_decision = (
+            self._signal_decisions.get(signal_decision.signal_decision_id)
+            if signal_decision is not None
+            else None
+        )
+        existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        existing_message = self._messages.get(message.message_id) if message is not None else None
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id
+            for existing in (
+                existing_staff_action,
+                existing_customer_update,
+                existing_signal_decision,
+                existing_handoff,
+                existing_message,
+            )
+        )
         records_match = (
-            all(item is None or item.claim_id == claim.claim_id for item in records)
+            child_ownership_matches
+            and all(item is None or item.claim_id == claim.claim_id for item in records)
             and idempotency.claim_id == claim.claim_id
             and idempotency.session_id in {'', active_session_id}
             and (
@@ -698,8 +738,10 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
+            or (existing_handoff is not None and existing_handoff.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')
