@@ -306,6 +306,7 @@ def get_workbench_claim_detail(
             item.model_dump(mode='json') for item in repository.list_customer_updates(claim_id)
         ],
         external_claim=claim.external_claim,
+        external_service_consents=claim.external_service_consents,
         assessor_routing=claim.assessor_routing,
         customer_next_step=claim.customer_next_step,
         created_at=claim.created_at,

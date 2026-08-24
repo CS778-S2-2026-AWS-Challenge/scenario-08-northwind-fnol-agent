@@ -1,5 +1,7 @@
 from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
+    AssessorAdapterFailure,
+    AssessorFixtureFailure,
     AssessorServiceAdapter,
     ClaimsServiceAdapter,
 )
@@ -7,11 +9,13 @@ from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     CustomerNextStep,
     ExternalClaimResult,
+    ExternalServiceConsentStatus,
     FormStatus,
     ResponsibleParty,
     RouteAssessorRequest,
@@ -204,11 +208,40 @@ def route_assessor(
             raise _idempotency_error()
         return claim.assessor_routing, True
 
+    consent = next(
+        (
+            record
+            for record in reversed(claim.external_service_consents)
+            if record.consent_ref == payload.claimant_consent_ref
+        ),
+        None,
+    )
+    required_consent_fields = {
+        'claim_id',
+        'external_claim_id',
+        'authorisation_ref',
+        'claimant_consent_ref',
+        'requested_action',
+        'location.region',
+    }
+    if (
+        consent is None
+        or consent.status is not ExternalServiceConsentStatus.GRANTED
+        or consent.service_identity != 'vehicle_damage_assessment_routing'
+        or consent.requested_action != payload.requested_action
+        or not required_consent_fields.issubset(consent.permitted_fields)
+    ):
+        raise _authorisation_error(
+            'Assessor routing requires matching active claimant consent for the minimum '
+            'data scope.',
+        )
+
     decision = repository.get_agent_decision_internal(payload.claim_id, payload.authorisation_ref)
     if (
         decision is None
         or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
         or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        or decision.resulting_revision != claim.revision
     ):
         raise _authorisation_error(
             'Assessor routing requires an authorised rule or staff decision.',
@@ -218,14 +251,61 @@ def route_assessor(
         outcome = adapter.route_assessor(payload, fingerprint)
     except AdapterIdempotencyConflict as conflict:
         raise _idempotency_error() from conflict
+    except AssessorAdapterFailure as failure:
+        unavailable = failure.code in {
+            AssessorFixtureFailure.TIMEOUT,
+            AssessorFixtureFailure.UNAVAILABLE,
+        }
+        messages = {
+            AssessorFixtureFailure.TIMEOUT: (
+                'The assessment request did not complete. The claim is saved and the same '
+                'request can be retried safely.'
+            ),
+            AssessorFixtureFailure.UNAVAILABLE: (
+                'The assessment service is unavailable. The claim is saved and no assessor '
+                'has been assigned.'
+            ),
+            AssessorFixtureFailure.ACCESS_DENIED: (
+                'The assessment service did not accept the request authority. Northwind must '
+                'review access before retrying.'
+            ),
+            AssessorFixtureFailure.MALFORMED: (
+                'The assessment service returned an unusable response. The claim is saved and '
+                'the adapter mapping must be reviewed.'
+            ),
+        }
+        raise ApiError(
+            status_code=503 if unavailable else 502,
+            code='DEPENDENCY_UNAVAILABLE' if unavailable else 'DEPENDENCY_FAILED',
+            message=messages[failure.code],
+            details=[ErrorDetail(field='assessor_service', reason=failure.code.value)],
+            retryable=unavailable,
+        ) from failure
+
+    if outcome.result.routing_status not in {
+        AssessorRoutingStatus.ASSIGNED,
+        AssessorRoutingStatus.QUEUED,
+    }:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The assessment service returned a non-success routing state.',
+            details=[
+                ErrorDetail(
+                    field='routing_status',
+                    reason=outcome.result.routing_status.value,
+                )
+            ],
+        )
 
     timestamp = now_utc()
+    assigned = outcome.result.routing_status is AssessorRoutingStatus.ASSIGNED
     updated_claim = claim.model_copy(
         update={
             'assessor_routing': outcome.result,
             'assessor_routing_fingerprint': fingerprint,
             'customer_next_step': CustomerNextStep(
-                status='assessor_assigned',
+                status='assessor_assigned' if assigned else 'awaiting_assessor_assignment',
                 summary=outcome.result.next_step,
                 responsible_party=ResponsibleParty.EXTERNAL_PARTY,
                 expected_by=outcome.result.expected_by,

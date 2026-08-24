@@ -163,7 +163,7 @@ class ClaimStateEffects(ReferenceContractModel):
 class ExternalServiceScenario(ReferenceContractModel):
     schema_version: Literal['1.0']
     scenario_id: str = Field(min_length=1)
-    implementation_status: Literal['contract_only']
+    implementation_status: Literal['contract_only', 'fixture_implemented']
     existing_boundary: Literal['POST /internal/v1/assessors/route']
     requirement_references: list[RequirementReference] = Field(min_length=1)
     participant: ExternalParticipant

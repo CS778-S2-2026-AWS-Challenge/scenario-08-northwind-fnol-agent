@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
+    AssessorFixtureFailure,
     ClaimCreationOutcome,
     ClaimsServiceAdapter,
     MockAssessorServiceAdapter,
@@ -13,14 +14,19 @@ from backend.adapters.claims_service import (
 )
 from backend.app import create_app
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     CustomerNextStep,
     ExternalClaimResult,
+    ExternalServiceConsent,
+    ExternalServiceConsentStatus,
     IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
@@ -29,6 +35,14 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.support import now_utc
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
+ASSESSOR_CONSENT_FIELDS = [
+    'claim_id',
+    'external_claim_id',
+    'authorisation_ref',
+    'claimant_consent_ref',
+    'requested_action',
+    'location.region',
+]
 
 
 def create_working_claim(client: TestClient, key: str = 'working-claim') -> dict[str, object]:
@@ -84,6 +98,39 @@ def save_authorisation(
     )
 
 
+def grant_assessor_consent(
+    repository: FixtureRepository,
+    claim_id: str,
+    *,
+    consent_ref: str = 'cns_vehicle_assessment',
+    status: ExternalServiceConsentStatus = ExternalServiceConsentStatus.GRANTED,
+    permitted_fields: list[str] | None = None,
+    requested_action: str = 'vehicle_damage_assessment',
+) -> int:
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    timestamp = now_utc()
+    consent = ExternalServiceConsent(
+        consent_ref=consent_ref,
+        service_identity='vehicle_damage_assessment_routing',
+        requested_action=requested_action,
+        permitted_fields=permitted_fields or ASSESSOR_CONSENT_FIELDS,
+        status=status,
+        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=claim.customer_id),
+        granted_at=timestamp,
+        withdrawn_at=(timestamp if status is ExternalServiceConsentStatus.WITHDRAWN else None),
+    )
+    updated = claim.model_copy(
+        update={
+            'external_service_consents': [*claim.external_service_consents, consent],
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    repository.save_claim(updated, expected_revision=claim.revision)
+    return updated.revision
+
+
 def creation_payload(
     claim_id: str,
     revision: int,
@@ -100,6 +147,73 @@ def creation_payload(
         'pending_evidence': [],
         'route': route,
     }
+
+
+def prepare_assessor_request(
+    client: TestClient,
+    repository: FixtureRepository,
+    *,
+    key: str,
+    grant_consent: bool = True,
+    consent_status: ExternalServiceConsentStatus = ExternalServiceConsentStatus.GRANTED,
+    permitted_fields: list[str] | None = None,
+) -> tuple[dict[str, object], int]:
+    created = create_working_claim(client, key)
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+    create_decision = f'dec_create_{key}'
+    save_authorisation(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        session_id=session_id,
+        decision_id=create_decision,
+        revision=1,
+        action=AgentAction.CREATE_CLAIM,
+        reason_code='CLAIM_CREATION_AUTHORISED',
+    )
+    creation_response = client.post(
+        '/internal/v1/claims/create',
+        headers=INTEGRATION_AUTH,
+        json=creation_payload(claim_id, 1, create_decision),
+    )
+    assert creation_response.status_code == 201
+    consent_ref = f'cns_{key}'
+    revision = 2
+    if grant_consent:
+        revision = grant_assessor_consent(
+            repository,
+            claim_id,
+            consent_ref=consent_ref,
+            status=consent_status,
+            permitted_fields=permitted_fields,
+        )
+    route_decision = f'dec_route_{key}'
+    save_authorisation(
+        repository,
+        claim_id=claim_id,
+        customer_id='cus_demo',
+        session_id=session_id,
+        decision_id=route_decision,
+        revision=revision,
+        action=AgentAction.PROCEED,
+        reason_code='ASSESSOR_RULE_AUTHORISED',
+    )
+    return (
+        {
+            'claim_id': claim_id,
+            'external_claim_id': creation_response.json()['external_claim_id'],
+            'authorisation_ref': route_decision,
+            'claimant_consent_ref': consent_ref,
+            'requested_action': 'vehicle_damage_assessment',
+            'location': {'region': 'Auckland'},
+        },
+        revision,
+    )
 
 
 def test_claim_creation_returns_complete_result_and_deduplicates_by_working_claim(
@@ -322,6 +436,8 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
         headers=INTEGRATION_AUTH,
         json=creation_payload(claim_id, 1, create_decision),
     ).json()
+    consent_ref = 'cns_routed_claim'
+    consent_revision = grant_assessor_consent(repository, claim_id, consent_ref=consent_ref)
     route_decision = 'dec_assessor_rule'
     save_authorisation(
         repository,
@@ -329,7 +445,7 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
         customer_id='cus_demo',
         session_id=session_id,
         decision_id=route_decision,
-        revision=2,
+        revision=consent_revision,
         action=AgentAction.PROCEED,
         reason_code='ASSESSOR_RULE_AUTHORISED',
     )
@@ -337,6 +453,7 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
         'claim_id': claim_id,
         'external_claim_id': creation['external_claim_id'],
         'authorisation_ref': route_decision,
+        'claimant_consent_ref': consent_ref,
         'requested_action': 'vehicle_damage_assessment',
         'location': {'region': 'Auckland'},
     }
@@ -364,8 +481,206 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     assert body['limitations']
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
-    assert stored.revision == 3
+    assert stored.revision == 4
     assert stored.customer_next_step.status == 'assessor_assigned'
+
+
+def test_assessor_routing_requires_consent_from_the_shared_claim_context() -> None:
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key='missing-consent',
+            grant_consent=False,
+        )
+        response = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert 'claimant consent' in response.json()['error']['message']
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision
+    assert stored.assessor_routing is None
+
+
+@pytest.mark.parametrize(
+    ('key', 'status', 'permitted_fields'),
+    [
+        ('withdrawn-consent', ExternalServiceConsentStatus.WITHDRAWN, None),
+        (
+            'insufficient-consent',
+            ExternalServiceConsentStatus.GRANTED,
+            [field for field in ASSESSOR_CONSENT_FIELDS if field != 'location.region'],
+        ),
+    ],
+)
+def test_assessor_routing_rejects_withdrawn_or_insufficient_consent(
+    key: str,
+    status: ExternalServiceConsentStatus,
+    permitted_fields: list[str] | None,
+) -> None:
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key=key,
+            consent_status=status,
+            permitted_fields=permitted_fields,
+        )
+        response = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == 409
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision
+    assert stored.assessor_routing is None
+
+
+def test_assessor_routing_rejects_authority_from_an_older_claim_revision() -> None:
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key='stale-assessor-authority',
+        )
+        claim = repository.get_claim_internal(str(payload['claim_id']))
+        assert claim is not None
+        repository.save_claim(
+            claim.model_copy(update={'revision': revision + 1}),
+            expected_revision=revision,
+        )
+        response = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision + 1
+    assert stored.assessor_routing is None
+
+
+@pytest.mark.parametrize(
+    ('failure', 'status_code', 'error_code', 'retryable'),
+    [
+        (AssessorFixtureFailure.TIMEOUT, 503, 'DEPENDENCY_UNAVAILABLE', True),
+        (AssessorFixtureFailure.UNAVAILABLE, 503, 'DEPENDENCY_UNAVAILABLE', True),
+        (AssessorFixtureFailure.ACCESS_DENIED, 502, 'DEPENDENCY_FAILED', False),
+        (AssessorFixtureFailure.MALFORMED, 502, 'DEPENDENCY_FAILED', False),
+    ],
+)
+def test_assessor_fixture_failures_preserve_claim_state_and_never_report_success(
+    failure: AssessorFixtureFailure,
+    status_code: int,
+    error_code: str,
+    retryable: bool,
+) -> None:
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(failure,))
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key=f'assessor-{failure.value}',
+        )
+        response = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == status_code
+    error = response.json()['error']
+    assert error['code'] == error_code
+    assert error['retryable'] is retryable
+    assert error['details'] == [{'field': 'assessor_service', 'reason': failure.value}]
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision
+    assert stored.assessor_routing is None
+    assert stored.customer_next_step.status == 'claim_created'
+
+
+def test_timeout_retry_is_safe_and_deduplicates_after_success() -> None:
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(AssessorFixtureFailure.TIMEOUT,))
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key='timeout-retry',
+        )
+        timed_out = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        retry = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        replay = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        changed = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json={**payload, 'location': {'region': 'Wellington'}},
+        )
+
+    assert timed_out.status_code == 503
+    assert retry.status_code == 201
+    assert replay.status_code == 200
+    assert replay.json() == retry.json()
+    assert changed.status_code == 409
+    assert changed.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision + 1
+    assert stored.assessor_routing is not None
+    assert stored.assessor_routing.routing_status is AssessorRoutingStatus.ASSIGNED
+
+
+def test_queued_assessor_result_preserves_queue_state_without_claiming_assignment() -> None:
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(routing_status=AssessorRoutingStatus.QUEUED)
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key='queued-assessor',
+        )
+        response = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+    assert response.status_code == 201
+    assert response.json()['routing_status'] == 'queued'
+    assert response.json()['assessor_reference'] is None
+    stored = repository.get_claim_internal(str(payload['claim_id']))
+    assert stored is not None
+    assert stored.revision == revision + 1
+    assert stored.customer_next_step.status == 'awaiting_assessor_assignment'
 
 
 def test_assessor_routing_is_not_authorised_by_severity_alone(
@@ -395,6 +710,8 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
         headers=INTEGRATION_AUTH,
         json=creation_payload(claim_id, 1, create_decision),
     ).json()
+    consent_ref = 'cns_severity_only'
+    consent_revision = grant_assessor_consent(repository, claim_id, consent_ref=consent_ref)
     severity_decision = 'dec_severity_only'
     save_authorisation(
         repository,
@@ -402,7 +719,7 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
         customer_id='cus_demo',
         session_id=session_id,
         decision_id=severity_decision,
-        revision=2,
+        revision=consent_revision,
         action=AgentAction.PROCEED,
         reason_code='COMPLEX_EVENT_REVIEW',
     )
@@ -414,6 +731,7 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
             'claim_id': claim_id,
             'external_claim_id': creation['external_claim_id'],
             'authorisation_ref': severity_decision,
+            'claimant_consent_ref': consent_ref,
             'requested_action': 'vehicle_damage_assessment',
             'location': {'region': 'Auckland'},
         },
@@ -493,6 +811,7 @@ def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() 
         claim_id='clm_fixture',
         external_claim_id='ext_fixture',
         authorisation_ref='dec_route',
+        claimant_consent_ref='cns_route',
         requested_action='vehicle_damage_assessment',
         location={'region': 'Auckland'},
     )

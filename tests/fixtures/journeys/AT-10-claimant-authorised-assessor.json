@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "scenario_id": "AT-10-claimant-authorised-assessor",
-  "implementation_status": "contract_only",
+  "implementation_status": "fixture_implemented",
   "existing_boundary": "POST /internal/v1/assessors/route",
   "requirement_references": [
     {
@@ -56,7 +56,7 @@
       "name": "claimant_consent_ref",
       "purpose": "Prove that the claimant or authorised representative permitted the task-specific disclosure.",
       "source": "persisted consent record",
-      "current_boundary_support": "gap_for_issue_252"
+      "current_boundary_support": "supported"
     },
     {
       "name": "requested_action",
@@ -182,8 +182,8 @@
   },
   "known_limitations": [
     "This is a controlled scenario contract, not evidence that a production assessor provider is connected.",
-    "The current RouteAssessorRequest does not carry claimant_consent_ref; issue #252 must preserve this boundary without embedding provider payloads.",
-    "The current fixture adapter demonstrates assigned or queued outcomes but does not implement the full consent and failure lifecycle.",
+    "The adapter fixture validates claimant_consent_ref, but the claimant-facing consent capture experience remains work for issue #262.",
+    "The fixture implements deterministic success and failure outcomes; it is not evidence that a production assessor provider is connected.",
     "The exact Challenge Key Feature 2 wording remains outside the repository and must be verified before claiming complete challenge coverage.",
     "Northwind production retry counts, timeouts, cancellation behaviour, participant access, and service-level timings remain unapproved."
   ]

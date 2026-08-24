@@ -1673,6 +1673,7 @@ Request requires an authorised rule or staff decision:
   "claim_id": "clm_01J4Y7Q2AW",
   "external_claim_id": "ext_fixture_1042",
   "authorisation_ref": "dec_01J4YEBP6X",
+  "claimant_consent_ref": "cns_01J4YECONSENT",
   "requested_action": "vehicle_damage_assessment",
   "location": {
     "region": "Auckland"
@@ -1698,7 +1699,18 @@ Response `201`, or `200` for an idempotent replay:
 ```
 
 The authorisation reference must resolve to an authorised decision containing
-`ASSESSOR_RULE_AUTHORISED`. A severity value by itself is not routing authority.
+`ASSESSOR_RULE_AUTHORISED` for the current claim revision. The claimant-consent reference
+must resolve from the shared Working Claim to a granted record for
+`vehicle_damage_assessment_routing`, the requested action, and the minimum request fields.
+Northwind authority and claimant consent are separate requirements; a severity value by
+itself is not routing authority.
+
+The controlled fixture can return assigned or queued success. Timeout and unavailable
+return `DEPENDENCY_UNAVAILABLE` with `retryable: true`; access-denied or malformed fixture
+outcomes return `DEPENDENCY_FAILED` with `retryable: false`. All four preserve the current
+claim and include a bounded `assessor_service` reason. An identical retry after a transient
+failure uses the same operation identity, and an identical retry after success returns the
+accepted result without creating another task.
 
 ## Reason Codes
 

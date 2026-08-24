@@ -24,7 +24,7 @@ provider payloads, or SDK types.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | claim-creation result, routing result, external participant task, idempotency result | `claim_id` and operation identity |
+| Integration | external-service consent, claim-creation result, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
 | Configuration | versioned model, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
@@ -46,10 +46,11 @@ and checksums rather than embedding those bytes.
 8. Read staff queues by priority, state, owner, next action, and service timing.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Resolve the active configuration version and read its immutable publication record.
-12. Read customer memory only through a purpose-limited, visibility-filtered access path.
-13. Create and process follow-up tasks by due time, responsibility, priority, and status.
-14. Append audit events and query them by authorised subject and time range.
+11. Resolve a current task-specific claimant consent before invoking an external participant.
+12. Resolve the active configuration version and read its immutable publication record.
+13. Read customer memory only through a purpose-limited, visibility-filtered access path.
+14. Create and process follow-up tasks by due time, responsibility, priority, and status.
+15. Append audit events and query them by authorised subject and time range.
 
 ## Claim Revision and Idempotency
 
@@ -60,6 +61,10 @@ and checksums rather than embedding those bytes.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- External-service consent records are claim-scoped and retain service identity, requested
+  action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
+  consent change advances the Working Claim revision; an adapter result cannot invent or
+  reactivate consent.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 

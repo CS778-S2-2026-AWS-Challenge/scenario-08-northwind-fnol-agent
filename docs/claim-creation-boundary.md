@@ -45,6 +45,9 @@ The public API remains unchanged when the active adapter changes.
 - Pending evidence remains recorded and is not silently discarded.
 - Model output, severity, retrieval, or an adapter response cannot independently
   authorise creation or assessor routing.
+- Assessor routing requires both a current Northwind rule/staff decision and a matching
+  active claimant-consent record from the shared Working Claim. These are separate
+  authorities and neither substitutes for the other.
 
 ## Failure Behaviour
 
@@ -62,6 +65,14 @@ Routing, assessor tasks, repair tasks, or another participant action require the
 provider-neutral command, result, authority, idempotency, visibility, and failure
 contract. Claim creation does not automatically grant an external participant access to
 the complete claim.
+
+The current controlled assessor fixture requires `claimant_consent_ref` and validates the
+record's service identity, requested action, granted status, and minimum permitted fields
+before the adapter is called. The adapter supports deterministic assigned and queued
+successes plus timeout, unavailable, access-denied, and malformed failures. A failure
+preserves the current claim and never becomes an assignment. Timeout and unavailable are
+retryable with the same operation identity; access-denied and malformed responses require
+review before another attempt. Automatic retry counts remain unapproved.
 
 ## Runtime-profile Relationship
 

@@ -40,10 +40,10 @@ claimant consent step and records:
 - claimant-visible success and failure wording; and
 - the exact Claim State fields that may change after success, with no failure mutation.
 
-The current `RouteAssessorRequest` does not contain `claimant_consent_ref`. The scenario
-marks that field as `gap_for_issue_252`; this issue does not change the API or simulate
-consent that the runtime cannot yet prove. The exact external Challenge Key Feature 2
-wording is also absent from the repository, so the scenario records that reference as
+The #252 adapter fixture adds `claimant_consent_ref` to `RouteAssessorRequest` and checks
+it against consent held in the shared Working Claim before calling the adapter. Claimant-
+facing consent capture remains #262 scope. The exact external Challenge Key Feature 2
+wording is absent from the repository, so the scenario records that reference as
 `unverified_external_brief` rather than claiming complete challenge-feature coverage.
 
 ## Repeatable Check

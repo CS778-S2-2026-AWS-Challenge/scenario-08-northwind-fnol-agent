@@ -55,7 +55,7 @@ def test_external_service_scenario_covers_consent_lifecycle_and_failures() -> No
 
     input_support = {field.name: field.current_boundary_support for field in scenario.minimum_input}
     assert scenario.consent.required is True
-    assert input_support['claimant_consent_ref'] == 'gap_for_issue_252'
+    assert input_support['claimant_consent_ref'] == 'supported'
     assert {outcome.code for outcome in scenario.failure_outcomes} == set(FailureOutcomeCode)
     assert {'consent_required', 'authorised', 'submitting', 'queued', 'assigned', 'failed'} == {
         status.status for status in scenario.status_lifecycle
@@ -66,7 +66,7 @@ def test_external_service_scenario_covers_consent_lifecycle_and_failures() -> No
 def test_external_service_scenario_does_not_claim_unverified_implementation() -> None:
     scenario = load_service_scenario()
 
-    assert scenario.implementation_status == 'contract_only'
+    assert scenario.implementation_status == 'fixture_implemented'
     assert scenario.participant.provider_identity == 'unverified'
     assert scenario.claim_state_effects.failure_may_change == []
     assert {'coverage', 'fraud signal', 'claim approval or rejection'} <= set(
