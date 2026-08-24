@@ -1,10 +1,16 @@
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.adapters.evidence_storage import EvidenceUploadNotFound, MockEvidenceStorage
+from backend.adapters.evidence_storage import (
+    EvidenceUploadNotFound,
+    MockEvidenceStorage,
+    StoredUpload,
+)
 from backend.domain.models import EvidenceFileStatus
 from backend.repositories.fixture import FixtureRepository
 
@@ -528,6 +534,49 @@ def integration_headers(key: str, revision: int) -> dict[str, str]:
         'Idempotency-Key': key,
         'If-Match': str(revision),
     }
+
+
+def test_completion_transition_uses_storage_result_source(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = create_claim(client, auth_headers, 'storage-source-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'storage-source', 1)
+    app = cast(FastAPI, client.app)
+    storage = cast(MockEvidenceStorage, app.state.evidence_storage)
+    original_complete = storage.complete_upload
+
+    def complete_with_configured_source(
+        *,
+        claim_id: str,
+        evidence_id: str,
+        checksum: str,
+        media_type: str,
+        size_bytes: int,
+    ) -> StoredUpload:
+        stored = original_complete(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            checksum=checksum,
+            media_type=media_type,
+            size_bytes=size_bytes,
+        )
+        return replace(stored, source_id='configured_test_evidence_storage')
+
+    monkeypatch.setattr(storage, 'complete_upload', complete_with_configured_source)
+
+    complete_upload(client, auth_headers, claim_id, evidence_id, 'storage-source', 2)
+
+    evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert evidence is not None
+    transitions = evidence.provenance['transition_history']
+    assert isinstance(transitions, list)
+    assert transitions[-1]['actor_id'] == 'configured_test_evidence_storage'
 
 
 def test_processing_rejects_unknown_targets_reused_keys_and_unregistered_facts(
