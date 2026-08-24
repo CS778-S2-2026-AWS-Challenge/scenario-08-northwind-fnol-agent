@@ -23,19 +23,22 @@ returned as persisted history.
 
 ## Page and State Flow
 
-1. The claimant starts or resumes a claim and sends an intake message.
-2. The claimant client shows the pending sender, audience, and `Sending` state.
-3. Success adds persisted claimant and Agent messages as `Delivered`. Failure retains the text,
-   shows `Failed before delivery`, and offers a safe retry.
-4. A support request creates a durable context-preserving handoff. Notification failure is shown as
-   `queued_locally` without losing the Workbench queue item.
-5. Staff open the same claim, review the communication and packet, and accept the handoff.
-6. Staff may generate a controlled prototype suggestion. It is visibly internal, can be accepted
-   for editing, edited, rejected, or fail, and cannot send itself.
-7. Staff send the reviewed composer text. The Workbench shows `Sending`, `Delivered`, or
-   `Failed before delivery`; retry reuses the original idempotency key.
-8. The claimant refreshes or resumes, sees the persisted staff reply, and continues without
-   re-entering confirmed facts. Resolving the handoff writes a separate claimant-safe next step.
+The journey can be read as a simple conversation moving between two screens:
+
+1. On the claimant website, the claimant starts a claim and sends a message.
+2. While the message is being sent, the claimant sees `Sending` beside their message.
+3. If sending succeeds, the message changes to `Delivered`. If it fails, the claimant keeps the
+   text and sees a retry button instead of having to type it again.
+4. When the claimant asks for a person, the saved claim and conversation are placed in the staff
+   Workbench queue. The claim is not lost if only the notification fails.
+5. On the employee website, a staff member opens that claim, reads the saved information, and
+   accepts the handoff.
+6. Staff may ask the Agent to draft a reply. The suggestion is clearly marked as internal: staff
+   can use it, change it, or reject it, but it is never sent automatically.
+7. Staff review the final wording and click send. A failed reply stays visible and can be retried
+   without creating two copies of the same message.
+8. Back on the claimant website, the claimant refreshes or resumes the claim, reads the staff
+   reply, and continues from the saved point without completing the form again.
 
 ## Repeatable Acceptance Check
 
@@ -48,16 +51,19 @@ returned as persisted history.
 
 ### Basic implementation-owner check
 
-| Step | Action | Expected result | Result / checker / date |
+Follow the rows in order and use one test claim throughout. “Customer page” means the claimant
+website on port `8001`; “employee page” means the Workbench on port `8002`.
+
+| Step | Where and what to do | What you should see | Result / checker / date |
 |---|---|---|---|
-| 1 | Send a claimant intake message | Pending item names claimant sender and staff audience; success becomes delivered | Automated component check passed, 2026-08-24 |
-| 2 | Fail one claimant request, then retry | Text remains; failure is explicit; retry succeeds once with the same idempotency keys | Automated component check passed, 2026-08-24 |
-| 3 | Request human support | Handoff carries saved context and appears in the Workbench | Existing API and component checks passed, 2026-08-24 |
-| 4 | Accept the handoff and open customer chat | Persisted history identifies sender, claimant audience, and delivery | Existing API and Workbench checks passed, 2026-08-24 |
-| 5 | Generate, use, edit, and reject a suggestion | State changes are visible and no suggestion sends itself | Automated Workbench interaction check passed, 2026-08-24 |
-| 6 | Fail one staff reply, then retry | Failed bubble remains; retry uses the same key and produces one delivered message | Static state and API idempotency checks passed; manual failure simulation remains repeatable |
-| 7 | Refresh or resume the claimant client | Staff reply appears and claimant can continue from current claim state | Existing component check passed, 2026-08-24 |
-| 8 | Resolve the handoff | Claimant-safe continuation appears; internal reasoning stays staff-only | Existing API and visibility checks passed, 2026-08-24 |
+| 1 | Customer page: start a claim and send a message | The message briefly shows `Sending`, identifies the claimant as sender, and then shows `Delivered` | Automated component check passed, 2026-08-24 |
+| 2 | Customer page: use browser developer tools to make one message request fail, then select retry | The original text remains visible, the failure is explained, and retry creates only one delivered message | Automated component check passed, 2026-08-24 |
+| 3 | Customer page: ask for help from a staff member | The page confirms that the claim was handed to staff; the same claim appears in the employee queue with its saved details | Existing API and component checks passed, 2026-08-24 |
+| 4 | Employee page: open the new claim, accept it, and open the customer conversation | Staff can see who sent each saved message, who can read it, and whether it was delivered | Existing API and Workbench checks passed, 2026-08-24 |
+| 5 | Employee page: generate an Agent reply suggestion; try use, edit, and reject | Each suggestion state is shown. Nothing reaches the claimant until staff deliberately click the normal send button | Automated Workbench interaction check passed, 2026-08-24 |
+| 6 | Employee page: make one reply request fail, then select retry | The unsent reply and failure message remain visible. Retry sends one copy, which changes to `Delivered` | Static state and API idempotency checks passed; manual failure simulation remains repeatable |
+| 7 | Customer page: refresh the page or reopen the saved claim | The staff reply appears and the claimant can continue from the saved claim without entering confirmed information again | Existing component check passed, 2026-08-24 |
+| 8 | Employee page: resolve the handoff; then check the customer page again | The claimant sees a plain-language next step. Internal staff notes and Agent drafting details are not visible | Existing API and visibility checks passed, 2026-08-24 |
 
 ### Independent repeat
 
