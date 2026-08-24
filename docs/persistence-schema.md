@@ -7,6 +7,20 @@ rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical sch
 Physical mappings belong inside the selected runtime-profile adapters and must preserve
 this contract.
 
+The current MongoDB work remains an unselected adapter implementation. Its repository
+method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
+Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
+Idempotency records. Mock-backed tests verify document mapping, ownership filters,
+relationship checks, revision conflicts, and mutation ordering. These tests do not prove
+MongoDB transaction rollback or concurrency behaviour.
+
+`DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
+verified against a transaction-capable supported MongoDB deployment, the protected
+evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
+The fixture profile remains the only complete profile at this stage. MongoDB adapter
+documents use `record_type` as their internal discriminator so domain fields such as
+Evidence `kind` and Retrieval `kind` remain unchanged.
+
 Public APIs expose domain identifiers and typed projections only. They never expose
 collection names, table names, partition keys, indexes, bucket keys, vector-index names,
 provider payloads, or SDK types.
@@ -24,7 +38,7 @@ provider payloads, or SDK types.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | external-service consent, claim-creation result, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
+| Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
 | Configuration | versioned model, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
@@ -47,10 +61,12 @@ and checksums rather than embedding those bytes.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
 11. Resolve a current task-specific claimant consent before invoking an external participant.
-12. Resolve the active configuration version and read its immutable publication record.
-13. Read customer memory only through a purpose-limited, visibility-filtered access path.
-14. Create and process follow-up tasks by due time, responsibility, priority, and status.
-15. Append audit events and query them by authorised subject and time range.
+12. Reserve an immutable external-operation identity and fingerprint before invocation, then
+    recover its accepted result independently of a later Claim State compare-and-set.
+13. Resolve the active configuration version and read its immutable publication record.
+14. Read customer memory only through a purpose-limited, visibility-filtered access path.
+15. Create and process follow-up tasks by due time, responsibility, priority, and status.
+16. Append audit events and query them by authorised subject and time range.
 
 ## Claim Revision and Idempotency
 
@@ -65,6 +81,12 @@ and checksums rather than embedding those bytes.
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
   reactivate consent.
+- Assessor routing persists its immutable identity, complete request fingerprint, consent and
+  authority references, authorised claim revision, and `prepared` state before provider
+  invocation. Retryable failure, terminal failure, and accepted result are explicit transitions.
+- Provider acceptance is durable before the final Claim State compare-and-set. If another claim
+  mutation advances the revision first, an unchanged retry reconciles the accepted result into a
+  new claim revision without invoking or creating a second external task.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 
@@ -141,6 +163,13 @@ and checksums rather than embedding those bytes.
   decision.
 - Staff decisions are separate immutable records and retain the source references that
   motivated the review.
+- An Agent decision identifies whether its proposal came from `controlled_agent` or
+  `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
+  profile, provider-reported model identifier, and provider request identifier when supplied.
+  These provider references are internal-only and never enter claimant projections.
+- Model-authored customer prose and model-proposed internal signals are not persistence
+  authority. Claimant-visible response fields are server-rendered after deterministic
+  validation, and any non-empty model signal proposal rejects the complete turn before write.
 
 ## Handoff and Staff-work Invariants
 

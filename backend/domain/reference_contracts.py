@@ -23,8 +23,29 @@ class SourceVersionBasis(str, Enum):
 
 class SourceSection(ReferenceContractModel):
     section_path: str = Field(min_length=1)
-    page: int | None = Field(default=None, ge=1)
+    printed_pages: list[int] | None = None
+    pdf_page_indices: list[int] | None = None
     intended_use: str = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_page_locators(self) -> 'SourceSection':
+        if (self.printed_pages is None) != (self.pdf_page_indices is None):
+            raise ValueError('printed_pages and pdf_page_indices must be supplied together')
+        if self.printed_pages is None or self.pdf_page_indices is None:
+            return self
+        if not self.printed_pages or not self.pdf_page_indices:
+            raise ValueError('page locator lists must not be empty')
+        if any(page < 1 for page in self.printed_pages):
+            raise ValueError('printed_pages use one-based document page numbers')
+        if any(page_index < 0 for page_index in self.pdf_page_indices):
+            raise ValueError('pdf_page_indices use zero-based file page indices')
+        if self.printed_pages != sorted(set(self.printed_pages)):
+            raise ValueError('printed_pages must be unique and ordered')
+        if self.pdf_page_indices != sorted(set(self.pdf_page_indices)):
+            raise ValueError('pdf_page_indices must be unique and ordered')
+        if len(self.printed_pages) != len(self.pdf_page_indices):
+            raise ValueError('printed and PDF page locators must map one to one')
+        return self
 
 
 class RagSourceRecord(ReferenceContractModel):
@@ -116,7 +137,13 @@ class ClaimantConsent(ReferenceContractModel):
     authorised_actor: str = Field(min_length=1)
     consent_record_field: str = Field(min_length=1)
     claimant_prompt: str = Field(min_length=1)
-    withdrawal_boundary: str = Field(min_length=1)
+    withdrawal_boundary: 'ConsentWithdrawalBoundary'
+
+
+class ConsentWithdrawalBoundary(ReferenceContractModel):
+    before_provider_acceptance: str = Field(min_length=1)
+    after_provider_acceptance: str = Field(min_length=1)
+    provider_cancellation_status: Literal['requires_separately_approved_capability']
 
 
 class ServiceContractField(ReferenceContractModel):
@@ -126,8 +153,18 @@ class ServiceContractField(ReferenceContractModel):
     current_boundary_support: Literal['supported', 'gap_for_issue_252']
 
 
+class ServiceLifecycleStatus(str, Enum):
+    CONSENT_REQUIRED = 'consent_required'
+    AUTHORISED = 'authorised'
+    SUBMITTING = 'submitting'
+    QUEUED = 'queued'
+    ASSIGNED = 'assigned'
+    RETRYABLE_FAILURE = 'retryable_failure'
+    TERMINAL_FAILURE = 'terminal_failure'
+
+
 class ServiceStatus(ReferenceContractModel):
-    status: str = Field(min_length=1)
+    status: ServiceLifecycleStatus
     terminal: bool
     claimant_meaning: str = Field(min_length=1)
 
@@ -142,6 +179,10 @@ class FailureOutcomeCode(str, Enum):
 class FailureOutcome(ReferenceContractModel):
     code: FailureOutcomeCode
     retryable: bool
+    lifecycle_status: Literal[
+        ServiceLifecycleStatus.RETRYABLE_FAILURE,
+        ServiceLifecycleStatus.TERMINAL_FAILURE,
+    ]
     claimant_wording: str = Field(min_length=1)
     claim_state_effect: Literal['preserve_current_claim']
     retry_expectation: str = Field(min_length=1)
@@ -191,4 +232,36 @@ class ExternalServiceScenario(ReferenceContractModel):
         statuses = [status.status for status in self.status_lifecycle]
         if len(statuses) != len(set(statuses)):
             raise ValueError('status lifecycle values must be unique')
+        if set(statuses) != set(ServiceLifecycleStatus):
+            raise ValueError('all required lifecycle statuses must be present exactly once')
+
+        status_terminality = {status.status: status.terminal for status in self.status_lifecycle}
+        expected_terminality = {
+            ServiceLifecycleStatus.CONSENT_REQUIRED: False,
+            ServiceLifecycleStatus.AUTHORISED: False,
+            ServiceLifecycleStatus.SUBMITTING: False,
+            ServiceLifecycleStatus.QUEUED: False,
+            ServiceLifecycleStatus.ASSIGNED: True,
+            ServiceLifecycleStatus.RETRYABLE_FAILURE: False,
+            ServiceLifecycleStatus.TERMINAL_FAILURE: True,
+        }
+        if status_terminality != expected_terminality:
+            raise ValueError('lifecycle terminality does not match the retry contract')
+
+        expected_retryability = {
+            FailureOutcomeCode.TIMEOUT: True,
+            FailureOutcomeCode.UNAVAILABLE: True,
+            FailureOutcomeCode.ACCESS_DENIED: False,
+            FailureOutcomeCode.MALFORMED: False,
+        }
+        for outcome in self.failure_outcomes:
+            if outcome.retryable is not expected_retryability[outcome.code]:
+                raise ValueError(f'{outcome.code.value} has invalid retryability')
+            expected_status = (
+                ServiceLifecycleStatus.RETRYABLE_FAILURE
+                if outcome.retryable
+                else ServiceLifecycleStatus.TERMINAL_FAILURE
+            )
+            if outcome.lifecycle_status != expected_status:
+                raise ValueError(f'{outcome.code.value} must use {expected_status.value}')
         return self

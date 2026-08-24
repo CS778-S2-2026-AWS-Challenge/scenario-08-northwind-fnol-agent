@@ -28,10 +28,14 @@
   },
   "consent": {
     "required": true,
-    "authorised_actor": "claimant or verified authorised representative",
+    "authorised_actor": "claimant linked to the Working Claim",
     "consent_record_field": "claimant_consent_ref",
     "claimant_prompt": "With your permission, Northwind can share the minimum claim and location details needed to request a vehicle damage assessment. This does not decide coverage or approve repairs. Do you want us to continue?",
-    "withdrawal_boundary": "Consent may be withdrawn until the external request is accepted; after acceptance, Northwind records the withdrawal and coordinates any cancellation through an authorised service path."
+    "withdrawal_boundary": {
+      "before_provider_acceptance": "Withdrawal prevents the external request from being submitted.",
+      "after_provider_acceptance": "Northwind records the withdrawal, but this contract does not promise provider cancellation or recall after acceptance.",
+      "provider_cancellation_status": "requires_separately_approved_capability"
+    }
   },
   "minimum_input": [
     {
@@ -54,7 +58,7 @@
     },
     {
       "name": "claimant_consent_ref",
-      "purpose": "Prove that the claimant or authorised representative permitted the task-specific disclosure.",
+      "purpose": "Prove that the claimant linked to the Working Claim permitted the task-specific disclosure.",
       "source": "persisted consent record",
       "current_boundary_support": "supported"
     },
@@ -113,15 +117,21 @@
       "claimant_meaning": "The service confirmed an assessor assignment and returned the next step."
     },
     {
-      "status": "failed",
+      "status": "retryable_failure",
+      "terminal": false,
+      "claimant_meaning": "No success is claimed; the current claim is preserved and the same unchanged operation may be retried explicitly."
+    },
+    {
+      "status": "terminal_failure",
       "terminal": true,
-      "claimant_meaning": "No success is claimed; the current claim is preserved with an honest limitation."
+      "claimant_meaning": "No success is claimed; the current claim is preserved and Northwind must review the request before another attempt."
     }
   ],
   "failure_outcomes": [
     {
       "code": "timeout",
       "retryable": true,
+      "lifecycle_status": "retryable_failure",
       "claimant_wording": "The assessment request did not complete. Your claim is saved; Northwind can safely retry the same request.",
       "claim_state_effect": "preserve_current_claim",
       "retry_expectation": "Retry only with the same idempotency identity and unchanged input under a controlled retry policy."
@@ -129,6 +139,7 @@
     {
       "code": "unavailable",
       "retryable": true,
+      "lifecycle_status": "retryable_failure",
       "claimant_wording": "The assessment service is unavailable right now. Your claim is saved, and no assessor has been assigned.",
       "claim_state_effect": "preserve_current_claim",
       "retry_expectation": "A controlled retry may occur later; do not fall through to a different provider or fixture."
@@ -136,6 +147,7 @@
     {
       "code": "access_denied",
       "retryable": false,
+      "lifecycle_status": "terminal_failure",
       "claimant_wording": "We could not send the assessment request because its authorisation was not accepted. Northwind must review the request before trying again.",
       "claim_state_effect": "preserve_current_claim",
       "retry_expectation": "Do not retry automatically; obtain corrected authority or access configuration first."
@@ -143,6 +155,7 @@
     {
       "code": "malformed",
       "retryable": false,
+      "lifecycle_status": "terminal_failure",
       "claimant_wording": "The assessment service returned an unusable response. Your claim is saved; Northwind must review the integration response.",
       "claim_state_effect": "preserve_current_claim",
       "retry_expectation": "Do not repair or reinterpret the provider response into success; review the adapter mapping before retrying."
@@ -182,6 +195,7 @@
   },
   "known_limitations": [
     "This is a controlled scenario contract, not evidence that a production assessor provider is connected.",
+    "Authorised-representative consent is not modelled; the fixture accepts only the claimant linked to the Working Claim.",
     "The adapter fixture validates claimant_consent_ref, but the claimant-facing consent capture experience remains work for issue #262.",
     "The fixture implements deterministic success and failure outcomes; it is not evidence that a production assessor provider is connected.",
     "The exact Challenge Key Feature 2 wording remains outside the repository and must be verified before claiming complete challenge coverage.",

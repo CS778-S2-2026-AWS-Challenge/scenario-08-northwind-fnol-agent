@@ -59,6 +59,7 @@ service mappings below are implementation options, not claims of availability.
 | Customer policy records | policy reference, product, status, effective dates, schedule, endorsements | Determine which contract may apply to the customer | Structured, authorised lookup | Customer-safe facts and staff review according to authority |
 | Claim history | previous claim references, dates, types, status, outcomes | Support continuity and bounded review signals | Structured, customer-scoped lookup | Staff by default; claimant projection requires an explicit contract |
 | External-service consent | consent reference, service purpose, requested action, permitted fields, grant/withdrawal state, actor, timestamps | Prove a claimant-authorised task-specific disclosure before an external participant action | Matching current record only | Claimant-safe consent experience and authorised staff; never a provider credential |
+| External-service operation | immutable operation identity and fingerprint, consent/authority references, prepared/failure/accepted state, provider-neutral result | Recover an external side effect without duplicating it when the Claim State write races or must be retried | Current task result and limitation only | Internal operational record; claimant receives only the safe action projection |
 | Knowledge documents | policy wording, legislation, industry guidance, approved procedures | Answer process and wording questions with citations | RAG retrieval with scope filters | Controlled by document authority and access metadata |
 | Retrieval records | returned facts, citations, source, version, retrieval time, limitations | Preserve what evidence supported an answer or review | Current relevant result only | Customer-safe citation or staff evidence according to source |
 | Handoffs and staff work | transfer packet, queue, owner, staff action, review decision | Preserve responsibility and professional decisions | Status and authorised result only | Internal details remain staff-only |
@@ -218,9 +219,9 @@ from a second profile without a separately approved architecture change.
 
 | Profile | Candidate transactional store | Candidate object store | Candidate knowledge/index services | Status |
 | --- | --- | --- | --- | --- |
-| `fixture` | In-memory fixture repository | Synthetic object adapter | Deterministic fixture retriever | Available for controlled tests and demonstrations |
+| `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
-| `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Candidate; topology and access must be verified |
+| `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Repository adapter in progress; transactions, object storage, topology, and access are not yet verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
 
 These mappings are alternatives. For example, selecting `mongodb` does not
@@ -274,14 +275,23 @@ is intentionally conservative: MongoDB repository code exists, but transaction-c
 persistence, protected object storage, and runtime bundle verification are still
 outstanding.
 
+The `fixture` capability row is the default baseline. When the local fixture profile
+explicitly selects the S3-compatible object adapter, the assembled bundle and readiness
+check report that configured service instead. External bundle injection must match both
+`DATA_RUNTIME_PROFILE` and `NORTHWIND_OBJECT_STORAGE_ADAPTER`; it cannot relabel fixture
+storage as the configured service.
+
 `DATA_RUNTIME_PROFILE` remains the only variable that selects a complete data-runtime
 profile. Provider connection and secret-reference variables are introduced by their
 corresponding adapter contracts rather than treated as profile selectors. The MinIO/S3
-compatible evidence adapter defines `NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
+compatible evidence adapter is explicitly selected by
+`NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible` and defines
+`NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
 `NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID`, `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY`,
 `NORTHWIND_OBJECT_STORAGE_BUCKET`, `NORTHWIND_OBJECT_STORAGE_REGION`, and
-`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`; these variables do not enable a
-runtime profile or make the adapter composition-ready by themselves.
+`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`. Connection or credential variables
+alone do not switch adapters, and this local object-store selection does not enable a
+MongoDB, Cloudflare, or AWS data profile.
 
 ## Knowledge Base and RAG
 
@@ -305,7 +315,8 @@ title
 document_type
 version
 section_path
-page
+printed_pages
+pdf_page_indices
 source_uri
 jurisdiction
 insurer

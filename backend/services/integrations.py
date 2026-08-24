@@ -7,7 +7,11 @@ from backend.adapters.claims_service import (
 )
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.models import (
+    ActorType,
     AgentAction,
+    AssessorRoutingFailureCode,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
     AssessorRoutingResult,
     AssessorRoutingStatus,
     AuthorityOutcome,
@@ -22,7 +26,11 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.repositories.protocols import PersistenceRepository, RevisionConflict
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    PersistenceRepository,
+    RevisionConflict,
+)
 from backend.services.support import now_utc, request_fingerprint
 
 
@@ -47,6 +55,49 @@ def _idempotency_error() -> ApiError:
         status_code=409,
         code='IDEMPOTENCY_CONFLICT',
         message='The integration request was already accepted with different data.',
+    )
+
+
+def _assessor_operation_id(payload: RouteAssessorRequest) -> str:
+    identity = {
+        'claim_id': payload.claim_id,
+        'external_claim_id': payload.external_claim_id,
+        'authorisation_ref': payload.authorisation_ref,
+        'claimant_consent_ref': payload.claimant_consent_ref,
+        'requested_action': payload.requested_action,
+    }
+    return f'asr_op_{request_fingerprint(identity)}'
+
+
+def _assessor_failure_error(failure_code: AssessorRoutingFailureCode) -> ApiError:
+    unavailable = failure_code in {
+        AssessorRoutingFailureCode.TIMEOUT,
+        AssessorRoutingFailureCode.UNAVAILABLE,
+    }
+    messages = {
+        AssessorRoutingFailureCode.TIMEOUT: (
+            'The assessment request did not complete. The claim is saved and the same '
+            'request can be retried safely.'
+        ),
+        AssessorRoutingFailureCode.UNAVAILABLE: (
+            'The assessment service is unavailable. The claim is saved and no assessor '
+            'has been assigned.'
+        ),
+        AssessorRoutingFailureCode.ACCESS_DENIED: (
+            'The assessment service did not accept the request authority. Northwind must '
+            'review access before retrying.'
+        ),
+        AssessorRoutingFailureCode.MALFORMED: (
+            'The assessment service returned an unusable response. The claim is saved and '
+            'the adapter mapping must be reviewed.'
+        ),
+    }
+    return ApiError(
+        status_code=503 if unavailable else 502,
+        code='DEPENDENCY_UNAVAILABLE' if unavailable else 'DEPENDENCY_FAILED',
+        message=messages[failure_code],
+        details=[ErrorDetail(field='assessor_service', reason=failure_code.value)],
+        retryable=unavailable,
     )
 
 
@@ -194,6 +245,7 @@ def route_assessor(
     payload: RouteAssessorRequest,
 ) -> tuple[AssessorRoutingResult, bool]:
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
+    operation_id = _assessor_operation_id(payload)
     claim = repository.get_claim_internal(payload.claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -207,6 +259,26 @@ def route_assessor(
         if claim.assessor_routing_fingerprint != fingerprint:
             raise _idempotency_error()
         return claim.assessor_routing, True
+
+    operation = repository.get_assessor_routing_operation(operation_id)
+    if operation is not None and operation.request_fingerprint != fingerprint:
+        raise _idempotency_error()
+
+    if operation is not None and operation.status is AssessorRoutingOperationStatus.ACCEPTED:
+        assert operation.result is not None
+        return _save_assessor_result(
+            repository,
+            payload.claim_id,
+            fingerprint,
+            operation.result,
+            replayed=True,
+        )
+    if (
+        operation is not None
+        and operation.status is AssessorRoutingOperationStatus.TERMINAL_FAILURE
+    ):
+        assert operation.failure_code is not None
+        raise _assessor_failure_error(operation.failure_code)
 
     consent = next(
         (
@@ -230,22 +302,46 @@ def route_assessor(
         or consent.service_identity != 'vehicle_damage_assessment_routing'
         or consent.requested_action != payload.requested_action
         or not required_consent_fields.issubset(consent.permitted_fields)
+        or consent.granted_by.actor_type is not ActorType.CLAIMANT
+        or consent.granted_by.actor_id != claim.customer_id
     ):
         raise _authorisation_error(
             'Assessor routing requires matching active claimant consent for the minimum '
             'data scope.',
         )
 
-    decision = repository.get_agent_decision_internal(payload.claim_id, payload.authorisation_ref)
-    if (
-        decision is None
-        or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
-        or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
-        or decision.resulting_revision != claim.revision
-    ):
-        raise _authorisation_error(
-            'Assessor routing requires an authorised rule or staff decision.',
+    if operation is None:
+        decision = repository.get_agent_decision_internal(
+            payload.claim_id,
+            payload.authorisation_ref,
         )
+        if (
+            decision is None
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+            or decision.resulting_revision != claim.revision
+        ):
+            raise _authorisation_error(
+                'Assessor routing requires an authorised rule or staff decision.',
+            )
+        timestamp = now_utc()
+        operation = AssessorRoutingOperation(
+            operation_id=operation_id,
+            claim_id=payload.claim_id,
+            external_claim_id=payload.external_claim_id,
+            authorisation_ref=payload.authorisation_ref,
+            claimant_consent_ref=payload.claimant_consent_ref,
+            requested_action=payload.requested_action,
+            authorised_revision=claim.revision,
+            request_fingerprint=fingerprint,
+            status=AssessorRoutingOperationStatus.PREPARED,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        try:
+            repository.save_assessor_routing_operation(operation)
+        except IdempotencyConflict as conflict:
+            raise _idempotency_error() from conflict
 
     try:
         outcome = adapter.route_assessor(payload, fingerprint)
@@ -256,31 +352,19 @@ def route_assessor(
             AssessorFixtureFailure.TIMEOUT,
             AssessorFixtureFailure.UNAVAILABLE,
         }
-        messages = {
-            AssessorFixtureFailure.TIMEOUT: (
-                'The assessment request did not complete. The claim is saved and the same '
-                'request can be retried safely.'
-            ),
-            AssessorFixtureFailure.UNAVAILABLE: (
-                'The assessment service is unavailable. The claim is saved and no assessor '
-                'has been assigned.'
-            ),
-            AssessorFixtureFailure.ACCESS_DENIED: (
-                'The assessment service did not accept the request authority. Northwind must '
-                'review access before retrying.'
-            ),
-            AssessorFixtureFailure.MALFORMED: (
-                'The assessment service returned an unusable response. The claim is saved and '
-                'the adapter mapping must be reviewed.'
-            ),
-        }
-        raise ApiError(
-            status_code=503 if unavailable else 502,
-            code='DEPENDENCY_UNAVAILABLE' if unavailable else 'DEPENDENCY_FAILED',
-            message=messages[failure.code],
-            details=[ErrorDetail(field='assessor_service', reason=failure.code.value)],
-            retryable=unavailable,
-        ) from failure
+        failed_operation = operation.model_copy(
+            update={
+                'status': (
+                    AssessorRoutingOperationStatus.RETRYABLE_FAILURE
+                    if unavailable
+                    else AssessorRoutingOperationStatus.TERMINAL_FAILURE
+                ),
+                'failure_code': failure.code,
+                'updated_at': now_utc(),
+            }
+        )
+        repository.save_assessor_routing_operation(failed_operation)
+        raise _assessor_failure_error(failure.code) from failure
 
     if outcome.result.routing_status not in {
         AssessorRoutingStatus.ASSIGNED,
@@ -298,21 +382,55 @@ def route_assessor(
             ],
         )
 
+    accepted_operation = operation.model_copy(
+        update={
+            'status': AssessorRoutingOperationStatus.ACCEPTED,
+            'result': outcome.result,
+            'failure_code': None,
+            'updated_at': now_utc(),
+        }
+    )
+    repository.save_assessor_routing_operation(accepted_operation)
+    return _save_assessor_result(
+        repository,
+        payload.claim_id,
+        fingerprint,
+        outcome.result,
+        replayed=outcome.replayed,
+    )
+
+
+def _save_assessor_result(
+    repository: PersistenceRepository,
+    claim_id: str,
+    fingerprint: str,
+    result: AssessorRoutingResult,
+    *,
+    replayed: bool,
+) -> tuple[AssessorRoutingResult, bool]:
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    if claim.assessor_routing is not None:
+        if claim.assessor_routing_fingerprint != fingerprint:
+            raise _idempotency_error()
+        return claim.assessor_routing, True
+
     timestamp = now_utc()
-    assigned = outcome.result.routing_status is AssessorRoutingStatus.ASSIGNED
+    assigned = result.routing_status is AssessorRoutingStatus.ASSIGNED
     updated_claim = claim.model_copy(
         update={
-            'assessor_routing': outcome.result,
+            'assessor_routing': result,
             'assessor_routing_fingerprint': fingerprint,
             'customer_next_step': CustomerNextStep(
                 status='assessor_assigned' if assigned else 'awaiting_assessor_assignment',
-                summary=outcome.result.next_step,
+                summary=result.next_step,
                 responsible_party=ResponsibleParty.EXTERNAL_PARTY,
-                expected_by=outcome.result.expected_by,
+                expected_by=result.expected_by,
             ),
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
     )
     _save_claim(repository, updated_claim, claim.revision)
-    return outcome.result, outcome.replayed
+    return result, replayed

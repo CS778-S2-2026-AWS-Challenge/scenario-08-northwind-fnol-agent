@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from datetime import timedelta
-from enum import Enum
 from hashlib import sha256
 from typing import Protocol
 
 from backend.domain.models import (
+    AssessorRoutingFailureCode,
     AssessorRoutingResult,
     AssessorRoutingStatus,
     ClaimCreationStatus,
@@ -15,16 +15,11 @@ from backend.domain.models import (
 )
 from backend.services.support import now_utc
 
+AssessorFixtureFailure = AssessorRoutingFailureCode
+
 
 class AdapterIdempotencyConflict(Exception):
     """The same provider-neutral idempotency reference was reused differently."""
-
-
-class AssessorFixtureFailure(str, Enum):
-    TIMEOUT = 'timeout'
-    UNAVAILABLE = 'unavailable'
-    ACCESS_DENIED = 'access_denied'
-    MALFORMED = 'malformed'
 
 
 class AssessorAdapterFailure(Exception):
@@ -120,6 +115,7 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
         if routing_status not in {AssessorRoutingStatus.ASSIGNED, AssessorRoutingStatus.QUEUED}:
             raise ValueError('The assessor fixture supports assigned or queued success only.')
         self._routed: dict[str, tuple[str, AssessorRoutingResult]] = {}
+        self._accepted_fingerprints: dict[str, str] = {}
         self._attempts: dict[str, int] = {}
         self._failure_sequence = failure_sequence
         self._routing_status = routing_status
@@ -127,6 +123,7 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
     def reset_demo_state(self) -> dict[str, int]:
         cleared = {'mock_assessor_results': len(self._routed)}
         self._routed.clear()
+        self._accepted_fingerprints.clear()
         self._attempts.clear()
         return cleared
 
@@ -144,6 +141,12 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
                 command.requested_action,
             )
         )
+        accepted_fingerprint = self._accepted_fingerprints.get(route_key)
+        if accepted_fingerprint is None:
+            self._accepted_fingerprints[route_key] = request_fingerprint
+        elif accepted_fingerprint != request_fingerprint:
+            raise AdapterIdempotencyConflict(route_key)
+
         existing = self._routed.get(route_key)
         if existing is not None:
             fingerprint, result = existing
