@@ -219,7 +219,7 @@ from a second profile without a separately approved architecture change.
 | --- | --- | --- | --- | --- |
 | `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
-| `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Candidate; topology and access must be verified |
+| `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Repository adapter in progress; transactions, object storage, topology, and access are not yet verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
 
 These mappings are alternatives. For example, selecting `mongodb` does not
