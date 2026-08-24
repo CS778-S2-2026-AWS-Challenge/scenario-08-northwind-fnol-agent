@@ -273,9 +273,14 @@ is intentionally conservative: MongoDB repository code exists, but transaction-c
 persistence, protected object storage, and runtime bundle verification are still
 outstanding.
 
-`DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
-connection and secret-reference variable names will be added with the corresponding
-adapter contract rather than invented before topology and access are verified.
+`DATA_RUNTIME_PROFILE` remains the only variable that selects a complete data-runtime
+profile. Provider connection and secret-reference variables are introduced by their
+corresponding adapter contracts rather than treated as profile selectors. The MinIO/S3
+compatible evidence adapter defines `NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
+`NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID`, `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY`,
+`NORTHWIND_OBJECT_STORAGE_BUCKET`, `NORTHWIND_OBJECT_STORAGE_REGION`, and
+`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`; these variables do not enable a
+runtime profile or make the adapter composition-ready by themselves.
 
 ## Knowledge Base and RAG
 
