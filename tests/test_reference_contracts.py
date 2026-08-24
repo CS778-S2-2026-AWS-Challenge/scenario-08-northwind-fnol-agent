@@ -1,10 +1,15 @@
+import json
 from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 from backend.domain.reference_contracts import (
     ExternalServiceScenario,
     FailureOutcomeCode,
     RagSourceInventory,
     RequirementReferenceStatus,
+    ServiceLifecycleStatus,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +55,26 @@ def test_source_inventory_retains_metadata_needed_before_chunking() -> None:
         assert source.checksum is None
 
 
+def test_source_inventory_uses_explicit_printed_and_pdf_page_locators() -> None:
+    inventory = load_source_inventory()
+    icnz_source = next(
+        source
+        for source in inventory.sources
+        if source.document_id == 'src_icnz_fair_insurance_code_2020'
+    )
+
+    assert icnz_source.sections[0].printed_pages == [3, 4]
+    assert icnz_source.sections[0].pdf_page_indices == [4, 5]
+    assert icnz_source.sections[1].printed_pages == [10]
+    assert icnz_source.sections[1].pdf_page_indices == [11]
+
+    payload = json.loads(SOURCE_INVENTORY.read_text(encoding='utf-8'))
+    first_icnz_section = payload['sources'][1]['sections'][0]
+    first_icnz_section['pdf_page_indices'] = [4]
+    with pytest.raises(ValidationError, match='map one to one'):
+        RagSourceInventory.model_validate(payload)
+
+
 def test_external_service_scenario_covers_consent_lifecycle_and_failures() -> None:
     scenario = load_service_scenario()
 
@@ -57,10 +82,57 @@ def test_external_service_scenario_covers_consent_lifecycle_and_failures() -> No
     assert scenario.consent.required is True
     assert input_support['claimant_consent_ref'] == 'gap_for_issue_252'
     assert {outcome.code for outcome in scenario.failure_outcomes} == set(FailureOutcomeCode)
-    assert {'consent_required', 'authorised', 'submitting', 'queued', 'assigned', 'failed'} == {
-        status.status for status in scenario.status_lifecycle
-    }
+    assert {
+        'consent_required',
+        'authorised',
+        'submitting',
+        'queued',
+        'assigned',
+        'retryable_failure',
+        'terminal_failure',
+    } == {status.status for status in scenario.status_lifecycle}
+    terminality = {status.status: status.terminal for status in scenario.status_lifecycle}
+    assert terminality[ServiceLifecycleStatus.RETRYABLE_FAILURE] is False
+    assert terminality[ServiceLifecycleStatus.TERMINAL_FAILURE] is True
+    outcomes = {outcome.code: outcome for outcome in scenario.failure_outcomes}
+    assert (
+        outcomes[FailureOutcomeCode.TIMEOUT].lifecycle_status
+        is ServiceLifecycleStatus.RETRYABLE_FAILURE
+    )
+    assert (
+        outcomes[FailureOutcomeCode.UNAVAILABLE].lifecycle_status
+        is ServiceLifecycleStatus.RETRYABLE_FAILURE
+    )
+    assert (
+        outcomes[FailureOutcomeCode.ACCESS_DENIED].lifecycle_status
+        is ServiceLifecycleStatus.TERMINAL_FAILURE
+    )
+    assert (
+        outcomes[FailureOutcomeCode.MALFORMED].lifecycle_status
+        is ServiceLifecycleStatus.TERMINAL_FAILURE
+    )
     assert scenario.idempotency.automatic_retry_limit == 'not_yet_approved'
+
+
+def test_external_service_scenario_rejects_retryable_terminal_failure() -> None:
+    payload = json.loads(SERVICE_SCENARIO.read_text(encoding='utf-8'))
+    payload['failure_outcomes'][0]['lifecycle_status'] = 'terminal_failure'
+
+    with pytest.raises(ValidationError, match='timeout must use retryable_failure'):
+        ExternalServiceScenario.model_validate(payload)
+
+
+def test_external_service_scenario_does_not_promise_unapproved_cancellation() -> None:
+    scenario = load_service_scenario()
+
+    assert (
+        scenario.consent.withdrawal_boundary.provider_cancellation_status
+        == 'requires_separately_approved_capability'
+    )
+    assert (
+        'does not promise provider cancellation or recall'
+        in scenario.consent.withdrawal_boundary.after_provider_acceptance
+    )
 
 
 def test_external_service_scenario_does_not_claim_unverified_implementation() -> None:

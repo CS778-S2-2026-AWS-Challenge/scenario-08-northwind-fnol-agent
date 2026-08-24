@@ -25,6 +25,12 @@ recheck the source version, capture the approved content, calculate its checksum
 governed insurer/product applicability, and publish it through the Control Plane before
 the runtime retriever can use it.
 
+Section locators distinguish one-based printed document pages from zero-based PDF file
+indices. For the Fair Insurance Code, clauses 1-14 span printed pages 3-4 (PDF indices
+4-5) and clauses 16-20 are on printed page 10 (PDF index 11). Web or legislation
+sections without a stable page locator keep both locator fields empty rather than using
+an ambiguous `page` value.
+
 ## Claimant-Authorised External-Service Scenario
 
 The machine-readable scenario is
@@ -37,8 +43,14 @@ claimant consent step and records:
 - provider-neutral output and lifecycle statuses;
 - timeout, unavailable, access-denied, and malformed outcomes;
 - idempotent retry expectations and unapproved automatic retry limits;
+- a nonterminal `retryable_failure` state for timeout/unavailable and a separate
+  `terminal_failure` state for access-denied/malformed outcomes;
 - claimant-visible success and failure wording; and
 - the exact Claim State fields that may change after success, with no failure mutation.
+
+Consent withdrawal before provider acceptance prevents submission. After acceptance,
+the scenario records the withdrawal but does not promise cancellation or recall; that
+requires a separately approved provider capability and Northwind policy.
 
 The current `RouteAssessorRequest` does not contain `claimant_consent_ref`. The scenario
 marks that field as `gap_for_issue_252`; this issue does not change the API or simulate
