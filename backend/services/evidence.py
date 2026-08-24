@@ -319,7 +319,45 @@ def request_upload(
                 message='The idempotent upload result could not be restored.',
                 retryable=True,
             )
-        return EvidenceUploadResponse.model_validate(existing.response_payload)
+        restored = EvidenceUploadResponse.model_validate(existing.response_payload)
+        if restored.upload.expires_at > now_utc():
+            return restored
+        evidence = repository.get_evidence(
+            claim_id,
+            restored.evidence_id,
+            principal.subject,
+        )
+        if (
+            evidence is None
+            or evidence.file_status is not EvidenceFileStatus.AWAITING_UPLOAD
+            or evidence.media_type is None
+            or evidence.size_bytes is None
+        ):
+            return restored
+        try:
+            refreshed = storage.create_upload_target(
+                claim_id=claim_id,
+                evidence_id=restored.evidence_id,
+                media_type=evidence.media_type,
+                size_bytes=evidence.size_bytes,
+            )
+        except EvidenceStorageUnavailable as error:
+            raise ApiError(
+                status_code=503,
+                code='DEPENDENCY_UNAVAILABLE',
+                message='Evidence storage is temporarily unavailable. The claim is unchanged.',
+                retryable=True,
+            ) from error
+        return restored.model_copy(
+            update={
+                'upload': UploadTarget(
+                    method='PUT',
+                    url=refreshed.url,
+                    headers=refreshed.headers,
+                    expires_at=refreshed.expires_at,
+                )
+            }
+        )
 
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:

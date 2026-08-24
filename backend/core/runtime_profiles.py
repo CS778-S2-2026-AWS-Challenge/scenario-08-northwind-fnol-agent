@@ -3,13 +3,18 @@ from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
-from backend.adapters.evidence_storage import EvidenceStorage, MockEvidenceStorage
+from backend.adapters.evidence_storage import (
+    EvidenceStorage,
+    MinioEvidenceStorage,
+    MockEvidenceStorage,
+    S3CompatibleObjectStorageConfig,
+)
 from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
-from backend.core.config import DataRuntimeProfile, Settings
+from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import PersistenceRepository
@@ -124,6 +129,15 @@ def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) 
             f'Externally supplied {bundle.profile.value!r} data runtime bundles are not '
             'supported until that complete provider bundle is implemented and validated.'
         )
+    expected_storage_type = (
+        MinioEvidenceStorage
+        if settings.object_storage_adapter is ObjectStorageAdapter.S3_COMPATIBLE
+        else MockEvidenceStorage
+    )
+    if not isinstance(bundle.evidence_storage, expected_storage_type):
+        raise RuntimeProfileConfigurationError(
+            'The data runtime bundle does not match NORTHWIND_OBJECT_STORAGE_ADAPTER.'
+        )
 
 
 def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
@@ -131,10 +145,17 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
 
     if settings.data_runtime_profile is DataRuntimeProfile.FIXTURE:
         knowledge_documents = FixtureKnowledgeDocumentStore()
+        evidence_storage: EvidenceStorage
+        if settings.object_storage_adapter is ObjectStorageAdapter.S3_COMPATIBLE:
+            evidence_storage = MinioEvidenceStorage(
+                S3CompatibleObjectStorageConfig.from_environment()
+            )
+        else:
+            evidence_storage = MockEvidenceStorage()
         return DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
             repository=FixtureRepository(),
-            evidence_storage=MockEvidenceStorage(),
+            evidence_storage=evidence_storage,
             policy_history=MockPolicyHistoryAdapter(),
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
