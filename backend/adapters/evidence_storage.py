@@ -24,6 +24,10 @@ class EvidenceUploadNotFound(EvidenceStorageError):
     pass
 
 
+class EvidenceUploadSizeMismatch(EvidenceStorageError):
+    pass
+
+
 class EvidenceStorageUnavailable(EvidenceStorageError):
     """The configured object store could not be reached.
 
@@ -80,6 +84,12 @@ class EvidenceStorage(Protocol):
     ) -> StoredUpload:
         raise NotImplementedError
 
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        raise NotImplementedError
+
+    def read_upload(self, *, claim_id: str, evidence_id: str) -> bytes | None:
+        raise NotImplementedError
+
 
 @dataclass(frozen=True, slots=True)
 class _PendingUpload:
@@ -99,6 +109,7 @@ class MockEvidenceStorage(EvidenceStorage):
     def __init__(self, outage: EvidenceStorageUnavailable | None = None) -> None:
         self._pending: dict[tuple[str, str], _PendingUpload] = {}
         self._completed: dict[tuple[str, str], StoredUpload] = {}
+        self._content: dict[tuple[str, str], bytes] = {}
         self._outage = outage
 
     def set_outage(self, outage: EvidenceStorageUnavailable | None) -> None:
@@ -115,9 +126,11 @@ class MockEvidenceStorage(EvidenceStorage):
         cleared = {
             'mock_pending_uploads': len(self._pending),
             'mock_completed_uploads': len(self._completed),
+            'mock_uploaded_files': len(self._content),
         }
         self._pending.clear()
         self._completed.clear()
+        self._content.clear()
         self._outage = None
         return cleared
 
@@ -144,11 +157,26 @@ class MockEvidenceStorage(EvidenceStorage):
         )
         return StoredUploadTarget(
             method='PUT',
-            url=f'https://example.invalid/uploads/{evidence_id}',
+            url=f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
             headers={'Content-Type': media_type},
             expires_at=now_utc() + timedelta(minutes=15),
             storage_key=storage_key,
         )
+
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        self._guard()
+        pending = self._pending.get((claim_id, evidence_id))
+        if pending is None:
+            raise EvidenceUploadNotFound(evidence_id)
+        if len(content) != pending.size_bytes:
+            raise EvidenceUploadSizeMismatch(evidence_id)
+        self._content[(claim_id, evidence_id)] = content
+
+    def read_upload(self, *, claim_id: str, evidence_id: str) -> bytes | None:
+        self._guard()
+        if (claim_id, evidence_id) not in self._completed:
+            return None
+        return self._content.get((claim_id, evidence_id))
 
     def complete_upload(
         self,

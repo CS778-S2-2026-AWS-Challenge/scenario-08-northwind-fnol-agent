@@ -17,7 +17,7 @@ provider payloads, or SDK types.
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |

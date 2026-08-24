@@ -8,6 +8,7 @@ time-bound commitments belong in `sprint/`.
 
 - [Repository Operation Rules](repo_rule.md)
 - [Current API Contract](api.md)
+- [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Development Conventions](development-conventions.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)

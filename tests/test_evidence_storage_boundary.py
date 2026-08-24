@@ -1,3 +1,4 @@
+import base64
 from typing import Any, cast
 
 import pytest
@@ -114,6 +115,61 @@ def test_the_fixture_path_still_runs_once_storage_recovers(
     assert recovered.status_code == 201
     assert recovered.json()['revision'] == 2
     assert readiness.json()['checks']['evidence_storage'] == 'using_fixture'
+
+
+def test_claimant_upload_content_is_available_to_authorised_staff(
+    storage_client: TestClient,
+) -> None:
+    upload_size = cast(int, UPLOAD_PAYLOAD['size_bytes'])
+    media_type = cast(str, UPLOAD_PAYLOAD['media_type'])
+    content = b'fixture-image-bytes' + (b'.' * (upload_size - 19))
+    assert len(content) == upload_size
+
+    with storage_client as client:
+        claim_id = create_claim(client, 'viewable-evidence-claim')
+        requested = request_upload(client, claim_id, 'viewable-evidence-upload')
+        assert requested.status_code == 201
+        evidence_id = requested.json()['evidence_id']
+        uploaded = client.put(
+            requested.json()['upload']['url'],
+            headers={**CLAIMANT_AUTH, 'Content-Type': media_type},
+            content=content,
+        )
+        completed = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+            headers={
+                **CLAIMANT_AUTH,
+                'Idempotency-Key': 'viewable-evidence-complete',
+                'If-Match': str(requested.json()['revision']),
+            },
+            json={'upload_checksum': 'sha256:' + ('a' * 64)},
+        )
+        staff_view = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers=STAFF_AUTH,
+        )
+        staff_data = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data',
+            headers=STAFF_AUTH,
+        )
+        claimant_view = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers=CLAIMANT_AUTH,
+        )
+
+    assert uploaded.status_code == 204
+    assert completed.status_code == 202
+    assert staff_view.status_code == 200
+    assert staff_view.content == content
+    assert staff_view.headers['content-type'] == 'image/jpeg'
+    assert staff_view.headers['content-disposition'] == 'inline; filename="damage.jpg"'
+    assert staff_data.status_code == 200
+    assert staff_data.json() == {
+        'filename': 'damage.jpg',
+        'media_type': 'image/jpeg',
+        'base64_data': base64.b64encode(content).decode('ascii'),
+    }
+    assert claimant_view.status_code == 403
 
 
 def test_pending_evidence_can_still_be_recorded_while_storage_is_unavailable(

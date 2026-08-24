@@ -14,6 +14,7 @@ import {
   updateClaimField,
 } from './api.js'
 import './App.css'
+import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -94,6 +95,8 @@ function App() {
   const [handoff, setHandoff] = useState(null)
   const [savedReports, setSavedReports] = useState(null)
   const [resumeContext, setResumeContext] = useState(null)
+  const [failedMessage, setFailedMessage] = useState(null)
+  const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
@@ -186,6 +189,7 @@ function App() {
     if (!text || isBusy || proposedFields.length > 0) return
 
     setError('')
+    setFailedMessage(null)
     setStatus(hasStarted ? 'sending' : 'starting')
     try {
       if (pendingSubmission.current?.text !== text) {
@@ -197,6 +201,7 @@ function App() {
         }
       }
       const operation = pendingSubmission.current
+      setPendingMessage({ text, audience: 'Northwind claim team' })
       let activeClaim = claim
       let activeSessionId = sessionId
       if (!activeClaim) {
@@ -228,8 +233,18 @@ function App() {
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
       pendingSubmission.current = null
+      setPendingMessage(null)
+      setFailedMessage(null)
       setStatus('idle')
     } catch (requestError) {
+      setPendingMessage(null)
+      setFailedMessage({
+        text,
+        sender: 'You',
+        audience: 'Northwind claim team',
+        delivery: 'Failed before delivery',
+        retry: 'Ready to retry safely',
+      })
       showError(requestError)
     }
   }
@@ -449,7 +464,9 @@ function App() {
         )}
       </header>
 
-      {!hasStarted && page === 'login' ? (
+      {!hasStarted && page === 'guided-motor' ? (
+        <GuidedMotorClaim onExit={() => setPage('home')} />
+      ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
@@ -499,13 +516,23 @@ function App() {
                     </button>
                   ))}
                 </div>
+              {claimType === 'motor' && (
+                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
+                  Start guided Motor claim
+                  <span>Three clear steps with draft saving</span>
+                </button>
+              )}
+              {claimType !== 'motor' && (
+                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. Start with the conversational claim service below.</p>
+              )}
+              <div className="choice-divider"><span>or describe what happened</span></div>
               <MessageComposer
                 draft={draft}
                 setDraft={setDraft}
                 onSubmit={sendMessage}
                 inputLabel="Incident description"
                 busy={isBusy}
-                buttonLabel={status === 'starting' ? 'Starting report...' : 'Continue claim'}
+                buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
                 error={error}
                 placeholder={claimTypePrompts[claimType]}
               />
@@ -570,8 +597,27 @@ function App() {
                 <article className={`message message-${message.actor}`} key={message.message_id}>
                   <p className="message-author">{message.actor === 'claimant' ? 'You' : 'Northwind'}</p>
                   <p>{messageText(message)}</p>
+                  <p className="message-state">
+                    Sender: {message.actor === 'claimant' ? 'You' : 'Northwind'} · Audience: Shared claim conversation · Delivered
+                  </p>
                 </article>
               ))}
+              {status === 'sending' && pendingMessage && (
+                <article className="message message-claimant is-pending" aria-label="Message sending">
+                  <p className="message-author">You</p>
+                  <p>{pendingMessage.text}</p>
+                  <p className="message-state">Audience: {pendingMessage.audience} · Sending…</p>
+                </article>
+              )}
+              {failedMessage && (
+                <article className="message message-claimant is-failed" role="alert">
+                  <p className="message-author">{failedMessage.sender}</p>
+                  <p>{failedMessage.text}</p>
+                  <p className="message-state">
+                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                  </p>
+                </article>
+              )}
             </div>
 
             {resumeContext && (
@@ -674,7 +720,7 @@ function App() {
                   ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
                   : 'Confirm or correct the details before continuing.'
               }
-              buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}
+              buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
           </section>
