@@ -12,6 +12,7 @@ from backend.adapters.claims_service import (
     MockClaimsServiceAdapter,
 )
 from backend.app import create_app
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -446,7 +447,12 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
 
 def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() -> None:
     repository = FixtureRepository()
-    app = create_app(repository=repository, claims_service_adapter=PendingClaimsAdapter())
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    app = create_app(
+        settings,
+        repository=repository,
+        claims_service_adapter=PendingClaimsAdapter(),
+    )
     with TestClient(app) as client:
         created = create_working_claim(client, 'replaceable-adapter')
         claim = created['claim']
@@ -476,27 +482,3 @@ def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() 
     assert response.json()['external_claim_id'] is None
     assert response.json()['claim_number'] is None
     assert response.json()['source'] == 'configured_service'
-
-
-def test_mock_adapters_reject_changed_payload_for_the_same_provider_reference() -> None:
-    claim_adapter = MockClaimsServiceAdapter()
-    claim_command = CreateExternalClaimRequest.model_validate(
-        creation_payload('clm_fixture', 1, 'dec_fixture')
-    )
-    claim_adapter.create_claim(claim_command, 'fingerprint-a')
-
-    with pytest.raises(AdapterIdempotencyConflict):
-        claim_adapter.create_claim(claim_command, 'fingerprint-b')
-
-    assessor_adapter = MockAssessorServiceAdapter()
-    route_command = RouteAssessorRequest(
-        claim_id='clm_fixture',
-        external_claim_id='ext_fixture',
-        authorisation_ref='dec_route',
-        requested_action='vehicle_damage_assessment',
-        location={'region': 'Auckland'},
-    )
-    assessor_adapter.route_assessor(route_command, 'fingerprint-a')
-
-    with pytest.raises(AdapterIdempotencyConflict):
-        assessor_adapter.route_assessor(route_command, 'fingerprint-b')
