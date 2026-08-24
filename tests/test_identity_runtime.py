@@ -1,4 +1,6 @@
-from fastapi import Depends
+from typing import Annotated
+
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -10,12 +12,12 @@ def _bearer(token: str) -> dict[str, str]:
     return {'Authorization': f'Bearer {token}'}
 
 
-def _identity_app(settings: Settings):
+def _identity_app(settings: Settings) -> FastAPI:
     app = create_app(settings)
 
     @app.get('/__identity_test/claimant')
     def claimant_identity(
-        principal: Principal = Depends(require_claimant),
+        principal: Annotated[Principal, Depends(require_claimant)],
     ) -> dict[str, object]:
         return {
             'subject': principal.subject,
@@ -27,7 +29,7 @@ def _identity_app(settings: Settings):
 
     @app.get('/__identity_test/administrator')
     def administrator_identity(
-        principal: Principal = Depends(require_administrator),
+        principal: Annotated[Principal, Depends(require_administrator)],
     ) -> dict[str, object]:
         return {
             'subject': principal.subject,
