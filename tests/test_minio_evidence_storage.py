@@ -88,6 +88,11 @@ class FakeS3Client:
         self.delete_calls.append(kwargs)
 
 
+class MissingBodyS3Client(FakeS3Client):
+    def get_object(self, **_: Any) -> dict[str, Any]:
+        return {'ContentLength': 0, 'ContentType': 'image/jpeg', 'Metadata': {}}
+
+
 def test_environment_contract_requires_runtime_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://localhost:9000')
     monkeypatch.delenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', raising=False)
@@ -223,6 +228,16 @@ def test_complete_upload_requires_matching_object_metadata() -> None:
     assert client.copy_calls[0]['CopySource']['Key'].endswith('/staging')
     assert client.delete_calls[0]['Key'].endswith('/staging')
 
+    retried = storage.complete_upload(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        checksum=checksum(client.object_body),
+        media_type='image/jpeg',
+        size_bytes=2048,
+    )
+    assert retried == stored
+    assert len(client.copy_calls) == 1
+
 
 def test_reusing_original_put_target_cannot_replace_finalised_evidence() -> None:
     client = FakeS3Client()
@@ -266,6 +281,43 @@ def test_finalised_evidence_can_be_read_only_with_its_claim_scoped_storage_key()
         is None
     )
     assert storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=None) is None
+
+
+def test_object_storage_read_rejects_proxy_uploads_missing_objects_and_oversized_bytes() -> None:
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
+    key = f'claims/clm_001/evidence/evd_001/finalised/{"a" * 64}'
+
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.put_upload(claim_id='clm_001', evidence_id='evd_001', content=b'fixture-only')
+
+    client.get_object_error = not_found_error('NoSuchKey')
+    assert storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=key) is None
+
+    client.get_object_error = None
+    client.final_objects[key] = b'x' * (storage.max_size_bytes + 1)
+    assert storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=key) is None
+
+
+def test_object_storage_read_reports_dependency_failures() -> None:
+    client = FakeS3Client()
+    client.get_object_error = EndpointConnectionError(endpoint_url='http://localhost:9000')
+    storage = MinioEvidenceStorage(config(), client=client)
+    key = f'claims/clm_001/evidence/evd_001/finalised/{"a" * 64}'
+
+    with pytest.raises(EvidenceStorageUnavailable):
+        storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=key)
+
+    client.get_object_error = not_found_error('AccessDenied')
+    with pytest.raises(EvidenceStorageUnavailable):
+        storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=key)
+
+
+def test_object_storage_read_rejects_a_response_without_a_readable_body() -> None:
+    storage = MinioEvidenceStorage(config(), client=MissingBodyS3Client())
+    key = f'claims/clm_001/evidence/evd_001/finalised/{"a" * 64}'
+
+    assert storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=key) is None
 
 
 def test_complete_upload_rejects_checksum_that_does_not_match_object_bytes() -> None:

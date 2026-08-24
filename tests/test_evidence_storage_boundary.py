@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import (
     EvidenceStorageUnavailable,
+    EvidenceUploadNotFound,
+    EvidenceUploadSizeMismatch,
     MockEvidenceStorage,
 )
-from backend.api.workbench import _safe_download_filename
+from backend.api.workbench import _evidence_storage_key, _safe_download_filename
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
@@ -27,6 +29,53 @@ UPLOAD_PAYLOAD = {
 def test_download_filename_removes_response_header_control_characters() -> None:
     assert _safe_download_filename('damage\r\nX-Injected: yes.jpg') == 'damageX-Injected: yes.jpg'
     assert _safe_download_filename('"\\') == 'evidence'
+
+
+def test_fixture_upload_rejects_mismatched_bytes_and_completion_metadata() -> None:
+    storage = MockEvidenceStorage()
+    storage.create_upload_target(
+        claim_id='clm_boundary',
+        evidence_id='evd_boundary',
+        media_type='image/jpeg',
+        size_bytes=4,
+    )
+
+    with pytest.raises(EvidenceUploadSizeMismatch):
+        storage.put_upload(claim_id='clm_boundary', evidence_id='evd_boundary', content=b'bad')
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.complete_upload(
+            claim_id='clm_boundary',
+            evidence_id='evd_boundary',
+            checksum='sha256:' + 'a' * 64,
+            media_type='image/jpeg',
+            size_bytes=5,
+        )
+
+    storage.put_upload(claim_id='clm_boundary', evidence_id='evd_boundary', content=b'good')
+    storage.complete_upload(
+        claim_id='clm_boundary',
+        evidence_id='evd_boundary',
+        checksum='sha256:' + 'a' * 64,
+        media_type='image/jpeg',
+        size_bytes=4,
+    )
+    assert (
+        storage.read_upload(
+            claim_id='clm_boundary',
+            evidence_id='evd_boundary',
+            storage_key='claims/clm_other/evidence/evd_boundary',
+        )
+        is None
+    )
+
+
+def test_storage_key_lookup_returns_none_for_unknown_claim_or_evidence(
+    storage_client: TestClient, storage_repository: FixtureRepository
+) -> None:
+    assert _evidence_storage_key(storage_repository, 'clm_missing', 'evd_missing') is None
+    with storage_client as client:
+        claim_id = create_claim(client, 'storage-key-lookup-claim')
+    assert _evidence_storage_key(storage_repository, claim_id, 'evd_missing') is None
 
 
 @pytest.fixture
@@ -176,6 +225,66 @@ def test_claimant_upload_content_is_available_to_authorised_staff(
         'base64_data': base64.b64encode(content).decode('ascii'),
     }
     assert claimant_view.status_code == 403
+
+
+def test_staff_evidence_content_returns_clear_not_found_and_storage_outage_errors(
+    storage_client: TestClient,
+    storage: MockEvidenceStorage,
+) -> None:
+    with storage_client as client:
+        claim_id = create_claim(client, 'staff-evidence-errors-claim')
+        missing_content = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/evd_missing/content',
+            headers=STAFF_AUTH,
+        )
+        missing_data = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/evd_missing/content-data',
+            headers=STAFF_AUTH,
+        )
+
+        requested = request_upload(client, claim_id, 'staff-evidence-errors-upload')
+        evidence_id = requested.json()['evidence_id']
+        storage.set_outage(
+            EvidenceStorageUnavailable(code='STORAGE_UNAVAILABLE', detail='Object store is down.')
+        )
+        unavailable_content = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers=STAFF_AUTH,
+        )
+        unavailable_data = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data',
+            headers=STAFF_AUTH,
+        )
+
+    assert missing_content.status_code == 404
+    assert missing_data.status_code == 404
+    assert unavailable_content.status_code == 503
+    assert unavailable_content.json()['error']['retryable'] is True
+    assert unavailable_data.status_code == 503
+    assert unavailable_data.json()['error']['retryable'] is True
+
+
+def test_staff_evidence_content_is_not_available_after_fixture_storage_reset(
+    storage_client: TestClient,
+    storage: MockEvidenceStorage,
+) -> None:
+    with storage_client as client:
+        claim_id = create_claim(client, 'staff-evidence-reset-claim')
+        requested = request_upload(client, claim_id, 'staff-evidence-reset-upload')
+        evidence_id = requested.json()['evidence_id']
+        storage.reset_demo_state()
+
+        content = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers=STAFF_AUTH,
+        )
+        content_data = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data',
+            headers=STAFF_AUTH,
+        )
+
+    assert content.status_code == 404
+    assert content_data.status_code == 404
 
 
 def test_pending_evidence_can_still_be_recorded_while_storage_is_unavailable(
