@@ -31,6 +31,19 @@ npm run dry-run
 
 The repository-level `./scripts/check.ps1` command also runs `npm run check` for this Worker.
 
+For an authorised live synchronization check, expose a GitHub token only through the process
+environment and wait for one Project status transition:
+
+```powershell
+$env:GITHUB_TOKEN = gh auth token
+npm run verify:kanban -- -- --issue 305 --expected "In progress"
+Remove-Item Env:GITHUB_TOKEN
+```
+
+The verifier reads Project 12 until the expected status appears or its 60-second timeout expires.
+It does not mutate the Project and does not validate CircleCI, pull-request policy, webhook
+delivery, or Queue operation as separate capabilities.
+
 ## Runtime Configuration
 
 Non-secret Project and repository identifiers are versioned in `wrangler.jsonc`. Set these Worker

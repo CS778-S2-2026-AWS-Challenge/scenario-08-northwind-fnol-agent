@@ -13,11 +13,12 @@ export class GitHubApiError extends Error {
 }
 
 type Fetcher = typeof fetch;
+const defaultFetcher: Fetcher = (input, init) => fetch(input, init);
 
 export class GitHubClient {
   constructor(
     private readonly token: string,
-    private readonly fetcher: Fetcher = fetch,
+    private readonly fetcher: Fetcher = defaultFetcher,
   ) {}
 
   async getIssue(owner: string, repo: string, issueNumber: number): Promise<Record<string, unknown>> {
