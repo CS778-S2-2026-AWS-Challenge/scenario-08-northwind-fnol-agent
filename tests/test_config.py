@@ -1,6 +1,6 @@
 import pytest
 
-from backend.core.config import Settings
+from backend.core.config import ObjectStorageAdapter, Settings
 
 
 def test_environment_settings_parse_cors_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,3 +61,35 @@ def test_production_hides_interactive_api_docs(monkeypatch: pytest.MonkeyPatch) 
     settings = Settings.from_environment()
 
     assert settings.expose_api_docs is False
+
+
+def test_environment_selects_s3_compatible_object_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ADAPTER', 's3_compatible')
+
+    settings = Settings.from_environment()
+
+    assert settings.object_storage_adapter is ObjectStorageAdapter.S3_COMPATIBLE
+
+
+def test_connection_values_alone_do_not_switch_object_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_OBJECT_STORAGE_ADAPTER', raising=False)
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://localhost:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access-key')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret-key')
+
+    settings = Settings.from_environment()
+
+    assert settings.object_storage_adapter is ObjectStorageAdapter.FIXTURE
+
+
+def test_environment_rejects_unknown_object_storage_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ADAPTER', 'minio-or-maybe-s3')
+
+    with pytest.raises(ValueError, match='NORTHWIND_OBJECT_STORAGE_ADAPTER must be exactly one'):
+        Settings.from_environment()
