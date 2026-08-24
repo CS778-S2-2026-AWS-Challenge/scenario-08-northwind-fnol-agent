@@ -11,6 +11,7 @@ from backend.adapters.claims_service import (
 )
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
+from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
@@ -20,18 +21,21 @@ from backend.api.health import router as health_router
 from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
 from backend.api.workbench import router as workbench_router
-from backend.core.config import DataRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Settings
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
+from backend.core.model_gateway import build_model_gateway
 from backend.core.runtime_profiles import (
     DataRuntimeBundle,
     build_data_runtime_bundle,
     validate_data_runtime_bundle,
 )
+from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
+from backend.services.model_agent import GatewayAgent
 
 
 def create_app(
@@ -44,6 +48,7 @@ def create_app(
     policy_history_adapter: PolicyHistoryAdapter | None = None,
     handoff_dispatch_adapter: HandoffDispatchAdapter | None = None,
     data_runtime_bundle: DataRuntimeBundle | None = None,
+    model_gateway_registry: ModelGatewayRegistry | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     injected_data_dependencies = any(
@@ -96,7 +101,19 @@ def create_app(
     # than by individual routers.  No router, service, seed path, or adapter
     # can reach an unguarded handoff write.
     app.state.claim_repository = guarded_handoff_repository(bundle.repository)
-    app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
+    if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+        if agent_turn_provider is not None:
+            raise ValueError(
+                'agent_turn_provider cannot override the configured model gateway runtime.'
+            )
+        model_gateway = build_model_gateway(resolved_settings, model_gateway_registry)
+        if not model_gateway.capabilities.structured_output:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        app.state.agent_turn_provider = GatewayAgent(model_gateway)
+        app.state.agent_runtime_status = 'configured'
+    else:
+        app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
+        app.state.agent_runtime_status = 'not_configured'
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage
