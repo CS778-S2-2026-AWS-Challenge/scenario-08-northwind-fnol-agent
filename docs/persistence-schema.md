@@ -65,6 +65,10 @@ and checksums rather than embedding those bytes.
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
   reactivate consent.
+- The claimant consent mutation and assessor request use separate idempotency records. Recording
+  consent advances the claim once. A provider failure after that point preserves the consented
+  revision and no routing result; an unchanged retry reuses the original assessor operation
+  identity.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 

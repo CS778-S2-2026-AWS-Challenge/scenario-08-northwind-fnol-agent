@@ -95,6 +95,79 @@ function firstTurn() {
   }
 }
 
+function completeMotorTurn() {
+  return {
+    ...firstTurn(),
+    form_changes: [
+      firstTurn().form_changes[0],
+      {
+        field_code: 'incident.location',
+        field: { ...firstTurn().form_changes[0].field, value: 'Auckland' },
+      },
+      {
+        field_code: 'loss.description',
+        field: { ...firstTurn().form_changes[0].field, value: 'Rear bumper damage' },
+      },
+    ],
+  }
+}
+
+function confirmedMotorFields() {
+  return Object.fromEntries(
+    completeMotorTurn().form_changes.map(({ field_code: fieldCode, field }) => [
+      fieldCode,
+      { ...field, status: 'confirmed' },
+    ]),
+  )
+}
+
+function assessmentAction(overrides = {}) {
+  return {
+    service_identity: 'vehicle_damage_assessment_routing',
+    service_name: 'Vehicle damage assessment',
+    provider: 'Controlled assessment fixture',
+    purpose: 'Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.',
+    shared_data_summary: [
+      'Your Northwind claim and external claim references',
+      'Northwind routing authority and your permission reference',
+      'The vehicle damage assessment request',
+      'Your confirmed incident region',
+    ],
+    status: 'consent_required',
+    consent_status: null,
+    routing: null,
+    can_request: true,
+    ...overrides,
+  }
+}
+
+function createdMotorClaimResponse(action = assessmentAction()) {
+  return {
+    claim_id: 'clm_test',
+    revision: 4,
+    decision: {
+      action: 'CREATE_CLAIM',
+      reason_codes: ['CLAIM_CREATION_AUTHORISED'],
+    },
+    external_claim: {
+      external_claim_id: 'ext_fixture_test',
+      claim_number: 'NWF-2026-TEST01',
+      creation_status: 'created',
+      route: 'standard_motor_intake',
+      next_step: 'Claims intake review',
+      expected_by: '2026-08-14T00:00:00Z',
+      created_at: '2026-08-13T00:00:00Z',
+    },
+    external_service_action: action,
+    customer_next_step: {
+      ...nextStep,
+      status: 'claim_created',
+      summary: 'Claims intake review',
+      responsible_party: 'northwind',
+    },
+  }
+}
+
 function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.customer_next_step) {
   const { claim, messages, session } = at08ResumeFixture
   fetch.mockImplementationOnce(() =>
@@ -704,6 +777,191 @@ describe('claimant intake', () => {
       '/api/v1/claims/clm_test/creation',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('shows the assessment action only after claim creation and completes consent and routing', async () => {
+    const completeTurn = completeMotorTurn()
+    const confirmedFields = confirmedMotorFields()
+    const readyAction = assessmentAction({
+      status: 'ready_to_request',
+      consent_status: 'granted',
+    })
+    const assignedAction = assessmentAction({
+      status: 'assigned',
+      consent_status: 'granted',
+      can_request: false,
+      routing: {
+        routing_status: 'assigned',
+        assessor_reference: 'asr_fixture_01',
+        queue_reference: 'QUE-AUC-001',
+        next_step: 'An assessor will review the confirmed claim information.',
+        expected_by: '2026-08-15T00:00:00Z',
+        limitations: ['Synthetic fixture routing; no production assessor was contacted.'],
+      },
+    })
+    let releaseConsent = () => {}
+    let releaseRouting = () => {}
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(completeTurn))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      claim_id: 'clm_test',
+      revision: 3,
+      confirmed_fields: confirmedFields,
+      decision: null,
+      customer_next_step: {
+        ...nextStep,
+        status: 'ready_to_create',
+        summary: 'Your confirmed report is ready for controlled claim creation.',
+      },
+    }))
+    fetch.mockImplementationOnce(() => jsonResponse(createdMotorClaimResponse(), 201))
+    fetch.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseConsent = () => {
+        jsonResponse({
+          claim_id: 'clm_test',
+          revision: 5,
+          action: readyAction,
+          customer_next_step: {
+            ...nextStep,
+            status: 'assessor_request_ready',
+            summary: 'Your permission is recorded.',
+          },
+        }, 201).then(resolve)
+      }
+    }))
+    fetch.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseRouting = () => {
+        jsonResponse({
+          claim_id: 'clm_test',
+          revision: 6,
+          action: assignedAction,
+          customer_next_step: {
+            ...nextStep,
+            status: 'assessor_assigned',
+            summary: assignedAction.routing.next_step,
+            responsible_party: 'external_party',
+          },
+        }, 201).then(resolve)
+      }
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.queryByRole('heading', { name: 'Request a vehicle damage assessment' }))
+      .not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
+    await user.click(await screen.findByRole('button', { name: 'Create claim' }))
+
+    expect(await screen.findByText('Controlled assessment fixture')).toBeVisible()
+    expect(screen.getByText('Your confirmed incident region')).toBeVisible()
+    const requestButton = screen.getByRole('button', { name: 'Agree and request assessor' })
+    expect(requestButton).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: /I give Northwind permission/ }))
+    await user.click(requestButton)
+
+    expect(await screen.findByText('Recording your permission...')).toBeVisible()
+    releaseConsent()
+    expect(await screen.findByText('Sending the assessment request...')).toBeVisible()
+    releaseRouting()
+    expect(await screen.findByText('Assessor assigned')).toBeVisible()
+    expect(screen.getByText('asr_fixture_01')).toBeVisible()
+    expect(screen.getByText('Synthetic fixture routing; no production assessor was contacted.'))
+      .toBeVisible()
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      '/api/v1/claims/clm_test/assessor-routing/consent',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
+      '/api/v1/claims/clm_test/assessor-routing',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('keeps the claim saved after a retryable assessment failure and safely retries', async () => {
+    const completeTurn = completeMotorTurn()
+    const confirmedFields = confirmedMotorFields()
+    const readyAction = assessmentAction({
+      status: 'ready_to_request',
+      consent_status: 'granted',
+    })
+    const assignedAction = assessmentAction({
+      status: 'assigned',
+      consent_status: 'granted',
+      can_request: false,
+      routing: {
+        routing_status: 'assigned',
+        assessor_reference: 'asr_fixture_retry',
+        queue_reference: 'QUE-AUC-RETRY',
+        next_step: 'An assessor will review the confirmed claim information.',
+        expected_by: null,
+        limitations: ['Synthetic fixture routing; no production assessor was contacted.'],
+      },
+    })
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(completeTurn))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      claim_id: 'clm_test',
+      revision: 3,
+      confirmed_fields: confirmedFields,
+      decision: null,
+      customer_next_step: {
+        ...nextStep,
+        status: 'ready_to_create',
+        summary: 'Your confirmed report is ready for controlled claim creation.',
+      },
+    }))
+    fetch.mockImplementationOnce(() => jsonResponse(createdMotorClaimResponse(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      claim_id: 'clm_test',
+      revision: 5,
+      action: readyAction,
+      customer_next_step: {
+        ...nextStep,
+        status: 'assessor_request_ready',
+        summary: 'Your permission is recorded.',
+      },
+    }, 201))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      error: {
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: 'The assessment service is unavailable. The claim is saved and no assessor has been assigned.',
+        retryable: true,
+      },
+    }, 503))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      claim_id: 'clm_test',
+      revision: 6,
+      action: assignedAction,
+      customer_next_step: {
+        ...nextStep,
+        status: 'assessor_assigned',
+        summary: assignedAction.routing.next_step,
+        responsible_party: 'external_party',
+      },
+    }, 201))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
+    await user.click(await screen.findByRole('button', { name: 'Create claim' }))
+    await user.click(await screen.findByRole('checkbox', { name: /I give Northwind permission/ }))
+    await user.click(screen.getByRole('button', { name: 'Agree and request assessor' }))
+
+    expect(await screen.findByText('Assessment request not sent')).toBeVisible()
+    expect(screen.getByText('Your claim is saved, and no assessor has been assigned.')).toBeVisible()
+    const firstRouteHeaders = fetch.mock.calls[5][1].headers
+    await user.click(screen.getByRole('button', { name: 'Retry assessment request' }))
+
+    expect(await screen.findByText('Assessor assigned')).toBeVisible()
+    expect(fetch.mock.calls[6][1].headers['Idempotency-Key'])
+      .toBe(firstRouteHeaders['Idempotency-Key'])
+    expect(fetch.mock.calls[6][1].headers['If-Match']).toBe('5')
   })
 
   it('renders an urgent message handoff without claiming emergency contact', async () => {

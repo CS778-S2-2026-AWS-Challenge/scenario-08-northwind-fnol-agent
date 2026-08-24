@@ -181,6 +181,13 @@ class ExternalServiceConsentStatus(str, Enum):
     WITHDRAWN = 'withdrawn'
 
 
+class ClaimantExternalServiceStatus(str, Enum):
+    CONSENT_REQUIRED = 'consent_required'
+    READY_TO_REQUEST = 'ready_to_request'
+    QUEUED = 'queued'
+    ASSIGNED = 'assigned'
+
+
 class SupportNeed(str, Enum):
     """Claimant-requested support need, used only by claimant support APIs."""
 
@@ -289,6 +296,18 @@ class AssessorRoutingResult(ContractModel):
     next_step: str
     expected_by: datetime | None = None
     limitations: list[str] = Field(default_factory=list)
+
+
+class ClaimantExternalServiceAction(ContractModel):
+    service_identity: str
+    service_name: str
+    provider: str
+    purpose: str
+    shared_data_summary: list[str]
+    status: ClaimantExternalServiceStatus
+    consent_status: ExternalServiceConsentStatus | None = None
+    routing: AssessorRoutingResult | None = None
+    can_request: bool
 
 
 class ExternalServiceConsent(ContractModel):
@@ -760,6 +779,17 @@ class RouteAssessorRequest(ContractModel):
     location: AssessorLocation
 
 
+class GrantAssessorConsentRequest(ContractModel):
+    consent: Literal[True]
+
+
+class ClaimantExternalServiceResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    action: ClaimantExternalServiceAction
+    customer_next_step: CustomerNextStep
+
+
 class ClaimantEvidence(ContractModel):
     """Claimant-safe evidence projection with storage and extraction details removed."""
 
@@ -957,6 +987,7 @@ class ClaimantClaim(ContractModel):
     form: dict[str, StructuredFormField]
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
+    external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
     handoff: ClaimantHandoff | None = None
     created_at: datetime
@@ -1060,6 +1091,7 @@ class ClaimCreationResponse(ContractModel):
     revision: int = Field(ge=1)
     decision: ClaimantDecision
     external_claim: ExternalClaimResult
+    external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
 
 

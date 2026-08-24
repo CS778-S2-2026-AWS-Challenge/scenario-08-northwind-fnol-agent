@@ -74,6 +74,15 @@ preserves the current claim and never becomes an assignment. Timeout and unavail
 retryable with the same operation identity; access-denied and malformed responses require
 review before another attempt. Automatic retry counts remain unapproved.
 
+The claimant experience uses two versioned public mutations. The first records a fixed,
+task-specific consent scope; the second derives the current decision, consent, external claim,
+requested action, and confirmed region from the shared Working Claim before invoking this
+adapter. The action is projected only for a created controlled motor claim when no open handoff
+or professional review has priority. The claimant client shows the participant, controlled
+fixture provider label, purpose, shared-data summary, submission progress, assigned or queued
+result, and bounded failure. It does not construct an internal adapter command or expose the raw
+consent and authority references.
+
 ## Runtime-profile Relationship
 
 Cloudflare, MongoDB, AWS, and fixture data profiles are selected as complete, mutually

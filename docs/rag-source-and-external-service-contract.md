@@ -41,8 +41,10 @@ claimant consent step and records:
 - the exact Claim State fields that may change after success, with no failure mutation.
 
 The #252 adapter fixture adds `claimant_consent_ref` to `RouteAssessorRequest` and checks
-it against consent held in the shared Working Claim before calling the adapter. Claimant-
-facing consent capture remains #262 scope. The exact external Challenge Key Feature 2
+it against consent held in the shared Working Claim before calling the adapter. The #262
+claimant flow records that bounded consent, derives the authorised request from shared state,
+and shows provider, shared-data, progress, success, and failure states without exposing internal
+references. The exact external Challenge Key Feature 2
 wording is absent from the repository, so the scenario records that reference as
 `unverified_external_brief` rather than claiming complete challenge-feature coverage.
 
@@ -62,3 +64,30 @@ Owner verification on 24 August 2026 recorded `4 passed` for the focused contrac
 tests. The repository gate also recorded `374 passed`, `91.41%` backend coverage,
 `14 passed` repository-policy checks, `24 passed` claimant tests, and successful format,
 lint, type, and claimant build checks.
+
+## Claimant Experience Repeatable Check
+
+The #262 claimant flow can be repeated from the repository root with:
+
+```powershell
+python -m pytest tests/test_claimant_external_service.py tests/test_integrations.py
+npm test --prefix customer -- src/App.test.jsx
+```
+
+The backend checks prove that the action is absent before the controlled created-motor state,
+consent is bounded and idempotent, claimant projections exclude raw consent references, current
+Northwind authority is created, provider failure preserves the consented revision, and an
+unchanged retry succeeds once. The claimant tests exercise the consent-required, permission and
+submission progress, assigned success, retryable failure, and explicit retry states.
+
+For a visible check, start the backend and claimant client, complete a synthetic motor report
+with a confirmed incident location, and create the claim. Verify that the assessor card appears
+only then, names the controlled fixture provider, lists the four shared-data groups, and keeps
+the request button disabled until permission is checked. Submit the request and verify the
+assigned or queued result, next step, timing when known, and fixture limitation. Repeat at
+1440 x 900 and 390 x 844; the 24 August 2026 owner run completed the assigned fixture path at
+both sizes with no horizontal overflow or browser-console error.
+
+The complete #262 branch gate on 24 August 2026 recorded `389 passed`, `90.77%`
+backend coverage, `14 passed` repository-policy checks, `26 passed` claimant tests,
+and successful format, lint, type, and claimant production-build checks.

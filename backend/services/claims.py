@@ -44,6 +44,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.evidence_visibility import claimant_visible_evidence
+from backend.services.external_services import claimant_assessor_action
 from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
@@ -94,6 +95,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         form=claim.form,
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
+        external_service_action=claimant_assessor_action(repository, claim),
         customer_next_step=claim.customer_next_step,
         handoff=handoff,
         created_at=claim.created_at,

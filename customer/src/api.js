@@ -97,6 +97,35 @@ export function createExternalClaim({
   })
 }
 
+export function grantAssessorConsent({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-consent'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing/consent`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ consent: true }),
+  })
+}
+
+export function requestAssessorRouting({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-routing'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
 export function submitClaimMessage({
   claimId,
   sessionId,

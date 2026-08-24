@@ -6,6 +6,10 @@ from backend.adapters.claims_service import (
     ClaimsServiceAdapter,
 )
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.external_services import (
+    ASSESSOR_CONSENT_FIELDS,
+    ASSESSOR_SERVICE_IDENTITY,
+)
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingResult,
@@ -216,20 +220,12 @@ def route_assessor(
         ),
         None,
     )
-    required_consent_fields = {
-        'claim_id',
-        'external_claim_id',
-        'authorisation_ref',
-        'claimant_consent_ref',
-        'requested_action',
-        'location.region',
-    }
     if (
         consent is None
         or consent.status is not ExternalServiceConsentStatus.GRANTED
-        or consent.service_identity != 'vehicle_damage_assessment_routing'
+        or consent.service_identity != ASSESSOR_SERVICE_IDENTITY
         or consent.requested_action != payload.requested_action
-        or not required_consent_fields.issubset(consent.permitted_fields)
+        or not ASSESSOR_CONSENT_FIELDS.issubset(consent.permitted_fields)
     ):
         raise _authorisation_error(
             'Assessor routing requires matching active claimant consent for the minimum '
