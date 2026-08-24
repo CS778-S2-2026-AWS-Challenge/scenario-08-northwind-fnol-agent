@@ -198,7 +198,7 @@ behaviour while the smaller ports are introduced.
 The composition root selects one complete adapter bundle at startup:
 
 ```text
-DATA_RUNTIME_PROFILE=fixture | cloudflare | mongodb | aws
+DATA_RUNTIME_PROFILE=fixture | local_mvp | cloudflare | mongodb | aws
 ```
 
 ```text
@@ -208,7 +208,7 @@ provider-neutral ports
         |
 one selected adapter bundle
         |
-one provider profile only
+one declared profile composition
 ```
 
 The selected profile must provide every required capability or fail startup
@@ -218,12 +218,15 @@ from a second profile without a separately approved architecture change.
 | Profile | Candidate transactional store | Candidate object store | Candidate knowledge/index services | Status |
 | --- | --- | --- | --- | --- |
 | `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
+| `local_mvp` | Verified MongoDB Atlas repository | Configured local MinIO | Labelled deterministic fixture policy/history and knowledge retrieval | Explicit development composition; MongoDB and MinIO must pass startup checks |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
 | `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Repository adapter in progress; transactions, object storage, topology, and access are not yet verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
 
 These mappings are alternatives. For example, selecting `mongodb` does not
 store evidence in Cloudflare R2 or query an AWS vector index.
+`local_mvp` is the sole explicit composite profile: it names every source and reports
+fixture-backed capabilities honestly instead of presenting them as MongoDB services.
 
 ## Runtime Configuration and Assembly
 
@@ -242,21 +245,24 @@ The application composition root must:
 
 The current implementation selects `fixture` by default and assembles its persistence,
 evidence, structured policy/history, knowledge-document, and knowledge-retrieval
-capabilities as one bundle. Selecting `cloudflare`, `mongodb`, or `aws` currently fails
+capabilities as one bundle. `local_mvp` assembles verified MongoDB persistence,
+configured MinIO evidence storage, and explicitly labelled fixture policy/history and
+knowledge capabilities for the local demonstration. Selecting `cloudflare`, `mongodb`,
+or `aws` currently fails
 startup with an explicit unsupported-profile error. Those profiles must remain
 unavailable until one complete provider-specific bundle and its conformance tests exist;
 the application does not fill missing capabilities from `fixture`.
 
 The runtime capability table used by the composition root is:
 
-| Capability | `fixture` | `cloudflare` | `mongodb` | `aws` |
-| --- | --- | --- | --- | --- |
-| `persistence` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `evidence_storage` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `policy` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `claim_history` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| Capability | `fixture` | `local_mvp` | `cloudflare` | `mongodb` | `aws` |
+| --- | --- | --- | --- | --- | --- |
+| `persistence` | `using_fixture` | `verified` | `pending_confirmation` | `pending_confirmation` | `pending_confirmation` |
+| `evidence_storage` | `using_fixture` | `verified` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `policy` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `claim_history` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_documents` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_retrieval` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
 
 The capability-status vocabulary separates readiness from implementation source.
 `using_fixture` means that the controlled fixture capability is ready, while `verified`
@@ -281,6 +287,11 @@ explicitly selects the S3-compatible object adapter, the assembled bundle and re
 check report that configured service instead. External bundle injection must match both
 `DATA_RUNTIME_PROFILE` and `NORTHWIND_OBJECT_STORAGE_ADAPTER`; it cannot relabel fixture
 storage as the configured service.
+
+The `local_mvp` profile requires
+`NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible`. Startup verifies MongoDB with a
+bounded ping and MinIO with a bucket check. A failure closes any opened MongoDB client
+and refuses startup without falling back to in-memory persistence.
 
 `DATA_RUNTIME_PROFILE` remains the only variable that selects a complete data-runtime
 profile. Provider connection and secret-reference variables are introduced by their

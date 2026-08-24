@@ -112,11 +112,11 @@ The script removes both staging and final objects for its own synthetic Evidence
 
 ## Current limitation
 
-The local composition uses fixture transactional, policy, and knowledge adapters with
-configured MinIO evidence bytes. MinIO is an explicitly selected local object-store
-adapter, not a complete data runtime profile. The MongoDB `DataRuntimeBundle` remains
-intentionally unselected until its complete transaction and provider-conformance
-acceptance criteria are met.
+The fixture profile may use configured MinIO while retaining fixture transactional,
+policy, and knowledge adapters. The explicit `local_mvp` profile instead requires
+verified MongoDB persistence and configured MinIO evidence bytes while retaining
+clearly labelled fixture policy/history and knowledge capabilities. This development
+composition does not enable or make production claims for the complete MongoDB profile.
 
 The demo reset endpoint intentionally returns `DEMO_RESET_UNAVAILABLE` while MinIO is
 selected. It does not clear a whole shared bucket. The smoke command provides bounded

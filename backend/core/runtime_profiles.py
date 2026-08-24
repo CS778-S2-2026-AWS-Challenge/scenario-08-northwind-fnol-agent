@@ -17,6 +17,12 @@ from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHist
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import (
+    MongoDBConfigurationError,
+    MongoDBConnectionConfig,
+    MongoDBRepository,
+    connect_mongodb_repository,
+)
 from backend.repositories.protocols import PersistenceRepository
 
 
@@ -53,6 +59,16 @@ _PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, RuntimeCapabilit
             DataRuntimeProfile.FIXTURE: MappingProxyType(
                 {
                     capability: RuntimeCapabilityStatus.USING_FIXTURE
+                    for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+            DataRuntimeProfile.LOCAL_MVP: MappingProxyType(
+                {
+                    capability: (
+                        RuntimeCapabilityStatus.VERIFIED
+                        if capability in {'persistence', 'evidence_storage'}
+                        else RuntimeCapabilityStatus.USING_FIXTURE
+                    )
                     for capability in RUNTIME_CAPABILITIES
                 }
             ),
@@ -167,6 +183,44 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
         return DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
             repository=FixtureRepository(),
+            evidence_storage=evidence_storage,
+            policy_history=MockPolicyHistoryAdapter(),
+            knowledge_documents=knowledge_documents,
+            knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
+        )
+
+    if settings.data_runtime_profile is DataRuntimeProfile.LOCAL_MVP:
+        if settings.object_storage_adapter is not ObjectStorageAdapter.S3_COMPATIBLE:
+            raise RuntimeProfileConfigurationError(
+                'The local_mvp data runtime requires '
+                'NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible.'
+            )
+        repository: MongoDBRepository | None = None
+        try:
+            repository = connect_mongodb_repository(MongoDBConnectionConfig.from_environment())
+            evidence_storage = MinioEvidenceStorage(
+                S3CompatibleObjectStorageConfig.from_environment()
+            )
+            if evidence_storage.connection_status() != 'configured_service':
+                raise RuntimeProfileConfigurationError(
+                    'The local_mvp data runtime cannot start because MinIO is unavailable.'
+                )
+        except RuntimeProfileConfigurationError:
+            if repository is not None:
+                repository.close()
+            raise
+        except (MongoDBConfigurationError, ValueError) as error:
+            if repository is not None:
+                repository.close()
+            raise RuntimeProfileConfigurationError(
+                'The local_mvp data runtime cannot start because provider configuration '
+                'or connectivity verification failed.'
+            ) from error
+
+        knowledge_documents = FixtureKnowledgeDocumentStore()
+        return DataRuntimeBundle(
+            profile=DataRuntimeProfile.LOCAL_MVP,
+            repository=repository,
             evidence_storage=evidence_storage,
             policy_history=MockPolicyHistoryAdapter(),
             knowledge_documents=knowledge_documents,

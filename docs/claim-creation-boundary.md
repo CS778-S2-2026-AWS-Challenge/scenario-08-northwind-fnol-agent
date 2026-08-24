@@ -71,6 +71,10 @@ system itself may remain a separately approved external integration, but its ada
 cannot expose provider details to the domain or use another data profile as a silent
 fallback.
 
+The named `local_mvp` development composition is explicit rather than silent: MongoDB
+owns structured persistence, MinIO owns evidence bytes, and fixture policy/history and
+knowledge results retain their fixture source labels.
+
 ## Open Confirmations
 
 Before a configured provider can be described as production-capable, verify endpoint and
