@@ -11,6 +11,7 @@ time-bound commitments belong in `sprint/`.
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Development Conventions](development-conventions.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
+- [Provider-Neutral Model Gateway](model-gateway.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
