@@ -83,12 +83,17 @@ class Settings:
     @classmethod
     def from_environment(cls) -> 'Settings':
         environment = os.getenv('NORTHWIND_ENVIRONMENT', 'development').strip().lower()
-        raw_identity_mode = os.getenv('NORTHWIND_IDENTITY_MODE', IdentityMode.NORMAL.value)
+        raw_identity_mode = os.getenv(
+            'NORTHWIND_IDENTITY_MODE',
+            IdentityMode.NORMAL.value,
+        )
         try:
             identity_mode = IdentityMode(raw_identity_mode.strip().lower())
         except ValueError as error:
             allowed = ', '.join(mode.value for mode in IdentityMode)
-            raise ValueError(f'NORTHWIND_IDENTITY_MODE must be exactly one of: {allowed}.') from error
+            raise ValueError(
+                f'NORTHWIND_IDENTITY_MODE must be exactly one of: {allowed}.'
+            ) from error
         raw_profile = os.getenv('DATA_RUNTIME_PROFILE', DataRuntimeProfile.FIXTURE.value)
         try:
             data_runtime_profile = DataRuntimeProfile(raw_profile.strip().lower())
