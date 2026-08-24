@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Barrier, Lock
 
 import mongomock
 import pytest
@@ -305,6 +307,79 @@ def test_child_record_identity_cannot_cross_claims(repository: MongoDBRepository
         'msg_mongo_001',
         first_claim.customer_id,
     ) == _message(first_claim, first_session)
+
+
+def test_child_record_identity_is_atomic_under_competing_writers(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_claim = _claim()
+    repository.create_claim(first_claim, _session(first_claim))
+    second_claim = first_claim.model_copy(
+        update={
+            'claim_id': 'clm_mongo_002',
+            'customer_id': 'cus_mongo_002',
+            'active_session_id': 'ses_mongo_002',
+        }
+    )
+    repository.create_claim(
+        second_claim,
+        _session(second_claim).model_copy(update={'session_id': 'ses_mongo_002'}),
+    )
+
+    original_find_one = repository._collection.find_one
+    ownership_reads = Barrier(2)
+    ownership_lock = Lock()
+    ownership_waits_remaining = 2
+
+    def coordinated_find_one(*args: object, **kwargs: object) -> object:
+        query = args[0] if args else kwargs.get('filter')
+        should_wait = False
+        nonlocal ownership_waits_remaining
+        if isinstance(query, dict) and query.get('_id') == repository._record_id(
+            'evidence', 'evd_mongo_001'
+        ):
+            with ownership_lock:
+                if ownership_waits_remaining:
+                    ownership_waits_remaining -= 1
+                    should_wait = True
+        if should_wait:
+            ownership_reads.wait(timeout=5)
+        return original_find_one(*args, **kwargs)
+
+    monkeypatch.setattr(repository._collection, 'find_one', coordinated_find_one)
+
+    def save_for(claim: WorkingClaim) -> str:
+        try:
+            repository.save_evidence(_evidence(claim), claim.customer_id)
+        except IdempotencyConflict:
+            return 'conflict'
+        return 'saved'
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(save_for, (first_claim, second_claim)))
+
+    assert sorted(results) == ['conflict', 'saved']
+    stored = repository._collection.find_one(
+        {'_id': repository._record_id('evidence', 'evd_mongo_001')}
+    )
+    assert stored is not None
+    assert stored['claim_id'] in {first_claim.claim_id, second_claim.claim_id}
+    winning_claim = first_claim if stored['claim_id'] == first_claim.claim_id else second_claim
+    losing_claim = second_claim if winning_claim is first_claim else first_claim
+    assert repository.get_evidence(
+        winning_claim.claim_id,
+        'evd_mongo_001',
+        winning_claim.customer_id,
+    ) == _evidence(winning_claim)
+    assert (
+        repository.get_evidence(
+            losing_claim.claim_id,
+            'evd_mongo_001',
+            losing_claim.customer_id,
+        )
+        is None
+    )
 
 
 def test_client_message_id_is_unique_within_claim(repository: MongoDBRepository) -> None:

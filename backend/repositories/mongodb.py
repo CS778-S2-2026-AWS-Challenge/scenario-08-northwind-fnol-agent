@@ -109,9 +109,15 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(identifier)
         self._reject_client_message_conflict(document, session=session)
+        ownership_filter = {
+            '_id': document['_id'],
+            'record_type': kind,
+            'claim_id': claim_id,
+            'customer_id': customer_id,
+        }
         try:
             self._collection.replace_one(
-                {'_id': document['_id']},
+                ownership_filter,
                 document,
                 upsert=True,
                 session=session,
