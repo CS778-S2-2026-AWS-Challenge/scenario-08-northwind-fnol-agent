@@ -1,3 +1,4 @@
+from datetime import timedelta
 from hashlib import sha256
 from io import BytesIO
 from typing import Any, cast
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.adapters.evidence_storage import MinioEvidenceStorage
 from backend.app import create_app
 from backend.core.config import ObjectStorageAdapter
+from backend.services.support import now_utc
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 PAYLOAD = b'northwind-minio-fastapi-smoke'
@@ -21,6 +23,8 @@ class FastApiS3Client:
         self.presign_error: Exception | None = None
         self.object_body = PAYLOAD
         self.object_reads = 0
+        self.presign_count = 0
+        self.final_body: bytes | None = None
 
     def head_bucket(self, **_: Any) -> None:
         if self.head_bucket_error is not None:
@@ -29,18 +33,31 @@ class FastApiS3Client:
     def generate_presigned_url(self, *_: Any, **kwargs: Any) -> str:
         if self.presign_error is not None:
             raise self.presign_error
+        self.presign_count += 1
         self.presigned_params = cast(dict[str, Any], kwargs['Params'])
-        return 'http://localhost:9000/northwind-evidence/signed'
+        return f'http://localhost:9000/northwind-evidence/signed-{self.presign_count}'
 
-    def get_object(self, **_: Any) -> dict[str, Any]:
+    def get_object(self, **kwargs: Any) -> dict[str, Any]:
         assert self.presigned_params is not None
+        if '/finalised/' in str(kwargs['Key']) and self.final_body is None:
+            from botocore.exceptions import ClientError
+
+            raise ClientError({'Error': {'Code': 'NoSuchKey'}}, 'GetObject')
         self.object_reads += 1
+        body = self.final_body if '/finalised/' in str(kwargs['Key']) else self.object_body
+        assert body is not None
         return {
-            'ContentLength': len(self.object_body),
+            'ContentLength': len(body),
             'ContentType': self.presigned_params['ContentType'],
             'Metadata': self.presigned_params['Metadata'],
-            'Body': BytesIO(self.object_body),
+            'Body': BytesIO(body),
         }
+
+    def copy_object(self, **_: Any) -> None:
+        self.final_body = bytes(self.object_body)
+
+    def delete_object(self, **_: Any) -> None:
+        return None
 
 
 def configure_minio_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,7 +127,7 @@ def test_environment_composes_minio_through_the_fastapi_evidence_flow(
         readiness = client.get('/health/ready')
 
     assert completed.status_code == 202
-    assert s3_client.object_reads == 1
+    assert s3_client.object_reads == 2
     assert listed.status_code == 200
     assert listed.json()['items'][0]['file_status'] == 'processing'
     assert readiness.status_code == 200
@@ -119,6 +136,85 @@ def test_environment_composes_minio_through_the_fastapi_evidence_flow(
     public_payload = f'{requested.text}{completed.text}{listed.text}{readiness.text}'
     assert 'local-access-key' not in public_payload
     assert 'local-secret-key' not in public_payload
+    assert '/finalised/' not in public_payload
+
+
+def test_expired_idempotent_replay_resigns_without_duplicate_or_revision_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_minio_environment(monkeypatch)
+    s3_client = FastApiS3Client()
+    monkeypatch.setattr(
+        'backend.adapters.evidence_storage.boto3.client',
+        lambda *_args, **_kwargs: s3_client,
+    )
+    app = create_app()
+
+    with TestClient(app) as client:
+        claim_id = create_claim(client, 'expired-replay-claim')
+        headers = {
+            **CLAIMANT_AUTH,
+            'Idempotency-Key': 'expired-replay-upload',
+            'If-Match': '1',
+        }
+        payload = {
+            'kind': 'incident_image',
+            'original_filename': 'damage.jpg',
+            'media_type': 'image/jpeg',
+            'size_bytes': len(PAYLOAD),
+        }
+        first = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads', headers=headers, json=payload
+        )
+        monkeypatch.setattr(
+            'backend.services.evidence.now_utc', lambda: now_utc() + timedelta(hours=1)
+        )
+        replay = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads', headers=headers, json=payload
+        )
+        claim = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
+        evidence = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
+
+    assert first.status_code == replay.status_code == 201
+    assert replay.json()['evidence_id'] == first.json()['evidence_id']
+    assert replay.json()['revision'] == first.json()['revision'] == 2
+    assert replay.json()['upload']['url'] != first.json()['upload']['url']
+    assert claim.json()['revision'] == 2
+    assert len(evidence.json()['items']) == 1
+
+
+def test_real_presign_exposes_only_short_lived_addressing_and_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_minio_environment(monkeypatch)
+    app = create_app()
+
+    with TestClient(app) as client:
+        claim_id = create_claim(client, 'real-presign-claim')
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={
+                **CLAIMANT_AUTH,
+                'Idempotency-Key': 'real-presign-upload',
+                'If-Match': '1',
+            },
+            json={
+                'kind': 'incident_image',
+                'original_filename': 'damage.jpg',
+                'media_type': 'image/jpeg',
+                'size_bytes': len(PAYLOAD),
+            },
+        )
+        listed = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
+
+    assert response.status_code == 201
+    capability = response.json()['upload']['url']
+    assert 'northwind-evidence' in capability
+    assert 'X-Amz-Credential=local-access-key' in capability
+    assert 'local-secret-key' not in response.text
+    assert '/staging' in capability
+    assert '/finalised/' not in response.text
+    assert '/staging' not in listed.text
 
 
 def test_configured_minio_outage_is_visible_and_keeps_claim_unchanged(

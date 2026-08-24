@@ -956,8 +956,13 @@ Response `201`:
 }
 ```
 
-This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative
-and is never stored in fixtures or claim records. The adapter MAY use fixture
+This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative.
+A configured S3-compatible adapter returns a short-lived upload capability that MAY
+contain bucket/addressing information, a staging object path, and SigV4 access-key
+identity. It MUST NOT contain the secret access key. Protected storage keys MUST NOT
+appear in the persistent claimant Claim or Evidence projections. A replay after the
+capability expires MUST re-sign the same upload intent without creating another Evidence
+record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
 
