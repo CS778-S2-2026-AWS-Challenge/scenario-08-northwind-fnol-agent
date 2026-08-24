@@ -66,8 +66,14 @@ function validatePullRequestBody({ body, isDraft, owner, repo }) {
     );
   }
 
+  const summary = sectionContent(body, 'Summary');
+  if (!hasMeaningfulContent(summary)) {
+    errors.push('Complete the `## Summary` section when opening a pull request.');
+  }
+
   if (!isDraft) {
     for (const heading of REQUIRED_READY_SECTIONS) {
+      if (heading === 'Summary') continue;
       const content = sectionContent(body, heading);
       if (!hasMeaningfulContent(content)) {
         errors.push(`Complete the \`## ${heading}\` section before requesting review.`);

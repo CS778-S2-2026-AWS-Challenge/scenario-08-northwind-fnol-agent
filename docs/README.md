@@ -52,6 +52,7 @@ current document explicitly adopts the same rule.
 - [Day 5 session and evidence validation](day5-session-evidence-validation.md)
 - [Day 5 staff revision validation](day5-staff-revision-validation.md)
 - [Day 5 clear-claim validation](day5-clear-claim-validation.md)
+- [Day 5 fact-source and confirmation validation](day5-fact-source-and-confirmation.md)
 - [DynamoDB fixture examples](api-dynamodb-fixture-examples.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also
