@@ -991,8 +991,13 @@ Response `201`:
 }
 ```
 
-This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative
-and is never stored in fixtures or claim records. The adapter MAY use fixture
+This request requires `Idempotency-Key` and `If-Match`. The URL is illustrative.
+A configured S3-compatible adapter returns a short-lived upload capability that MAY
+contain bucket/addressing information, a staging object path, and SigV4 access-key
+identity. It MUST NOT contain the secret access key. Protected storage keys MUST NOT
+appear in the persistent claimant Claim or Evidence projections. A replay after the
+capability expires MUST re-sign the same upload intent without creating another Evidence
+record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
 
@@ -1012,10 +1017,12 @@ This request requires `Idempotency-Key` and `If-Match`. Response is `200` when
 processing is complete or `202` when processing continues. It returns the
 claimant-safe evidence resource, new claim revision, `status_url`, and the
 current customer next step. The server MUST validate media type, size,
-ownership, and stored object identity before accepting the item. Image-derived
-fields remain proposed until a claimant or authorised staff member confirms
-them; completion never silently writes extracted values into the confirmed
-form.
+ownership, stored object identity, and the submitted SHA-256 checksum before
+accepting the item. A configured object adapter records the checksum computed
+from the stored bytes and a safe adapter source identifier; it does not treat a
+claimant-declared checksum as provider-verified provenance. Image-derived fields
+remain proposed until a claimant or authorised staff member confirms them;
+completion never silently writes extracted values into the confirmed form.
 
 For the fixture runtime, the upload target is the authenticated
 `PUT /api/v1/claims/{claim_id}/evidence/{evidence_id}/content` route. It requires the claimant
@@ -1607,9 +1614,10 @@ adapter:
 | `evidence_storage` | the evidence object store |
 | `claims_service` | the external claim-creation service |
 
-Each reports `using_fixture` when the adapter answers under the production
-contract, and `unavailable` while it is in an outage. A fixture says it is a
-fixture; it never claims to be the real provider.
+Each reports `using_fixture` when the fixture adapter answers under the production
+contract, `configured_service` when the explicitly configured S3-compatible object
+adapter passes its bucket health check, and `unavailable` while a required adapter is
+in an outage. A fixture says it is a fixture; it never claims to be the real provider.
 
 Every unconfirmed provider capability stays visible as its own check and remains
 `pending_confirmation` until its access is verified, so a working fixture can never be
@@ -1841,7 +1849,10 @@ Returns readiness without secrets or private configuration:
 }
 ```
 
-Readiness is `ok`, `degraded`, or `unavailable`. A fixture is not reported as a real connected service.
+Readiness is `ok`, `degraded`, or `unavailable`. A required configured data capability
+reporting `unavailable` makes overall readiness `unavailable`; otherwise the current
+fixture/model combination remains `degraded`. A fixture is not reported as a real
+connected service.
 
 ## Persistence and Provider Boundary
 

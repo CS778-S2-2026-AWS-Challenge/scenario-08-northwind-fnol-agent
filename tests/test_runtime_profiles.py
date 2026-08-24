@@ -10,11 +10,15 @@ from backend.adapters.knowledge import (
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
-from backend.core.config import DataRuntimeProfile, Settings
+from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.core.runtime_profiles import (
+    RUNTIME_CAPABILITIES,
     DataRuntimeBundle,
+    RuntimeCapabilityStatus,
     RuntimeProfileConfigurationError,
     build_data_runtime_bundle,
+    missing_runtime_capabilities,
+    runtime_capability_statuses,
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.repositories.fixture import FixtureRepository
@@ -74,6 +78,36 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
         'knowledge_documents': 'using_fixture',
         'knowledge_retrieval': 'using_fixture',
     }
+
+
+def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_profile() -> None:
+    for profile in DataRuntimeProfile:
+        statuses = runtime_capability_statuses(profile)
+        assert tuple(statuses) == RUNTIME_CAPABILITIES
+
+    assert set(missing_runtime_capabilities(DataRuntimeProfile.FIXTURE)) == set()
+    assert set(missing_runtime_capabilities(DataRuntimeProfile.MONGODB)) == set(
+        RUNTIME_CAPABILITIES
+    )
+    assert set(missing_runtime_capabilities(DataRuntimeProfile.CLOUDFLARE)) == set(
+        RUNTIME_CAPABILITIES
+    )
+    assert set(missing_runtime_capabilities(DataRuntimeProfile.AWS)) == set(RUNTIME_CAPABILITIES)
+
+
+def test_capability_status_table_is_returned_as_a_copy() -> None:
+    statuses = runtime_capability_statuses(DataRuntimeProfile.FIXTURE)
+    statuses['persistence'] = 'tampered'
+
+    assert runtime_capability_statuses(DataRuntimeProfile.FIXTURE)['persistence'] == 'using_fixture'
+
+
+def test_verified_non_fixture_capability_is_start_capable_without_fixture_label() -> None:
+    assert RuntimeCapabilityStatus.USING_FIXTURE.start_capable
+    assert RuntimeCapabilityStatus.VERIFIED.start_capable
+    assert RuntimeCapabilityStatus.VERIFIED.value == 'verified'
+    assert not RuntimeCapabilityStatus.PENDING_CONFIRMATION.start_capable
+    assert not RuntimeCapabilityStatus.UNAVAILABLE.start_capable
 
 
 def test_fixture_knowledge_retrieval_filters_metadata_before_text_matching() -> None:
@@ -171,7 +205,10 @@ def test_fixture_knowledge_retrieval_fails_closed_for_inapplicable_or_missing_sc
 def test_unimplemented_profile_fails_without_fixture_fallback(
     profile: DataRuntimeProfile,
 ) -> None:
-    with pytest.raises(RuntimeProfileConfigurationError, match='no fixture'):
+    with pytest.raises(
+        RuntimeProfileConfigurationError,
+        match='missing or unverified capabilities: persistence',
+    ):
         build_data_runtime_bundle(Settings(data_runtime_profile=profile))
 
 
@@ -192,6 +229,19 @@ def test_app_rejects_a_bundle_that_does_not_match_selected_profile() -> None:
     with pytest.raises(ValueError, match='does not match DATA_RUNTIME_PROFILE'):
         create_app(
             Settings(data_runtime_profile=DataRuntimeProfile.MONGODB),
+            data_runtime_bundle=fixture_bundle,
+        )
+
+
+def test_app_rejects_a_bundle_that_does_not_match_selected_object_storage() -> None:
+    fixture_bundle = build_data_runtime_bundle(Settings())
+
+    with pytest.raises(
+        RuntimeProfileConfigurationError,
+        match='does not match NORTHWIND_OBJECT_STORAGE_ADAPTER',
+    ):
+        create_app(
+            Settings(object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE),
             data_runtime_bundle=fixture_bundle,
         )
 

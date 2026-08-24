@@ -118,6 +118,10 @@ physically:
    retrieval records, handoffs, staff actions, follow-up tasks, active branch and
    rule references, revisions, idempotency records, retention work, and audit events.
 2. **Object store** holds original evidence and other large binary objects.
+   For the local MVP, the object-store port may use the S3-compatible MinIO
+   adapter defined in [MinIO Object-Storage Boundary](minio-object-storage.md).
+   MinIO is an object-store choice, not a separate data runtime profile; it
+   does not change the provider-neutral domain or API contract.
 3. **Knowledge document store** holds approved source documents, parsed text,
    versions, authority metadata, and chunk records.
 4. **Retrieval index** supports metadata-filtered keyword and vector search over
@@ -213,7 +217,7 @@ from a second profile without a separately approved architecture change.
 
 | Profile | Candidate transactional store | Candidate object store | Candidate knowledge/index services | Status |
 | --- | --- | --- | --- | --- |
-| `fixture` | In-memory fixture repository | Synthetic object adapter | Deterministic fixture retriever | Available for controlled tests and demonstrations |
+| `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
 | `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Candidate; topology and access must be verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
@@ -243,9 +247,49 @@ startup with an explicit unsupported-profile error. Those profiles must remain
 unavailable until one complete provider-specific bundle and its conformance tests exist;
 the application does not fill missing capabilities from `fixture`.
 
-`DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
-connection and secret-reference variable names will be added with the corresponding
-adapter contract rather than invented before topology and access are verified.
+The runtime capability table used by the composition root is:
+
+| Capability | `fixture` | `cloudflare` | `mongodb` | `aws` |
+| --- | --- | --- | --- | --- |
+| `persistence` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `evidence_storage` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `policy` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `claim_history` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+
+The capability-status vocabulary separates readiness from implementation source.
+`using_fixture` means that the controlled fixture capability is ready, while `verified`
+means that a non-fixture provider capability has passed its required verification. Both
+statuses are start-capable. `pending_confirmation` and `unavailable` are not
+start-capable and appear in the named missing-capability error.
+
+The table currently provides diagnostic input to `build_data_runtime_bundle`; it is not
+the sole composition gate. `validate_data_runtime_bundle` independently rejects every
+externally supplied non-fixture bundle until a complete provider-specific composition
+path and its conformance tests are implemented. Changing a table entry to `verified`
+alone therefore cannot enable a provider or assemble a mixed bundle. The current table
+is intentionally conservative: MongoDB repository code exists, but transaction-capable
+persistence, protected object storage, and runtime bundle verification are still
+outstanding.
+
+The `fixture` capability row is the default baseline. When the local fixture profile
+explicitly selects the S3-compatible object adapter, the assembled bundle and readiness
+check report that configured service instead. External bundle injection must match both
+`DATA_RUNTIME_PROFILE` and `NORTHWIND_OBJECT_STORAGE_ADAPTER`; it cannot relabel fixture
+storage as the configured service.
+
+`DATA_RUNTIME_PROFILE` remains the only variable that selects a complete data-runtime
+profile. Provider connection and secret-reference variables are introduced by their
+corresponding adapter contracts rather than treated as profile selectors. The MinIO/S3
+compatible evidence adapter is explicitly selected by
+`NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible` and defines
+`NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
+`NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID`, `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY`,
+`NORTHWIND_OBJECT_STORAGE_BUCKET`, `NORTHWIND_OBJECT_STORAGE_REGION`, and
+`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`. Connection or credential variables
+alone do not switch adapters, and this local object-store selection does not enable a
+MongoDB, Cloudflare, or AWS data profile.
 
 ## Knowledge Base and RAG
 

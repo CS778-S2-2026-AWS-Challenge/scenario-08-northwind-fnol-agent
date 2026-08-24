@@ -11,7 +11,7 @@
     "claim_state": {
       "severity": "complex",
       "coverage": "not_assessed",
-      "evidence": "not_started",
+      "evidence": "received",
       "fraud_signal": "none",
       "customer_support": "human_requested",
       "urgency": "urgent",
@@ -60,7 +60,7 @@
         "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
       }
     },
-    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "evidence_summary": {"received": 1, "pending": 0, "needs_attention": 0},
     "route": null,
     "active_session_id": "ses_fixture_at04",
     "external_claim": null,
@@ -90,7 +90,25 @@
       "closed_at": null
     }
   ],
-  "evidence": [],
+  "evidence": [
+    {
+      "evidence_id": "evd_fixture_path_urgent_image",
+      "claim_id": "clm_fixture_at04",
+      "kind": "incident_image",
+      "status": "received",
+      "file_status": "ready",
+      "original_filename": "urgent-scene.jpg",
+      "media_type": "image/jpeg",
+      "size_bytes": 286720,
+      "source": "claimant",
+      "related_fields": ["incident.description"],
+      "needed_for": ["later_action"],
+      "provenance": {"fixture_storage_ref": "fixture://path/urgent/image"},
+      "claimant_note": "The scene image is available but does not delay urgent support.",
+      "created_at": "2026-08-17T01:20:00Z",
+      "updated_at": "2026-08-17T01:20:00Z"
+    }
+  ],
   "messages": [
     {
       "message_id": "msg_at04_claimant_1",
@@ -103,7 +121,7 @@
         "type": "text",
         "text": "A passenger is injured and trapped after a rear-end collision on the motorway near Exit 12."
       },
-      "evidence_refs": [],
+      "evidence_refs": ["evd_fixture_path_urgent_image"],
       "in_reply_to": null,
       "created_at": "2026-08-13T09:00:00Z"
     }
@@ -168,7 +186,23 @@
             "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
           }
         },
-        "evidence_refs": [],
+        "evidence_refs": ["evd_fixture_path_urgent_image"],
+        "evidence": [
+          {
+            "evidence_id": "evd_fixture_path_urgent_image",
+            "kind": "incident_image",
+            "status": "received",
+            "file_status": "ready",
+            "source": "claimant",
+            "visibility": "shared",
+            "original_filename": "urgent-scene.jpg",
+            "media_type": "image/jpeg",
+            "size_bytes": 286720,
+            "related_fields": ["incident.description"],
+            "needed_for": ["later_action"],
+            "claimant_note": "The scene image is available but does not delay urgent support."
+          }
+        ],
         "missing_items": ["vehicle.drivable", "authorities.emergency_services_notified"],
         "pending_items": [],
         "conflicts": [],

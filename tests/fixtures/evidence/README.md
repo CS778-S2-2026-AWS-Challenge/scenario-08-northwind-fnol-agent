@@ -22,24 +22,43 @@ fixture work.
 
 ## Path entry and visibility fixtures
 
-`path-entry-visibility.json` defines complete effective evidence sets for the fast,
-professional-review, urgent, human-request, and pending-evidence paths. Each
-entry references the canonical catalogue in `backend/demo_data/scenarios` by
-`scenario_id`; the loader derives the claim identifier, non-evidence Claim State,
-customer next step, and evidence claim links from that record. It then derives
-the effective Evidence State and Evidence Summary from the entry's complete
-evidence set using the same precedence as the runtime evidence service. The
-fixture source must not copy those derived fields, so scenario-facing state has
-one runtime source and cannot contradict its evidence records.
+`path-entry-visibility.json` classifies the complete canonical evidence set for
+the fast, professional-review, urgent, human-request, and pending-evidence
+paths. It does **not** own a second copy of any `EvidenceRecord`.
 
-Evidence is labelled `claimant_visible`, `shared`, or `internal_only`. The
-claimant fixture projection includes the first two classes, removes internal
-provenance, and always excludes internal-only evidence. Validate all five path
-entries with:
+Each entry names a canonical scenario in `backend/demo_data/scenarios` and each
+visibility item stores only:
+
+- a fixture/classification id;
+- one visibility value (`claimant_visible`, `shared`, or `internal_only`);
+- the canonical `evidence_id` it classifies.
+
+`load_evidence_path_fixtures()` resolves the actual evidence payload from the
+canonical scenario. The loader rejects embedded evidence payloads, unknown
+references, duplicate references, and incomplete classifications. Claim id,
+Claim State, Evidence Summary, and customer next step are also projected from
+the canonical scenario.
+
+This gives the path fixture one job only: classify visibility. Evidence value,
+source, lifecycle state, provenance, timing, and relationship data remain owned
+by the canonical scenario.
+
+The claimant fixture projection includes `claimant_visible` and `shared`, strips
+internal provenance, and excludes `internal_only` evidence. Validate all five
+path entries with:
 
 ```powershell
 py -3.12 scripts/run_evidence_visibility_fixtures.py
 ```
+
+The live cross-check is stricter:
+
+```powershell
+py -3.12 scripts/run_evidence_path_defects.py
+```
+
+It seeds the canonical scenarios and compares the declared visibility with the
+actual claimant and Workbench projections. The expected result is zero defects.
 
 ## The shared evidence fixture service
 
@@ -73,6 +92,6 @@ disagrees with.
 
 `test_evidence_fixture_service.py` sweeps every evidence record in
 `backend/demo_data/scenarios`, `tests/fixtures/professional_review`, the
-lifecycle catalogue, and the path entries. Parsing already forces the domain
-`EvidenceRecord`, so a private model fails at load; the sweep adds the subtler
-check that no path invents an unregistered status and file-status combination.
+lifecycle catalogue, and the resolved path entries. Parsing already forces the
+domain `EvidenceRecord`; the path loader additionally proves each entry points
+back to the canonical record rather than a private copy.

@@ -168,7 +168,6 @@ it('shows missing material as outstanding instead of submitted evidence', async 
   expect(workspace.textContent).toContain('1Outstanding materials')
   dom.window.close()
 })
-
 it('paginates a large queue, resets on filter change, and keeps handoff facts visible', async () => {
   const items = Array.from({ length: 8 }, (_, index) => queueItem(index + 1))
   items[0] = queueItem(1, { priority: 'high', open_handoff_count: 2 })
@@ -745,7 +744,6 @@ it('keeps Agent reply suggestions internal through suggested, accepted, edited, 
   expect(document.querySelector('#agentSuggestionText').value).toBe('')
   dom.window.close()
 })
-
 it('announces queue failures and exposes named keyboard controls', async () => {
   let releaseRequest
   const pendingResponse = new Promise((resolve) => {

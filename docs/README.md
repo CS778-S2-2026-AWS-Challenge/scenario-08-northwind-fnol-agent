@@ -17,6 +17,7 @@ time-bound commitments belong in `sprint/`.
 - [Persistence Contract](persistence-schema.md)
 - [Policy and Claim-History Retrieval Contract](policy-history-mapping.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
+- [MinIO Object-Storage Boundary](minio-object-storage.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
@@ -52,6 +53,8 @@ current document explicitly adopts the same rule.
 - [Day 5 policy-review validation](day5-policy-review-validation.md)
 - [Day 5 session and evidence validation](day5-session-evidence-validation.md)
 - [Day 5 staff revision validation](day5-staff-revision-validation.md)
+- [Day 5 clear-claim validation](day5-clear-claim-validation.md)
+- [Day 5 fact-source and confirmation validation](day5-fact-source-and-confirmation.md)
 - [DynamoDB fixture examples](api-dynamodb-fixture-examples.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also

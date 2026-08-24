@@ -53,6 +53,12 @@ or sprint plan.
 
 ## Issue and Pull-Request Traceability
 
+- Every contributor may create a pull request. A pull request must represent a coherent repository
+  change with a valid linked issue; do not create an empty placeholder, split work only to bypass
+  acceptance or review, or use a new pull request to hide incomplete work from an earlier one.
+- A Draft pull request may be opened while implementation, validation, or a dependency remains
+  incomplete, but its Summary must state the current deliverable and what remains. A pull request
+  may leave Draft only when its required content and evidence describe the current head.
 - Every pull request must reference at least one valid issue in this repository in its `Linked
   issue` section.
 - Use `Closes #123`, `Fixes #123`, or `Resolves #123` only when the pull request fully satisfies
@@ -70,6 +76,22 @@ or sprint plan.
   and data impact, dependencies, and remaining risks using the repository pull-request template.
 - Do not claim that an issue is complete when a dependency, acceptance criterion, integration
   result, or required consumer remains outstanding.
+
+## Issue Creation And Maintenance
+
+- Use the repository `Code work` Issue Form for feature, bug, regression-validation,
+  integration-gap, security-concern, and maintenance or documentation work. Do not leave required
+  fields as placeholders.
+- Update an existing issue when its acceptance criteria are still incomplete. Create a new issue
+  only for an independently verifiable defect, regression guard, integration gap, or security
+  concern that cannot be represented clearly as remaining work on the existing issue.
+- A follow-up issue must state why it is separate, identify the related issue or pull request,
+  and define its own observable acceptance criteria. It must not hide an unmet acceptance
+  criterion from the original issue.
+- Issue workflow checks are asynchronous audits. They may comment on missing information and fail
+  their check, but they must not close, delete, or silently rewrite an issue.
+- Issue creation is open to contributors. The policy governs the issue's purpose, structure,
+  traceability, and acceptance boundary, not which contributor is allowed to open it.
 
 ## Local Quality Gate
 
