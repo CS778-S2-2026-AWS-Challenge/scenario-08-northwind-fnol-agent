@@ -1,0 +1,26 @@
+{
+  "name": "northwind-github-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm run types:check && npm run lint && npm test",
+    "dev": "wrangler dev --local --test-scheduled",
+    "dry-run": "wrangler deploy --dry-run",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "types": "wrangler types worker-configuration.d.ts",
+    "types:check": "wrangler types --check worker-configuration.d.ts && tsc --noEmit",
+    "verify:kanban": "node scripts/verify-kanban-sync.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.0.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.9.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
+  }
+}
