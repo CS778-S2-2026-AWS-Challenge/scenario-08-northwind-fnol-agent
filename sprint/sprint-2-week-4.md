@@ -110,12 +110,13 @@ The following sequencing rules are part of the sprint commitment because violati
 
 ### Backend / identity / messaging
 
-1. #237 defines the shared Claim State transaction boundary before #248 and #257 rely on multi-record mutation semantics.
-2. #238 defines the identity/developer-mode boundary before #247 implements it.
+1. #237 defines the shared Claim State transaction boundary before #248 finalises material multi-record mutation behaviour and before #257 connects the end-to-end shared-state flow.
+2. #238 defines the identity/developer-mode boundary before #247 implements the verified-principal runtime boundary.
 3. #239 defines sender, audience, delivery, failure, retry, and Agent-suggestion semantics before #248 finalises messaging API behaviour.
-4. #248 must provide a stable messaging contract before #249 builds the conversation UI and before #257 connects the shared state flow.
-5. #247 and the Control Plane screen/access contract must exist before #258 exposes Admin endpoints.
-6. #257 is the connected-state prerequisite for #267; #247 is the identity prerequisite for #268.
+4. #247 and #248 may progress in parallel only where the messaging work is identity-independent; before #248 is treated as complete, sender/actor authority must come from #247's server-derived verified principal and no request-supplied sender identity may remain authoritative.
+5. #248 must provide the stable messaging contract before #249 builds the conversation UI; #237, #247, and #248 are all required inputs before #257 is treated as the connected Claim/session/handoff/message lifecycle.
+6. #247 and #240 are required before #258 exposes the bounded Admin API, so administrator authority and the first Control Plane workflow are not invented independently in the backend.
+7. #257 is the connected-state prerequisite for #267. #247 is the identity prerequisite for #268, and #268 must also validate any Admin routes introduced by #258 when that slice is present.
 
 A blocked dependency must remain visible. A downstream card must not invent incompatible semantics merely to start on schedule.
 
