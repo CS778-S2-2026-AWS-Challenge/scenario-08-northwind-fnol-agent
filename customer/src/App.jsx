@@ -238,12 +238,15 @@ function App() {
       setStatus('idle')
     } catch (requestError) {
       setPendingMessage(null)
+      const knownRejection = requestError instanceof ApiRequestError
+        && requestError.status >= 400
+        && requestError.status < 500
       setFailedMessage({
         text,
         sender: 'You',
         audience: 'Northwind claim team',
-        delivery: 'Failed before delivery',
-        retry: 'Ready to retry safely',
+        delivery: knownRejection ? 'Rejected before delivery' : 'Delivery outcome unknown',
+        retry: knownRejection ? 'Correct the issue and retry' : 'Retry to confirm delivery safely',
       })
       showError(requestError)
     }
@@ -536,6 +539,15 @@ function App() {
                 error={error}
                 placeholder={claimTypePrompts[claimType]}
               />
+              {failedMessage && (
+                <article className="message message-claimant is-failed">
+                  <p className="message-author">{failedMessage.sender}</p>
+                  <p>{failedMessage.text}</p>
+                  <p className="message-state">
+                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                  </p>
+                </article>
+              )}
               </section>
               <div className="resume-entry">
                 <button

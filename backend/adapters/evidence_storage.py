@@ -180,6 +180,7 @@ class _PendingUpload:
     media_type: str
     size_bytes: int
     storage_key: str
+    expires_at: datetime
 
 
 class MockEvidenceStorage(EvidenceStorage):
@@ -230,18 +231,20 @@ class MockEvidenceStorage(EvidenceStorage):
         if size_bytes > self.max_size_bytes:
             raise EvidenceUploadTooLarge(size_bytes)
         storage_key = f'claims/{claim_id}/evidence/{evidence_id}'
+        expires_at = now_utc() + timedelta(minutes=15)
         self._pending[(claim_id, evidence_id)] = _PendingUpload(
             claim_id=claim_id,
             evidence_id=evidence_id,
             media_type=media_type,
             size_bytes=size_bytes,
             storage_key=storage_key,
+            expires_at=expires_at,
         )
         return StoredUploadTarget(
             method='PUT',
             url=f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
             headers={'Content-Type': media_type},
-            expires_at=now_utc() + timedelta(minutes=15),
+            expires_at=expires_at,
             storage_key=storage_key,
         )
 
@@ -249,6 +252,10 @@ class MockEvidenceStorage(EvidenceStorage):
         self._guard()
         pending = self._pending.get((claim_id, evidence_id))
         if pending is None:
+            raise EvidenceUploadNotFound(evidence_id)
+        if pending.expires_at <= now_utc():
+            self._pending.pop((claim_id, evidence_id), None)
+            self._content.pop((claim_id, evidence_id), None)
             raise EvidenceUploadNotFound(evidence_id)
         if len(content) != pending.size_bytes:
             raise EvidenceUploadSizeMismatch(evidence_id)
@@ -278,9 +285,15 @@ class MockEvidenceStorage(EvidenceStorage):
         pending = self._pending.get((claim_id, evidence_id))
         if pending is None or pending.media_type != media_type or pending.size_bytes != size_bytes:
             raise EvidenceUploadNotFound(evidence_id)
+        content = self._content.get((claim_id, evidence_id))
+        if content is None:
+            raise EvidenceUploadNotFound(evidence_id)
+        verified_checksum = f'sha256:{sha256(content).hexdigest()}'
+        if checksum.lower() != verified_checksum:
+            raise EvidenceUploadNotFound(evidence_id)
         completed = StoredUpload(
             storage_key=pending.storage_key,
-            checksum=checksum,
+            checksum=verified_checksum,
             source_id='fixture_evidence_storage',
         )
         self._completed[(claim_id, evidence_id)] = completed

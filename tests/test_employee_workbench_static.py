@@ -286,15 +286,18 @@ def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigat
     assert 'customerChatHistoryEntryCreated' in page
 
 
-def test_employee_messaging_defines_delivery_retry_and_agent_suggestion_states() -> None:
+def test_employee_messaging_defines_delivery_retry_and_template_states() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     assert 'Sender: ${formatLabel(item.actor)} · Audience: Claimant · Delivered' in page
-    assert 'Failed before delivery · Ready to retry' in page
+    assert 'Delivery outcome unknown · Retry to reconcile' in page
+    assert 'Rejected before delivery · Ready to retry' in page
     assert "button.textContent = 'Retry message'" in page
-    assert 'retry uses the same safe request key' in page
+    assert 'Retry with the same safe request key to reconcile' in page
     assert 'id="agentSuggestionStatus"' in page
     for state in ('generating', 'suggested', 'accepted', 'edited', 'rejected', 'failed'):
         assert f"setAgentSuggestionState('{state}'" in page
     assert 'Internal draft only; nothing will be sent' in page
     assert 'Copied for staff review; not sent' in page
+    assert '>Reply template<' in page
+    assert '>Agent reply suggestion<' not in page

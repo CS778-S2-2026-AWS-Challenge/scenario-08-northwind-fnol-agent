@@ -1,4 +1,5 @@
 import base64
+from hashlib import sha256
 from typing import Any, cast
 
 import pytest
@@ -55,7 +56,7 @@ def test_fixture_upload_rejects_mismatched_bytes_and_completion_metadata() -> No
     storage.complete_upload(
         claim_id='clm_boundary',
         evidence_id='evd_boundary',
-        checksum='sha256:' + 'a' * 64,
+        checksum=f'sha256:{sha256(b"good").hexdigest()}',
         media_type='image/jpeg',
         size_bytes=4,
     )
@@ -67,6 +68,38 @@ def test_fixture_upload_rejects_mismatched_bytes_and_completion_metadata() -> No
         )
         is None
     )
+
+
+def test_fixture_upload_target_expires_and_checksum_is_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = MockEvidenceStorage()
+    target = storage.create_upload_target(
+        claim_id='clm_expiry',
+        evidence_id='evd_expiry',
+        media_type='image/png',
+        size_bytes=4,
+    )
+    monkeypatch.setattr('backend.adapters.evidence_storage.now_utc', lambda: target.expires_at)
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.put_upload(claim_id='clm_expiry', evidence_id='evd_expiry', content=b'data')
+
+    storage = MockEvidenceStorage()
+    storage.create_upload_target(
+        claim_id='clm_checksum',
+        evidence_id='evd_checksum',
+        media_type='image/png',
+        size_bytes=4,
+    )
+    storage.put_upload(claim_id='clm_checksum', evidence_id='evd_checksum', content=b'BBBB')
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.complete_upload(
+            claim_id='clm_checksum',
+            evidence_id='evd_checksum',
+            checksum=f'sha256:{sha256(b"AAAA").hexdigest()}',
+            media_type='image/png',
+            size_bytes=4,
+        )
 
 
 def test_storage_key_lookup_returns_none_for_unknown_claim_or_evidence(
@@ -197,7 +230,7 @@ def test_claimant_upload_content_is_available_to_authorised_staff(
                 'Idempotency-Key': 'viewable-evidence-complete',
                 'If-Match': str(requested.json()['revision']),
             },
-            json={'upload_checksum': 'sha256:' + ('a' * 64)},
+            json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
         )
         staff_view = client.get(
             f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',

@@ -695,7 +695,7 @@ it('blocks incomplete evidence, saves signal findings sequentially, and isolates
   dom.window.close()
 })
 
-it('keeps Agent reply suggestions internal through suggested, accepted, edited, and rejected states', async () => {
+it('keeps deterministic reply templates internal through suggested, accepted, edited, and rejected states', async () => {
   const item = queueItem(120, { claim_id: 'clm_agent_suggestion', open_handoff_count: 1, assignee_id: 'stf_demo' })
   const detail = {
     ...queueDetail(item),
@@ -727,6 +727,7 @@ it('keeps Agent reply suggestions internal through suggested, accepted, edited, 
   const document = dom.window.document
 
   await waitFor(() => expect(document.querySelector('#customerChatNav').disabled).toBe(false))
+  expect(document.querySelector('#agentSuggestionTitle').textContent).toBe('Reply template')
   document.querySelector('#customerChatNav').click()
   await waitFor(() => expect(document.querySelector('#customerChatText').disabled).toBe(false))
   document.querySelector('#generateAgentSuggestion').click()
@@ -742,6 +743,68 @@ it('keeps Agent reply suggestions internal through suggested, accepted, edited, 
   document.querySelector('#rejectAgentSuggestion').click()
   expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Rejected')
   expect(document.querySelector('#agentSuggestionText').value).toBe('')
+  dom.window.close()
+})
+
+it('reconciles a committed staff reply after the client loses its response', async () => {
+  const item = queueItem(121, {
+    claim_id: 'clm_staff_response_lost', open_handoff_count: 1, assignee_id: 'stf_demo',
+  })
+  let sendAttempts = 0
+  let delivered = false
+  const detail = () => ({
+    ...queueDetail(item),
+    active_session_id: 'ses_staff_response_lost',
+    messages: delivered ? [{
+      message_id: 'msg_staff_delivered', actor: 'staff', visibility: 'shared',
+      content: { type: 'text', text: 'Your claim can continue.' },
+      created_at: '2026-08-13T00:03:00Z',
+    }] : [],
+    handoffs: [{
+      handoff_id: 'hnd_staff_response_lost', status: 'accepted', assigned_to: 'stf_demo',
+      priority: 'standard', trigger: 'claimant_support_request',
+      requested_action: 'Help the claimant continue.', packet: {},
+    }],
+  })
+  const requestKeys = []
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (options.method === 'POST' && String(url).endsWith('/messages')) {
+      sendAttempts += 1
+      requestKeys.push(options.headers['Idempotency-Key'])
+      if (sendAttempts === 1) {
+        delivered = true // server commit happened, but its response was lost
+        return Promise.reject(new TypeError('Response lost'))
+      }
+      return response({ message: detail().messages[0], claim_revision: 3 })
+    }
+    if (String(url).endsWith(`/${item.claim_id}`)) return response(detail())
+    return response({ items: [item], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'response-lost-key'
+    },
+  })
+  const document = dom.window.document
+
+  await waitFor(() => expect(document.querySelector('#customerChatNav').disabled).toBe(false))
+  document.querySelector('#customerChatNav').click()
+  await waitFor(() => expect(document.querySelector('#customerChatText').disabled).toBe(false))
+  document.querySelector('#customerChatText').value = 'Your claim can continue.'
+  document.querySelector('#customerChatSend').click()
+
+  await waitFor(() => expect(document.querySelector('#customerChatStatus').textContent)
+    .toContain('Delivery outcome unknown'))
+  expect(document.querySelector('#pendingStaffMessage').textContent)
+    .toContain('Delivery outcome unknown')
+  document.querySelector('#customerChatSend').click()
+
+  await waitFor(() => expect(document.querySelector('#customerChatHistory').textContent)
+    .toContain('Delivered'))
+  expect(requestKeys).toEqual(['staff-message-response-lost-key', 'staff-message-response-lost-key'])
+  expect(document.querySelectorAll('#customerChatHistory .customer-chat-message.staff')).toHaveLength(1)
   dom.window.close()
 })
 it('announces queue failures and exposes named keyboard controls', async () => {

@@ -378,6 +378,7 @@
     .customer-chat-message-meta { margin-top:6px; color:#64748b; font-size:10px; line-height:1.4; }
     .customer-chat-message.is-pending { border:1px dashed #94a3b8; opacity:.82; }
     .customer-chat-message.is-failed { border:1px solid #fca5a5; background:#fff1f2; color:#881337; }
+    .customer-chat-message.is-unknown { border:1px solid #fbbf24; background:#fffbeb; color:#78350f; }
     .agent-suggestion-panel { margin:12px 0; padding:12px; border:1px solid #c4b5fd; border-radius:12px; background:#faf5ff; }
     .agent-suggestion-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
     .agent-suggestion-heading strong { margin-right:auto; color:#5b21b6; }
@@ -601,10 +602,10 @@
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
               <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
                 <div class="agent-suggestion-heading">
-                  <strong id="agentSuggestionTitle">Agent reply suggestion</strong>
+                  <strong id="agentSuggestionTitle">Reply template</strong>
                   <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
                 </div>
-                <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Agent reply suggestion" placeholder="Generate a claimant-safe draft based on the current claim state." readonly></textarea>
+                <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
                 <div class="agent-suggestion-actions">
                   <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
                   <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
@@ -763,10 +764,12 @@
           headers: { ...getHeaders(), ...options.headers },
         });
       } catch (error) {
-        throw new Error(
+        const requestError = new Error(
           'Cannot reach the Workbench API at http://127.0.0.1:8000. '
           + 'Start the backend and keep it running, then refresh this page.'
         );
+        requestError.code = 'NETWORK_ERROR';
+        throw requestError;
       }
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -2350,8 +2353,10 @@
       const delivery = document.createElement('div');
       delivery.className = 'customer-chat-message-meta';
       delivery.textContent = state === 'failed'
-        ? 'Sender: Staff · Audience: Claimant · Failed before delivery · Ready to retry'
-        : 'Sender: Staff · Audience: Claimant · Sending…';
+        ? 'Sender: Staff · Audience: Claimant · Rejected before delivery · Ready to retry'
+        : state === 'unknown'
+          ? 'Sender: Staff · Audience: Claimant · Delivery outcome unknown · Retry to reconcile'
+          : 'Sender: Staff · Audience: Claimant · Sending…';
       message.append(meta, body, delivery);
       byId('customerChatHistory').append(message);
     }
@@ -2405,9 +2410,14 @@
         await refreshDetail(claim.claim_id);
         await renderCustomerChat();
       } catch (error) {
-        if (pendingCustomerMessage) pendingCustomerMessage.state = 'failed';
-        renderTransientStaffMessage(text, 'failed');
-        byId('customerChatStatus').textContent = `Delivery failed: ${error.message} The message was not delivered; retry uses the same safe request key.`;
+        const knownRejection = Number.isInteger(error.status)
+          && error.status >= 400 && error.status < 500;
+        const state = knownRejection ? 'failed' : 'unknown';
+        if (pendingCustomerMessage) pendingCustomerMessage.state = state;
+        renderTransientStaffMessage(text, state);
+        byId('customerChatStatus').textContent = knownRejection
+          ? `Message rejected: ${error.message} Correct the issue, then retry with the same safe request key.`
+          : `Delivery outcome unknown: ${error.message} Retry with the same safe request key to reconcile the delivered message.`;
         button.textContent = 'Retry message';
       } finally {
         button.disabled = false;

@@ -386,6 +386,8 @@ describe('claimant intake', () => {
         'We could not reach the claim service. Check your connection and try again.',
       )
     })
+    expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
+    expect(screen.queryByText(/Failed before delivery/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
   })
 
@@ -526,7 +528,7 @@ describe('claimant intake', () => {
     expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 
-  it('reuses the claim idempotency key when a failed submission is retried', async () => {
+  it('reconciles a committed message after its response is lost', async () => {
     fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Response lost')))
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
     fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
@@ -539,9 +541,12 @@ describe('claimant intake', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'Retry claim message' }))
     await screen.findByRole('button', { name: 'Confirm details' })
+    expect(screen.getAllByText('Another vehicle hit my parked car.')[0]).toBeVisible()
+    expect(screen.queryByText(/Delivery outcome unknown/)).not.toBeInTheDocument()
 
     const firstHeaders = fetch.mock.calls[0][1].headers
     const retryHeaders = fetch.mock.calls[1][1].headers

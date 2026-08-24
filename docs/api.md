@@ -307,15 +307,22 @@ Claimant text content uses `{ "type": "text", "text": "..." }`. File bytes are e
 
 `actor` defines the sender and `visibility` defines the persisted audience boundary. A message
 returned by a successful mutation or list response is durably stored and therefore has delivery
-state `delivered` in the clients. `sending`, `failed_before_delivery`, and `retrying` are transient
-client states and MUST NOT be inserted into persisted message history. A failed client retains the
-text and original idempotency identifiers so retry cannot create a duplicate. The complete state
+state `delivered` in the clients. This means durable in-app persistence, not email, SMS, or push
+delivery. `sending`, `rejected_before_delivery`, `delivery_outcome_unknown`, and `retrying` are
+transient client states and MUST NOT be inserted into persisted message history. A client MUST use
+`delivery_outcome_unknown` when a transport failure could have hidden a successful commit. It
+retains the text and original idempotency identifiers so replay restores the delivered record
+without creating a duplicate. The complete state
 and page flow is defined in `docs/claimant-staff-messaging-journey.md`.
 
-An Agent-generated staff reply suggestion is internal draft UI state, not a `MessageRecord`.
-Suggestion states are `not_requested`, `generating`, `suggested`, `accepted`, `edited`, `rejected`,
-and `failed`. Only an authenticated staff submission creates a shared staff message; generating or
-accepting a suggestion never sends it automatically.
+The current staff reply helper is a deterministic template built from claimant-safe state; it does
+not call the Agent or model gateway and MUST NOT be labelled as Agent- or AI-generated. Template
+draft state is internal UI state, not a `MessageRecord`. Only an authenticated, assigned staff
+submission creates a shared message; building or accepting a template never sends it automatically.
+
+An `in_reply_to` reference MUST identify a message in the same claim and interaction session.
+Message lists use the stable total order `(created_at, message_id)` ascending (newest-last). Equal
+timestamps therefore cannot cause cursor pagination to duplicate or skip records.
 
 ### Customer Next Step
 
@@ -1034,7 +1041,10 @@ completion never silently writes extracted values into the confirmed form.
 
 For the fixture runtime, the upload target is the authenticated
 `PUT /api/v1/claims/{claim_id}/evidence/{evidence_id}/content` route. It requires the claimant
-bearer token, registered media type, and exact registered byte length. Provider-backed profiles
+bearer token, registered media type, exact registered byte length, and use before the target's
+`expires_at`. An expired target is rejected and the client must replay the upload-intent request to
+obtain a current target. Completion hashes the stored bytes and rejects a claimant-supplied checksum
+that does not match; the supplied value is never treated as proof by itself. Provider-backed profiles
 may instead return an object-store URL without changing the upload-target contract.
 
 The Sprint 2 mock adapter returns `202` and records the public `file_status` as
