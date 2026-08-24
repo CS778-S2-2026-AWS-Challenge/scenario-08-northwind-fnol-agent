@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "types": "wrangler types worker-configuration.d.ts",
-    "types:check": "wrangler types --check worker-configuration.d.ts && tsc --noEmit"
+    "types:check": "wrangler types --check worker-configuration.d.ts && tsc --noEmit",
+    "verify:kanban": "node scripts/verify-kanban-sync.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.0.0",
