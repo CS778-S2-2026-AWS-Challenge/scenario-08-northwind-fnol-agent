@@ -6,10 +6,12 @@ from backend.domain.intake import infer_controlled_incident_type, next_controlle
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
+    AgentProposalSource,
     AuthorityOutcome,
     CustomerNextStep,
     FormSource,
     FormStatus,
+    ModelDecisionProvenance,
     NeededFor,
     ProposedFormChange,
     ResponsibleParty,
@@ -159,6 +161,8 @@ class AgentProposal:
     next_action_requirements: list[str]
     handoff_priority: str | None = None
     controlled_rule_authorised: bool = False
+    proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
+    model_provenance: ModelDecisionProvenance | None = None
 
 
 def _contains_unnegated_signal(

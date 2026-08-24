@@ -150,6 +150,13 @@ and checksums rather than embedding those bytes.
   decision.
 - Staff decisions are separate immutable records and retain the source references that
   motivated the review.
+- An Agent decision identifies whether its proposal came from `controlled_agent` or
+  `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
+  profile, provider-reported model identifier, and provider request identifier when supplied.
+  These provider references are internal-only and never enter claimant projections.
+- Model-authored customer prose and model-proposed internal signals are not persistence
+  authority. Claimant-visible response fields are server-rendered after deterministic
+  validation, and any non-empty model signal proposal rejects the complete turn before write.
 
 ## Handoff and Staff-work Invariants
 
