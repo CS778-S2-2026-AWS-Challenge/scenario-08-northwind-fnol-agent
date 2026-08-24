@@ -283,7 +283,15 @@ class MinioEvidenceStorage(EvidenceStorage):
             raise ValueError('claim_id must be a non-empty path-safe identifier.')
         if not evidence_id or '/' in evidence_id or '\\' in evidence_id:
             raise ValueError('evidence_id must be a non-empty path-safe identifier.')
-        return f'claims/{claim_id}/evidence/{evidence_id}'
+        return f'claims/{claim_id}/evidence/{evidence_id}/staging'
+
+    @classmethod
+    def _final_storage_key(cls, claim_id: str, evidence_id: str, checksum: str) -> str:
+        digest = checksum.removeprefix('sha256:').lower()
+        if not re.fullmatch(r'[0-9a-f]{64}', digest):
+            raise EvidenceUploadNotFound(evidence_id)
+        staging_key = cls._storage_key(claim_id, evidence_id)
+        return f'{staging_key.removesuffix("/staging")}/finalised/{digest}'
 
     @staticmethod
     def _metadata(
@@ -363,7 +371,73 @@ class MinioEvidenceStorage(EvidenceStorage):
         media_type: str,
         size_bytes: int,
     ) -> StoredUpload:
-        storage_key = self._storage_key(claim_id, evidence_id)
+        staging_key = self._storage_key(claim_id, evidence_id)
+        final_key = self._final_storage_key(claim_id, evidence_id, checksum)
+
+        # A retry after the final copy (for example after a repository failure)
+        # can recover from the immutable object without requiring staging bytes.
+        try:
+            self._verify_object(
+                storage_key=final_key,
+                evidence_id=evidence_id,
+                claim_id=claim_id,
+                checksum=checksum,
+                media_type=media_type,
+                size_bytes=size_bytes,
+            )
+            return StoredUpload(
+                storage_key=final_key,
+                checksum=checksum.lower(),
+                source_id='s3_compatible_evidence_storage',
+            )
+        except EvidenceUploadNotFound:
+            pass
+
+        verified_checksum = self._verify_object(
+            storage_key=staging_key,
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            checksum=checksum,
+            media_type=media_type,
+            size_bytes=size_bytes,
+        )
+        try:
+            self._client.copy_object(
+                Bucket=self._config.bucket,
+                Key=final_key,
+                CopySource={'Bucket': self._config.bucket, 'Key': staging_key},
+            )
+            # Re-read the copied object so a concurrent staging overwrite cannot
+            # bind the evidence record to bytes other than those just verified.
+            self._verify_object(
+                storage_key=final_key,
+                evidence_id=evidence_id,
+                claim_id=claim_id,
+                checksum=verified_checksum,
+                media_type=media_type,
+                size_bytes=size_bytes,
+            )
+            self._client.delete_object(Bucket=self._config.bucket, Key=staging_key)
+        except ClientError as error:
+            raise self._unavailable('finalise the uploaded object', error) from error
+        except BotoCoreError as error:
+            raise self._unavailable('finalise the uploaded object', error) from error
+        return StoredUpload(
+            storage_key=final_key,
+            checksum=verified_checksum,
+            source_id='s3_compatible_evidence_storage',
+        )
+
+    def _verify_object(
+        self,
+        *,
+        storage_key: str,
+        evidence_id: str,
+        claim_id: str,
+        checksum: str,
+        media_type: str,
+        size_bytes: int,
+    ) -> str:
         try:
             response = self._client.get_object(Bucket=self._config.bucket, Key=storage_key)
             body = response.get('Body')
@@ -406,8 +480,4 @@ class MinioEvidenceStorage(EvidenceStorage):
         verified_checksum = f'sha256:{digest.hexdigest()}'
         if checksum.lower() != verified_checksum:
             raise EvidenceUploadNotFound(evidence_id)
-        return StoredUpload(
-            storage_key=storage_key,
-            checksum=verified_checksum,
-            source_id='s3_compatible_evidence_storage',
-        )
+        return verified_checksum
