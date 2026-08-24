@@ -61,6 +61,7 @@ class FastApiS3Client:
 
 
 def configure_minio_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('NORTHWIND_IDENTITY_MODE', 'developer')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ADAPTER', 's3_compatible')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://localhost:9000')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access-key')
