@@ -14,6 +14,18 @@ Idempotency records. Mock-backed tests verify document mapping, ownership filter
 relationship checks, revision conflicts, and mutation ordering. These tests do not prove
 MongoDB transaction rollback or concurrency behaviour.
 
+The adapter owns bounded environment parsing and verified client construction through
+`MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
+repository only after `ping` and index initialisation succeed; failure closes the client and
+raises a bounded error without returning the connection URI. The non-secret setting names are:
+
+- `NORTHWIND_MONGODB_URI` (secret-bearing value supplied only through process configuration);
+- `NORTHWIND_MONGODB_DATABASE`;
+- `NORTHWIND_MONGODB_COLLECTION`; and
+- `NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS`.
+
+These connection primitives do not by themselves enable the MongoDB runtime profile.
+
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.

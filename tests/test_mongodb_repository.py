@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Barrier, Lock
+from typing import Any
 
 import mongomock
 import pytest
+from pymongo.errors import ServerSelectionTimeoutError
 
 from backend.domain.models import (
     ActorType,
@@ -33,7 +35,12 @@ from backend.domain.retrieval import (
     RetrievalSource,
     ReviewSignalRecord,
 )
-from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.mongodb import (
+    MongoDBConfigurationError,
+    MongoDBConnectionConfig,
+    MongoDBRepository,
+    connect_mongodb_repository,
+)
 from backend.repositories.protocols import (
     IdempotencyConflict,
     PersistenceRepository,
@@ -152,6 +159,87 @@ def repository() -> MongoDBRepository:
     repository = MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
     repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     return repository
+
+
+def test_mongodb_connection_config_requires_uri_and_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_MONGODB_URI', raising=False)
+    monkeypatch.delenv('NORTHWIND_MONGODB_DATABASE', raising=False)
+
+    with pytest.raises(MongoDBConfigurationError, match='NORTHWIND_MONGODB_URI'):
+        MongoDBConnectionConfig.from_environment()
+
+
+def test_mongodb_connection_config_reads_bounded_non_secret_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_COLLECTION', 'claim_records')
+    monkeypatch.setenv('NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS', '750')
+
+    config = MongoDBConnectionConfig.from_environment()
+
+    assert config.database_name == 'northwind_test'
+    assert config.collection_name == 'claim_records'
+    assert config.server_selection_timeout_ms == 750
+
+
+@pytest.mark.parametrize('timeout', ['not-a-number', '99', '60001'])
+def test_mongodb_connection_config_rejects_invalid_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout: str,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS', timeout)
+
+    with pytest.raises(MongoDBConfigurationError, match='TIMEOUT'):
+        MongoDBConnectionConfig.from_environment()
+
+
+def test_connected_mongodb_repository_reports_verified_and_can_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client: Any = mongomock.MongoClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+    repository = connect_mongodb_repository(
+        MongoDBConnectionConfig('mongodb://unused', 'northwind_test')
+    )
+
+    assert repository.connection_status() == 'verified'
+    repository.close()
+
+
+def test_mongodb_connection_failure_closes_client_without_exposing_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingAdmin:
+        @staticmethod
+        def command(name: str) -> None:
+            assert name == 'ping'
+            raise ServerSelectionTimeoutError('provider detail')
+
+    class FailingClient:
+        admin = FailingAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client: FailingClient = FailingClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+    secret_uri = 'mongodb+srv://user:secret@example.invalid'
+
+    with pytest.raises(MongoDBConfigurationError) as error:
+        connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
+
+    assert client.closed
+    assert secret_uri not in str(error.value)
+    assert 'secret' not in str(error.value)
 
 
 def test_claim_and_session_round_trip_enforces_customer_ownership(
