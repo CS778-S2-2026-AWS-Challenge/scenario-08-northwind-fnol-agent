@@ -123,7 +123,10 @@ def test_evidence_id_cannot_be_reowned_by_another_claim() -> None:
             _claimant_retry(second, 'steal-evidence'),
         )
 
-    assert repository.get_evidence(first.claim_id, original.evidence_id, first.customer_id) == original
+    assert (
+        repository.get_evidence(first.claim_id, original.evidence_id, first.customer_id)
+        == original
+    )
     assert repository.get_evidence(second.claim_id, original.evidence_id, second.customer_id) is None
     assert repository.get_claim(second.claim_id, second.customer_id) == second
 
@@ -143,7 +146,9 @@ def test_handoff_id_cannot_be_reowned_by_another_claim() -> None:
             _claimant_retry(second, 'steal-handoff', handoff_id=original.handoff_id),
         )
 
-    assert repository.get_handoff(first.claim_id, original.handoff_id, first.customer_id) == original
+    assert (
+        repository.get_handoff(first.claim_id, original.handoff_id, first.customer_id) == original
+    )
     assert repository.get_handoff(second.claim_id, original.handoff_id, second.customer_id) is None
     assert repository.get_claim(second.claim_id, second.customer_id) == second
 
@@ -227,8 +232,14 @@ def test_agent_decision_id_cannot_be_reowned_by_another_claim_turn() -> None:
             retry,
         )
 
-    assert repository.get_agent_decision_internal(first.claim_id, original_decision.decision_id) == original_decision
-    assert repository.get_agent_decision_internal(second.claim_id, original_decision.decision_id) is None
+    assert (
+        repository.get_agent_decision_internal(first.claim_id, original_decision.decision_id)
+        == original_decision
+    )
+    assert (
+        repository.get_agent_decision_internal(second.claim_id, original_decision.decision_id)
+        is None
+    )
     assert repository.get_claim(second.claim_id, second.customer_id) == second
 
 
@@ -301,4 +312,7 @@ def test_agent_turn_rejects_claimant_and_agent_message_identity_aliasing() -> No
         )
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
-    assert repository.list_messages(claim.claim_id, claim.active_session_id or '', claim.customer_id) == []
+    assert (
+        repository.list_messages(claim.claim_id, claim.active_session_id or '', claim.customer_id)
+        == []
+    )
