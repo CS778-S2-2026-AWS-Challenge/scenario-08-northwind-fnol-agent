@@ -1,3 +1,5 @@
+from hashlib import sha256
+from io import BytesIO
 from typing import Any
 
 import pytest
@@ -25,14 +27,19 @@ def config() -> S3CompatibleObjectStorageConfig:
 def not_found_error(code: str = 'NotFound') -> ClientError:
     return ClientError(
         {'Error': {'Code': code, 'Message': 'synthetic object-store error'}},
-        'HeadObject',
+        'GetObject',
     )
+
+
+def checksum(payload: bytes) -> str:
+    return f'sha256:{sha256(payload).hexdigest()}'
 
 
 class FakeS3Client:
     def __init__(self) -> None:
         self.presign_calls: list[dict[str, Any]] = []
-        self.head_object_response: dict[str, Any] = {
+        self.object_body = b'x' * 2048
+        self.get_object_response: dict[str, Any] = {
             'ContentLength': 2048,
             'ContentType': 'image/jpeg',
             'Metadata': {
@@ -41,7 +48,7 @@ class FakeS3Client:
             },
         }
         self.head_bucket_error: Exception | None = None
-        self.head_object_error: Exception | None = None
+        self.get_object_error: Exception | None = None
         self.presign_error: Exception | None = None
 
     def head_bucket(self, **_: Any) -> None:
@@ -54,10 +61,10 @@ class FakeS3Client:
         self.presign_calls.append(kwargs)
         return 'http://localhost:9000/northwind-evidence/signed'
 
-    def head_object(self, **_: Any) -> dict[str, Any]:
-        if self.head_object_error is not None:
-            raise self.head_object_error
-        return self.head_object_response
+    def get_object(self, **_: Any) -> dict[str, Any]:
+        if self.get_object_error is not None:
+            raise self.get_object_error
+        return {**self.get_object_response, 'Body': BytesIO(self.object_body)}
 
 
 def test_environment_contract_requires_runtime_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,6 +87,35 @@ def test_environment_contract_parses_bucket_and_expiry(monkeypatch: pytest.Monke
 
     assert settings.bucket == 'northwind-evidence'
     assert settings.presign_expiry_seconds == 600
+
+
+def test_environment_contract_hides_credentials_from_representation() -> None:
+    settings = S3CompatibleObjectStorageConfig(
+        endpoint_url='http://localhost:9000',
+        access_key_id='sensitive-access-key',
+        secret_access_key='sensitive-secret-key',
+        bucket='northwind-evidence',
+    )
+
+    representation = repr(settings)
+
+    assert 'sensitive-access-key' not in representation
+    assert 'sensitive-secret-key' not in representation
+
+
+def test_environment_contract_rejects_endpoint_credentials_without_echoing_them() -> None:
+    embedded_secret = 'embedded-secret'
+
+    with pytest.raises(ValueError, match='must not contain embedded credentials') as captured:
+        S3CompatibleObjectStorageConfig(
+            endpoint_url=f'http://user:{embedded_secret}@localhost:9000',
+            access_key_id='access-key',
+            secret_access_key='runtime-secret',
+            bucket='northwind-evidence',
+        )
+
+    assert embedded_secret not in str(captured.value)
+    assert 'runtime-secret' not in str(captured.value)
 
 
 @pytest.mark.parametrize(
@@ -149,17 +185,34 @@ def test_create_target_rejects_unsupported_or_oversized_objects(
 
 
 def test_complete_upload_requires_matching_object_metadata() -> None:
-    storage = MinioEvidenceStorage(config(), client=FakeS3Client())
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
 
     stored = storage.complete_upload(
         claim_id='clm_001',
         evidence_id='evd_001',
-        checksum='sha256:' + 'a' * 64,
+        checksum=checksum(client.object_body),
         media_type='image/jpeg',
         size_bytes=2048,
     )
 
     assert stored.storage_key == 'claims/clm_001/evidence/evd_001'
+    assert stored.checksum == checksum(client.object_body)
+    assert stored.source_id == 's3_compatible_evidence_storage'
+
+
+def test_complete_upload_rejects_checksum_that_does_not_match_object_bytes() -> None:
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
+
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.complete_upload(
+            claim_id='clm_001',
+            evidence_id='evd_001',
+            checksum='sha256:' + '0' * 64,
+            media_type='image/jpeg',
+            size_bytes=2048,
+        )
 
 
 @pytest.mark.parametrize(
@@ -180,14 +233,14 @@ def test_complete_upload_requires_matching_object_metadata() -> None:
 )
 def test_complete_upload_rejects_mismatched_object(response: dict[str, Any]) -> None:
     client = FakeS3Client()
-    client.head_object_response = response
+    client.get_object_response = response
     storage = MinioEvidenceStorage(config(), client=client)
 
     with pytest.raises(EvidenceUploadNotFound):
         storage.complete_upload(
             claim_id='clm_001',
             evidence_id='evd_001',
-            checksum='sha256:' + 'a' * 64,
+            checksum=checksum(client.object_body),
             media_type='image/jpeg',
             size_bytes=2048,
         )
@@ -197,7 +250,7 @@ def test_connection_and_upload_errors_are_retryable_dependency_failures() -> Non
     client = FakeS3Client()
     client.head_bucket_error = EndpointConnectionError(endpoint_url='http://localhost:9000')
     client.presign_error = EndpointConnectionError(endpoint_url='http://localhost:9000')
-    client.head_object_error = not_found_error('NoSuchKey')
+    client.get_object_error = not_found_error('NoSuchKey')
     storage = MinioEvidenceStorage(config(), client=client)
 
     assert storage.connection_status() == 'unavailable'
@@ -214,7 +267,7 @@ def test_connection_and_upload_errors_are_retryable_dependency_failures() -> Non
         storage.complete_upload(
             claim_id='clm_001',
             evidence_id='evd_001',
-            checksum='sha256:' + 'a' * 64,
+            checksum=checksum(client.object_body),
             media_type='image/jpeg',
             size_bytes=2048,
         )

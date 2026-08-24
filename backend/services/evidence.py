@@ -500,7 +500,7 @@ def complete_upload(
             source=evidence.source.value,
             at=timestamp.isoformat(),
             actor_type=ActorType.SYSTEM.value,
-            actor_id='mock_evidence_storage',
+            actor_id=stored.source_id,
         ),
     )
     completed = evidence.model_copy(

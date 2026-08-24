@@ -32,7 +32,9 @@ synthetic local credentials only.
 | `NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS` | Signed PUT lifetime | `900` |
 
 The adapter requires endpoint, access key, and secret at runtime. Credentials are
-not stored in source control, API responses, logs, or domain records.
+not stored in source control, API responses, logs, domain records, or configuration
+representations. Endpoint URLs containing embedded user-info credentials are rejected;
+credentials have one controlled environment source.
 
 ## Object contract
 
@@ -44,10 +46,11 @@ claims/{claim_id}/evidence/{evidence_id}
 
 The signed PUT target requires the declared media type and carries metadata for
 `claim-id`, `evidence-id`, `media-type`, and `expected-size`. Completion calls
-`head_object` and accepts the object only when its content type, byte length, and
-claim/evidence metadata match the provider-neutral request. The domain stores the
-returned protected reference and checksum; it never exposes the bucket or raw
-provider response to a claimant.
+`get_object`, computes SHA-256 over the stored bytes, and accepts the object only when
+its checksum, content type, byte length, and claim/evidence metadata match the
+provider-neutral request. The domain stores the returned protected reference, verified
+checksum, and safe `s3_compatible_evidence_storage` transition source; it never exposes
+the bucket, object key, or raw provider response to a claimant.
 
 The adapter accepts `image/jpeg`, `image/png`, and `application/pdf`, with a
 maximum declared size of 10 MiB. Missing objects, metadata mismatches, and size or

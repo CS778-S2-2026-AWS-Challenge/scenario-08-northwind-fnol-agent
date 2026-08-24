@@ -1,7 +1,8 @@
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from hashlib import sha256
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -52,8 +53,8 @@ class S3CompatibleObjectStorageConfig:
     """Environment-backed connection contract shared by MinIO and S3."""
 
     endpoint_url: str
-    access_key_id: str
-    secret_access_key: str
+    access_key_id: str = field(repr=False)
+    secret_access_key: str = field(repr=False)
     bucket: str
     region: str = 'us-east-1'
     presign_expiry_seconds: int = DEFAULT_PRESIGN_EXPIRY_SECONDS
@@ -62,6 +63,8 @@ class S3CompatibleObjectStorageConfig:
         parsed = urlparse(self.endpoint_url)
         if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
             raise ValueError('endpoint_url must be an absolute HTTP(S) URL.')
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError('endpoint_url must not contain embedded credentials.')
         if not self.access_key_id.strip() or not self.secret_access_key.strip():
             raise ValueError('access_key_id and secret_access_key must be non-empty.')
         if not _BUCKET_NAME.fullmatch(self.bucket):
@@ -126,6 +129,7 @@ class StoredUploadTarget:
 class StoredUpload:
     storage_key: str
     checksum: str
+    source_id: str
 
 
 class EvidenceStorage(Protocol):
@@ -239,7 +243,11 @@ class MockEvidenceStorage(EvidenceStorage):
         pending = self._pending.get((claim_id, evidence_id))
         if pending is None or pending.media_type != media_type or pending.size_bytes != size_bytes:
             raise EvidenceUploadNotFound(evidence_id)
-        completed = StoredUpload(storage_key=pending.storage_key, checksum=checksum)
+        completed = StoredUpload(
+            storage_key=pending.storage_key,
+            checksum=checksum,
+            source_id='fixture_evidence_storage',
+        )
         self._completed[(claim_id, evidence_id)] = completed
         return completed
 
@@ -357,7 +365,35 @@ class MinioEvidenceStorage(EvidenceStorage):
     ) -> StoredUpload:
         storage_key = self._storage_key(claim_id, evidence_id)
         try:
-            response = self._client.head_object(Bucket=self._config.bucket, Key=storage_key)
+            response = self._client.get_object(Bucket=self._config.bucket, Key=storage_key)
+            body = response.get('Body')
+            if body is None or not callable(getattr(body, 'read', None)):
+                raise EvidenceUploadNotFound(evidence_id)
+            try:
+                metadata = {
+                    str(key).lower(): str(value)
+                    for key, value in (response.get('Metadata') or {}).items()
+                }
+                if (
+                    response.get('ContentLength') != size_bytes
+                    or response.get('ContentType') != media_type
+                    or metadata.get('claim-id') != claim_id
+                    or metadata.get('evidence-id') != evidence_id
+                ):
+                    raise EvidenceUploadNotFound(evidence_id)
+                digest = sha256()
+                actual_size = 0
+                while chunk := body.read(64 * 1024):
+                    if not isinstance(chunk, bytes):
+                        raise EvidenceUploadNotFound(evidence_id)
+                    digest.update(chunk)
+                    actual_size += len(chunk)
+                    if actual_size > size_bytes or actual_size > self.max_size_bytes:
+                        raise EvidenceUploadNotFound(evidence_id)
+            finally:
+                close = getattr(body, 'close', None)
+                if callable(close):
+                    close()
         except ClientError as error:
             if self._not_found(error):
                 raise EvidenceUploadNotFound(evidence_id) from error
@@ -365,14 +401,13 @@ class MinioEvidenceStorage(EvidenceStorage):
         except BotoCoreError as error:
             raise self._unavailable('verify the uploaded object', error) from error
 
-        metadata = {
-            str(key).lower(): str(value) for key, value in (response.get('Metadata') or {}).items()
-        }
-        if (
-            response.get('ContentLength') != size_bytes
-            or response.get('ContentType') != media_type
-            or metadata.get('claim-id') != claim_id
-            or metadata.get('evidence-id') != evidence_id
-        ):
+        if actual_size != size_bytes:
             raise EvidenceUploadNotFound(evidence_id)
-        return StoredUpload(storage_key=storage_key, checksum=checksum)
+        verified_checksum = f'sha256:{digest.hexdigest()}'
+        if checksum.lower() != verified_checksum:
+            raise EvidenceUploadNotFound(evidence_id)
+        return StoredUpload(
+            storage_key=storage_key,
+            checksum=verified_checksum,
+            source_id='s3_compatible_evidence_storage',
+        )
