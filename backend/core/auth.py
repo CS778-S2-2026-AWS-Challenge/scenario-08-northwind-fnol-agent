@@ -125,7 +125,10 @@ def _verify_principal(
             f'The {credential_label} identity could not be authenticated.'
         )
 
-    if principal.actor_type != required_actor or not required_scopes.issubset(principal.scopes):
+    if (
+        principal.actor_type != required_actor
+        or not required_scopes.issubset(principal.scopes)
+    ):
         raise _access_denied(
             f'The authenticated identity cannot access the {credential_label} boundary.'
         )
