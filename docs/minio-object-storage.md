@@ -16,14 +16,15 @@ docker compose up -d minio
 ```
 
 The local API is available at `http://localhost:9000` and the MinIO console at
-`http://localhost:9001`. Create the `northwind-evidence` bucket in the console
-before running an integration check. The default values in `.env.example` are
-synthetic local credentials only.
+`http://localhost:9001`. The repeatable smoke command below creates the
+`northwind-evidence` bucket when it is absent. The default values in `.env.example`
+are synthetic local credentials only.
 
 ## Environment contract
 
 | Variable | Meaning | Example |
 | --- | --- | --- |
+| `NORTHWIND_OBJECT_STORAGE_ADAPTER` | Explicit object-store adapter selection | `s3_compatible` |
 | `NORTHWIND_OBJECT_STORAGE_ENDPOINT` | S3-compatible HTTP(S) endpoint | `http://localhost:9000` |
 | `NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID` | Runtime access key | `minioadmin` |
 | `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY` | Runtime secret | `minioadmin` |
@@ -35,6 +36,22 @@ The adapter requires endpoint, access key, and secret at runtime. Credentials ar
 not stored in source control, API responses, logs, domain records, or configuration
 representations. Endpoint URLs containing embedded user-info credentials are rejected;
 credentials have one controlled environment source.
+
+The default adapter is `fixture`. Endpoint or credential variables alone do not switch
+the running application. Selecting `s3_compatible` is explicit and fails startup when
+the required connection values are incomplete; it never falls back to fixture storage.
+This object-store selection does not enable the MongoDB, Cloudflare, or AWS data profile.
+
+For a local PowerShell process:
+
+```powershell
+$env:DATA_RUNTIME_PROFILE = 'fixture'
+$env:NORTHWIND_OBJECT_STORAGE_ADAPTER = 's3_compatible'
+$env:NORTHWIND_OBJECT_STORAGE_ENDPOINT = 'http://localhost:9000'
+$env:NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID = 'minioadmin'
+$env:NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY = 'minioadmin'
+$env:NORTHWIND_OBJECT_STORAGE_BUCKET = 'northwind-evidence'
+```
 
 ## Object contract
 
@@ -66,8 +83,24 @@ needed) region configuration only. FastAPI routes and domain models do not impor
 `boto3` or inspect object-store keys. Runtime wiring and end-to-end FastAPI upload
 checks are tracked separately by issue #245.
 
+## FastAPI verification
+
+With MinIO running and the environment above set, execute:
+
+```powershell
+py -3.12 scripts/run_minio_fastapi_smoke.py
+```
+
+The check creates the local bucket when necessary, creates one synthetic Claim through
+FastAPI, requests a signed upload target, uploads the object, completes checksum and
+metadata verification through the FastAPI evidence route, reads the claimant-safe
+evidence record, and checks readiness. It exits non-zero on configuration, upload,
+stored-object, persistence, or health failure and prints no credentials or object keys.
+
 ## Current limitation
 
-This boundary is implemented and tested with a deterministic S3 client double. The
-MongoDB `DataRuntimeBundle` remains intentionally unselected until its complete
-transaction and evidence-storage acceptance criteria are met.
+The local composition uses fixture transactional, policy, and knowledge adapters with
+configured MinIO evidence bytes. MinIO is an explicitly selected local object-store
+adapter, not a complete data runtime profile. The MongoDB `DataRuntimeBundle` remains
+intentionally unselected until its complete transaction and provider-conformance
+acceptance criteria are met.

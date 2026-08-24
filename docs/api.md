@@ -1559,9 +1559,10 @@ adapter:
 | `evidence_storage` | the evidence object store |
 | `claims_service` | the external claim-creation service |
 
-Each reports `using_fixture` when the adapter answers under the production
-contract, and `unavailable` while it is in an outage. A fixture says it is a
-fixture; it never claims to be the real provider.
+Each reports `using_fixture` when the fixture adapter answers under the production
+contract, `configured_service` when the explicitly configured S3-compatible object
+adapter passes its bucket health check, and `unavailable` while a required adapter is
+in an outage. A fixture says it is a fixture; it never claims to be the real provider.
 
 Every unconfirmed provider capability stays visible as its own check and remains
 `pending_confirmation` until its access is verified, so a working fixture can never be
@@ -1793,7 +1794,10 @@ Returns readiness without secrets or private configuration:
 }
 ```
 
-Readiness is `ok`, `degraded`, or `unavailable`. A fixture is not reported as a real connected service.
+Readiness is `ok`, `degraded`, or `unavailable`. A required configured data capability
+reporting `unavailable` makes overall readiness `unavailable`; otherwise the current
+fixture/model combination remains `degraded`. A fixture is not reported as a real
+connected service.
 
 ## Persistence and Provider Boundary
 
