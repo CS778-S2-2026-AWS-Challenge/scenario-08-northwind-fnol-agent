@@ -247,6 +247,32 @@ startup with an explicit unsupported-profile error. Those profiles must remain
 unavailable until one complete provider-specific bundle and its conformance tests exist;
 the application does not fill missing capabilities from `fixture`.
 
+The runtime capability table used by the composition root is:
+
+| Capability | `fixture` | `cloudflare` | `mongodb` | `aws` |
+| --- | --- | --- | --- | --- |
+| `persistence` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `evidence_storage` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `policy` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `claim_history` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+
+The capability-status vocabulary separates readiness from implementation source.
+`using_fixture` means that the controlled fixture capability is ready, while `verified`
+means that a non-fixture provider capability has passed its required verification. Both
+statuses are start-capable. `pending_confirmation` and `unavailable` are not
+start-capable and appear in the named missing-capability error.
+
+The table currently provides diagnostic input to `build_data_runtime_bundle`; it is not
+the sole composition gate. `validate_data_runtime_bundle` independently rejects every
+externally supplied non-fixture bundle until a complete provider-specific composition
+path and its conformance tests are implemented. Changing a table entry to `verified`
+alone therefore cannot enable a provider or assemble a mixed bundle. The current table
+is intentionally conservative: MongoDB repository code exists, but transaction-capable
+persistence, protected object storage, and runtime bundle verification are still
+outstanding.
+
 `DATA_RUNTIME_PROFILE` is the only runtime-profile variable currently defined. Provider
 connection and secret-reference variable names will be added with the corresponding
 adapter contract rather than invented before topology and access are verified.
