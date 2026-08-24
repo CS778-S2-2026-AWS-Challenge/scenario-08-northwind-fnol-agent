@@ -9,6 +9,7 @@ time-bound commitments belong in `sprint/`.
 - [Repository Operation Rules](repo_rule.md)
 - [Current API Contract](api.md)
 - [Development Conventions](development-conventions.md)
+- [First Control Plane Interface Contract](control-plane-interface.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
