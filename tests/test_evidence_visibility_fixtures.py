@@ -170,8 +170,8 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'professional_review',
             'HANDOFF',
             'inconsistent',
-            'coverage_under_review',
-            'northwind',
+            'professional_review_queued',
+            'claims_professional',
             (
                 'professional_review',
                 'queued',

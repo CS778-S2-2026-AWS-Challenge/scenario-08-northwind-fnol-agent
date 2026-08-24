@@ -45,9 +45,9 @@
     "active_session_id": "ses_fixture_at02",
     "external_claim": null,
     "customer_next_step": {
-      "status": "coverage_under_review",
-      "summary": "Northwind is reviewing your policy coverage for this incident and will contact you with a coverage decision.",
-      "responsible_party": "northwind",
+      "status": "professional_review_queued",
+      "summary": "A claims professional is reviewing the relevant information and policy wording before the claim can proceed.",
+      "responsible_party": "claims_professional",
       "can_resume": true,
       "required_items": []
     },
@@ -243,7 +243,7 @@
         "history_evidence_refs": [],
         "source_refs": ["msg_at02_claimant_1"],
         "prior_customer_updates": [],
-        "promised_next_step": "Northwind is reviewing your policy coverage for this incident and will contact you with a coverage decision."
+        "promised_next_step": "A claims professional is reviewing the relevant information and policy wording before the claim can proceed."
       },
       "source_message_id": "msg_at02_claimant_1",
       "assigned_to": null,
@@ -254,7 +254,7 @@
   ],
   "expected": {
     "workflow_state": "professional_review",
-    "customer_status": "coverage_under_review",
+    "customer_status": "professional_review_queued",
     "confirmed_fields": ["incident.description"],
     "handoff_priority": "high",
     "handoff_queue": "professional_review",

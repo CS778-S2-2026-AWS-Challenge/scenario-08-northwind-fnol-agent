@@ -30,8 +30,8 @@
         "workflow_state": "professional_review",
         "next_action": "HANDOFF",
         "evidence_state": "inconsistent",
-        "customer_next_step_status": "coverage_under_review",
-        "responsible_party": "northwind",
+        "customer_next_step_status": "professional_review_queued",
+        "responsible_party": "claims_professional",
         "handoff": {
           "type": "professional_review",
           "status": "queued",
