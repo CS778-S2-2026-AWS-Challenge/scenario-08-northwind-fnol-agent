@@ -124,7 +124,7 @@ def _verify_principal(
     actor_mismatch = principal.actor_type != required_actor
     scope_mismatch = not required_scopes.issubset(principal.scopes)
     if actor_mismatch or scope_mismatch:
-        denied_message = f'The authenticated identity cannot access the {credential_label} boundary.'
+        denied_message = f'Access denied for the {credential_label} boundary.'
         raise _access_denied(denied_message)
 
     return principal
