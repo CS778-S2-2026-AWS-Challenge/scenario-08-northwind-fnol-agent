@@ -242,6 +242,32 @@ def test_reusing_original_put_target_cannot_replace_finalised_evidence() -> None
     assert client.object_body != client.final_objects[stored.storage_key]
 
 
+def test_finalised_evidence_can_be_read_only_with_its_claim_scoped_storage_key() -> None:
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
+    stored = storage.complete_upload(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        checksum=checksum(client.object_body),
+        media_type='image/jpeg',
+        size_bytes=len(client.object_body),
+    )
+
+    assert (
+        storage.read_upload(
+            claim_id='clm_001', evidence_id='evd_001', storage_key=stored.storage_key
+        )
+        == client.object_body
+    )
+    assert (
+        storage.read_upload(
+            claim_id='clm_other', evidence_id='evd_001', storage_key=stored.storage_key
+        )
+        is None
+    )
+    assert storage.read_upload(claim_id='clm_001', evidence_id='evd_001', storage_key=None) is None
+
+
 def test_complete_upload_rejects_checksum_that_does_not_match_object_bytes() -> None:
     client = FakeS3Client()
     storage = MinioEvidenceStorage(config(), client=client)

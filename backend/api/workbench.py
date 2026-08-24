@@ -1,4 +1,5 @@
 import base64
+import re
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
@@ -59,6 +60,24 @@ def storage_for(request: Request) -> EvidenceStorage:
     return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
+def _evidence_storage_key(
+    repository: PersistenceRepository, claim_id: str, evidence_id: str
+) -> str | None:
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        return None
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        return None
+    value = evidence.provenance.get('storage_key')
+    return value if isinstance(value, str) else None
+
+
+def _safe_download_filename(value: str | None) -> str:
+    filename = re.sub(r'[\x00-\x1f\x7f"\\]', '', value or 'evidence').strip()
+    return filename or 'evidence'
+
+
 @router.get('', response_model=WorkbenchClaimListResponse)
 def read_workbench_claims(
     request: Request,
@@ -93,7 +112,11 @@ def read_workbench_evidence_content(
             status_code=404, code='RESOURCE_NOT_FOUND', message='The evidence file was not found.'
         )
     try:
-        content = storage_for(request).read_upload(claim_id=claim_id, evidence_id=evidence_id)
+        content = storage_for(request).read_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            storage_key=_evidence_storage_key(repository, claim_id, evidence_id),
+        )
     except EvidenceStorageUnavailable as error:
         raise ApiError(
             status_code=503,
@@ -107,7 +130,7 @@ def read_workbench_evidence_content(
             code='RESOURCE_NOT_FOUND',
             message='The evidence file is not available to view.',
         )
-    filename = (evidence.original_filename or 'evidence').replace('"', '')
+    filename = _safe_download_filename(evidence.original_filename)
     return Response(
         content=content,
         media_type=evidence.media_type,
@@ -130,7 +153,11 @@ def read_workbench_evidence_content_data(
             status_code=404, code='RESOURCE_NOT_FOUND', message='The evidence file was not found.'
         )
     try:
-        content = storage_for(request).read_upload(claim_id=claim_id, evidence_id=evidence_id)
+        content = storage_for(request).read_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            storage_key=_evidence_storage_key(repository, claim_id, evidence_id),
+        )
     except EvidenceStorageUnavailable as error:
         raise ApiError(
             status_code=503,

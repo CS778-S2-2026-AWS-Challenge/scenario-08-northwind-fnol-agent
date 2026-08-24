@@ -167,7 +167,9 @@ class EvidenceStorage(Protocol):
     def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
         raise NotImplementedError
 
-    def read_upload(self, *, claim_id: str, evidence_id: str) -> bytes | None:
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
         raise NotImplementedError
 
 
@@ -252,9 +254,14 @@ class MockEvidenceStorage(EvidenceStorage):
             raise EvidenceUploadSizeMismatch(evidence_id)
         self._content[(claim_id, evidence_id)] = content
 
-    def read_upload(self, *, claim_id: str, evidence_id: str) -> bytes | None:
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
         self._guard()
         if (claim_id, evidence_id) not in self._completed:
+            return None
+        completed = self._completed[(claim_id, evidence_id)]
+        if storage_key is not None and storage_key != completed.storage_key:
             return None
         return self._content.get((claim_id, evidence_id))
 
@@ -389,6 +396,37 @@ class MinioEvidenceStorage(EvidenceStorage):
             expires_at=now_utc() + timedelta(seconds=self._config.presign_expiry_seconds),
             storage_key=storage_key,
         )
+
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        """Reject the fixture-only upload proxy when object storage is configured."""
+        raise EvidenceUploadNotFound(evidence_id)
+
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
+        expected_prefix = self._storage_key(claim_id, evidence_id).removesuffix('staging')
+        if storage_key is None or not storage_key.startswith(f'{expected_prefix}finalised/'):
+            return None
+        try:
+            response = self._client.get_object(Bucket=self._config.bucket, Key=storage_key)
+            body = response.get('Body')
+            if body is None or not callable(getattr(body, 'read', None)):
+                return None
+            try:
+                content = body.read(self.max_size_bytes + 1)
+            finally:
+                close = getattr(body, 'close', None)
+                if callable(close):
+                    close()
+        except ClientError as error:
+            if self._not_found(error):
+                return None
+            raise self._unavailable('read the uploaded object', error) from error
+        except BotoCoreError as error:
+            raise self._unavailable('read the uploaded object', error) from error
+        if not isinstance(content, bytes) or len(content) > self.max_size_bytes:
+            return None
+        return content
 
     def complete_upload(
         self,

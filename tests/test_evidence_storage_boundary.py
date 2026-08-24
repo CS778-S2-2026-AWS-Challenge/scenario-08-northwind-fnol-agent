@@ -8,6 +8,7 @@ from backend.adapters.evidence_storage import (
     EvidenceStorageUnavailable,
     MockEvidenceStorage,
 )
+from backend.api.workbench import _safe_download_filename
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
@@ -21,6 +22,11 @@ UPLOAD_PAYLOAD = {
     'media_type': 'image/jpeg',
     'size_bytes': 2048,
 }
+
+
+def test_download_filename_removes_response_header_control_characters() -> None:
+    assert _safe_download_filename('damage\r\nX-Injected: yes.jpg') == 'damageX-Injected: yes.jpg'
+    assert _safe_download_filename('"\\') == 'evidence'
 
 
 @pytest.fixture
