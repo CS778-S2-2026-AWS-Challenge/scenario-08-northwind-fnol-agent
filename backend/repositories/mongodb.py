@@ -908,6 +908,24 @@ class MongoDBRepository:
             if stored_session is None or stored_session.claim_id != claim.claim_id:
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
+            if kind == 'message':
+                if not isinstance(record, MessageRecord):
+                    raise KeyError(claim.claim_id)
+                message_session = self._get(
+                    'session',
+                    record.session_id,
+                    SessionRecord,
+                    customer_id=claim.customer_id,
+                    session=mongo_session,
+                )
+                if (
+                    message_session is None
+                    or message_session.claim_id != claim.claim_id
+                    or idempotency.session_id != record.session_id
+                    or record.message_id
+                    not in {idempotency.message_id, idempotency.agent_message_id}
+                ):
+                    raise KeyError(claim.claim_id)
             document = record.model_dump(mode='json')
             document.update(
                 {

@@ -686,6 +686,133 @@ def test_staff_mutation_persists_audited_record_with_claim_revision(
     assert repository.list_staff_actions(claim.claim_id) == [action]
 
 
+@pytest.mark.parametrize('invalid_session', ['foreign', 'missing'])
+def test_staff_message_mutation_rejects_invalid_parent_session_without_writes(
+    repository: MongoDBRepository,
+    invalid_session: str,
+) -> None:
+    from backend.repositories.protocols import IdempotencyRecord
+
+    claim = _claim()
+    own_session = _session(claim)
+    repository.create_claim(claim, own_session)
+    foreign_claim = claim.model_copy(
+        update={
+            'claim_id': 'clm_mongo_foreign',
+            'customer_id': 'cus_mongo_foreign',
+            'active_session_id': 'ses_mongo_foreign',
+        }
+    )
+    foreign_session = _session(foreign_claim).model_copy(
+        update={
+            'session_id': 'ses_mongo_foreign',
+            'claim_id': foreign_claim.claim_id,
+            'customer_id': foreign_claim.customer_id,
+        }
+    )
+    repository.create_claim(foreign_claim, foreign_session)
+    referenced_session_id = (
+        foreign_session.session_id if invalid_session == 'foreign' else 'ses_mongo_missing'
+    )
+    message = _message(claim, own_session).model_copy(
+        update={
+            'message_id': f'msg_staff_{invalid_session}',
+            'session_id': referenced_session_id,
+            'client_message_id': None,
+            'actor': ActorType.STAFF,
+        }
+    )
+    idempotency = IdempotencyRecord(
+        actor_id='stf_mongo_001',
+        route='/staff-messages',
+        key=f'staff-message-{invalid_session}',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=message.session_id,
+        message_id=message.message_id,
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            claim.model_copy(update={'revision': 2}),
+            1,
+            idempotency,
+            message=message,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert (
+        repository.get_session(claim.claim_id, own_session.session_id, claim.customer_id)
+        == own_session
+    )
+    assert (
+        repository.get_session(
+            foreign_claim.claim_id,
+            foreign_session.session_id,
+            foreign_claim.customer_id,
+        )
+        == foreign_session
+    )
+    assert (
+        repository.get_message(
+            claim.claim_id,
+            message.session_id,
+            message.message_id,
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.find_idempotency(idempotency.actor_id, idempotency.route, idempotency.key)
+        is None
+    )
+
+
+@pytest.mark.parametrize('invalid_link', ['session_id', 'message_id'])
+def test_staff_message_mutation_rejects_invalid_idempotency_link_without_writes(
+    repository: MongoDBRepository,
+    invalid_link: str,
+) -> None:
+    from backend.repositories.protocols import IdempotencyRecord
+
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session).model_copy(
+        update={'client_message_id': None, 'actor': ActorType.STAFF}
+    )
+    values = {
+        'session_id': session.session_id,
+        'message_id': message.message_id,
+    }
+    values[invalid_link] = f'wrong-{invalid_link}'
+    idempotency = IdempotencyRecord(
+        actor_id='stf_mongo_001',
+        route='/staff-messages',
+        key=f'staff-message-wrong-{invalid_link}',
+        request_fingerprint='fingerprint',
+        claim_id=claim.claim_id,
+        session_id=values['session_id'],
+        message_id=values['message_id'],
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_staff_mutation(
+            claim.model_copy(update={'revision': 2}),
+            1,
+            idempotency,
+            message=message,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.get_session(claim.claim_id, session.session_id, claim.customer_id) == session
+    assert repository.list_messages(claim.claim_id, session.session_id, claim.customer_id) == []
+    assert (
+        repository.find_idempotency(idempotency.actor_id, idempotency.route, idempotency.key)
+        is None
+    )
+
+
 def test_agent_turn_persists_linked_records_as_one_mutation(
     repository: MongoDBRepository,
     monkeypatch: pytest.MonkeyPatch,
