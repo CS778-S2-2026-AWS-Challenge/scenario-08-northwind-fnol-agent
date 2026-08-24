@@ -108,7 +108,9 @@ def _verify_principal(
         # No production verifier is configured in this bounded Week-4 slice. Normal mode
         # is therefore deliberately fail-closed instead of falling back to repository
         # synthetic credentials.
-        raise _authentication_required(f'The {credential_label} identity could not be authenticated.')
+        raise _authentication_required(
+            f'The {credential_label} identity could not be authenticated.'
+        )
 
     principal = next(
         (
@@ -119,7 +121,9 @@ def _verify_principal(
         None,
     )
     if principal is None:
-        raise _authentication_required(f'The {credential_label} identity could not be authenticated.')
+        raise _authentication_required(
+            f'The {credential_label} identity could not be authenticated.'
+        )
 
     if principal.actor_type != required_actor or not required_scopes.issubset(principal.scopes):
         raise _access_denied(
