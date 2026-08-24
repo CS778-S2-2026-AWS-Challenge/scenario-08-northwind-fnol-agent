@@ -217,7 +217,7 @@ from a second profile without a separately approved architecture change.
 
 | Profile | Candidate transactional store | Candidate object store | Candidate knowledge/index services | Status |
 | --- | --- | --- | --- | --- |
-| `fixture` | In-memory fixture repository | Synthetic object adapter | Deterministic fixture retriever | Available for controlled tests and demonstrations |
+| `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
 | `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Repository adapter in progress; transactions, object storage, topology, and access are not yet verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
@@ -273,14 +273,23 @@ is intentionally conservative: MongoDB repository code exists, but transaction-c
 persistence, protected object storage, and runtime bundle verification are still
 outstanding.
 
+The `fixture` capability row is the default baseline. When the local fixture profile
+explicitly selects the S3-compatible object adapter, the assembled bundle and readiness
+check report that configured service instead. External bundle injection must match both
+`DATA_RUNTIME_PROFILE` and `NORTHWIND_OBJECT_STORAGE_ADAPTER`; it cannot relabel fixture
+storage as the configured service.
+
 `DATA_RUNTIME_PROFILE` remains the only variable that selects a complete data-runtime
 profile. Provider connection and secret-reference variables are introduced by their
 corresponding adapter contracts rather than treated as profile selectors. The MinIO/S3
-compatible evidence adapter defines `NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
+compatible evidence adapter is explicitly selected by
+`NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible` and defines
+`NORTHWIND_OBJECT_STORAGE_ENDPOINT`,
 `NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID`, `NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY`,
 `NORTHWIND_OBJECT_STORAGE_BUCKET`, `NORTHWIND_OBJECT_STORAGE_REGION`, and
-`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`; these variables do not enable a
-runtime profile or make the adapter composition-ready by themselves.
+`NORTHWIND_OBJECT_STORAGE_PRESIGN_EXPIRY_SECONDS`. Connection or credential variables
+alone do not switch adapters, and this local object-store selection does not enable a
+MongoDB, Cloudflare, or AWS data profile.
 
 ## Knowledge Base and RAG
 
