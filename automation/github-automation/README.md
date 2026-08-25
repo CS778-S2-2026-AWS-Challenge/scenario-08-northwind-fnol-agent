@@ -7,8 +7,8 @@ files remain the reviewed GitHub-native implementation of the `github` quality p
 ## Responsibilities
 
 - receive signed GitHub `pull_request` webhooks and enqueue them for asynchronous processing;
-- run the shared `.github/scripts/pr_policy.cjs` validator and write the `PR policy` commit status
-  to the exact pull-request head SHA using the configured remote/local quality profile;
+- run the shared `.github/scripts/pr_policy.cjs` validator and write the `Northwind PR policy`
+  commit status to the exact pull-request head SHA using the configured remote/local quality profile;
 - synchronize Project 12 only for GitHub closing references (`Closes`, `Fixes`, or `Resolves`);
 - treat a Draft pull request as the explicit start signal and set its linked card to `In progress`;
 - set a ready-for-review pull request to `In review`, an unmerged closed pull request to
