@@ -38,7 +38,8 @@
       "sections": [
         {
           "section_path": "Section 22 / Information privacy principles 1, 3, 5, 10 and 11",
-          "page": null,
+          "printed_pages": null,
+          "pdf_page_indices": null,
           "intended_use": "Bound collection, notice, security, use, and disclosure when designing claimant-authorised external-service data sharing."
         }
       ],
@@ -73,12 +74,14 @@
       "sections": [
         {
           "section_path": "Our general responsibilities to you / clauses 1-14",
-          "page": 4,
+          "printed_pages": [3, 4],
+          "pdf_page_indices": [4, 5],
           "intended_use": "Support plain communication and privacy-aware handling without turning the code into claim authority."
         },
         {
           "section_path": "What happens when you make a claim / clauses 16-20",
-          "page": 11,
+          "printed_pages": [10],
+          "pdf_page_indices": [11],
           "intended_use": "Support claimant-facing process explanations and permission-aware coordination with assessors or repairers."
         }
       ],
@@ -113,12 +116,14 @@
       "sections": [
         {
           "section_path": "What you need to tell insurers - disclosure",
-          "page": null,
+          "printed_pages": null,
+          "pdf_page_indices": null,
           "intended_use": "Support a general explanation that claim information should be relevant, complete, and kept distinct from a coverage conclusion."
         },
         {
           "section_path": "Your rights / What insurers must do",
-          "page": null,
+          "printed_pages": null,
+          "pdf_page_indices": null,
           "intended_use": "Support general signposting about insurer conduct and complaints without representing the guidance as policy wording."
         }
       ],

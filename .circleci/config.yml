@@ -1,0 +1,112 @@
+version: 2.1
+
+jobs:
+  backend-quality:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+      - run:
+          name: Install backend dependencies
+          command: python -m pip install -r backend/requirements-dev.txt
+      - save_cache:
+          key: v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
+          paths:
+            - ~/.cache/pip
+      - run:
+          name: Check backend formatting
+          command: python -m ruff format --check .
+      - run:
+          name: Lint backend
+          command: python -m ruff check .
+      - run:
+          name: Type-check backend
+          command: python -m mypy backend tests
+      - run:
+          name: Test backend
+          command: python -m pytest --cov=backend --cov-report=term-missing
+
+  customer-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-customer-node-{{ arch }}-{{ checksum "customer/package-lock.json" }}
+      - run:
+          name: Install customer dependencies
+          command: npm ci
+          working_directory: customer
+      - save_cache:
+          key: v1-customer-node-{{ arch }}-{{ checksum "customer/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint customer
+          command: npm run lint
+          working_directory: customer
+      - run:
+          name: Test customer
+          command: npm test
+          working_directory: customer
+      - run:
+          name: Build customer
+          command: npm run build
+          working_directory: customer
+
+  github-automation-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
+      - run:
+          name: Install GitHub automation dependencies
+          command: npm ci
+          working_directory: automation/github-automation
+      - save_cache:
+          key: v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Check GitHub automation Worker
+          command: npm run check
+          working_directory: automation/github-automation
+      - run:
+          name: Validate Worker bundle
+          command: npm run dry-run
+          working_directory: automation/github-automation
+
+  pr-policy:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Test repository policy validators
+          command: >-
+            node --test
+            .github/scripts/pr_policy.test.cjs
+            .github/scripts/issue_policy.test.cjs
+            .circleci/run-pr-policy.test.cjs
+      - run:
+          name: Validate pull request
+          command: node .circleci/run-pr-policy.cjs
+
+workflows:
+  quality:
+    jobs:
+      - backend-quality
+      - customer-quality
+      - github-automation-quality
+      - pr-policy

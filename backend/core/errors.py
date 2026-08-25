@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
+from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
+
 
 class ErrorDetail(BaseModel):
     field: str
@@ -133,9 +135,33 @@ async def internal_error_handler(request: Request, _exc: Exception) -> JSONRespo
     )
 
 
+async def model_gateway_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, ModelGatewayError):
+        raise TypeError('model_gateway_error_handler requires ModelGatewayError.')
+    unavailable = exc.retryable or exc.code in {
+        ModelGatewayErrorCode.TIMEOUT,
+        ModelGatewayErrorCode.RATE_LIMIT,
+    }
+    return _response(
+        request,
+        503 if unavailable else 502,
+        ErrorBody(
+            code='DEPENDENCY_UNAVAILABLE' if unavailable else 'DEPENDENCY_FAILED',
+            message=(
+                'The model service is temporarily unavailable. The claim is unchanged.'
+                if unavailable
+                else 'The model service could not complete the request. The claim is unchanged.'
+            ),
+            request_id=_request_id(request),
+            retryable=unavailable,
+        ),
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     handlers: list[tuple[type[Exception], ExceptionHandler]] = [
         (ApiError, api_error_handler),
+        (ModelGatewayError, model_gateway_error_handler),
         (RequestValidationError, validation_error_handler),
         (HTTPException, http_error_handler),
         (Exception, internal_error_handler),

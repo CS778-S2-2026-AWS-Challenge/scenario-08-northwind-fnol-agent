@@ -26,6 +26,11 @@ class AuthorityOutcome(str, Enum):
     REVIEW_REQUIRED = 'review_required'
 
 
+class AgentProposalSource(str, Enum):
+    CONTROLLED_AGENT = 'controlled_agent'
+    MODEL_GATEWAY = 'model_gateway'
+
+
 class Severity(str, Enum):
     UNASSESSED = 'unassessed'
     FAST_TRACK = 'fast_track'
@@ -176,6 +181,20 @@ class AssessorRoutingStatus(str, Enum):
     FAILED = 'failed'
 
 
+class AssessorRoutingFailureCode(str, Enum):
+    TIMEOUT = 'timeout'
+    UNAVAILABLE = 'unavailable'
+    ACCESS_DENIED = 'access_denied'
+    MALFORMED = 'malformed'
+
+
+class AssessorRoutingOperationStatus(str, Enum):
+    PREPARED = 'prepared'
+    RETRYABLE_FAILURE = 'retryable_failure'
+    TERMINAL_FAILURE = 'terminal_failure'
+    ACCEPTED = 'accepted'
+
+
 class ExternalServiceConsentStatus(str, Enum):
     GRANTED = 'granted'
     WITHDRAWN = 'withdrawn'
@@ -310,6 +329,41 @@ class ClaimantExternalServiceAction(ContractModel):
     can_request: bool
 
 
+class AssessorRoutingOperation(ContractModel):
+    operation_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    external_claim_id: str = Field(min_length=1, max_length=100)
+    authorisation_ref: str = Field(min_length=1, max_length=100)
+    claimant_consent_ref: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    authorised_revision: int = Field(ge=1)
+    request_fingerprint: str = Field(min_length=1)
+    status: AssessorRoutingOperationStatus
+    result: AssessorRoutingResult | None = None
+    failure_code: AssessorRoutingFailureCode | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_operation_state(self) -> 'AssessorRoutingOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Assessor operation update cannot precede creation.')
+        if self.status is AssessorRoutingOperationStatus.ACCEPTED:
+            if self.result is None or self.failure_code is not None:
+                raise ValueError('Accepted assessor operation requires only a result.')
+            return self
+        if self.status in {
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+        }:
+            if self.failure_code is None or self.result is not None:
+                raise ValueError('Failed assessor operation requires only a failure code.')
+            return self
+        if self.result is not None or self.failure_code is not None:
+            raise ValueError('Prepared assessor operation cannot contain an outcome.')
+        return self
+
+
 class ExternalServiceConsent(ContractModel):
     consent_ref: str = Field(min_length=1, max_length=100)
     service_identity: str = Field(min_length=1, max_length=100)
@@ -419,6 +473,12 @@ class AgentAuthority(ContractModel):
     outcome: AuthorityOutcome
 
 
+class ModelDecisionProvenance(ContractModel):
+    runtime_profile: Literal['model_gateway'] = 'model_gateway'
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
+
+
 class AgentDecisionRecord(ContractModel):
     decision_id: str
     claim_id: str
@@ -436,6 +496,8 @@ class AgentDecisionRecord(ContractModel):
     handoff_id: str | None = None
     customer_next_step: CustomerNextStep
     authority: AgentAuthority
+    proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
+    model_provenance: ModelDecisionProvenance | None = None
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
     resulting_revision: int = Field(ge=1)
     created_at: datetime

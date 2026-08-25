@@ -68,11 +68,19 @@ the complete claim.
 
 The current controlled assessor fixture requires `claimant_consent_ref` and validates the
 record's service identity, requested action, granted status, and minimum permitted fields
-before the adapter is called. The adapter supports deterministic assigned and queued
-successes plus timeout, unavailable, access-denied, and malformed failures. A failure
-preserves the current claim and never becomes an assignment. Timeout and unavailable are
-retryable with the same operation identity; access-denied and malformed responses require
-review before another attempt. Automatic retry counts remain unapproved.
+before the adapter is called. The record must have been granted by the claimant linked to the
+Working Claim; authorised-representative consent remains unsupported until that identity and
+authority are modelled explicitly. The adapter supports deterministic assigned and queued
+successes plus timeout, unavailable, access-denied, and malformed failures. A failure preserves
+the current claim and never becomes an assignment. Timeout and unavailable are retryable with
+the same operation identity; access-denied and malformed responses require review before another
+attempt. Automatic retry counts remain unapproved.
+
+The service reserves an immutable operation identity and full request fingerprint before
+invocation. It records retryable failure, terminal failure, or provider acceptance separately
+from Claim State. A changed retry is rejected even before any success, and a provider-accepted
+result can be reconciled after a concurrent Claim revision advance without invoking a second
+external task.
 
 The claimant experience uses two versioned public mutations. The first records a fixed,
 task-specific consent scope; the second derives the current decision, consent, external claim,
