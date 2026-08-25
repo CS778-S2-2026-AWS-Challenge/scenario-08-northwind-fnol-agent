@@ -5,11 +5,11 @@ Issue: #272
 ## Scope
 
 This record validates the claimant external-service UI and controlled assessor adapter on the
-current #302 implementation at `98cf8464ff2ff816bf51810d341c585e7924edf7`, synchronized
-through `main@79bc4eae6d47e506c7bdcdded536671cc2002e76`. All claim data, provider
-responses, identifiers, and failure outcomes are synthetic. The check covers clean success, a
-claimant choosing not to grant consent, service unavailable, timeout, retry, and replay
-behaviour through the public claimant API and visible claimant interface.
+merged #302 implementation at `98cf8464ff2ff816bf51810d341c585e7924edf7`, integrated into
+`main` by merge commit `2fbdc70ef2a537dc3cec440c41e856a27ec4ac76`. All claim data,
+provider responses, identifiers, and failure outcomes are synthetic. The check covers clean
+success, a claimant choosing not to grant consent, service unavailable, timeout, retry, and
+replay behaviour through the public claimant API and visible claimant interface.
 
 ## Repeatable checks
 
@@ -30,8 +30,8 @@ Owner verification on 26 August 2026 recorded `4 passed` for the focused backend
 source `none` and recorded `591 passed`, `90.32%` backend coverage, `21 passed`
 repository-policy checks, `15 passed` GitHub-automation checks, and `36 passed` customer tests;
 formatting, lint, type checking, dependency audits, and the production build also passed. The
-validated code-and-test tree before this result-record update was
-`a07ea083abc73d9fb04cac883fd20920eb8c84d3`; the PR validation record identifies the final
+validated code-and-test tree after GitHub retargeted the stacked PR onto merged #302 was
+`edbff6781b8eea2a37eb2f0521c4251654799293`; the PR validation record identifies the final
 documentation head and repeats the complete gate there.
 
 ## Result matrix
@@ -72,6 +72,6 @@ can be closed.
   persisted consent withdrawal or provider cancellation workflow.
 - Automatic retry counts remain unapproved. The claimant explicitly initiates the demonstrated
   retry.
-- #300 and #298 are merged. #302 remains the immediate dependency and is synchronized to current
-  main; #308 must be refreshed and revalidated again if #302 advances before this validation PR
-  is reviewed or merged.
+- #298, #300, and #302 are merged. #308 is based directly on the #302 merge commit in current
+  main and must be refreshed and revalidated again only if main advances before this validation
+  PR is reviewed or merged.
