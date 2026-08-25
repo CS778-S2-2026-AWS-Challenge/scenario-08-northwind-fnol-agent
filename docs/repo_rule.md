@@ -102,9 +102,16 @@ or sprint plan.
   pushing or requesting review.
 - Record the exact command and result in the pull-request description. Never copy a result from a
   different branch, worktree, commit, or environment and present it as current evidence.
-- Install the versioned pre-push hook with `./scripts/install-git-hooks.ps1`. The hook is an early
-  local guard, not proof that a check ran: Git permits hooks to be bypassed, so required GitHub CI
-  remains the merge boundary.
+- Install the versioned pre-push hook with `./scripts/install-git-hooks.ps1`. The hook routes
+  through `./scripts/pre-push-quality-gate.ps1`: by default it runs the local gate only when the
+  remote provider is unavailable. Set `NORTHWIND_REMOTE_CI_PROVIDER=circleci` after CircleCI has
+  been connected and verified, or use `NORTHWIND_REMOTE_CI_PROVIDER=github` when GitHub Actions
+  is available. Set `NORTHWIND_QUALITY_GATE_MODE=local` to force the local gate during diagnosis.
+- `NORTHWIND_QUALITY_GATE_MODE=off` is an explicit maintenance escape hatch and must not be used
+  as ordinary development configuration. A pre-push hook is an early local guard, not proof that
+  a check ran: Git permits hooks to be bypassed. Once a remote provider is available, its exact
+  checks remain the merge boundary; temporarily moving required checks to local hooks does not
+  create equivalent server-side enforcement.
 - When the full gate cannot run, keep the pull request Draft, document the blocker, and do not
   request approval. A narrow test may support diagnosis but does not replace the complete gate.
 - A successful build or API-level assertion does not prove a claimant or staff journey. Match the
