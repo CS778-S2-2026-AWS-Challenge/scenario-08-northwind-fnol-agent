@@ -157,7 +157,7 @@ class MongoDBRepository:
     def connection_status(self) -> str:
         try:
             self._client.admin.command('ping')
-        except PyMongoError:
+        except (PyMongoError, ValueError):
             return 'unavailable'
         return 'verified'
 

@@ -5,7 +5,7 @@ from typing import Any
 
 import mongomock
 import pytest
-from pymongo.errors import ServerSelectionTimeoutError
+from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 
 from backend.domain.models import (
     ActorType,
@@ -278,13 +278,15 @@ def test_mongodb_connection_failure_closes_client_without_exposing_uri(
     assert 'secret' not in str(error.value)
 
 
+@pytest.mark.parametrize('provider_error', [ValueError, ConfigurationError])
 def test_mongodb_constructor_failure_is_bounded_without_exposing_uri(
     monkeypatch: pytest.MonkeyPatch,
+    provider_error: type[Exception],
 ) -> None:
     secret_uri = 'mongodb+srv://constructor-user:constructor-secret@example.invalid'
 
     def fail_constructor(*args: object, **kwargs: object) -> None:
-        raise ValueError(f'invalid provider URI: {secret_uri}')
+        raise provider_error(f'invalid provider URI: {secret_uri}')
 
     monkeypatch.setattr('backend.repositories.mongodb.MongoClient', fail_constructor)
 
@@ -294,6 +296,18 @@ def test_mongodb_constructor_failure_is_bounded_without_exposing_uri(
     assert secret_uri not in str(error.value)
     assert 'constructor-user' not in str(error.value)
     assert 'constructor-secret' not in str(error.value)
+
+
+def test_mongodb_connection_status_bounds_local_configuration_failure(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_ping(_name: str) -> None:
+        raise ValueError('invalid local client configuration')
+
+    monkeypatch.setattr(repository._client.admin, 'command', fail_ping)
+
+    assert repository.connection_status() == 'unavailable'
 
 
 def test_claim_and_session_round_trip_enforces_customer_ownership(
