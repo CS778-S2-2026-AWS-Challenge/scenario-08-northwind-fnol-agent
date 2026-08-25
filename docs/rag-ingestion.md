@@ -21,9 +21,11 @@ knowledge/indexed/{document_id}/{version}/keyword-index.json
 knowledge/indexed/{document_id}/{version}/ingestion.json
 ```
 
-The ingestion record binds the document and version to the source checksum. Repeating an import of
-identical bytes returns `unchanged` and writes no duplicate objects. Different bytes cannot replace
-an existing document version.
+The ingestion record binds the document and version to both the source checksum and a deterministic
+fingerprint of every governed source field. Repeating an import returns `unchanged` only when the
+bytes and governed metadata are identical, and writes no duplicate objects. Different bytes or
+changed provenance, applicability, effective dates, authority, or visibility cannot replace an
+existing document version; the publisher must issue a new version.
 
 ## Run
 

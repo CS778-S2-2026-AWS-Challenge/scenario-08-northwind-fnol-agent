@@ -41,6 +41,28 @@ def _terms(text: str) -> set[str]:
     return {term for term in re.findall(r"[a-z0-9']+", text.casefold()) if len(term) > 2}
 
 
+def _source_metadata_fingerprint(source: KnowledgeSource) -> str:
+    governed_metadata = {
+        'document_id': source.document_id,
+        'source_key': source.source_key,
+        'title': source.title,
+        'document_type': source.document_type,
+        'version': source.version,
+        'source_uri': source.source_uri,
+        'jurisdiction': source.jurisdiction,
+        'insurer': source.insurer,
+        'product': source.product,
+        'effective_from': source.effective_from.isoformat() if source.effective_from else None,
+        'effective_to': source.effective_to.isoformat() if source.effective_to else None,
+        'authority': source.authority,
+        'visibility': source.visibility,
+        'publication_status': source.publication_status.value,
+        'expected_checksum': source.expected_checksum,
+    }
+    canonical = json.dumps(governed_metadata, sort_keys=True, separators=(',', ':')).encode()
+    return sha256(canonical).hexdigest()
+
+
 class KnowledgeIngestionService:
     def __init__(
         self, store: KnowledgeObjectStore, approved_sources: dict[tuple[str, str], KnowledgeSource]
@@ -73,6 +95,7 @@ class KnowledgeIngestionService:
         checksum = sha256(raw).hexdigest()
         if checksum != source.expected_checksum:
             raise KnowledgeIngestionError('Knowledge source checksum does not match the manifest.')
+        metadata_fingerprint = _source_metadata_fingerprint(source)
 
         prefix = f'knowledge/indexed/{source.document_id}/{source.version}'
         state_key = f'{prefix}/ingestion.json'
@@ -82,6 +105,10 @@ class KnowledgeIngestionService:
             if state['source_checksum'] != checksum:
                 raise KnowledgeIngestionError(
                     'An immutable document version already exists with different content.'
+                )
+            if state.get('source_metadata_fingerprint') != metadata_fingerprint:
+                raise KnowledgeIngestionError(
+                    'An immutable document version already exists with different governed metadata.'
                 )
             return KnowledgeIngestionResult(
                 source.document_id, source.version, checksum, state['chunk_count'], 'unchanged'
@@ -102,6 +129,7 @@ class KnowledgeIngestionService:
             'version': source.version,
             'source_key': source.source_key,
             'source_checksum': checksum,
+            'source_metadata_fingerprint': metadata_fingerprint,
             'chunk_count': len(chunks),
             'status': 'indexed',
         }

@@ -85,6 +85,9 @@ def test_approved_source_is_indexed_once_with_traceable_chunks() -> None:
     assert chunks[1]['section_path'] == 'MTR-COV-01 - Collision cover'
     assert chunks[1]['checksum'] == sha256(POLICY).hexdigest()
     assert chunks[1]['jurisdiction'] == 'NZ'
+    state_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/ingestion.json'
+    state = json.loads(store.objects[state_key])
+    assert len(state['source_metadata_fingerprint']) == 64
 
 
 def test_missing_source_and_version_fail_explicitly() -> None:
@@ -135,3 +138,28 @@ def test_changed_content_cannot_replace_an_existing_version() -> None:
     store.objects[source().source_key] = POLICY + b'changed'
     with pytest.raises(KnowledgeIngestionError, match='checksum'):
         ingestion.ingest(source())
+
+
+@pytest.mark.parametrize(
+    ('field', 'changed_value'),
+    [
+        ('visibility', 'staff_only'),
+        ('authority', 'corrected_synthetic_authority'),
+    ],
+)
+def test_governed_metadata_cannot_drift_under_an_existing_version(
+    field: str,
+    changed_value: str,
+) -> None:
+    store = MemoryObjectStore({source().source_key: POLICY})
+    service(store).ingest(source())
+    chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
+    original_chunks = store.objects[chunks_key]
+    original_writes = list(store.writes)
+    changed_source = source(**{field: changed_value})
+
+    with pytest.raises(KnowledgeIngestionError, match='different governed metadata'):
+        service(store, changed_source).ingest(changed_source)
+
+    assert store.objects[chunks_key] == original_chunks
+    assert store.writes == original_writes
