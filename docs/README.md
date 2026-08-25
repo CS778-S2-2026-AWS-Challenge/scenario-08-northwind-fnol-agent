@@ -12,6 +12,7 @@ time-bound commitments belong in `sprint/`.
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [Provider-Neutral Model Gateway](model-gateway.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
+- [RAG Knowledge Ingestion](rag-ingestion.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Persistence Contract](persistence-schema.md)
