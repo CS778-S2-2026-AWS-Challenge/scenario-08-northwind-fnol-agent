@@ -1286,6 +1286,14 @@ available only in development and test environments, and returns
 this set again. Runtime demo records are maintained under `backend/demo_data/scenarios/`, not
 under the test fixture tree.
 
+AT-02 also supplies the bounded structured MVP record graph: its `customer_reference` and
+`claim_id` connect the Working Claim to typed policy and claim-history retrievals, evidence,
+messages, and a professional-review handoff. The handoff packet references those records by
+their stable identifiers. Policy/history payloads remain available only from the authorised
+Workbench claim-detail route; claimant routes do not expose retrieval records, provider
+references, claim history, internal messages, or the staff packet. Both web clients discover
+the queue and claim detail through these APIs rather than embedding fixture payloads or IDs.
+
 Response `200`:
 
 ```json
