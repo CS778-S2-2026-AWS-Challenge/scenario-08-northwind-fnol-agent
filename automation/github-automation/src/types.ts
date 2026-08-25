@@ -26,6 +26,7 @@ export interface GitHubQueueMessage {
 export type WorkerEnv = Env & {
   readonly GITHUB_TOKEN: string;
   readonly GITHUB_WEBHOOK_SECRET: string;
+  readonly REMOTE_CI_PROVIDER: string;
 };
 
 export type ProjectEnvironment = Pick<

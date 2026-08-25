@@ -18,6 +18,9 @@
 
 ## Local validation
 
+- Record the quality source selected by the active profile. For `none`, include the exact
+  `./scripts/check.ps1` command and `Result: PASS`; for `github` or `circleci`, name the remote
+  provider and its checks. Do not claim a local result that was not run.
 - Command:
 - Result:
 
