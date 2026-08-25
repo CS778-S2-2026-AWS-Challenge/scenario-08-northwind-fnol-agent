@@ -6,11 +6,11 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
 if command -v pwsh >/dev/null 2>&1; then
-  exec pwsh -NoProfile -File ./scripts/check.ps1 -SkipInstall
+  exec pwsh -NoProfile -File ./scripts/pre-push-quality-gate.ps1 -SkipInstall
 fi
 
 if command -v powershell.exe >/dev/null 2>&1; then
-  exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check.ps1 -SkipInstall
+  exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/pre-push-quality-gate.ps1 -SkipInstall
 fi
 
 echo "Pre-push check failed: PowerShell is required to run scripts/check.ps1." >&2
