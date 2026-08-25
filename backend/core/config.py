@@ -10,6 +10,16 @@ class DataRuntimeProfile(str, Enum):
     AWS = 'aws'
 
 
+class AgentRuntimeProfile(str, Enum):
+    CONTROLLED = 'controlled'
+    MODEL_GATEWAY = 'model_gateway'
+
+
+class ObjectStorageAdapter(str, Enum):
+    FIXTURE = 'fixture'
+    S3_COMPATIBLE = 's3_compatible'
+
+
 def _csv_setting(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -32,6 +42,16 @@ def _boolean_setting(name: str, default: bool) -> bool:
     raise ValueError(f'{name} must be a boolean value.')
 
 
+def _float_setting(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError as error:
+        raise ValueError(f'{name} must be a number.') from error
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str = 'development'
@@ -42,10 +62,23 @@ class Settings:
     synthetic_staff_token: str = 'synthetic-staff'
     synthetic_integration_token: str = 'synthetic-integration'
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
+    agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
+    model_protocol_adapter: str = 'openai_compatible'
+    model_base_url: str = ''
+    model_identifier: str = ''
+    model_api_key_env: str | None = None
+    model_timeout_seconds: float = 30.0
+    model_supports_structured_output: bool = True
+    model_supports_tools: bool = False
+    object_storage_adapter: ObjectStorageAdapter = ObjectStorageAdapter.FIXTURE
 
     def __post_init__(self) -> None:
         if not isinstance(self.data_runtime_profile, DataRuntimeProfile):
             raise ValueError('data_runtime_profile must be a DataRuntimeProfile value.')
+        if not isinstance(self.agent_runtime_profile, AgentRuntimeProfile):
+            raise ValueError('agent_runtime_profile must be an AgentRuntimeProfile value.')
+        if not isinstance(self.object_storage_adapter, ObjectStorageAdapter):
+            raise ValueError('object_storage_adapter must be an ObjectStorageAdapter value.')
         if self.cors_allow_credentials and '*' in self.cors_allow_origins:
             raise ValueError('Wildcard CORS origins cannot be used with credentials.')
         synthetic_tokens = {
@@ -57,6 +90,15 @@ class Settings:
             raise ValueError(
                 'Synthetic claimant, staff, and integration tokens must be pairwise distinct.'
             )
+        if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
+            if not self.model_protocol_adapter.strip():
+                raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
+            if not self.model_base_url.strip():
+                raise ValueError('MODEL_BASE_URL must not be empty.')
+            if not self.model_identifier.strip():
+                raise ValueError('MODEL_IDENTIFIER must not be empty.')
+            if self.model_timeout_seconds <= 0:
+                raise ValueError('MODEL_TIMEOUT_SECONDS must be greater than zero.')
 
     @classmethod
     def from_environment(cls) -> 'Settings':
@@ -67,6 +109,24 @@ class Settings:
         except ValueError as error:
             allowed = ', '.join(profile.value for profile in DataRuntimeProfile)
             raise ValueError(f'DATA_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
+        raw_agent_profile = os.getenv('AGENT_RUNTIME_PROFILE', AgentRuntimeProfile.CONTROLLED.value)
+        try:
+            agent_runtime_profile = AgentRuntimeProfile(raw_agent_profile.strip().lower())
+        except ValueError as error:
+            allowed = ', '.join(profile.value for profile in AgentRuntimeProfile)
+            raise ValueError(f'AGENT_RUNTIME_PROFILE must be exactly one of: {allowed}.') from error
+        credential_environment_variable = os.getenv('MODEL_API_KEY_ENV', '').strip() or None
+        raw_object_storage = os.getenv(
+            'NORTHWIND_OBJECT_STORAGE_ADAPTER',
+            ObjectStorageAdapter.FIXTURE.value,
+        )
+        try:
+            object_storage_adapter = ObjectStorageAdapter(raw_object_storage.strip().lower())
+        except ValueError as error:
+            allowed = ', '.join(adapter.value for adapter in ObjectStorageAdapter)
+            raise ValueError(
+                f'NORTHWIND_OBJECT_STORAGE_ADAPTER must be exactly one of: {allowed}.'
+            ) from error
         return cls(
             environment=environment,
             cors_allow_origins=_csv_setting('NORTHWIND_CORS_ALLOW_ORIGINS', ('*',)),
@@ -88,4 +148,15 @@ class Settings:
                 'synthetic-integration',
             ),
             data_runtime_profile=data_runtime_profile,
+            agent_runtime_profile=agent_runtime_profile,
+            model_protocol_adapter=os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip(),
+            model_base_url=os.getenv('MODEL_BASE_URL', '').strip(),
+            model_identifier=os.getenv('MODEL_IDENTIFIER', '').strip(),
+            model_api_key_env=credential_environment_variable,
+            model_timeout_seconds=_float_setting('MODEL_TIMEOUT_SECONDS', 30.0),
+            model_supports_structured_output=_boolean_setting(
+                'MODEL_SUPPORTS_STRUCTURED_OUTPUT', True
+            ),
+            model_supports_tools=_boolean_setting('MODEL_SUPPORTS_TOOLS', False),
+            object_storage_adapter=object_storage_adapter,
         )

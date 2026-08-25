@@ -50,6 +50,9 @@ class FakeS3Client:
         self.head_bucket_error: Exception | None = None
         self.get_object_error: Exception | None = None
         self.presign_error: Exception | None = None
+        self.final_objects: dict[str, bytes] = {}
+        self.copy_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[dict[str, Any]] = []
 
     def head_bucket(self, **_: Any) -> None:
         if self.head_bucket_error is not None:
@@ -61,10 +64,28 @@ class FakeS3Client:
         self.presign_calls.append(kwargs)
         return 'http://localhost:9000/northwind-evidence/signed'
 
-    def get_object(self, **_: Any) -> dict[str, Any]:
+    def get_object(self, **kwargs: Any) -> dict[str, Any]:
         if self.get_object_error is not None:
             raise self.get_object_error
-        return {**self.get_object_response, 'Body': BytesIO(self.object_body)}
+        key = str(kwargs['Key'])
+        if '/finalised/' in key:
+            if key not in self.final_objects:
+                raise not_found_error()
+            body = self.final_objects[key]
+        else:
+            body = self.object_body
+        return {
+            **self.get_object_response,
+            'ContentLength': len(body),
+            'Body': BytesIO(body),
+        }
+
+    def copy_object(self, **kwargs: Any) -> None:
+        self.copy_calls.append(kwargs)
+        self.final_objects[str(kwargs['Key'])] = bytes(self.object_body)
+
+    def delete_object(self, **kwargs: Any) -> None:
+        self.delete_calls.append(kwargs)
 
 
 def test_environment_contract_requires_runtime_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +175,7 @@ def test_create_target_signs_provider_metadata_and_constraints() -> None:
     )
 
     assert target.method == 'PUT'
-    assert target.storage_key == 'claims/clm_001/evidence/evd_001'
+    assert target.storage_key == 'claims/clm_001/evidence/evd_001/staging'
     assert target.headers['Content-Type'] == 'image/jpeg'
     assert target.headers['x-amz-meta-claim-id'] == 'clm_001'
     assert client.presign_calls[0]['Params']['Metadata']['expected-size'] == '2048'
@@ -196,9 +217,29 @@ def test_complete_upload_requires_matching_object_metadata() -> None:
         size_bytes=2048,
     )
 
-    assert stored.storage_key == 'claims/clm_001/evidence/evd_001'
+    assert stored.storage_key.startswith('claims/clm_001/evidence/evd_001/finalised/')
     assert stored.checksum == checksum(client.object_body)
     assert stored.source_id == 's3_compatible_evidence_storage'
+    assert client.copy_calls[0]['CopySource']['Key'].endswith('/staging')
+    assert client.delete_calls[0]['Key'].endswith('/staging')
+
+
+def test_reusing_original_put_target_cannot_replace_finalised_evidence() -> None:
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
+    original = bytes(client.object_body)
+
+    stored = storage.complete_upload(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        checksum=checksum(original),
+        media_type='image/jpeg',
+        size_bytes=len(original),
+    )
+    client.object_body = b'y' * len(original)  # old PUT can only recreate staging
+
+    assert client.final_objects[stored.storage_key] == original
+    assert client.object_body != client.final_objects[stored.storage_key]
 
 
 def test_complete_upload_rejects_checksum_that_does_not_match_object_bytes() -> None:

@@ -4,7 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import MockAssessorServiceAdapter, MockClaimsServiceAdapter
-from backend.adapters.evidence_storage import MockEvidenceStorage
+from backend.adapters.evidence_storage import (
+    MinioEvidenceStorage,
+    MockEvidenceStorage,
+    S3CompatibleObjectStorageConfig,
+)
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, RouteAssessorRequest
@@ -173,6 +177,33 @@ def test_reset_refuses_unknown_persistence_without_touching_mock_results() -> No
     assert response.json()['error']['code'] == 'DEMO_RESET_UNAVAILABLE'
     assert 'No state was cleared' in response.json()['error']['message']
     assert claims_adapter.create_claim(command, 'out-of-scope-fingerprint').replayed is True
+
+
+def test_reset_fails_closed_for_minio_without_clearing_repository() -> None:
+    repository = FixtureRepository()
+    storage = MinioEvidenceStorage(
+        S3CompatibleObjectStorageConfig(
+            endpoint_url='http://localhost:9000',
+            access_key_id='synthetic-access',
+            secret_access_key='synthetic-secret',
+            bucket='northwind-evidence',
+        ),
+        client=object(),
+    )
+    app = create_app(Settings(), repository=repository, evidence_storage=storage)
+
+    with TestClient(app) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**CLAIMANT_AUTH, 'Idempotency-Key': 'minio-reset-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        response = client.post('/api/v1/workbench/demo/reset', headers=STAFF_AUTH)
+
+    assert created.status_code == 201
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'DEMO_RESET_UNAVAILABLE'
+    assert len(repository.list_claims_internal()) == 1
 
 
 def test_reset_command_reports_success_and_actionable_failure(
