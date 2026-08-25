@@ -102,9 +102,16 @@ or sprint plan.
   pushing or requesting review.
 - Record the exact command and result in the pull-request description. Never copy a result from a
   different branch, worktree, commit, or environment and present it as current evidence.
-- Install the versioned pre-push hook with `./scripts/install-git-hooks.ps1`. The hook is an early
-  local guard, not proof that a check ran: Git permits hooks to be bypassed, so required GitHub CI
-  remains the merge boundary.
+- Install the versioned pre-push hook with `./scripts/install-git-hooks.ps1`. The hook routes
+  through `./scripts/pre-push-quality-gate.ps1`. `NORTHWIND_REMOTE_CI_PROVIDER` selects the
+  active quality profile: `none` requires the local gate, while `github` and `circleci` allow the
+  configured remote gate to provide the merge evidence. With the default `auto` hook mode and
+  provider `none`, an enabled GitHub Actions installation is detected automatically. Set
+  `NORTHWIND_QUALITY_GATE_MODE=local` to force the local gate when needed.
+- `NORTHWIND_QUALITY_GATE_MODE=off` is an explicit maintenance escape hatch and must not be used
+  as ordinary development configuration. A pre-push hook is an early local guard, not proof that
+  a check ran: Git permits hooks to be bypassed. The active quality profile determines whether
+  the pull request records local gate evidence or names the remote provider as its source.
 - When the full gate cannot run, keep the pull request Draft, document the blocker, and do not
   request approval. A narrow test may support diagnosis but does not replace the complete gate.
 - A successful build or API-level assertion does not prove a claimant or staff journey. Match the
@@ -182,12 +189,16 @@ authorise an agent to make the same state change manually.
 
 ## CI, Branch Protection, and Automation
 
-- `Backend quality`, `Customer quality`, and `PR policy` are required merge checks for `main`.
-  Required checks apply to the final pull-request head and must not be bypassed because a local
-  check passed.
-- `PR policy` validates repository issue linkage and the evidence sections required for a
-  non-Draft pull request. It cannot prove that a person or agent read this document or actually ran
-  a local command; independent review remains necessary.
+- The active quality profile selects the merge checks for `main`: the `github` profile uses the
+  GitHub Actions `Backend quality`, `Customer quality`, and `PR policy` checks; the `circleci`
+  profile uses their CircleCI equivalents; and the `none` profile uses `PR policy` to validate the
+  required local gate evidence. Required checks apply to the final pull-request head and must not
+  be bypassed because a local check passed.
+- `PR policy` validates repository issue linkage and the evidence sections required for a non-Draft
+  pull request. It requires `./scripts/check.ps1` and `Result: PASS` in `Local validation` for the
+  `none` profile, and accepts the configured remote provider as the quality source for `github` or
+  `circleci`. It cannot prove that a person or agent actually ran a local command; independent
+  review remains necessary.
 - `Kanban Sync` manages reviewed Project status rules. It is separate from code-quality CI and must
   not merge pull requests, change Draft state, or substitute Project status for acceptance evidence.
 - CI/CD must not deploy automatically until deployment targets, credentials, environments,

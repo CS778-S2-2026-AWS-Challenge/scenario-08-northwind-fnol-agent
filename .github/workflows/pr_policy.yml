@@ -42,4 +42,9 @@ jobs:
         with:
           script: |
             const policy = require('./.github/scripts/pr_policy.cjs');
-            await policy.run({ github, context, core });
+            await policy.run({
+              github,
+              context,
+              core,
+              requireLocalQualityEvidence: false,
+            });
