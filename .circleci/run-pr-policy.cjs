@@ -130,6 +130,7 @@ async function run({ env = process.env, fetchImpl = fetch, policyImpl = policy }
     github,
     context: { payload: { pull_request: pullRequest }, repo: { owner, repo } },
     core,
+    requireLocalQualityEvidence: false,
   });
 }
 
