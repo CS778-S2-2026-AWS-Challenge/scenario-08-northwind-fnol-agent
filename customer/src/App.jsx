@@ -94,8 +94,11 @@ function App() {
   const [handoff, setHandoff] = useState(null)
   const [savedReports, setSavedReports] = useState(null)
   const [resumeContext, setResumeContext] = useState(null)
-  const [serviceConsentChecked, setServiceConsentChecked] = useState(false)
-  const [serviceError, setServiceError] = useState(null)
+  const [externalServiceInteraction, setExternalServiceInteraction] = useState({
+    claimId: null,
+    consentChecked: false,
+    error: null,
+  })
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
@@ -126,6 +129,27 @@ function App() {
   )
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
+  const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
+    && externalServiceInteraction.consentChecked
+  const serviceError = externalServiceInteraction.claimId === claim?.claim_id
+    ? externalServiceInteraction.error
+    : null
+
+  function setServiceConsentChecked(consentChecked) {
+    setExternalServiceInteraction((current) => ({
+      claimId: claim?.claim_id || null,
+      consentChecked,
+      error: current.claimId === claim?.claim_id ? current.error : null,
+    }))
+  }
+
+  function setServiceError(serviceErrorValue) {
+    setExternalServiceInteraction((current) => ({
+      claimId: claim?.claim_id || null,
+      consentChecked: current.claimId === claim?.claim_id ? current.consentChecked : false,
+      error: serviceErrorValue,
+    }))
+  }
 
   useEffect(() => {
     if (claim?.revision) {
@@ -368,8 +392,9 @@ function App() {
     if (action.status === 'consent_required' && !serviceConsentChecked) return
 
     setServiceError(null)
-    if (!pendingExternalService.current) {
+    if (pendingExternalService.current?.claimId !== claim.claim_id) {
       pendingExternalService.current = {
+        claimId: claim.claim_id,
         consentKey: requestId('assessor-consent'),
         routeKey: requestId('assessor-routing'),
       }
@@ -408,8 +433,27 @@ function App() {
       }))
       setNextStep(routed.customer_next_step)
       pendingExternalService.current = null
+      setServiceConsentChecked(false)
       setStatus('idle')
     } catch (requestError) {
+      try {
+        const current = await getClaim(claim.claim_id)
+        const currentAction = current.external_service_action
+        latestRevision.current = current.revision
+        setClaim(current)
+        setForm(current.form)
+        setNextStep(current.customer_next_step)
+        setHandoff(current.handoff || null)
+        if (['assigned', 'queued'].includes(currentAction?.status)) {
+          pendingExternalService.current = null
+          setServiceConsentChecked(false)
+          setServiceError(null)
+          setStatus('idle')
+          return
+        }
+      } catch {
+        // Keep the original request error when authoritative state cannot be restored.
+      }
       setServiceError({
         message: requestError.message || 'We could not send the assessment request.',
         retryable: Boolean(requestError.retryable),

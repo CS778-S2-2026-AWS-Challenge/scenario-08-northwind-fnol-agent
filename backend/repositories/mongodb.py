@@ -247,6 +247,29 @@ class MongoDBRepository:
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
 
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=[],
+            )
+        )
+
     def get_session(
         self,
         claim_id: str,

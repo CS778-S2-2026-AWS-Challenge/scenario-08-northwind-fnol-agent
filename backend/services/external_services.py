@@ -1,5 +1,5 @@
 from hashlib import sha256
-from typing import Any
+from typing import Any, NoReturn
 
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
@@ -278,8 +278,22 @@ def grant_assessor_consent(
             'updated_at': now_utc(),
         }
     )
+    response = _response(repository, updated)
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=updated.claim_id,
+        session_id=updated.active_session_id or '',
+        response_payload=response.model_dump(mode='json'),
+    )
     try:
-        repository.save_claim(updated, expected_revision=claim.revision)
+        repository.save_claim_mutation(
+            updated,
+            expected_revision=claim.revision,
+            idempotency=idempotency,
+        )
     except RevisionConflict as conflict:
         raise ApiError(
             status_code=409,
@@ -288,17 +302,8 @@ def grant_assessor_consent(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
-
-    response = _response(repository, updated)
-    _save_idempotency(
-        repository,
-        actor_id=principal.subject,
-        route=route,
-        key=key,
-        fingerprint=fingerprint,
-        claim=updated,
-        response=response,
-    )
+    except IdempotencyConflict as conflict:
+        raise _idempotency_conflict() from conflict
     return response, False
 
 
@@ -315,6 +320,33 @@ def _confirmed_region(claim: WorkingClaim) -> str:
             if isinstance(candidate, str) and candidate.strip():
                 return candidate.strip()[:100]
     raise _invalid_state('The confirmed incident location does not include a routable region.')
+
+
+def _assessor_route_request(
+    claim: WorkingClaim,
+    consent: ExternalServiceConsent,
+    decision_id: str,
+) -> RouteAssessorRequest:
+    if claim.external_claim is None or claim.external_claim.external_claim_id is None:
+        raise _invalid_state('Create the external claim before requesting an assessor.')
+    return RouteAssessorRequest(
+        claim_id=claim.claim_id,
+        external_claim_id=claim.external_claim.external_claim_id,
+        authorisation_ref=decision_id,
+        claimant_consent_ref=consent.consent_ref,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        location={'region': _confirmed_region(claim)},
+    )
+
+
+def _raise_revision_conflict(claim: WorkingClaim) -> NoReturn:
+    raise ApiError(
+        status_code=409,
+        code='REVISION_CONFLICT',
+        message='The claim changed after this page was loaded.',
+        retryable=True,
+        current_revision=claim.revision,
+    )
 
 
 def request_assessor_routing(
@@ -345,14 +377,40 @@ def request_assessor_routing(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _not_found()
+    decision_seed = f'{claim_id}:{principal.subject}:{key}'.encode()
+    decision_id = f'dec_{sha256(decision_seed).hexdigest()[:20]}'
     if claim.revision != expected_revision:
-        raise ApiError(
-            status_code=409,
-            code='REVISION_CONFLICT',
-            message='The claim changed after this page was loaded.',
-            retryable=True,
-            current_revision=claim.revision,
+        consent = _active_assessor_consent(claim)
+        decision = repository.get_agent_decision(claim_id, decision_id, principal.subject)
+        if claim.assessor_routing is None or consent is None or decision is None:
+            _raise_revision_conflict(claim)
+        if decision.resulting_revision != expected_revision:
+            _raise_revision_conflict(claim)
+        route_assessor(
+            repository,
+            adapter,
+            _assessor_route_request(claim, consent, decision_id),
         )
+        restored = repository.get_claim(claim_id, principal.subject)
+        if restored is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The assessment result could not be restored.',
+                retryable=True,
+            )
+        response = _response(repository, restored)
+        _save_idempotency(
+            repository,
+            actor_id=principal.subject,
+            route=route,
+            key=key,
+            fingerprint=fingerprint,
+            claim=restored,
+            response=response,
+            decision_id=decision_id,
+        )
+        return response, True
     action = claimant_assessor_action(repository, claim)
     consent = _active_assessor_consent(claim)
     if (
@@ -361,8 +419,6 @@ def request_assessor_routing(
         or consent is None
     ):
         raise _invalid_state('Record claimant permission before requesting an assessor.')
-    if claim.external_claim is None or claim.external_claim.external_claim_id is None:
-        raise _invalid_state('Create the external claim before requesting an assessor.')
     if claim.active_session_id is None:
         raise _invalid_state('An active claim session is required for assessor routing.')
     claimant_messages = [
@@ -377,8 +433,6 @@ def request_assessor_routing(
     if not claimant_messages:
         raise _invalid_state('A claimant message is required before assessor routing.')
 
-    decision_seed = f'{claim_id}:{principal.subject}:{key}'.encode()
-    decision_id = f'dec_{sha256(decision_seed).hexdigest()[:20]}'
     timestamp = now_utc()
     decision = AgentDecisionRecord(
         decision_id=decision_id,
@@ -406,19 +460,11 @@ def request_assessor_routing(
         resulting_revision=claim.revision,
         created_at=timestamp,
     )
-    repository.save_agent_decision(decision, principal.subject)
-
     route_assessor(
         repository,
         adapter,
-        RouteAssessorRequest(
-            claim_id=claim_id,
-            external_claim_id=claim.external_claim.external_claim_id,
-            authorisation_ref=decision.decision_id,
-            claimant_consent_ref=consent.consent_ref,
-            requested_action=ASSESSOR_REQUESTED_ACTION,
-            location={'region': _confirmed_region(claim)},
-        ),
+        _assessor_route_request(claim, consent, decision.decision_id),
+        authorisation_decision=decision,
     )
     updated = repository.get_claim(claim_id, principal.subject)
     if updated is None:

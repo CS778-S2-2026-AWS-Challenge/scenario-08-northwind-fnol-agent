@@ -13,6 +13,7 @@ from backend.domain.external_services import (
 from backend.domain.models import (
     ActorType,
     AgentAction,
+    AgentDecisionRecord,
     AssessorRoutingFailureCode,
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
@@ -247,6 +248,8 @@ def route_assessor(
     repository: PersistenceRepository,
     adapter: AssessorServiceAdapter,
     payload: RouteAssessorRequest,
+    *,
+    authorisation_decision: AgentDecisionRecord | None = None,
 ) -> tuple[AssessorRoutingResult, bool]:
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
     operation_id = _assessor_operation_id(payload)
@@ -307,12 +310,13 @@ def route_assessor(
         )
 
     if operation is None:
-        decision = repository.get_agent_decision_internal(
-            payload.claim_id,
-            payload.authorisation_ref,
+        decision = authorisation_decision or repository.get_agent_decision_internal(
+            payload.claim_id, payload.authorisation_ref
         )
         if (
             decision is None
+            or decision.decision_id != payload.authorisation_ref
+            or decision.claim_id != payload.claim_id
             or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
             or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
             or decision.resulting_revision != claim.revision
@@ -335,7 +339,14 @@ def route_assessor(
             updated_at=timestamp,
         )
         try:
-            repository.save_assessor_routing_operation(operation)
+            if authorisation_decision is None:
+                repository.save_assessor_routing_operation(operation)
+            else:
+                repository.save_assessor_routing_preparation(
+                    operation,
+                    authorisation_decision,
+                    claim.customer_id,
+                )
         except IdempotencyConflict as conflict:
             raise _idempotency_error() from conflict
 

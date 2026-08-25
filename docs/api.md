@@ -940,6 +940,8 @@ routing authority remain separate requirements.
 Response `201`, or `200` for an identical replay, returns the new revision,
 `customer_next_step`, and the claimant-safe `external_service_action` with status
 `ready_to_request`. Raw consent references and the internal consent list are not returned.
+The consent, single Claim revision advance, and idempotency response are one repository
+mutation: a failed transaction leaves all three unchanged.
 
 This endpoint is available only when the external service action is a relevant next step. A
 draft, non-motor, pending or failed claim-creation result, open handoff, professional review, or
@@ -962,6 +964,12 @@ Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryabl
 four leave the consented Working Claim revision unchanged, do not report assignment, and retain
 the same operation identity for an unchanged permitted retry. Automatic retry counts remain
 unapproved; the claimant client offers only an explicit retry for retryable failures.
+
+The authorised decision and prepared operation identity are persisted together before the
+provider call. A timeout retry reuses that durable authority record rather than replacing it
+with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
+idempotency response fails, the same request restores the authoritative assigned or queued state;
+the claimant client also reloads that state before presenting a failure message.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 

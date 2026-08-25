@@ -91,8 +91,11 @@ npm test --prefix customer -- src/App.test.jsx
 The backend checks prove that the action is absent before the controlled created-motor state,
 consent is bounded and idempotent, claimant projections exclude raw consent references, current
 Northwind authority is created, provider failure preserves the consented revision, and an
-unchanged retry succeeds once. The claimant tests exercise the consent-required, permission and
-submission progress, assigned success, retryable failure, and explicit retry states.
+unchanged retry succeeds once without rewriting its authority record. Failure injection also
+checks that consent cannot survive without its idempotency result and that a durable provider
+success is restored when the public response write fails. The claimant tests exercise the
+consent-required, permission and submission progress, assigned success, retryable failure,
+explicit retry, authoritative-result recovery, and claim-scoped interaction states.
 
 For a visible check, start the backend and claimant client, complete a synthetic motor report
 with a confirmed incident location, and create the claim. Verify that the assessor card appears

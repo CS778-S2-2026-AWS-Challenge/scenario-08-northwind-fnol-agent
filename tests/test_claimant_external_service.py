@@ -1,6 +1,7 @@
 from datetime import timedelta
 from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import AssessorFixtureFailure, MockAssessorServiceAdapter
@@ -8,6 +9,7 @@ from backend.app import create_app
 from backend.domain.models import (
     ActorReference,
     ActorType,
+    AssessorRoutingOperationStatus,
     ClaimCreationStatus,
     CustomerNextStep,
     ExternalClaimResult,
@@ -20,6 +22,7 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
 from backend.services.support import now_utc
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -177,10 +180,32 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         },
         json={'consent': True},
     )
+    changed_replay = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing/consent',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'consent-contract',
+            'If-Match': str(revision + 1),
+        },
+        json={'consent': True},
+    )
+    additional_key = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing/consent',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'consent-contract-additional-key',
+            'If-Match': str(revision + 1),
+        },
+        json={'consent': True},
+    )
 
     assert first.status_code == 201
     assert replay.status_code == 200
     assert replay.json() == first.json()
+    assert changed_replay.status_code == 409
+    assert changed_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert additional_key.status_code == 200
+    assert additional_key.json()['revision'] == revision + 1
     assert first.json()['revision'] == revision + 1
     assert first.json()['action']['status'] == 'ready_to_request'
     assert first.json()['action']['consent_status'] == 'granted'
@@ -204,11 +229,103 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
     assert 'consent_ref' not in str(claimant)
 
 
+def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> None:
+    class FailingConsentRepository(FixtureRepository):
+        def save_claim_mutation(
+            self,
+            claim: Any,
+            expected_revision: int,
+            idempotency: IdempotencyRecord,
+        ) -> None:
+            raise RuntimeError('injected consent transaction failure')
+
+    repository = FailingConsentRepository()
+    with TestClient(create_app(repository=repository), raise_server_exceptions=False) as client:
+        claim_id, revision = _start_created_motor_claim(
+            client,
+            repository,
+            key='consent-atomic-failure',
+        )
+        before = repository.get_claim_internal(claim_id)
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing/consent',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'consent-atomic-failure',
+                'If-Match': str(revision),
+            },
+            json={'consent': True},
+        )
+
+    assert response.status_code == 500
+    assert repository.get_claim_internal(claim_id) == before
+    assert (
+        repository.find_idempotency(
+            'cus_demo',
+            f'/api/v1/claims/{claim_id}/assessor-routing/consent',
+            'consent-atomic-failure',
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ('failure', 'expected_code'),
+    [
+        (RevisionConflict(9), 'REVISION_CONFLICT'),
+        (IdempotencyConflict('consent-conflict'), 'IDEMPOTENCY_CONFLICT'),
+    ],
+)
+def test_claimant_consent_maps_atomic_repository_conflicts(
+    failure: Exception,
+    expected_code: str,
+) -> None:
+    class ConflictingConsentRepository(FixtureRepository):
+        def save_claim_mutation(
+            self,
+            claim: Any,
+            expected_revision: int,
+            idempotency: IdempotencyRecord,
+        ) -> None:
+            raise failure
+
+    repository = ConflictingConsentRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        claim_id, revision = _start_created_motor_claim(
+            client,
+            repository,
+            key=f'consent-{expected_code.lower()}',
+        )
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing/consent',
+            headers={
+                **AUTH,
+                'Idempotency-Key': f'consent-{expected_code.lower()}',
+                'If-Match': str(revision),
+            },
+            json={'consent': True},
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == expected_code
+
+
 def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     client: TestClient,
     repository: FixtureRepository,
 ) -> None:
     claim_id, revision = _start_created_motor_claim(client, repository, key='route-success')
+    stored_before_consent = repository.get_claim_internal(claim_id)
+    assert stored_before_consent is not None
+    location = stored_before_consent.form['incident.location'].model_copy(
+        update={'value': {'city': 'Auckland'}}
+    )
+    repository.save_claim(
+        stored_before_consent.model_copy(
+            update={'form': {**stored_before_consent.form, 'incident.location': location}}
+        ),
+        expected_revision=revision,
+    )
     consent = _grant_consent(client, claim_id, revision, key='route-success')
 
     first = client.post(
@@ -227,10 +344,20 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
             'If-Match': str(consent['revision']),
         },
     )
+    changed_replay = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'route-success',
+            'If-Match': str(consent['revision'] + 1),
+        },
+    )
 
     assert first.status_code == 201
     assert replay.status_code == 200
     assert replay.json() == first.json()
+    assert changed_replay.status_code == 409
+    assert changed_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
     body = first.json()
     assert body['revision'] == consent['revision'] + 1
     assert body['action']['status'] == 'assigned'
@@ -268,16 +395,85 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         },
         json={'consent': True},
     )
+    stale_route = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'stale-route',
+            'If-Match': str(revision - 1),
+        },
+    )
+    missing_claim = client.post(
+        '/api/v1/claims/clm_missing/assessor-routing/consent',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'missing-consent',
+            'If-Match': '1',
+        },
+        json={'consent': True},
+    )
+    missing_route = client.post(
+        '/api/v1/claims/clm_missing/assessor-routing',
+        headers={
+            **AUTH,
+            'Idempotency-Key': 'missing-route',
+            'If-Match': '1',
+        },
+    )
 
     assert without_consent.status_code == 409
     assert without_consent.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
     assert stale_consent.status_code == 409
     assert stale_consent.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert stale_route.status_code == 409
+    assert stale_route.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert missing_claim.status_code == 404
+    assert missing_route.status_code == 404
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     assert stored.revision == revision
     assert stored.external_service_consents == []
     assert stored.assessor_routing is None
+
+
+def test_claimant_route_maps_atomic_preparation_conflict() -> None:
+    class ConflictingPreparationRepository(FixtureRepository):
+        def save_assessor_routing_preparation(
+            self,
+            operation: Any,
+            decision: Any,
+            customer_id: str,
+        ) -> None:
+            raise IdempotencyConflict('routing-preparation-conflict')
+
+    repository = ConflictingPreparationRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        claim_id, revision = _start_created_motor_claim(
+            client,
+            repository,
+            key='route-preparation-conflict',
+        )
+        consent = _grant_consent(
+            client,
+            claim_id,
+            revision,
+            key='route-preparation-conflict',
+        )
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'route-preparation-conflict',
+                'If-Match': str(consent['revision']),
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert not any(
+        decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
+        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+    )
 
 
 def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request() -> None:
@@ -299,10 +495,46 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
             headers=route_headers,
         )
         after_failure = repository.get_claim_internal(claim_id)
+        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_demo')
+        routing_decision = next(
+            decision
+            for decision in decisions_after_failure
+            if decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
+        )
+        routing_operation = next(iter(repository._assessor_routing_operations.values()))
+        prepared_operation = routing_operation.model_copy(
+            update={
+                'status': AssessorRoutingOperationStatus.PREPARED,
+                'failure_code': None,
+                'updated_at': routing_operation.created_at,
+            }
+        )
+        with pytest.raises(KeyError):
+            repository.save_assessor_routing_preparation(
+                prepared_operation,
+                routing_decision,
+                'another-customer',
+            )
+        repository._assessor_routing_operations[prepared_operation.operation_id] = (
+            prepared_operation
+        )
+        repository.save_assessor_routing_preparation(
+            prepared_operation,
+            routing_decision,
+            'cus_demo',
+        )
+        with pytest.raises(IdempotencyConflict):
+            repository.save_assessor_routing_preparation(
+                prepared_operation,
+                routing_decision.model_copy(update={'customer_response': 'Changed response.'}),
+                'cus_demo',
+            )
+        repository._assessor_routing_operations[routing_operation.operation_id] = routing_operation
         retried = client.post(
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers=route_headers,
         )
+        decisions_after_retry = repository.list_agent_decisions(claim_id, 'cus_demo')
 
     assert timed_out.status_code == 503
     assert timed_out.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
@@ -313,3 +545,60 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
     assert after_failure.customer_next_step.status == 'assessor_request_ready'
     assert retried.status_code == 201
     assert retried.json()['action']['status'] == 'assigned'
+    routing_decisions = [
+        decision
+        for decision in decisions_after_failure
+        if decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
+    ]
+    assert len(routing_decisions) == 1
+    assert decisions_after_retry == decisions_after_failure
+
+
+def test_claimant_retry_restores_authoritative_success_when_response_save_fails() -> None:
+    class FailingResponseRepository(FixtureRepository):
+        fail_route_response = True
+
+        def save_idempotency(self, record: IdempotencyRecord) -> None:
+            if self.fail_route_response and record.route.endswith('/assessor-routing'):
+                self.fail_route_response = False
+                raise RuntimeError('injected response save failure')
+            super().save_idempotency(record)
+
+    repository = FailingResponseRepository()
+    with TestClient(create_app(repository=repository), raise_server_exceptions=False) as client:
+        claim_id, revision = _start_created_motor_claim(
+            client,
+            repository,
+            key='route-response-recovery',
+        )
+        consent = _grant_consent(
+            client,
+            claim_id,
+            revision,
+            key='route-response-recovery',
+        )
+        headers = {
+            **AUTH,
+            'Idempotency-Key': 'route-response-recovery',
+            'If-Match': str(consent['revision']),
+        }
+
+        failed_response = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers=headers,
+        )
+        after_failure = repository.get_claim_internal(claim_id)
+        decisions_after_failure = repository.list_agent_decisions(claim_id, 'cus_demo')
+        restored = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers=headers,
+        )
+
+    assert failed_response.status_code == 500
+    assert after_failure is not None
+    assert after_failure.revision == consent['revision'] + 1
+    assert after_failure.assessor_routing is not None
+    assert restored.status_code == 200
+    assert restored.json()['revision'] == after_failure.revision
+    assert restored.json()['action']['status'] == 'assigned'
+    assert repository.list_agent_decisions(claim_id, 'cus_demo') == decisions_after_failure

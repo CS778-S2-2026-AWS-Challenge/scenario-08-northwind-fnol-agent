@@ -5,6 +5,7 @@ from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
+    AuthorityOutcome,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -99,6 +100,32 @@ class FixtureRepository(PersistenceRepository):
         if stored_claim.revision != expected_revision:
             raise RevisionConflict(stored_claim.revision)
         self._claims[claim.claim_id] = deepcopy(claim)
+
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        if (
+            stored_claim.customer_id != claim.customer_id
+            or claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        if lookup in self._idempotency:
+            raise IdempotencyConflict(idempotency.key)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_session(
         self,
@@ -356,6 +383,43 @@ class FixtureRepository(PersistenceRepository):
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
+        self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+
+    def save_assessor_routing_preparation(
+        self,
+        operation: AssessorRoutingOperation,
+        decision: AgentDecisionRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self._claims.get(operation.claim_id)
+        session = self._sessions.get(decision.session_id)
+        if (
+            claim is None
+            or claim.customer_id != customer_id
+            or claim.active_session_id != decision.session_id
+            or session is None
+            or session.claim_id != claim.claim_id
+            or session.customer_id != customer_id
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.status is not AssessorRoutingOperationStatus.PREPARED
+            or operation.authorised_revision != claim.revision
+            or decision.claim_id != claim.claim_id
+            or decision.decision_id != operation.authorisation_ref
+            or decision.resulting_revision != operation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        ):
+            raise KeyError(operation.claim_id)
+
+        existing_operation = self._assessor_routing_operations.get(operation.operation_id)
+        existing_decision = self._decisions.get(decision.decision_id)
+        if existing_operation is not None or existing_decision is not None:
+            if existing_operation == operation and existing_decision == decision:
+                return
+            raise IdempotencyConflict(operation.operation_id)
+
+        self._decisions[decision.decision_id] = deepcopy(decision)
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
     def get_agent_decision(
