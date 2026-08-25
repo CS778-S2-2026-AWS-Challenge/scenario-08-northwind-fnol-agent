@@ -87,17 +87,6 @@ Start the backend:
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-For the explicit MongoDB plus MinIO local MVP profile, supply the non-secret setting
-names documented in `.env.example`, start MinIO, and run:
-
-```powershell
-py -3.12 scripts/verify_local_mvp_journey.py
-```
-
-The verifier uses one fixed idempotency key, restarts the application boundary, and
-checks that the claimant and staff workbench read the same persisted claim. Repeated
-runs reuse that synthetic verification claim instead of adding another example.
-
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in

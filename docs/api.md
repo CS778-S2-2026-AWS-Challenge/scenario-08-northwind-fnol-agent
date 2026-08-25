@@ -1865,16 +1865,13 @@ The persistence layer MUST support at least:
 Fixture and configured adapters MUST implement the same provider-neutral domain ports.
 Exactly one complete data runtime profile is selected when a process starts. Cloudflare,
 MongoDB, AWS, and fixture profiles are alternatives; the API MUST NOT silently combine
-their persistence or retrieval stores. The explicit `local_mvp` development profile is
-the only composite: it reports MongoDB persistence, configured MinIO evidence storage,
-and fixture policy/history and knowledge sources separately. Detailed data classes,
-profile composition, and RAG boundaries are defined in `docs/data-architecture.md`.
+their persistence or retrieval stores. Detailed data classes, profile composition, and
+RAG boundaries are defined in `docs/data-architecture.md`.
 
-The current composition root implements the complete fixture and explicit local-MVP
-bundles. The local-MVP bundle fails startup unless MongoDB and MinIO connectivity pass.
-Selecting an unimplemented Cloudflare, MongoDB, or AWS profile fails process startup
-explicitly; it does not create a partial provider bundle or fall back to fixture
-capabilities. The selected deployment profile itself is not returned by the public API.
+The current composition root implements the complete fixture bundle. Selecting an
+unimplemented Cloudflare, MongoDB, or AWS profile fails process startup explicitly; it
+does not create a partial provider bundle or fall back to fixture capabilities. The
+selected deployment profile itself is not returned by the public API.
 
 The model gateway and future Admin API also remain provider-neutral. Their HTTP routes
 and payloads are added to this contract only with the corresponding implementation,

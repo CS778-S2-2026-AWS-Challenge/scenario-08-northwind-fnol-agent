@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.adapters.evidence_storage import EvidenceStorageUnavailable, MockEvidenceStorage
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
@@ -81,61 +81,6 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
     }
 
 
-def test_local_mvp_profile_builds_explicit_mongodb_minio_fixture_bundle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class ConnectedMongoDBRepository(FixtureRepository):
-        closed = False
-
-        @staticmethod
-        def connection_status() -> str:
-            return 'verified'
-
-        def close(self) -> None:
-            self.closed = True
-
-    class ConnectedMinioStorage(MockEvidenceStorage):
-        @staticmethod
-        def connection_status() -> str:
-            return 'configured_service'
-
-    repository = ConnectedMongoDBRepository()
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.MongoDBConnectionConfig.from_environment',
-        lambda: object(),
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.connect_mongodb_repository',
-        lambda config: repository,
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.S3CompatibleObjectStorageConfig.from_environment',
-        lambda: object(),
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.MinioEvidenceStorage',
-        lambda config: ConnectedMinioStorage(),
-    )
-
-    bundle = build_data_runtime_bundle(
-        Settings(
-            data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
-            object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
-        )
-    )
-
-    assert bundle.profile is DataRuntimeProfile.LOCAL_MVP
-    assert bundle.repository is repository
-    assert bundle.readiness_checks() == {
-        'persistence': 'verified',
-        'evidence_storage': 'configured_service',
-        'policy': 'using_fixture',
-        'claim_history': 'using_fixture',
-        'knowledge_documents': 'using_fixture',
-        'knowledge_retrieval': 'using_fixture',
-    }
-
-
 def test_app_lifespan_closes_an_injected_repository() -> None:
     class ClosableFixtureRepository(FixtureRepository):
         closed = False
@@ -163,13 +108,12 @@ def test_bundle_reports_repository_connection_status() -> None:
     assert bundle.readiness_checks()['persistence'] == 'verified'
 
 
-def test_capability_table_is_complete_and_declared_profiles_are_start_capable() -> None:
+def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_profile() -> None:
     for profile in DataRuntimeProfile:
         statuses = runtime_capability_statuses(profile)
         assert tuple(statuses) == RUNTIME_CAPABILITIES
 
     assert set(missing_runtime_capabilities(DataRuntimeProfile.FIXTURE)) == set()
-    assert set(missing_runtime_capabilities(DataRuntimeProfile.LOCAL_MVP)) == set()
     assert set(missing_runtime_capabilities(DataRuntimeProfile.MONGODB)) == set(
         RUNTIME_CAPABILITIES
     )
@@ -297,51 +241,6 @@ def test_unimplemented_profile_fails_without_fixture_fallback(
         match='missing or unverified capabilities: persistence',
     ):
         build_data_runtime_bundle(Settings(data_runtime_profile=profile))
-
-
-def test_local_mvp_requires_s3_compatible_storage() -> None:
-    with pytest.raises(RuntimeProfileConfigurationError, match='requires.*s3_compatible'):
-        build_data_runtime_bundle(Settings(data_runtime_profile=DataRuntimeProfile.LOCAL_MVP))
-
-
-def test_local_mvp_closes_mongodb_when_minio_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class ConnectedMongoDBRepository(FixtureRepository):
-        closed = False
-
-        def close(self) -> None:
-            self.closed = True
-
-    repository = ConnectedMongoDBRepository()
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.MongoDBConnectionConfig.from_environment',
-        lambda: object(),
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.connect_mongodb_repository',
-        lambda config: repository,
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.S3CompatibleObjectStorageConfig.from_environment',
-        lambda: object(),
-    )
-    monkeypatch.setattr(
-        'backend.core.runtime_profiles.MinioEvidenceStorage',
-        lambda config: MockEvidenceStorage(
-            outage=EvidenceStorageUnavailable('TEST_UNAVAILABLE', 'Synthetic outage.')
-        ),
-    )
-
-    with pytest.raises(RuntimeProfileConfigurationError, match='MinIO is unavailable'):
-        build_data_runtime_bundle(
-            Settings(
-                data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
-                object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
-            )
-        )
-
-    assert repository.closed is True
 
 
 def test_app_rejects_bundle_and_partial_data_dependency_mix() -> None:

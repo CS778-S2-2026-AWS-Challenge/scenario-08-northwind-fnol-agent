@@ -26,12 +26,6 @@ raises a bounded error without returning the connection URI. The non-secret sett
 
 These connection primitives do not by themselves enable the MongoDB runtime profile.
 
-For the local MVP only, `DATA_RUNTIME_PROFILE=local_mvp` explicitly composes MongoDB
-structured persistence, configured S3-compatible MinIO evidence storage, and labelled
-fixture policy/history and knowledge capabilities. Both configured providers must pass
-startup connectivity checks. This is a transparent development composition, not the
-complete MongoDB provider profile and not a production deployment claim.
-
 Run the isolated provider check from the repository root after supplying the MongoDB
 environment variables:
 

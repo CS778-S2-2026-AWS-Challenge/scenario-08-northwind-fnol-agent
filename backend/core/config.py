@@ -5,7 +5,6 @@ from enum import Enum
 
 class DataRuntimeProfile(str, Enum):
     FIXTURE = 'fixture'
-    LOCAL_MVP = 'local_mvp'
     CLOUDFLARE = 'cloudflare'
     MONGODB = 'mongodb'
     AWS = 'aws'
