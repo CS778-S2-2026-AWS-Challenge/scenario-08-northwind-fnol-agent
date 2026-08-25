@@ -60,6 +60,45 @@ Adds repository guardrails.
   assert.deepEqual(result, { errors: [], references: [192] });
 });
 
+test('accepts a ready pull request without local evidence when a remote provider is active', () => {
+  const body = `## Linked issue
+
+Refs #192
+
+## Summary
+
+The remote quality profile supplies the merge gate.
+
+## Acceptance evidence
+
+- Remote checks are configured for this pull request.
+
+## Local validation
+
+- Remote provider: CircleCI
+
+## Contract and data impact
+
+- API contract: none.
+- Persistence schema: none.
+- Fixtures and tests: policy validator coverage added.
+- Claimant and staff projections: none.
+
+## Dependencies and risks
+
+- Dependencies: none.
+- Remaining risks: remote provider availability is part of the active profile.
+`;
+  const result = validatePullRequestBody({
+    body,
+    isDraft: false,
+    owner,
+    repo,
+    requireLocalQualityEvidence: false,
+  });
+  assert.deepEqual(result, { errors: [], references: [192] });
+});
+
 test('rejects a ready pull request with empty template sections', () => {
   const body = `## Linked issue
 
