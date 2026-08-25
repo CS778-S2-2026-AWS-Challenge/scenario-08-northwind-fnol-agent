@@ -54,6 +54,8 @@ agents must not merge pull requests or change Draft status without explicit curr
 | `employee/` | Static employee workbench backed by the shared Workbench API |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
+| `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
+| `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
 | `docs/` | API contract, engineering conventions, and research material |
 | `sprint/` | Time-bound sprint commitments and delivery flow |
@@ -123,7 +125,7 @@ Run the complete repository quality gate before pushing and before requesting re
 
 After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run.
 The command checks backend formatting, linting, types, tests and coverage, the pull-request policy
-validator, and then checks and builds the claimant client.
+validator, the external GitHub automation Worker, and then checks and builds the claimant client.
 
 Run the synthetic integration fixtures from the repository root with:
 
