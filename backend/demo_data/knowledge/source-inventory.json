@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "inventory_id": "rag-source-inventory-2026-08-24",
+  "prepared_at": "2026-08-24",
+  "publication_status": "candidate_not_published",
+  "governance": {
+    "public_sources_are_northwind_policy": false,
+    "unverified_northwind_facts": "unknown",
+    "publication_requires_control_plane_approval": true,
+    "checksum_created_during_ingestion": true
+  },
+  "sources": [
+    {
+      "document_id": "src_nz_privacy_act_2020",
+      "title": "Privacy Act 2020",
+      "document_type": "legislation",
+      "source_uri": "https://www.legislation.govt.nz/act/public/2020/31/en/latest/",
+      "controlled_reference": "New Zealand Public Act 2020 No 31, section 22",
+      "authority": "legislation",
+      "issuer": "New Zealand Parliament; official version published by the Parliamentary Counsel Office",
+      "version": "latest-as-at-2026-05-01",
+      "version_basis": "official_version_date",
+      "retrieved_at": "2026-08-24",
+      "jurisdiction": "NZ",
+      "insurer": null,
+      "product": null,
+      "scope_notes": "New Zealand privacy obligations across sectors; not limited to insurance or a Northwind product.",
+      "effective_from": "2020-12-01",
+      "effective_to": null,
+      "visibility": "public",
+      "usage_boundary": "May support privacy-purpose, notification, security, use, and disclosure explanations. It cannot answer coverage, liability, fraud, approval, or Northwind procedure questions.",
+      "northwind_applicability": "unverified",
+      "known_limitations": [
+        "This inventory is not legal advice and does not select an exception to an information privacy principle.",
+        "The source is legislation, not Northwind policy or proof of a Northwind operational process.",
+        "The latest official version must be rechecked at ingestion and before publication."
+      ],
+      "sections": [
+        {
+          "section_path": "Section 22 / Information privacy principles 1, 3, 5, 10 and 11",
+          "printed_pages": null,
+          "pdf_page_indices": null,
+          "intended_use": "Bound collection, notice, security, use, and disclosure when designing claimant-authorised external-service data sharing."
+        }
+      ],
+      "ingestion_status": "candidate_metadata_complete",
+      "checksum": null
+    },
+    {
+      "document_id": "src_icnz_fair_insurance_code_2020",
+      "title": "Fair Insurance Code 2020",
+      "document_type": "industry_code",
+      "source_uri": "https://www.icnz.org.nz/wp-content/uploads/2023/01/Fair_Insurance_Code_2020.pdf",
+      "controlled_reference": "Insurance Council of New Zealand, Fair Insurance Code 2020",
+      "authority": "industry_code",
+      "issuer": "Insurance Council of New Zealand",
+      "version": "2020",
+      "version_basis": "publisher_document_version",
+      "retrieved_at": "2026-08-24",
+      "jurisdiction": "NZ",
+      "insurer": null,
+      "product": null,
+      "scope_notes": "ICNZ members; general insurance other than health and life; individuals and entities with 19 or fewer employees.",
+      "effective_from": "2020-04-01",
+      "effective_to": null,
+      "visibility": "public",
+      "usage_boundary": "May support general conduct, communication, claim-handling, confidentiality, and third-party coordination guidance. It cannot establish Northwind membership, policy wording, coverage, or a claim decision.",
+      "northwind_applicability": "unverified",
+      "known_limitations": [
+        "Northwind membership of ICNZ has not been verified, so the code is not labelled as Northwind policy.",
+        "The code is an industry code rather than legislation or customer-specific policy wording.",
+        "Applicability to a product and effective period must be checked before a passage is retrieved."
+      ],
+      "sections": [
+        {
+          "section_path": "Our general responsibilities to you / clauses 1-14",
+          "printed_pages": [3, 4],
+          "pdf_page_indices": [4, 5],
+          "intended_use": "Support plain communication and privacy-aware handling without turning the code into claim authority."
+        },
+        {
+          "section_path": "What happens when you make a claim / clauses 16-20",
+          "printed_pages": [10],
+          "pdf_page_indices": [11],
+          "intended_use": "Support claimant-facing process explanations and permission-aware coordination with assessors or repairers."
+        }
+      ],
+      "ingestion_status": "candidate_metadata_complete",
+      "checksum": null
+    },
+    {
+      "document_id": "src_nz_consumer_protection_insurance",
+      "title": "Insurance",
+      "document_type": "government_guidance",
+      "source_uri": "https://www.consumerprotection.govt.nz/help-product-service/managing-money/insurance",
+      "controlled_reference": "New Zealand Consumer Protection, Insurance guidance page",
+      "authority": "government_guidance",
+      "issuer": "New Zealand Consumer Protection",
+      "version": "retrieved-2026-08-24",
+      "version_basis": "retrieval_date",
+      "retrieved_at": "2026-08-24",
+      "jurisdiction": "NZ",
+      "insurer": null,
+      "product": null,
+      "scope_notes": "Public New Zealand consumer guidance across insurance types, including motor vehicle insurance.",
+      "effective_from": null,
+      "effective_to": null,
+      "visibility": "public",
+      "usage_boundary": "May support general consumer process explanations and signposting. It cannot determine a customer's policy terms, Northwind process, coverage, excess, acceptance, or refusal.",
+      "northwind_applicability": "unverified",
+      "known_limitations": [
+        "The web page has no stable document edition, so retrieval date is used as the controlled version.",
+        "The page is general guidance and is not Northwind policy or customer-specific advice.",
+        "Statements that depend on policy wording or current law require the authoritative underlying source."
+      ],
+      "sections": [
+        {
+          "section_path": "What you need to tell insurers - disclosure",
+          "printed_pages": null,
+          "pdf_page_indices": null,
+          "intended_use": "Support a general explanation that claim information should be relevant, complete, and kept distinct from a coverage conclusion."
+        },
+        {
+          "section_path": "Your rights / What insurers must do",
+          "printed_pages": null,
+          "pdf_page_indices": null,
+          "intended_use": "Support general signposting about insurer conduct and complaints without representing the guidance as policy wording."
+        }
+      ],
+      "ingestion_status": "candidate_metadata_complete",
+      "checksum": null
+    }
+  ]
+}

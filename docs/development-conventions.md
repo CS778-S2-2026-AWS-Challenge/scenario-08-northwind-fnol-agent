@@ -195,7 +195,13 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 ## Quality Gate
 
-Before merge, the relevant format, lint, type, unit, contract, build, and end-to-end checks must pass. `main` requires `Backend quality`, `Customer quality`, and `PR policy` for the final pull-request head. The pull request must also record the exact local checks run and their results. A successful build alone does not demonstrate product correctness.
+Before merge, the active quality profile must pass its relevant format, lint, type, unit, contract,
+build, and end-to-end checks. The `github` profile uses the GitHub Actions `Backend quality`,
+`Customer quality`, and `Northwind PR policy` checks; the `circleci` profile uses their CircleCI
+equivalents; the `none` profile uses `Northwind PR policy` with recorded local gate evidence. A ready pull request must
+identify its quality source in `Local validation`: record the exact `./scripts/check.ps1` command
+and `Result: PASS` for `none`, or name the active remote provider for `github` or `circleci`.
+A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 
