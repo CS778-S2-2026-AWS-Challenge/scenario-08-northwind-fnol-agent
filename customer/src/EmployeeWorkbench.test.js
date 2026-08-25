@@ -76,6 +76,29 @@ function queueDetail(item) {
   }
 }
 
+it('collapses and restores the employee sidebar', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const toggle = dom.window.document.querySelector('#sidebarToggle')
+
+  expect(page).not.toHaveClass('sidebar-collapsed')
+  toggle.click()
+  expect(page).toHaveClass('sidebar-collapsed')
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(toggle).toHaveAttribute('aria-label', 'Expand sidebar')
+
+  toggle.click()
+  expect(page).not.toHaveClass('sidebar-collapsed')
+  expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+})
+
 it('toggles professional review controls without navigating away from the claim', async () => {
   const item = queueItem(90)
   const fetchMock = vi.fn((url) => {
