@@ -48,7 +48,8 @@ slice only; it does not enable or describe the complete MongoDB runtime profile.
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
-The fixture profile remains the only complete profile at this stage. MongoDB adapter
+The fixture and explicit `local_mvp` profiles are start-capable at this stage. The complete
+MongoDB-only provider profile remains unavailable. MongoDB adapter
 documents use `record_type` as their internal discriminator so domain fields such as
 Evidence `kind` and Retrieval `kind` remain unchanged.
 
