@@ -26,19 +26,6 @@ raises a bounded error without returning the connection URI. The non-secret sett
 
 These connection primitives do not by themselves enable the MongoDB runtime profile.
 
-Run the isolated provider check from the repository root after supplying the MongoDB
-environment variables:
-
-```powershell
-py -3.12 scripts/verify_mongodb_persistence.py
-```
-
-The verifier creates a uniquely named temporary collection, persists a synthetic claim,
-session, message, evidence record, and staff write-back, reconnects through a new client,
-checks ownership filtering, and drops the temporary collection in a `finally` block. It
-does not print the connection URI. A passing result verifies this bounded persistence
-slice only; it does not enable or describe the complete MongoDB runtime profile.
-
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
