@@ -42,19 +42,36 @@ def _terms(text: str) -> set[str]:
 
 
 class KnowledgeIngestionService:
-    def __init__(self, store: KnowledgeObjectStore) -> None:
+    def __init__(
+        self, store: KnowledgeObjectStore, approved_sources: dict[tuple[str, str], KnowledgeSource]
+    ) -> None:
         self._store = store
+        self._approved_sources = approved_sources
 
-    def ingest(self, source: KnowledgeSource) -> KnowledgeIngestionResult:
-        if not source.version.strip():
+    def ingest(self, requested_source: KnowledgeSource) -> KnowledgeIngestionResult:
+        if not requested_source.version.strip():
             raise KnowledgeIngestionError('Knowledge source version is required.')
+        identity = (requested_source.document_id, requested_source.version)
+        source = self._approved_sources.get(identity)
+        if source is None:
+            raise KnowledgeIngestionError(
+                'Knowledge source is not registered in the approved manifest.'
+            )
         if source.publication_status is not KnowledgePublicationStatus.APPROVED:
-            raise KnowledgeIngestionError('Only approved knowledge sources may be ingested.')
+            raise KnowledgeIngestionError(
+                'Knowledge source is not approved in the controlled manifest.'
+            )
+        if requested_source != source:
+            raise KnowledgeIngestionError(
+                'Knowledge source metadata does not match the controlled manifest.'
+            )
+        if source.expected_checksum is None:
+            raise KnowledgeIngestionError('Approved manifest entry requires a source checksum.')
         raw = self._store.read(source.source_key)
         if raw is None:
             raise KnowledgeSourceNotFound(f'Knowledge source not found: {source.source_key}')
         checksum = sha256(raw).hexdigest()
-        if source.expected_checksum is not None and checksum != source.expected_checksum:
+        if checksum != source.expected_checksum:
             raise KnowledgeIngestionError('Knowledge source checksum does not match the manifest.')
 
         prefix = f'knowledge/indexed/{source.document_id}/{source.version}'

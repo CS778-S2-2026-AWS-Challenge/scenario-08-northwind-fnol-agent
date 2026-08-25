@@ -17,6 +17,8 @@ from backend.domain.knowledge import (
 )
 from backend.services.knowledge_ingestion import KnowledgeIngestionService
 
+APPROVED_MANIFEST = Path(__file__).resolve().parents[1] / 'config' / 'knowledge-sources.json'
+
 
 def _optional_datetime(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace('Z', '+00:00')) if value else None
@@ -43,6 +45,34 @@ def load_source(path: Path) -> KnowledgeSource:
     )
 
 
+def load_approved_sources(path: Path = APPROVED_MANIFEST) -> dict[tuple[str, str], KnowledgeSource]:
+    value: dict[str, Any] = json.loads(path.read_text(encoding='utf-8'))
+    sources: dict[tuple[str, str], KnowledgeSource] = {}
+    for entry in value['documents']:
+        source = KnowledgeSource(
+            document_id=entry['document_id'],
+            source_key=entry['source_key'],
+            title=entry['title'],
+            document_type=entry['document_type'],
+            version=entry['version'],
+            source_uri=entry['source_uri'],
+            jurisdiction=entry['jurisdiction'],
+            insurer=entry.get('insurer'),
+            product=entry.get('product'),
+            effective_from=_optional_datetime(entry.get('effective_from')),
+            effective_to=_optional_datetime(entry.get('effective_to')),
+            authority=entry['authority'],
+            visibility=entry['visibility'],
+            publication_status=KnowledgePublicationStatus(entry['publication_status']),
+            expected_checksum=entry['checksum_sha256'],
+        )
+        identity = (source.document_id, source.version)
+        if identity in sources:
+            raise ValueError(f'Duplicate knowledge source manifest identity: {identity!r}')
+        sources[identity] = source
+    return sources
+
+
 def required_environment(name: str) -> str:
     value = os.getenv(name)
     if not value:
@@ -65,7 +95,9 @@ def main() -> None:
         client,
         os.getenv('NORTHWIND_KNOWLEDGE_BUCKET', 'northwind-knowledge'),
     )
-    result = KnowledgeIngestionService(store).ingest(load_source(arguments.request))
+    result = KnowledgeIngestionService(store, load_approved_sources()).ingest(
+        load_source(arguments.request)
+    )
     print(
         f'{result.status}: document={result.document_id} version={result.version} '
         f'chunks={result.chunk_count} checksum={result.source_checksum}'

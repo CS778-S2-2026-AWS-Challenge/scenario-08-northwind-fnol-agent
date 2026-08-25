@@ -61,12 +61,19 @@ def source(**changes: object) -> KnowledgeSource:
     return replace(value, **changes)  # type: ignore[arg-type]
 
 
+def service(store: MemoryObjectStore, *approved: KnowledgeSource) -> KnowledgeIngestionService:
+    sources = approved or (source(),)
+    return KnowledgeIngestionService(
+        store, {(item.document_id, item.version): item for item in sources}
+    )
+
+
 def test_approved_source_is_indexed_once_with_traceable_chunks() -> None:
     store = MemoryObjectStore({source().source_key: POLICY})
-    service = KnowledgeIngestionService(store)
+    ingestion = service(store)
 
-    first = service.ingest(source())
-    second = service.ingest(source())
+    first = ingestion.ingest(source())
+    second = ingestion.ingest(source())
 
     assert first.status == 'indexed'
     assert second.status == 'unchanged'
@@ -81,26 +88,50 @@ def test_approved_source_is_indexed_once_with_traceable_chunks() -> None:
 
 
 def test_missing_source_and_version_fail_explicitly() -> None:
-    service = KnowledgeIngestionService(MemoryObjectStore())
+    ingestion = service(MemoryObjectStore())
     with pytest.raises(KnowledgeSourceNotFound, match='not found'):
-        service.ingest(source())
+        ingestion.ingest(source())
     with pytest.raises(KnowledgeIngestionError, match='version is required'):
-        service.ingest(source(version=''))
+        ingestion.ingest(source(version=''))
 
 
 def test_unapproved_or_checksum_mismatched_source_is_rejected() -> None:
     store = MemoryObjectStore({source().source_key: POLICY})
-    service = KnowledgeIngestionService(store)
-    with pytest.raises(KnowledgeIngestionError, match='Only approved'):
-        service.ingest(source(publication_status=KnowledgePublicationStatus.DRAFT))
+    ingestion = service(store)
+    with pytest.raises(KnowledgeIngestionError, match='does not match'):
+        ingestion.ingest(source(publication_status=KnowledgePublicationStatus.DRAFT))
     with pytest.raises(KnowledgeIngestionError, match='checksum'):
-        service.ingest(source(expected_checksum='0' * 64))
+        service(store, source(expected_checksum='0' * 64)).ingest(
+            source(expected_checksum='0' * 64)
+        )
+
+
+def test_self_declared_approval_cannot_register_unknown_or_tampered_source() -> None:
+    store = MemoryObjectStore({source().source_key: POLICY})
+    ingestion = service(store)
+    unknown = source(
+        document_id='unregistered', publication_status=KnowledgePublicationStatus.APPROVED
+    )
+    with pytest.raises(KnowledgeIngestionError, match='not registered'):
+        ingestion.ingest(unknown)
+    with pytest.raises(KnowledgeIngestionError, match='does not match'):
+        ingestion.ingest(source(source_uri='https://attacker.invalid/policy'))
+
+
+def test_controlled_manifest_must_approve_source_and_bind_checksum() -> None:
+    store = MemoryObjectStore({source().source_key: POLICY})
+    draft = source(publication_status=KnowledgePublicationStatus.DRAFT)
+    with pytest.raises(KnowledgeIngestionError, match='not approved'):
+        service(store, draft).ingest(draft)
+    checksumless = source(expected_checksum=None)
+    with pytest.raises(KnowledgeIngestionError, match='requires a source checksum'):
+        service(store, checksumless).ingest(checksumless)
 
 
 def test_changed_content_cannot_replace_an_existing_version() -> None:
     store = MemoryObjectStore({source().source_key: POLICY})
-    service = KnowledgeIngestionService(store)
-    service.ingest(source())
+    ingestion = service(store)
+    ingestion.ingest(source())
     store.objects[source().source_key] = POLICY + b'changed'
-    with pytest.raises(KnowledgeIngestionError, match='immutable'):
-        service.ingest(source(expected_checksum=None))
+    with pytest.raises(KnowledgeIngestionError, match='checksum'):
+        ingestion.ingest(source())

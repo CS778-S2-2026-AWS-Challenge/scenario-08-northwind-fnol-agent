@@ -27,9 +27,11 @@ an existing document version.
 
 ## Run
 
-Create a non-secret request JSON containing the `KnowledgeSource` fields, including an exact
-`source_key`, non-empty `version`, `publication_status: "approved"`, and optionally the expected
-SHA-256 checksum. Supply MinIO or S3-compatible connection values through the existing protected
+The repository-controlled `config/knowledge-sources.json` manifest is the approval authority. Each
+entry binds document ID and version to its source key, URI, scope metadata, publication status, and
+required SHA-256 checksum. A request JSON must exactly match that governed entry; declaring
+`publication_status: "approved"` in a request cannot register or promote a source. Supply MinIO or
+S3-compatible connection values through the existing protected
 environment boundary, then run:
 
 ```powershell
@@ -38,8 +40,9 @@ py -3.12 scripts/ingest_knowledge_source.py path/to/ingestion-request.json
 
 The knowledge bucket defaults to `northwind-knowledge` and may be overridden with
 `NORTHWIND_KNOWLEDGE_BUCKET`. Draft or withdrawn sources, absent objects, checksum mismatches,
-invalid UTF-8, duplicate section identifiers, missing versions, and attempted mutation of an
-existing version fail explicitly.
+unknown document versions, request metadata that differs from the manifest, invalid UTF-8,
+duplicate section identifiers, missing versions, and attempted mutation of an existing version
+fail explicitly.
 
 ## Current boundary
 
