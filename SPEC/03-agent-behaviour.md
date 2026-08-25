@@ -1,5 +1,12 @@
 # Agent Behaviour
 
+This specification defines product-level Agent behaviour and target outcomes. The target
+engineering objects are defined in [Agent Runtime Target](../docs/agent-runtime-target.md);
+the current transport remains authoritative in [the API contract](../docs/api.md), and its
+compatibility removal path is defined in [Agent Runtime Migration](../docs/agent-runtime-migration.md).
+The target behaviour is intentionally ahead of the current transport, but it must not be
+read as evidence that every target object is already implemented.
+
 ## Service Behaviour
 
 The Agent behaves like a capable insurance service professional while keeping internal
@@ -41,10 +48,10 @@ The model produces an `AgentProposal`. Runtime validation produces an `Execution
 and real tool and state outcomes produce a `TurnResult`. These records remain distinct so
 an audit can show what was proposed, what was authorised, and what actually happened.
 
-Canonical actions use separate `conversation`, `claim`, `human`, `external`, and
-`runtime` namespaces. The existing `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`, `UPDATE`,
-`HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM` values remain a transport migration
-mapping only; they are not the foundation of new behaviour.
+Target actions use separate `conversation`, `claim`, `human`, `external`, and `runtime`
+namespaces. The current endpoint temporarily exposes the deprecated eight-action
+compatibility transport; it is not the target behaviour model and is removed only through
+the coordinated migration gate.
 
 Every auditable action retains a stable identifier, namespace, target, proposer, reason
 and source references, validated inputs, preconditions, authority requirement, expected
