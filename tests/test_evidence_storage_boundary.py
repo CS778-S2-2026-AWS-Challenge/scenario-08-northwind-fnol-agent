@@ -1,19 +1,24 @@
+import asyncio
 import base64
 from hashlib import sha256
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from backend.adapters.evidence_storage import (
+    MAX_UPLOAD_SIZE_BYTES,
     EvidenceStorageUnavailable,
     EvidenceUploadNotFound,
     EvidenceUploadSizeMismatch,
     MockEvidenceStorage,
 )
+from backend.api.evidence import _read_bounded_upload
 from backend.api.workbench import _evidence_storage_key, _safe_download_filename
 from backend.app import create_app
 from backend.core.config import Settings
+from backend.core.errors import ApiError
 from backend.repositories.fixture import FixtureRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -146,6 +151,98 @@ def request_upload(client: TestClient, claim_id: str, key: str, revision: int = 
         headers={**CLAIMANT_AUTH, 'Idempotency-Key': key, 'If-Match': str(revision)},
         json=UPLOAD_PAYLOAD,
     )
+
+
+def test_fixture_proxy_rejects_more_than_registered_size_without_storing_it(
+    storage_client: TestClient,
+    storage: MockEvidenceStorage,
+) -> None:
+    with storage_client as client:
+        claim_id = create_claim(client, 'bounded-proxy-claim')
+        requested = request_upload(client, claim_id, 'bounded-proxy-upload')
+        evidence_id = requested.json()['evidence_id']
+        oversized = client.put(
+            requested.json()['upload']['url'],
+            headers={**CLAIMANT_AUTH, 'Content-Type': 'image/jpeg'},
+            content=iter([b'x' * cast(int, UPLOAD_PAYLOAD['size_bytes']), b'one-byte-too-many']),
+        )
+
+    assert oversized.status_code == 422
+    assert oversized.json()['error']['code'] == 'VALIDATION_ERROR'
+    with pytest.raises(EvidenceUploadNotFound):
+        storage.complete_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            checksum=f'sha256:{sha256(b"x").hexdigest()}',
+            media_type='image/jpeg',
+            size_bytes=cast(int, UPLOAD_PAYLOAD['size_bytes']),
+        )
+
+
+def test_fixture_proxy_stream_is_bounded_by_global_maximum_without_content_length(
+    storage_client: TestClient,
+) -> None:
+    with storage_client as client:
+        claim_id = create_claim(client, 'global-bound-claim')
+        requested = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={
+                **CLAIMANT_AUTH,
+                'Idempotency-Key': 'global-bound-upload',
+                'If-Match': '1',
+            },
+            json={
+                **UPLOAD_PAYLOAD,
+                'size_bytes': MAX_UPLOAD_SIZE_BYTES,
+            },
+        )
+        response = client.put(
+            requested.json()['upload']['url'],
+            headers={**CLAIMANT_AUTH, 'Content-Type': 'image/jpeg'},
+            content=iter([b'x' * MAX_UPLOAD_SIZE_BYTES, b'one-byte-too-many']),
+        )
+
+    assert response.status_code == 413
+    assert response.json()['error']['code'] == 'UPLOAD_TOO_LARGE'
+
+
+def test_stream_without_content_length_stops_at_registered_and_global_bounds() -> None:
+    async def read_with_chunks(chunks: list[bytes], expected_size: int, max_size: int) -> bytes:
+        messages = [
+            {
+                'type': 'http.request',
+                'body': chunk,
+                'more_body': index < len(chunks) - 1,
+            }
+            for index, chunk in enumerate(chunks)
+        ]
+
+        async def receive() -> dict[str, object]:
+            return messages.pop(0)
+
+        request = Request(
+            {'type': 'http', 'method': 'PUT', 'path': '/', 'headers': []},
+            receive,
+        )
+        return await _read_bounded_upload(
+            request,
+            expected_size_bytes=expected_size,
+            max_size_bytes=max_size,
+        )
+
+    with pytest.raises(ApiError) as registered_error:
+        asyncio.run(read_with_chunks([b'abcd', b'e'], expected_size=4, max_size=8))
+    assert registered_error.value.status_code == 422
+
+    with pytest.raises(ApiError) as global_error:
+        asyncio.run(
+            read_with_chunks(
+                [b'x' * MAX_UPLOAD_SIZE_BYTES, b'y'],
+                expected_size=MAX_UPLOAD_SIZE_BYTES,
+                max_size=MAX_UPLOAD_SIZE_BYTES,
+            )
+        )
+    assert global_error.value.status_code == 413
 
 
 def test_storage_outage_is_a_retryable_dependency_failure_not_a_rejected_file(

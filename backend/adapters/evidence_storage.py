@@ -139,6 +139,7 @@ class StoredUpload:
 class EvidenceStorage(Protocol):
     max_size_bytes: int
     allowed_media_types: tuple[str, ...]
+    supports_content_proxy: bool
 
     def connection_status(self) -> str:
         raise NotImplementedError
@@ -188,6 +189,7 @@ class MockEvidenceStorage(EvidenceStorage):
 
     max_size_bytes = MAX_UPLOAD_SIZE_BYTES
     allowed_media_types = ALLOWED_MEDIA_TYPES
+    supports_content_proxy = True
 
     def __init__(self, outage: EvidenceStorageUnavailable | None = None) -> None:
         self._pending: dict[tuple[str, str], _PendingUpload] = {}
@@ -313,6 +315,7 @@ class MinioEvidenceStorage(EvidenceStorage):
 
     max_size_bytes = MAX_UPLOAD_SIZE_BYTES
     allowed_media_types = ALLOWED_MEDIA_TYPES
+    supports_content_proxy = False
 
     def __init__(self, config: S3CompatibleObjectStorageConfig, client: Any = None) -> None:
         self._config = config

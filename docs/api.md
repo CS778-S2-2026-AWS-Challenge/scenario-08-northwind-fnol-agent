@@ -1044,8 +1044,12 @@ For the fixture runtime, the upload target is the authenticated
 bearer token, registered media type, exact registered byte length, and use before the target's
 `expires_at`. An expired target is rejected and the client must replay the upload-intent request to
 obtain a current target. Completion hashes the stored bytes and rejects a claimant-supplied checksum
-that does not match; the supplied value is never treated as proof by itself. Provider-backed profiles
-may instead return an object-store URL without changing the upload-target contract.
+that does not match; the supplied value is never treated as proof by itself. The application reads
+fixture-proxy content as a stream and stops as soon as either the registered byte length or the
+application-wide evidence maximum would be exceeded. `Content-Length` is checked when present but
+is never the sole size control. Provider-backed profiles return an object-store URL and reject the
+fixture-only content route before consuming its request body, without changing the upload-target
+contract.
 
 The Sprint 2 mock adapter returns `202` and records the public `file_status` as
 `processing` after an image or PDF upload is accepted. Filename, media type,
