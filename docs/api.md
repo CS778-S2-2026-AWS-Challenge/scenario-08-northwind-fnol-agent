@@ -1838,10 +1838,11 @@ then converts structured output to the existing `AgentProposal`. Existing determ
 authority and state validation still controls execution.
 
 The implemented `openai_compatible` adapter supports official, relay, and local
-compatible chat-completions endpoints through configuration. Non-compatible protocols
-register another adapter against the same internal contract without changing claimant
-or staff routes. Capability and failure semantics are documented in
-[Model Gateway](model-gateway.md).
+compatible chat-completions endpoints through configuration. The `bedrock_converse`
+adapter uses the same provider-neutral contract with an AWS credential chain and explicit
+region configuration. `custom_http` is the registry boundary for a non-compatible mapping;
+it does not change claimant or staff routes. Capability and failure semantics, profile
+selection, and availability states are documented in [Model Gateway](model-gateway.md).
 
 ## Persistence and Provider Boundary
 

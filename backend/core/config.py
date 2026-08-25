@@ -64,6 +64,12 @@ class Settings:
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
+    model_profile_id: str = 'default'
+    model_provider: str = 'unconfigured'
+    model_purpose: str = 'agent_turn'
+    model_privacy_class: str = 'synthetic_fnol'
+    model_prompt_version: str = 'current'
+    model_region: str | None = None
     model_base_url: str = ''
     model_identifier: str = ''
     model_api_key_env: str | None = None
@@ -93,12 +99,19 @@ class Settings:
         if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
             if not self.model_protocol_adapter.strip():
                 raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
-            if not self.model_base_url.strip():
+            if (
+                self.model_protocol_adapter != 'bedrock_converse'
+                and not self.model_base_url.strip()
+            ):
                 raise ValueError('MODEL_BASE_URL must not be empty.')
             if not self.model_identifier.strip():
                 raise ValueError('MODEL_IDENTIFIER must not be empty.')
             if self.model_timeout_seconds <= 0:
                 raise ValueError('MODEL_TIMEOUT_SECONDS must be greater than zero.')
+            if self.model_protocol_adapter == 'bedrock_converse' and not (
+                self.model_region and self.model_region.strip()
+            ):
+                raise ValueError('MODEL_REGION must be set for bedrock_converse.')
 
     @classmethod
     def from_environment(cls) -> 'Settings':
@@ -150,6 +163,12 @@ class Settings:
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip(),
+            model_profile_id=os.getenv('MODEL_PROFILE_ID', 'default').strip(),
+            model_provider=os.getenv('MODEL_PROVIDER', 'unconfigured').strip(),
+            model_purpose=os.getenv('MODEL_PURPOSE', 'agent_turn').strip(),
+            model_privacy_class=os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip(),
+            model_prompt_version=os.getenv('MODEL_PROMPT_VERSION', 'current').strip(),
+            model_region=os.getenv('MODEL_REGION', '').strip() or None,
             model_base_url=os.getenv('MODEL_BASE_URL', '').strip(),
             model_identifier=os.getenv('MODEL_IDENTIFIER', '').strip(),
             model_api_key_env=credential_environment_variable,

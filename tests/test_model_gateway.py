@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import (
+    BedrockConverseModelGateway,
     ModelGatewayConfig,
     ModelGatewayRegistry,
     OpenAICompatibleModelGateway,
@@ -19,6 +20,7 @@ from backend.domain.model_gateway import (
     ModelGatewayError,
     ModelGatewayErrorCode,
     ModelMessage,
+    ModelProfile,
     ModelRequest,
     ModelResponse,
     ModelRole,
@@ -172,6 +174,232 @@ def test_openai_compatible_gateway_normalises_tool_calls() -> None:
 
     assert response.tool_calls[0].name == 'find_policy'
     assert response.tool_calls[0].arguments == {'policy_id': 'pol-1'}
+
+
+def test_bedrock_converse_gateway_normalises_structured_output_and_usage() -> None:
+    class FakeBedrockClient:
+        def __init__(self) -> None:
+            self.payload: dict[str, object] | None = None
+
+        def converse(self, **payload: object) -> dict[str, object]:
+            self.payload = payload
+            return {
+                'output': {
+                    'message': {
+                        'role': 'assistant',
+                        'content': [{'text': '{"action":"ASK"}'}],
+                    }
+                },
+                'stopReason': 'end_turn',
+                'usage': {'inputTokens': 9, 'outputTokens': 3, 'totalTokens': 12},
+                'ResponseMetadata': {'RequestId': 'bedrock-request-1'},
+            }
+
+    client = FakeBedrockClient()
+    gateway = BedrockConverseModelGateway(
+        ModelGatewayConfig(
+            base_url='',
+            model='amazon.test-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=ModelCapabilities(structured_output=True),
+            protocol='bedrock_converse',
+            region='us-west-2',
+            profile=ModelProfile(
+                profile_id='bedrock-test',
+                protocol='bedrock_converse',
+                provider='aws',
+                model_identifier='amazon.test-model',
+                purpose='agent_turn',
+                privacy_class='synthetic_fnol',
+                capabilities=ModelCapabilities(structured_output=True),
+                timeout_seconds=5.0,
+                prompt_version='v1',
+            ),
+        ),
+        client=client,
+    )
+
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.SYSTEM, content='Return a proposal.'),
+                ModelMessage(role=ModelRole.USER, content='Synthetic incident.'),
+            ],
+            response_schema={'type': 'object'},
+        )
+    )
+
+    assert client.payload is not None
+    assert client.payload['modelId'] == 'amazon.test-model'
+    assert response.structured_output == {'action': 'ASK'}
+    assert response.provider_request_id == 'bedrock-request-1'
+    assert response.usage is not None and response.usage.total_tokens == 12
+
+
+def test_bedrock_converse_requires_region_and_normalises_provider_failure() -> None:
+    with pytest.raises(ModelGatewayError) as invalid_config:
+        ModelGatewayConfig(
+            base_url='',
+            model='amazon.test-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=ModelCapabilities(),
+            protocol='bedrock_converse',
+        )
+    assert invalid_config.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+    class FailingClient:
+        def converse(self, **_payload: object) -> object:
+            error = RuntimeError('provider body must not leak')
+            error.response = {'ResponseMetadata': {'HTTPStatusCode': 500}}  # type: ignore[attr-defined]
+            raise error
+
+    gateway = BedrockConverseModelGateway(
+        ModelGatewayConfig(
+            base_url='',
+            model='amazon.test-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=ModelCapabilities(),
+            protocol='bedrock_converse',
+            region='us-west-2',
+        ),
+        client=FailingClient(),
+    )
+    with pytest.raises(ModelGatewayError) as provider_error:
+        gateway.complete(ModelRequest(messages=[]))
+    assert provider_error.value.code is ModelGatewayErrorCode.PROVIDER
+    assert provider_error.value.retryable is True
+    assert 'provider body' not in str(provider_error.value)
+
+
+def test_model_gateway_config_and_registry_reject_invalid_boundaries() -> None:
+    with pytest.raises(ModelGatewayError, match='configuration'):
+        gateway_config(base_url='not a url')
+    with pytest.raises(ModelGatewayError, match='configuration'):
+        gateway_config(model='')
+
+    registry = ModelGatewayRegistry()
+    registry.register('custom', lambda _config: OpenAICompatibleModelGateway(gateway_config()))
+    with pytest.raises(ValueError, match='non-empty and unique'):
+        registry.register('CUSTOM', lambda _config: OpenAICompatibleModelGateway(gateway_config()))
+    with pytest.raises(ModelGatewayError, match='configuration'):
+        registry.create('missing', gateway_config())
+
+
+def test_bedrock_converse_maps_tool_use_and_budget() -> None:
+    class ToolClient:
+        def __init__(self) -> None:
+            self.payload: dict[str, object] | None = None
+
+        def converse(self, **payload: object) -> dict[str, object]:
+            self.payload = payload
+            return {
+                'output': {
+                    'message': {
+                        'role': 'assistant',
+                        'content': [
+                            {
+                                'toolUse': {
+                                    'toolUseId': 'tool-1',
+                                    'name': 'lookup_policy',
+                                    'input': {'reference': 'synthetic-policy'},
+                                }
+                            }
+                        ],
+                    }
+                }
+            }
+
+    client = ToolClient()
+    gateway = BedrockConverseModelGateway(
+        ModelGatewayConfig(
+            base_url='',
+            model='amazon.test-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=ModelCapabilities(tools=True),
+            protocol='bedrock_converse',
+            region='us-west-2',
+        ),
+        client=client,
+    )
+    response = gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Use the tool.')],
+            token_budget=128,
+            tools=[
+                ModelTool(
+                    name='lookup_policy',
+                    description='Lookup synthetic policy facts.',
+                    input_schema={'type': 'object'},
+                )
+            ],
+        )
+    )
+    assert client.payload is not None
+    assert client.payload['inferenceConfig'] == {'maxTokens': 128}
+    assert 'toolConfig' in client.payload
+    assert response.tool_calls[0].call_id == 'tool-1'
+
+
+@pytest.mark.parametrize(
+    ('status', 'expected'),
+    [
+        (401, ModelGatewayErrorCode.AUTHENTICATION),
+        (429, ModelGatewayErrorCode.RATE_LIMIT),
+        (500, ModelGatewayErrorCode.PROVIDER),
+    ],
+)
+def test_bedrock_provider_statuses_are_normalised(
+    status: int,
+    expected: ModelGatewayErrorCode,
+) -> None:
+    class ProviderError(RuntimeError):
+        pass
+
+    error = ProviderError('provider detail')
+    error.response = {'ResponseMetadata': {'HTTPStatusCode': status}}  # type: ignore[attr-defined]
+
+    with pytest.raises(ModelGatewayError) as captured:
+        BedrockConverseModelGateway._raise_provider_error(error)
+    assert captured.value.code is expected
+
+
+def test_bedrock_timeout_and_credential_errors_are_normalised() -> None:
+    class TimeoutError(RuntimeError):
+        pass
+
+    class CredentialError(RuntimeError):
+        pass
+
+    with pytest.raises(ModelGatewayError) as timeout:
+        BedrockConverseModelGateway._raise_provider_error(TimeoutError())
+    assert timeout.value.code is ModelGatewayErrorCode.TIMEOUT
+    assert timeout.value.retryable is True
+
+    with pytest.raises(ModelGatewayError) as credential:
+        BedrockConverseModelGateway._raise_provider_error(CredentialError())
+    assert credential.value.code is ModelGatewayErrorCode.AUTHENTICATION
+    assert credential.value.retryable is False
+
+
+def test_bedrock_malformed_response_is_rejected() -> None:
+    gateway = BedrockConverseModelGateway(
+        ModelGatewayConfig(
+            base_url='',
+            model='amazon.test-model',
+            credential_environment_variable=None,
+            timeout_seconds=5.0,
+            capabilities=ModelCapabilities(),
+            protocol='bedrock_converse',
+            region='us-west-2',
+        ),
+        client=object(),
+    )
+    with pytest.raises(ModelGatewayError, match='invalid response'):
+        gateway._normalise_response({'output': {'message': {'content': 'not-a-list'}}})
 
 
 @pytest.mark.parametrize(

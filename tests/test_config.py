@@ -100,6 +100,24 @@ def test_model_gateway_runtime_requires_endpoint_and_model() -> None:
         Settings(agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY)
 
 
+def test_bedrock_runtime_requires_region_but_not_base_url() -> None:
+    with pytest.raises(ValueError, match='MODEL_REGION'):
+        Settings(
+            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_protocol_adapter='bedrock_converse',
+            model_identifier='amazon.test-model',
+        )
+
+    settings = Settings(
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='bedrock_converse',
+        model_identifier='amazon.test-model',
+        model_region='us-west-2',
+    )
+    assert settings.model_base_url == ''
+    assert settings.model_region == 'us-west-2'
+
+
 def test_model_gateway_runtime_requires_adapter_model_and_positive_timeout() -> None:
     with pytest.raises(ValueError, match='MODEL_PROTOCOL_ADAPTER'):
         Settings(

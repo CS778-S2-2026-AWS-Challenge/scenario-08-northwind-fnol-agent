@@ -15,6 +15,19 @@ normalise:
 - assistant text, finish reason, provider model and request identity; and
 - input, output, and total token usage when supplied by the endpoint.
 
+`ModelRequest` also carries provider-neutral execution metadata: purpose, actor, claim
+scope, policy and prompt versions, privacy class, required capabilities, token and latency
+budgets, and a bounded trace context. These fields describe the authority and cost boundary;
+they do not contain credentials or provider SDK payloads. `ModelResponse` reports normalized
+capabilities in addition to text, structured output, tool calls, finish reason, usage, and
+bounded provider identity.
+
+`ModelProfile` is the selection record for an adapter. It contains a profile identifier,
+protocol, provider, model identifier, credential reference, purpose, privacy class,
+capabilities, timeout, fallback group, prompt version, and an explicit availability state
+(`configured`, `degraded`, or `unavailable`). A credential reference names a secret location;
+it is never the secret itself.
+
 `GatewayAgent` converts a normalised structured response into the existing
 `AgentProposal`. The existing deterministic validation then authorises, blocks, or
 requires review for the proposal. A model response never executes a tool, writes claim
@@ -93,6 +106,38 @@ output and tool requests are rejected before transport when the selected adapter
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
 
+## Bedrock Converse Adapter
+
+The `bedrock_converse` adapter uses the AWS Bedrock Runtime Converse operation through the
+standard boto3 credential chain. It is selected with `MODEL_PROTOCOL_ADAPTER=bedrock_converse`,
+`MODEL_REGION`, and `MODEL_IDENTIFIER`; `MODEL_BASE_URL` is not used. The adapter maps the
+neutral messages, optional tool declarations, structured-output instruction, stop reason,
+usage, and request ID to the same `ModelResponse` contract as the compatible HTTP adapter.
+
+The first live verification must use synthetic FNOL context and an explicitly authorised
+runtime environment. A successful personal-account check is evidence for that configured
+profile only; it is not evidence of Northwind production access, data, permissions, or
+deployment readiness. Credentials remain in the AWS credential chain and are never committed.
+
+Run the explicit live check only after configuring an authorised profile:
+
+```powershell
+py -3.12 -m scripts.verify_model_gateway_live
+```
+
+The command refuses to run under the default controlled profile and prints only profile,
+provider, request-presence, usage, and capability metadata. The output is not a substitute
+for a claimant journey or a production readiness review.
+
+## Custom HTTP Boundary
+
+`custom_http` is a registry entry for a non-compatible HTTP protocol. The default boundary
+uses the same transport and normalized response shape as the compatible adapter so a custom
+implementation can be registered without changing Agent behaviour or claimant routes. A
+provider-specific request mapping belongs in a separate adapter factory; it must perform
+capability checks before transport and map all failures to `ModelGatewayError` without
+returning raw provider bodies.
+
 ## Custom Protocols
 
 A non-compatible HTTP or local protocol implements the `ModelGateway` contract and is
@@ -128,8 +173,9 @@ unchanged.
 
 ## Current Limitations
 
-- The included transport implements synchronous OpenAI-compatible chat completions;
-  streaming and provider-specific response APIs are not implemented.
+- The included transports implement synchronous OpenAI-compatible chat completions and
+  Bedrock Converse; streaming and provider-specific response APIs beyond Converse are not
+  implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
 - The gateway normalises tool calls, but the current `GatewayAgent` requests only a

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,10 +58,41 @@ class ModelCapabilities(ModelContract):
     tools: bool = False
 
 
+class ModelProfile(ModelContract):
+    """Provider-neutral model selection metadata.
+
+    The profile contains references and capabilities only. Credentials and provider
+    SDK configuration remain outside the domain contract.
+    """
+
+    profile_id: str = Field(min_length=1, max_length=100)
+    protocol: str = Field(min_length=1, max_length=50)
+    provider: str = Field(min_length=1, max_length=100)
+    model_identifier: str = Field(min_length=1, max_length=300)
+    credential_reference: str | None = Field(default=None, max_length=200)
+    purpose: str = Field(min_length=1, max_length=100)
+    privacy_class: str = Field(min_length=1, max_length=100)
+    capabilities: ModelCapabilities
+    timeout_seconds: float = Field(gt=0)
+    fallback_group: str | None = Field(default=None, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    evaluation_status: Literal['configured', 'degraded', 'unavailable'] = 'configured'
+
+
 class ModelRequest(ModelContract):
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
+    purpose: str = Field(default='agent_turn', min_length=1, max_length=100)
+    actor: str = Field(default='claimant_agent', min_length=1, max_length=100)
+    claim_scope: str = Field(default='working_claim', min_length=1, max_length=100)
+    policy_version: str = Field(default='current', min_length=1, max_length=100)
+    prompt_version: str = Field(default='current', min_length=1, max_length=100)
+    privacy_class: str = Field(default='synthetic_fnol', min_length=1, max_length=100)
+    required_capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+    token_budget: int | None = Field(default=None, ge=1)
+    latency_budget_ms: int | None = Field(default=None, ge=1)
+    trace_context: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelResponse(ModelContract):
@@ -72,6 +103,7 @@ class ModelResponse(ModelContract):
     usage: ModelUsage | None = None
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
+    capabilities: ModelCapabilities | None = None
 
 
 class ModelClaimStateContext(ModelContract):
