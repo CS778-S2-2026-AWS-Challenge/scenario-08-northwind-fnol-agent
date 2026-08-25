@@ -1,6 +1,7 @@
 import { isRecord, requireRecord } from "./validation";
 
 const GITHUB_API_VERSION = "2022-11-28";
+export const PR_POLICY_STATUS_CONTEXT = "Northwind PR policy";
 
 export class GitHubApiError extends Error {
   constructor(
@@ -39,7 +40,7 @@ export class GitHubClient {
         state: input.state,
         description: input.description,
         target_url: input.targetUrl,
-        context: "PR policy",
+        context: PR_POLICY_STATUS_CONTEXT,
       }),
     });
   }

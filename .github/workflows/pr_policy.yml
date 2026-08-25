@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   policy:
-    name: PR policy
+    name: Northwind PR policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
