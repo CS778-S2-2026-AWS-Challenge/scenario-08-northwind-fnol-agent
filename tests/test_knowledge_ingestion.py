@@ -141,6 +141,18 @@ def test_changed_content_cannot_replace_an_existing_version() -> None:
 
 
 @pytest.mark.parametrize(
+    'invalid_state',
+    [b'not-json', b'{}', b'{"source_checksum": "value", "chunk_count": 0}'],
+)
+def test_invalid_existing_ingestion_state_fails_closed(invalid_state: bytes) -> None:
+    state_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/ingestion.json'
+    store = MemoryObjectStore({source().source_key: POLICY, state_key: invalid_state})
+
+    with pytest.raises(KnowledgeIngestionError, match='state is invalid'):
+        service(store).ingest(source())
+
+
+@pytest.mark.parametrize(
     ('field', 'changed_value'),
     [
         ('visibility', 'staff_only'),

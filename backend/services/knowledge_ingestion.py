@@ -101,8 +101,19 @@ class KnowledgeIngestionService:
         state_key = f'{prefix}/ingestion.json'
         existing = self._store.read(state_key)
         if existing is not None:
-            state = json.loads(existing)
-            if state['source_checksum'] != checksum:
+            try:
+                state = json.loads(existing)
+                recorded_checksum = state['source_checksum']
+                chunk_count = state['chunk_count']
+            except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                raise KnowledgeIngestionError(
+                    'Existing ingestion state is invalid and cannot be trusted.'
+                ) from error
+            if not isinstance(chunk_count, int) or chunk_count < 1:
+                raise KnowledgeIngestionError(
+                    'Existing ingestion state is invalid and cannot be trusted.'
+                )
+            if recorded_checksum != checksum:
                 raise KnowledgeIngestionError(
                     'An immutable document version already exists with different content.'
                 )
@@ -111,7 +122,7 @@ class KnowledgeIngestionService:
                     'An immutable document version already exists with different governed metadata.'
                 )
             return KnowledgeIngestionResult(
-                source.document_id, source.version, checksum, state['chunk_count'], 'unchanged'
+                source.document_id, source.version, checksum, chunk_count, 'unchanged'
             )
 
         chunks = self._chunk(source, raw, checksum)

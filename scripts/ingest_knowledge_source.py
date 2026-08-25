@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,25 +25,29 @@ def _optional_datetime(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace('Z', '+00:00')) if value else None
 
 
-def load_source(path: Path) -> KnowledgeSource:
-    value: dict[str, Any] = json.loads(path.read_text(encoding='utf-8'))
-    return KnowledgeSource(
-        document_id=value['document_id'],
-        source_key=value['source_key'],
-        title=value['title'],
-        document_type=value['document_type'],
-        version=value['version'],
-        source_uri=value['source_uri'],
-        jurisdiction=value['jurisdiction'],
-        insurer=value.get('insurer'),
-        product=value.get('product'),
-        effective_from=_optional_datetime(value.get('effective_from')),
-        effective_to=_optional_datetime(value.get('effective_to')),
-        authority=value['authority'],
-        visibility=value['visibility'],
-        publication_status=KnowledgePublicationStatus(value['publication_status']),
-        expected_checksum=value.get('expected_checksum'),
-    )
+@dataclass(frozen=True, slots=True)
+class IngestionRequest:
+    document_id: str
+    version: str
+
+
+def load_request(path: Path) -> IngestionRequest:
+    value: Any = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict) or set(value) != {'document_id', 'version'}:
+        raise ValueError('Ingestion request must contain only document_id and version.')
+    if not all(isinstance(value[field], str) and value[field].strip() for field in value):
+        raise ValueError('Ingestion request document_id and version must be non-empty strings.')
+    return IngestionRequest(document_id=value['document_id'], version=value['version'])
+
+
+def resolve_source(
+    request: IngestionRequest,
+    approved_sources: dict[tuple[str, str], KnowledgeSource],
+) -> KnowledgeSource:
+    source = approved_sources.get((request.document_id, request.version))
+    if source is None:
+        raise ValueError('Knowledge source is not registered in the approved manifest.')
+    return source
 
 
 def load_approved_sources(path: Path = APPROVED_MANIFEST) -> dict[tuple[str, str], KnowledgeSource]:
@@ -95,9 +100,9 @@ def main() -> None:
         client,
         os.getenv('NORTHWIND_KNOWLEDGE_BUCKET', 'northwind-knowledge'),
     )
-    result = KnowledgeIngestionService(store, load_approved_sources()).ingest(
-        load_source(arguments.request)
-    )
+    approved_sources = load_approved_sources()
+    source = resolve_source(load_request(arguments.request), approved_sources)
+    result = KnowledgeIngestionService(store, approved_sources).ingest(source)
     print(
         f'{result.status}: document={result.document_id} version={result.version} '
         f'chunks={result.chunk_count} checksum={result.source_checksum}'

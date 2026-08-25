@@ -31,9 +31,15 @@ existing document version; the publisher must issue a new version.
 
 The repository-controlled `config/knowledge-sources.json` manifest is the approval authority. Each
 entry binds document ID and version to its source key, URI, scope metadata, publication status, and
-required SHA-256 checksum. A request JSON must exactly match that governed entry; declaring
-`publication_status: "approved"` in a request cannot register or promote a source. Supply MinIO or
-S3-compatible connection values through the existing protected
+required SHA-256 checksum. A request supplies only the controlled identity:
+
+```json
+{"document_id": "nw-policy-motor-standard-mvp-2026-1", "version": "MVP-2026.1"}
+```
+
+The CLI resolves every authoritative field from the manifest. Extra caller-supplied metadata is
+rejected, so a request cannot register, modify, or promote a source. Supply MinIO or S3-compatible
+connection values through the existing protected
 environment boundary, then run:
 
 ```powershell
