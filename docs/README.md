@@ -18,6 +18,7 @@ time-bound commitments belong in `sprint/`.
 - [Policy and Claim-History Retrieval Contract](policy-history-mapping.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [MinIO Object-Storage Boundary](minio-object-storage.md)
+- [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
