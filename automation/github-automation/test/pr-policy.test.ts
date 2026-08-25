@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GitHubClient } from "../src/github";
+import { GitHubClient, PR_POLICY_STATUS_CONTEXT } from "../src/github";
 import { evaluatePullRequestPolicy, requiresLocalQualityEvidence } from "../src/pr-policy";
 import type { PullRequestEvent } from "../src/types";
 
@@ -68,7 +68,7 @@ describe("Worker PR policy adapter", () => {
     expect(statusCall).toBeDefined();
     expect(JSON.parse(requestBody(statusCall?.init)) as unknown).toMatchObject({
       state: "success",
-      context: "PR policy",
+      context: PR_POLICY_STATUS_CONTEXT,
     });
   });
 
@@ -94,6 +94,6 @@ describe("Worker PR policy adapter", () => {
     expect(result.errors).toContain(
       "#999 is not an issue in CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent.",
     );
-    expect(statusBody).toMatchObject({ state: "failure", context: "PR policy" });
+    expect(statusBody).toMatchObject({ state: "failure", context: PR_POLICY_STATUS_CONTEXT });
   });
 });

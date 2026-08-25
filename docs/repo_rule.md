@@ -190,8 +190,9 @@ authorise an agent to make the same state change manually.
 ## CI, Branch Protection, and Automation
 
 - The active quality profile selects the merge checks for `main`: the `github` profile uses the
-  GitHub Actions `Backend quality`, `Customer quality`, and `PR policy` checks; the `circleci`
-  profile uses their CircleCI equivalents; and the `none` profile uses `PR policy` to validate the
+  GitHub Actions `Backend quality`, `Customer quality`, and `Northwind PR policy` checks; the
+  `circleci` profile uses their CircleCI equivalents; and the `none` profile uses `Northwind PR
+  policy` to validate the
   required local gate evidence. Required checks apply to the final pull-request head and must not
   be bypassed because a local check passed.
 - `PR policy` validates repository issue linkage and the evidence sections required for a non-Draft
