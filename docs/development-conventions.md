@@ -36,6 +36,11 @@ Kanban collaboration details within that boundary.
   ./scripts/check.ps1
   ```
 
+- The installed pre-push hook uses `scripts/pre-push-quality-gate.ps1`. In `auto` mode it skips
+  the additional local run only after a configured GitHub Actions or verified CircleCI provider is
+  available; otherwise it runs the local gate. `NORTHWIND_QUALITY_GATE_MODE=local` forces the
+  local gate, while `NORTHWIND_QUALITY_GATE_MODE=off` is reserved for authorised maintenance.
+
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
