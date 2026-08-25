@@ -310,20 +310,22 @@ def route_assessor(
             'data scope.',
         )
 
-    if operation is None:
-        decision = repository.get_agent_decision_internal(
-            payload.claim_id,
-            payload.authorisation_ref,
+    decision = repository.get_agent_decision_internal(
+        payload.claim_id,
+        payload.authorisation_ref,
+    )
+    if (
+        decision is None
+        or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        or decision.resulting_revision != claim.revision
+        or (operation is not None and operation.authorised_revision != claim.revision)
+    ):
+        raise _authorisation_error(
+            'Assessor routing requires current authority for this claim revision.',
         )
-        if (
-            decision is None
-            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
-            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
-            or decision.resulting_revision != claim.revision
-        ):
-            raise _authorisation_error(
-                'Assessor routing requires an authorised rule or staff decision.',
-            )
+
+    if operation is None:
         timestamp = now_utc()
         operation = AssessorRoutingOperation(
             operation_id=operation_id,

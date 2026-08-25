@@ -55,7 +55,12 @@ requires a separately approved provider capability and Northwind policy.
 The #252 adapter fixture adds `claimant_consent_ref` to `RouteAssessorRequest` and checks
 it against consent held in the shared Working Claim before calling the adapter. The
 current fixture accepts consent only from that claim's claimant; authorised-representative
-authority is not yet modelled. Claimant-facing consent capture remains #262 scope. The
+authority is not yet modelled. A retryable provider failure may be invoked again only
+while its recorded authority still matches the current Claim revision. If a material
+Claim update advances the revision, the stale retry is rejected before another provider
+call and a fresh current-revision authority must prepare a new operation. An already
+accepted provider result remains recoverable without a second provider call.
+Claimant-facing consent capture remains #262 scope. The
 exact external Challenge Key Feature 2 wording is absent from the repository, so the
 scenario records that reference as `unverified_external_brief` rather than claiming
 complete challenge-feature coverage.
