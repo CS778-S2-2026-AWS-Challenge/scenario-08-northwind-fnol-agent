@@ -563,3 +563,8 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         'msg_workbench_assessor',
     }
     assert detail['messages'] == []
+    queue_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+    queue_item = next(
+        item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
+    )
+    assert queue_item['assignee_id'] == 'stf_demo'

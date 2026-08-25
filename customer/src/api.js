@@ -50,12 +50,56 @@ async function apiRequest(path, options = {}) {
   return payload
 }
 
-export function createClaim({ idempotencyKey = requestId('claim') } = {}) {
+export function createClaim({ idempotencyKey = requestId('claim'), incidentType = null } = {}) {
   return apiRequest('/api/v1/claims', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ' }),
+    body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ', incident_type: incidentType }),
   })
+}
+
+export function updateClaimFields({ claimId, revision, updates }) {
+  return apiRequest(`/api/v1/claims/${claimId}/form`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ updates }),
+  })
+}
+
+export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', idempotencyKey = requestId('evidence-upload') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/uploads`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ kind, original_filename: file.name, media_type: file.type, size_bytes: file.size }),
+  })
+}
+
+export function completeEvidenceUpload({ claimId, evidenceId, revision, checksum, idempotencyKey = requestId('evidence-complete') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/${evidenceId}/complete`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ upload_checksum: checksum }),
+  })
+}
+
+export function uploadEvidenceContent({ upload, file }) {
+  return apiRequest(upload.url, {
+    method: upload.method,
+    headers: upload.headers,
+    body: file,
+  })
+}
+
+export function registerPendingEvidence({ claimId, revision, kind, note, idempotencyKey = requestId('evidence-pending') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ kind, status: 'incomplete', related_fields: [], needed_for: ['later_action'], claimant_note: note }),
+  })
+}
+
+export function getClaimEvidence(claimId) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence`)
 }
 
 export function getClaim(claimId) {

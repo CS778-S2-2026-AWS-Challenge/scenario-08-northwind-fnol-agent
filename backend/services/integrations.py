@@ -217,6 +217,9 @@ def create_external_claim(
             'external_claim_source_revision': payload.claim_revision,
             'external_claim_fingerprint': fingerprint,
             'route': outcome.result.route,
+            'assignee_id': (
+                'stf_demo' if payload.route == 'standard_motor_intake' else claim.assignee_id
+            ),
             'claim_state': claim.claim_state.model_copy(
                 update={
                     'workflow_state': (

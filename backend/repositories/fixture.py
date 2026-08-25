@@ -281,7 +281,7 @@ class FixtureRepository(PersistenceRepository):
             for message in self._messages.values()
             if message.claim_id == claim_id and message.session_id == session_id
         ]
-        return sorted(messages, key=lambda message: message.created_at)
+        return sorted(messages, key=lambda message: (message.created_at, message.message_id))
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (

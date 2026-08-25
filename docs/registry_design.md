@@ -23,19 +23,23 @@ and a recalculable Claim State rather than a large hard-coded `if-else` tree.
 
 ```text
 Field Registry       -> which fields may exist
-Branch Registry      -> which claim and condition branches may exist
+Content Branch Registry -> which incident-content branches may exist
 Rule Set             -> when registered fields and branches become active
-Action Requirements  -> what the current next action needs
 Lifecycle Registry   -> which claim states and transitions may exist
+Action Registry      -> which conversation, Claim, human, external, and runtime actions may exist
+Tool Registry        -> which bounded application operations may be requested or executed
+Staff Capability Registry -> which capabilities staff may combine through natural language
+Model Profile Registry -> which model capabilities and data terms are verified for each purpose
+Error Registry       -> which stable failures, retry classes, and state effects may exist
 Follow-up and Retention Policies -> when work is followed up or removed
 Claim State          -> facts, sources, statuses, branches, and unresolved work
 Form Projection      -> what the Agent asks, shows, or can safely skip now
 ```
 
-The Registry is not simply another database table. It is a versioned, validated
-catalogue of allowed fields, branches, tags, and rules. A database may persist the
-catalogue, but storage is an implementation detail. The important boundary is that
-runtime code and model output can use only published definitions.
+Registry is not one database table. It is a set of independently versioned and validated
+finite contracts. A database may persist their published snapshots, but storage is an
+implementation detail. Runtime code and model output may reference only published
+definitions, and Registry never stores what is currently true for one Claim.
 
 ## Registry Responsibilities
 
@@ -63,19 +67,20 @@ Examples include `vehicle.registration`, `vehicle.drivable`,
 The existence of a field in the catalogue does not mean that it is mandatory for every
 claim, claimant-supplied, or required before claim creation.
 
-### Branch Registry
+### Content Branch Registry
 
-The Branch Registry defines the approved paths and dimensions that may be activated for
-a claim:
+The Content Branch Registry defines the approved information dimensions that may be
+activated for a Claim. Content branches answer what information and rules apply to the
+incident. They do not store lifecycle states such as draft, waiting, review, or created.
 
-| Branch type | Examples | Purpose |
+| Dimension | Examples | Purpose |
 | --- | --- | --- |
-| Interruption | urgent safety, repeated human request, accessibility support | Pause ordinary collection and preserve progress |
 | Claim family | motor, home, contents, unknown | Select the relevant product or incident field group |
-| Incident condition | another party, witness, Police involvement, theft, conflicting evidence | Add a supported conditional group |
+| Incident type | collision, theft, fire, water, weather, accidental damage | Add applicable incident facts and evidence rules |
+| Participant | another party, witness, Police, repairer, assessor | Add supported participant and coordination information |
+| Safety and support | injury, continuing danger, distress, accessibility | Supply an interruption signal and change the support approach without becoming a lifecycle state |
 | Evidence state | available, missing, incomplete, unofficial, pending generation | Describe responsibility and timing without blocking unrelated work |
 | Professional authority | coverage ambiguity, material conflict, review signal | Request staff attention without making the decision automatically |
-| Next action | continue intake, register evidence, hand off, create claim, route | Determine the minimum information needed now |
 
 A claim may have one primary claim-family branch and several simultaneous conditional
 branches. For example:
@@ -91,7 +96,13 @@ motor
 One route label must not erase an independent injury, evidence, responsibility, or
 review dimension.
 
-### Rules and Action Requirements
+Each content-branch definition includes its stable code and version, dimension,
+activation and exit conditions, conflict group, fields, tags, rules, and tools it may
+add, confirmation policy, visibility, and resume policy. The model proposes a candidate
+with supporting facts and provenance. The rule engine alone controls
+`proposed -> active -> suspended -> exited/corrected`.
+
+### Rules and Current-action Requirements
 
 Rules should be declarative and limited to a finite set of condition operators such as
 `exists`, `equals`, `in`, `all`, `any`, and `not`. Configuration must not execute
@@ -104,25 +115,29 @@ must not turn the entire field catalogue into a mandatory questionnaire.
 The model may propose a classification or value, but deterministic validation controls
 activation, authority, visibility, and side effects.
 
-### Claim Lifecycle Registry
+### Lifecycle Registry and WorkItems
 
-The claim lifecycle is a finite state machine, not a collection of unrelated booleans.
-The Registry should define the allowed states, transition reasons, responsible party,
-next-action shape, and staff visibility for each state. A starting set is:
+The Claim lifecycle is a finite state machine, not a collection of unrelated booleans.
+It answers where the work is, who owns it, and what it is waiting for. The Registry
+defines allowed states, transitions, responsibilities, resume behaviour, recovery,
+expiry, and visibility. A starting set is:
 
 ```text
-not_started
-draft_saved
-awaiting_customer
-awaiting_external_material
-ready_for_next_step
-staff_review
-submitted
+no_claim
+draft_active
+waiting_customer
+waiting_external
+staff_support
+professional_review
+ready_to_create
+creating
+created
+withdrawn
 expired
-purged
+purged_or_anonymised
 ```
 
-`awaiting_customer`, `awaiting_external_material`, explicit customer withdrawal, and
+`waiting_customer`, `waiting_external`, explicit customer withdrawal, and
 timeout expiry must remain distinguishable. A session with no credible claim intent may
 remain `non_claim_intent` without creating a claim at all.
 
@@ -130,6 +145,65 @@ Lifecycle definitions should also identify whether the state is resumable, wheth
 staff-visible, who owns the next action, and what event can move it forward. Status fields
 such as `saved`, `active`, and `abandoned` may be derived for filtering, but they must not
 be the competing source of truth.
+
+A Claim may have several independent `WorkItem` records while holding one lifecycle
+state. Each WorkItem records its type, status, owner, exact action blocked, due time when
+authoritatively known, source references, and completion evidence. A Police document may
+therefore remain outstanding while unrelated Claim creation work continues.
+
+### Action Registry
+
+The Action Registry defines finite actions across five namespaces:
+
+| Namespace | Meaning |
+| --- | --- |
+| `conversation` | Communication such as answering, explaining, asking, clarifying, or summarising, with no business side effect |
+| `claim` | Revision-checked proposals or changes to facts, evidence, WorkItems, draft progress, and Claim creation |
+| `human` | Support handoff, professional review, approval, and staff-decision actions |
+| `external` | Preparation, authority, submission, tracking, verification, reconciliation, and recovery for third-party work |
+| `runtime` | One primary directive controlling whether the turn continues, waits, pauses, interrupts, stops, or fails safely |
+
+Every action definition records its input schema, preconditions, state effect, authority,
+visibility, idempotency need, permitted tools, response obligation, failure policy, and
+prohibited outcomes. The model may propose only registered actions; a schema-valid
+proposal is not execution authority.
+
+### Tool Registry
+
+The Tool Registry defines provider-neutral application capabilities, not provider SDK
+methods. Each tool has one bounded purpose, typed input and output, required scopes,
+allowed Agent purposes, side-effect class, idempotency support, retry and timeout policy,
+minimum disclosure rules, and audit requirements. A tool result proves only the result it
+reports; requesting a tool never proves that the action completed.
+
+### Staff Capability Registry
+
+The Staff Capability Registry describes problems the Agent may help authorised staff
+solve, including Claim summary, gap explanation, evidence comparison, policy retrieval,
+next-step proposals, communication drafts, handoff inspection, and external-request
+preparation. `@Agent` selects and combines these capabilities from ordinary language; it
+is not a fixed command language.
+
+Each capability defines allowed roles, maximum Claim projection, allowed tools and
+actions, output schema, execution policy, and evaluation scenarios. Read-only capability
+does not grant mutation, send, disclosure, or high-impact decision authority.
+
+### Model Profile Registry
+
+The Model Profile Registry stores adapter and endpoint references, real provider model
+identity, secret references, verified capabilities, data terms, permitted privacy classes
+and purposes, qualified fallback group, evaluation evidence, and lifecycle status. It
+does not store FNOL permissions or business rules. A model that returns text but lacks
+strict structured output cannot be used for a purpose that requires structured Claim or
+side-effect proposals.
+
+### Error Registry
+
+The Error Registry supplies stable codes for model, tool, Claim State, retrieval,
+external, authentication, and runtime failures. Each entry defines retry class, state
+effect, safe role-facing message, diagnostic reference rules, and any provider-code
+mapping. A timeout after an external side effect can be `unknown_outcome`; it must be
+reconciled before retry rather than treated as a simple failure.
 
 ### Follow-up and Retention Policies
 
@@ -166,12 +240,13 @@ The system builds a claim-specific form through the following sequence:
 natural claimant account
 -> explicit facts and bounded classification proposals
 -> safety and human-support interruption checks
--> claim-family branch proposal
+-> content-branch candidates with sources
 -> approved rule activates registered fields and tags
 -> conditional sub-branches activate when supported
 -> current action identifies required-now and candidate fields
--> Agent asks one useful question or progresses the next safe action
--> Claim State changes cause the active form to be recalculated
+-> TurnPlan may combine communication, form patches, lookups, and the next step
+-> Runtime validates an ExecutionPlan and applies only authorised effects
+-> Claim State changes cause branches, WorkItems, lifecycle, and form to be recalculated
 ```
 
 The form is dynamic because its active subset changes for each claim. Its schema is
@@ -334,6 +409,12 @@ or exposing a field through claimant or staff APIs is a shared contract change. 
 requires coordinated updates to the field model, API contract, domain validation,
 persistence mapping, projections, fixtures, and tests.
 
+Adding or changing a Content Branch, Lifecycle, Action, Tool, Staff Capability, Model
+Profile, or Error Registry entry requires the same impact analysis for every consumer of
+its semantics. A wording-only change may avoid a storage migration, but a change to
+authority, visibility, side effects, retry, state transition, or output schema is a shared
+contract change.
+
 Changing wording or candidate priority is not automatically a schema change, but it
 still requires Agent Policy evaluation and publication. Making a field required for
 claim creation, urgent handling, or another high-impact action is a controlled business
@@ -343,10 +424,14 @@ rule and requires Northwind authority.
 
 ### Stage 1: Static controlled catalogue
 
-- define and validate a small published field and branch snapshot;
+- define and validate small published Field, Content Branch, Lifecycle, Action, Tool,
+  Staff Capability, Model Profile, and Error snapshots;
 - support motor, unknown, urgent, and human-support paths;
 - implement several conditional branches such as another party, injury, and pending
   evidence;
+- map the legacy eight Agent actions explicitly to the new namespaced action model;
+- support one model profile and one provider adapter through the provider-neutral
+  ModelRequest and ModelResult boundary;
 - replace the current fixed four-field sequence with controlled selection; and
 - test irrelevant-question avoidance, required-now selection, and safe handoff.
 
@@ -354,6 +439,8 @@ rule and requires Northwind authority.
 
 - persist Registry versions and the version used by each claim;
 - preserve branch, field, source, and selection-state history;
+- persist TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelope, ToolResult, and
+  TurnResult history without merging their statuses;
 - persist claim lifecycle state, follow-up task, retention, and Customer Memory versions
   with their source and expiry rules;
 - validate snapshots before runtime activation; and
@@ -372,6 +459,8 @@ rule and requires Northwind authority.
 
 - Which candidate fields enter the MVP registry for motor, home, and contents claims?
 - What is the approved branch and tag catalogue?
+- What is the minimum approved Action, Tool, Staff Capability, Model Profile, and Error
+  catalogue for the MVP?
 - Which rule conditions are sufficient for the first implementation?
 - Which explicit claimant statements may become confirmed without another turn?
 - What is the minimum field set for each safe next action and claim-creation route?
@@ -382,3 +471,5 @@ rule and requires Northwind authority.
 - Which lifecycle, follow-up, and retention changes require stronger approval?
 - Which Customer Memory categories are allowed, and what evidence is required before they
   can be stored?
+- How long must legacy Agent Decisions remain readable, and when may the eight-action API
+  mapping be removed?
