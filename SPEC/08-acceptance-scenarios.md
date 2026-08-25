@@ -34,6 +34,11 @@ The `MVP-AT` namespace adds committed MVP targets without renaming or reusing th
 | MVP-AT-04 | Prompt injection inside a document | Retrieved instructions do not change system authority, tool access, or customer-data visibility |
 | MVP-AT-05 | Model API is unavailable or malformed | The error is normalised, claim progress is preserved, and the service does not fabricate an Agent result |
 | MVP-AT-06 | Data runtime profile selection | Exactly one fixture, Cloudflare, MongoDB, or AWS profile is active; incomplete or mixed-provider configuration fails explicitly |
+| MVP-AT-07 | One input has several purposes | One turn may answer, explain, propose several supported facts, request a bounded lookup, and identify the next step; the audit distinguishes communication, proposals, approved actions, and completed results |
+| MVP-AT-08 | Content and lifecycle coexist | Motor, collision, another-party, and pending-evidence content remains separate from lifecycle and WorkItems; waiting for one document does not stop unrelated safe progress |
+| MVP-AT-09 | Open-ended staff `@Agent` request | The Agent combines authorised reading, comparison, gap explanation, next-step proposals, and a communication draft without treating staff read access as execution permission |
+| MVP-AT-10 | External submission outcome is unknown | The request remains `unknown_outcome`; status is checked with the existing identity before any retry, and no duplicate external action is created |
+| MVP-AT-11 | Model profile lacks a required capability | The runtime returns a capability error or uses only an equivalently evaluated fallback; it does not parse free text as a structured state or side-effect proposal |
 
 ## Product-Direction Administration and Control Plane Scenarios
 
@@ -59,6 +64,11 @@ backlog work in issue #208.
   requested action without requiring full transcript review.
 - Knowledge and model output remain evidence or proposals until the applicable authority
   permits an action.
+- The model proposal, validated execution plan, real tool and state outcomes, and final
+  role projection remain distinguishable for every evaluated turn.
+- Behaviour evaluation checks the trajectory, including repeated questions, rejected
+  overreach, side effects, unknown outcomes, and handoff quality, rather than only the
+  final response text.
 - Success, unavailable, timeout, malformed, retry, stale-revision, and access-denied paths
   retain traceable state and actionable errors.
 - Core results are repeatable with synthetic data and independently verified.
