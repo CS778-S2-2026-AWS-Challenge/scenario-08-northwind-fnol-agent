@@ -213,6 +213,28 @@ def test_mongodb_connection_config_rejects_invalid_timeout(
         MongoDBConnectionConfig.from_environment()
 
 
+@pytest.mark.parametrize(
+    ('variable', 'value', 'message'),
+    [
+        ('NORTHWIND_MONGODB_DATABASE', 'invalid/database', 'DATABASE is invalid'),
+        ('NORTHWIND_MONGODB_COLLECTION', 'system.secrets', 'COLLECTION is invalid'),
+    ],
+)
+def test_mongodb_connection_config_rejects_invalid_names(
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_COLLECTION', 'claim_records')
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(MongoDBConfigurationError, match=message):
+        MongoDBConnectionConfig.from_environment()
+
+
 def test_connected_mongodb_repository_reports_verified_and_can_close(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
