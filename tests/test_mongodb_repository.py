@@ -186,6 +186,20 @@ def test_mongodb_connection_config_reads_bounded_non_secret_settings(
     assert config.server_selection_timeout_ms == 750
 
 
+def test_mongodb_connection_config_representation_redacts_secret_uri() -> None:
+    config = MongoDBConnectionConfig(
+        'mongodb+srv://private-user:private-secret@example.invalid',
+        'northwind_test',
+    )
+
+    representation = repr(config)
+
+    assert 'private-user' not in representation
+    assert 'private-secret' not in representation
+    assert 'mongodb+srv' not in representation
+    assert "database_name='northwind_test'" in representation
+
+
 @pytest.mark.parametrize('timeout', ['not-a-number', '99', '60001'])
 def test_mongodb_connection_config_rejects_invalid_timeout(
     monkeypatch: pytest.MonkeyPatch,
@@ -240,6 +254,24 @@ def test_mongodb_connection_failure_closes_client_without_exposing_uri(
     assert client.closed
     assert secret_uri not in str(error.value)
     assert 'secret' not in str(error.value)
+
+
+def test_mongodb_constructor_failure_is_bounded_without_exposing_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret_uri = 'mongodb+srv://constructor-user:constructor-secret@example.invalid'
+
+    def fail_constructor(*args: object, **kwargs: object) -> None:
+        raise ValueError(f'invalid provider URI: {secret_uri}')
+
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', fail_constructor)
+
+    with pytest.raises(MongoDBConfigurationError) as error:
+        connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
+
+    assert secret_uri not in str(error.value)
+    assert 'constructor-user' not in str(error.value)
+    assert 'constructor-secret' not in str(error.value)
 
 
 def test_claim_and_session_round_trip_enforces_customer_ownership(

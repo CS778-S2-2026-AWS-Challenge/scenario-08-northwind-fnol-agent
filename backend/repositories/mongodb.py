@@ -8,7 +8,7 @@ document details below the repository boundary.
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -51,7 +51,7 @@ class MongoDBConfigurationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class MongoDBConnectionConfig:
-    uri: str
+    uri: str = field(repr=False)
     database_name: str
     collection_name: str = 'northwind_records'
     server_selection_timeout_ms: int = 5_000
@@ -101,11 +101,12 @@ class MongoDBConnectionConfig:
 def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepository':
     """Connect and verify MongoDB before exposing the persistence adapter."""
 
-    client: MongoClient[Any] = MongoClient(
-        config.uri,
-        serverSelectionTimeoutMS=config.server_selection_timeout_ms,
-    )
+    client: MongoClient[Any] | None = None
     try:
+        client = MongoClient(
+            config.uri,
+            serverSelectionTimeoutMS=config.server_selection_timeout_ms,
+        )
         client.admin.command('ping')
         return MongoDBRepository(
             client,
@@ -113,7 +114,8 @@ def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepos
             collection_name=config.collection_name,
         )
     except (PyMongoError, ValueError) as error:
-        client.close()
+        if client is not None:
+            client.close()
         raise MongoDBConfigurationError(
             'MongoDB connection or repository initialisation failed.'
         ) from error
