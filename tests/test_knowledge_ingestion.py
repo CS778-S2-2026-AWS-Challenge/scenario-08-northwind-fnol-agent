@@ -85,7 +85,7 @@ def test_approved_source_is_indexed_once_with_traceable_chunks() -> None:
     assert len(store.writes) == 3
     chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
     chunks = [json.loads(line) for line in store.objects[chunks_key].splitlines()]
-    assert chunks[1]['chunk_id'] == 'nw-motor-2026-1#mtr-cov-01'
+    assert chunks[1]['chunk_id'] == 'nw-motor-2026-1#MTR-COV-01'
     assert chunks[1]['section_path'] == 'MTR-COV-01 - Collision cover'
     assert chunks[1]['checksum'] == sha256(POLICY).hexdigest()
     assert chunks[1]['jurisdiction'] == 'NZ'

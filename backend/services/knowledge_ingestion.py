@@ -43,8 +43,9 @@ class KnowledgeIngestionResult:
     status: str
 
 
-def _slug(value: str) -> str:
-    return re.sub(r'[^a-z0-9]+', '-', value.casefold()).strip('-')
+def _citation_identifier(value: str, position: int) -> str:
+    identifier = re.sub(r'[^A-Za-z0-9_-]+', '-', value).strip('-')
+    return identifier or f'SECTION-{position:03d}'
 
 
 def _terms(text: str) -> set[str]:
@@ -309,7 +310,7 @@ class KnowledgeIngestionService:
         for position, section in enumerate(sections, start=1):
             heading = section.splitlines()[0].removeprefix('## ').strip()
             section_code = heading.split(' - ', 1)[0]
-            identifier = _slug(section_code) or f'section-{position:03d}'
+            identifier = _citation_identifier(section_code, position)
             chunks.append(
                 KnowledgeChunk(
                     document_id=source.document_id,

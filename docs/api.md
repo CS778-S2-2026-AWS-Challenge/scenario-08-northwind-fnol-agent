@@ -1493,6 +1493,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 |---|---|---|
 | `POST` | `/internal/v1/agent/turns` | Produce the current compatibility Agent Decision proposal |
 | `POST` | `/internal/v1/policy/search` | Retrieve cited policy evidence |
+| `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
@@ -1569,6 +1570,37 @@ enter a versioned HTTP contract only when backend models, Model Gateway,
 persistence, claimant and Workbench consumers, fixtures, generated OpenAPI, and contract
 tests are updated in the same pull request. Until then, `/internal/v1/agent/turns`
 continues to use the compatibility request and `AgentDecision` response above.
+
+### `POST /internal/v1/knowledge/search`
+
+Retrieves approved knowledge chunks after exact applicability filtering. Requires an integration
+principal. This route searches policy wording and guidance; it does not retrieve a customer's
+structured policy schedule or make a coverage decision.
+
+Request:
+
+```json
+{
+  "question": "How much excess do I have to pay?",
+  "jurisdiction": "NZ",
+  "visibility": "customer_and_staff",
+  "document_id": "nw-policy-motor-standard-mvp-2026-1",
+  "authority": "northwind_synthetic_demo",
+  "version": "MVP-2026.1",
+  "insurer": "Northwind Insurance",
+  "product": "motor",
+  "effective_at": "2026-08-25T00:00:00Z",
+  "limit": 3
+}
+```
+
+An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
+version, checksum, and source text for every result. `no_evidence` returns no results and an honest
+scope limitation. `unavailable` returns no results and a claimant-safe dependency limitation.
+Provider errors and object-store identifiers are not exposed. Missing applicability fields fail
+request validation rather than broadening the search.
+When a structured Policy Schedule supplies a wording document identifier, the caller includes
+`document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
 
 ### `POST /internal/v1/policy/search`
 

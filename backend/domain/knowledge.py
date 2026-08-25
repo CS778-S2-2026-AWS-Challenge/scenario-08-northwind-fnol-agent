@@ -3,6 +3,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
+from pydantic import Field, field_validator
+
+from backend.domain.models import ContractModel
+
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeChunk:
@@ -31,6 +35,7 @@ class KnowledgeSearch:
     text: str
     jurisdiction: str
     visibility: str
+    document_id: str | None = None
     authority: str | None = None
     version: str | None = None
     insurer: str | None = None
@@ -78,3 +83,44 @@ class KnowledgeRetriever(Protocol):
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         raise NotImplementedError
+
+
+class KnowledgeRetrievalUnavailable(RuntimeError):
+    pass
+
+
+class KnowledgeSearchRequest(ContractModel):
+    question: str = Field(min_length=1, max_length=500)
+    jurisdiction: str = Field(min_length=2, max_length=20)
+    visibility: str = Field(min_length=1, max_length=100)
+    document_id: str | None = Field(default=None, min_length=1, max_length=200)
+    authority: str = Field(min_length=1, max_length=100)
+    version: str = Field(min_length=1, max_length=100)
+    insurer: str = Field(min_length=1, max_length=200)
+    product: str = Field(min_length=1, max_length=100)
+    effective_at: datetime
+    limit: int = Field(default=5, ge=1, le=10)
+
+    @field_validator('effective_at')
+    @classmethod
+    def require_effective_at_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError('effective_at must include a timezone offset')
+        return value
+
+
+class KnowledgeCitation(ContractModel):
+    document_id: str
+    chunk_id: str
+    title: str
+    section_path: str
+    source_uri: str
+    version: str
+    checksum: str
+    text: str
+
+
+class KnowledgeSearchResponse(ContractModel):
+    status: str
+    results: list[KnowledgeCitation]
+    limitations: list[str]
