@@ -602,3 +602,95 @@ def test_claimant_retry_restores_authoritative_success_when_response_save_fails(
     assert restored.json()['revision'] == after_failure.revision
     assert restored.json()['action']['status'] == 'assigned'
     assert repository.list_agent_decisions(claim_id, 'cus_demo') == decisions_after_failure
+
+
+def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_conflict() -> None:
+    class AcceptedResultCASConflictRepository(FixtureRepository):
+        fail_assessor_claim_write = True
+
+        def save_claim(self, claim: Any, expected_revision: int) -> None:
+            if self.fail_assessor_claim_write and claim.assessor_routing is not None:
+                self.fail_assessor_claim_write = False
+                current = self.get_claim_internal(claim.claim_id)
+                assert current is not None
+                concurrent = current.model_copy(
+                    update={
+                        'customer_next_step': current.customer_next_step.model_copy(
+                            update={'summary': 'Claim details changed during provider response.'}
+                        ),
+                        'revision': current.revision + 1,
+                        'updated_at': now_utc(),
+                    }
+                )
+                super().save_claim(concurrent, expected_revision)
+                raise RevisionConflict(concurrent.revision)
+            super().save_claim(claim, expected_revision)
+
+    class CountingAssessorAdapter(MockAssessorServiceAdapter):
+        invocations = 0
+
+        def route_assessor(self, command: Any, request_fingerprint: str) -> Any:
+            self.invocations += 1
+            return super().route_assessor(command, request_fingerprint)
+
+    repository = AcceptedResultCASConflictRepository()
+    adapter = CountingAssessorAdapter()
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        claim_id, revision = _start_created_motor_claim(
+            client,
+            repository,
+            key='accepted-cas-recovery',
+        )
+        consent = _grant_consent(
+            client,
+            claim_id,
+            revision,
+            key='accepted-cas-recovery',
+        )
+        headers = {
+            **AUTH,
+            'Idempotency-Key': 'accepted-cas-recovery',
+            'If-Match': str(consent['revision']),
+        }
+
+        conflicted = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers=headers,
+        )
+        after_conflict = repository.get_claim_internal(claim_id)
+        operations = list(repository._assessor_routing_operations.values())
+        unrelated_retry = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'accepted-cas-unrelated',
+                'If-Match': str(consent['revision']),
+            },
+        )
+        recovered = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers=headers,
+        )
+
+    assert conflicted.status_code == 409
+    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert after_conflict is not None
+    assert after_conflict.revision == consent['revision'] + 1
+    assert after_conflict.assessor_routing is None
+    assert len(operations) == 1
+    assert operations[0].status is AssessorRoutingOperationStatus.ACCEPTED
+    assert operations[0].result is not None
+    accepted_reference = operations[0].result.assessor_reference
+    assert accepted_reference is not None
+    assert unrelated_retry.status_code == 409
+    assert unrelated_retry.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert recovered.status_code == 200
+    assert recovered.json()['revision'] == consent['revision'] + 2
+    assert recovered.json()['action']['status'] == 'assigned'
+    assert recovered.json()['action']['routing']['assessor_reference'] == accepted_reference
+    assert adapter.invocations == 1
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.assessor_routing is not None
+    assert stored.assessor_routing.assessor_reference == accepted_reference
+    assert len(repository._assessor_routing_operations) == 1

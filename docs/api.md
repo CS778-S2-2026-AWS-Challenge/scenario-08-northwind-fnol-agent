@@ -1032,6 +1032,11 @@ provider call. A timeout retry reuses that durable authority record rather than 
 with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
 idempotency response fails, the same request restores the authoritative assigned or queued state;
 the claimant client also reloads that state before presenting a failure message.
+If provider acceptance is durable but a concurrent Claim mutation wins the following
+compare-and-set, the first request returns the bounded revision conflict. Only the identical
+claimant request with the original idempotency key, revision, consent, authority, and operation
+identity may reconcile that accepted result without another provider call. An unrelated stale
+request remains a revision or idempotency conflict.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 

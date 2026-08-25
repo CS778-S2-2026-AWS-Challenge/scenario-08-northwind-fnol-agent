@@ -16,6 +16,7 @@ from backend.domain.models import (
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorRoutingOperationStatus,
     AssessorRoutingStatus,
     AuthorityOutcome,
     ClaimantExternalServiceAction,
@@ -38,7 +39,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.integrations import route_assessor
+from backend.services.integrations import assessor_operation_id, route_assessor
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -382,14 +383,21 @@ def request_assessor_routing(
     if claim.revision != expected_revision:
         consent = _active_assessor_consent(claim)
         decision = repository.get_agent_decision(claim_id, decision_id, principal.subject)
-        if claim.assessor_routing is None or consent is None or decision is None:
+        if consent is None or decision is None:
             _raise_revision_conflict(claim)
         if decision.resulting_revision != expected_revision:
             _raise_revision_conflict(claim)
+        route_request = _assessor_route_request(claim, consent, decision_id)
+        if claim.assessor_routing is None:
+            operation = repository.get_assessor_routing_operation(
+                assessor_operation_id(route_request)
+            )
+            if operation is None or operation.status is not AssessorRoutingOperationStatus.ACCEPTED:
+                _raise_revision_conflict(claim)
         route_assessor(
             repository,
             adapter,
-            _assessor_route_request(claim, consent, decision_id),
+            route_request,
         )
         restored = repository.get_claim(claim_id, principal.subject)
         if restored is None:

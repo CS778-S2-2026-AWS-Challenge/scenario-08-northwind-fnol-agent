@@ -99,7 +99,10 @@ consent is bounded and idempotent, claimant projections exclude raw consent refe
 Northwind authority is created, provider failure preserves the consented revision, and an
 unchanged retry succeeds once without rewriting its authority record. Failure injection also
 checks that consent cannot survive without its idempotency result and that a durable provider
-success is restored when the public response write fails. The claimant tests exercise the
+success is restored when the public response write fails. A separate provider-acceptance/Claim-
+CAS race check proves that the identical claimant request can reconcile the already accepted
+operation without a second provider task, while an unrelated stale request remains rejected.
+The claimant tests exercise the
 consent-required, permission and submission progress, assigned success, retryable failure,
 explicit retry, authoritative-result recovery, and claim-scoped interaction states.
 
