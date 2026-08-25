@@ -396,6 +396,7 @@ class WorkingClaim(ContractModel):
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
+    assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)

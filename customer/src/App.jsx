@@ -16,6 +16,7 @@ import {
   updateClaimField,
 } from './api.js'
 import './App.css'
+import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -81,6 +82,8 @@ function mergeFields(current, changes) {
 }
 
 function App() {
+  const [page, setPage] = useState('home')
+  const [claimType, setClaimType] = useState('motor')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -99,6 +102,8 @@ function App() {
     consentChecked: false,
     error: null,
   })
+  const [failedMessage, setFailedMessage] = useState(null)
+  const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
@@ -149,6 +154,12 @@ function App() {
       consentChecked: current.claimId === claim?.claim_id ? current.consentChecked : false,
       error: serviceErrorValue,
     }))
+  }
+
+  const claimTypePrompts = {
+    motor: 'For example: Another car reversed into mine while it was parked.',
+    home: 'For example: A pipe burst overnight and damaged the kitchen floor.',
+    contents: 'For example: My laptop and camera were stolen from my apartment.',
   }
 
   useEffect(() => {
@@ -209,6 +220,7 @@ function App() {
     if (!text || isBusy || proposedFields.length > 0) return
 
     setError('')
+    setFailedMessage(null)
     setStatus(hasStarted ? 'sending' : 'starting')
     try {
       if (pendingSubmission.current?.text !== text) {
@@ -220,6 +232,7 @@ function App() {
         }
       }
       const operation = pendingSubmission.current
+      setPendingMessage({ text, audience: 'Northwind claim team' })
       let activeClaim = claim
       let activeSessionId = sessionId
       if (!activeClaim) {
@@ -251,8 +264,21 @@ function App() {
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
       pendingSubmission.current = null
+      setPendingMessage(null)
+      setFailedMessage(null)
       setStatus('idle')
     } catch (requestError) {
+      setPendingMessage(null)
+      const knownRejection = requestError instanceof ApiRequestError
+        && requestError.status >= 400
+        && requestError.status < 500
+      setFailedMessage({
+        text,
+        sender: 'You',
+        audience: 'Northwind claim team',
+        delivery: knownRejection ? 'Rejected before delivery' : 'Delivery outcome unknown',
+        retry: knownRejection ? 'Correct the issue and retry' : 'Retry to confirm delivery safely',
+      })
       showError(requestError)
     }
   }
@@ -526,10 +552,17 @@ function App() {
   return (
     <div className="customer-app">
       <header className="product-header">
-        <a className="brand" href="/" aria-label="Northwind home">
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
           <span className="brand-mark">N</span>
-          <span>Northwind</span>
+          <span>Northwind Insurance</span>
         </a>
+        {!hasStarted && page === 'home' && (
+          <nav className="public-nav" aria-label="Main navigation">
+            <a href="#claims">Claims</a>
+            <a href="#how-it-works">How it works</a>
+            <button className="login-button" type="button" onClick={() => setPage('login')}>Log in</button>
+          </nav>
+        )}
         {hasStarted && (
           <div className="header-actions">
             <span className="draft-label">Draft report</span>
@@ -545,24 +578,88 @@ function App() {
         )}
       </header>
 
-      {!hasStarted ? (
+      {!hasStarted && page === 'guided-motor' ? (
+        <GuidedMotorClaim onExit={() => setPage('home')} />
+      ) : !hasStarted && page === 'login' ? (
+        <main className="login-page">
+          <section className="login-card" aria-labelledby="login-title">
+            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
+            <p className="eyebrow">Your Northwind account</p>
+            <h1 id="login-title">Welcome back</h1>
+            <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
+            <form className="login-form" onSubmit={(event) => event.preventDefault()}>
+              <label htmlFor="customer-email">Email address</label>
+              <input id="customer-email" name="email" type="email" autoComplete="email" />
+              <label htmlFor="customer-password">Password</label>
+              <input id="customer-password" name="password" type="password" autoComplete="current-password" />
+              <button className="primary-button login-submit" type="submit" disabled>Log in</button>
+              <p className="prototype-note" role="note">Customer account authentication is not connected in this prototype. You can still start a claim without logging in.</p>
+            </form>
+            <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
+              Start a claim without logging in
+            </button>
+            <div className="employee-access">
+              <span>Northwind team member?</span>
+              <a href="http://127.0.0.1:8002/">Employee access</a>
+            </div>
+          </section>
+        </main>
+      ) : !hasStarted ? (
         <main className="entry-page">
           <section className="entry-main">
             <div className="entry-content">
-              <p className="eyebrow">Start a new claim</p>
-              <h1>Tell us what happened in your own words</h1>
+              <p className="eyebrow">Claims, made a little easier</p>
+              <h1>We&apos;ll help you get back on track</h1>
               <p className="entry-intro">
-                You do not need to use insurance terms. Start with the details you know now.
+                Start your claim online in a few minutes. No account or insurance jargon needed.
               </p>
+              <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
+                <h2 id="claim-starter-title">What would you like to claim for?</h2>
+                <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                  {['motor', 'home', 'contents'].map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      role="tab"
+                      aria-selected={claimType === type}
+                      className={claimType === type ? 'is-selected' : ''}
+                      onClick={() => setClaimType(type)}
+                    >
+                      <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
+                      {type[0].toUpperCase() + type.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              {claimType === 'motor' && (
+                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
+                  Start guided Motor claim
+                  <span>Three clear steps with draft saving</span>
+                </button>
+              )}
+              {claimType !== 'motor' && (
+                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. Start with the conversational claim service below.</p>
+              )}
+              <div className="choice-divider"><span>or describe what happened</span></div>
               <MessageComposer
                 draft={draft}
                 setDraft={setDraft}
                 onSubmit={sendMessage}
                 inputLabel="Incident description"
                 busy={isBusy}
-                buttonLabel={status === 'starting' ? 'Starting report...' : 'Continue claim'}
+                buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
                 error={error}
+                placeholder={claimTypePrompts[claimType]}
               />
+              {failedMessage && (
+                <article className="message message-claimant is-failed">
+                  <p className="message-author">{failedMessage.sender}</p>
+                  <p>{failedMessage.text}</p>
+                  <p className="message-state">
+                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                  </p>
+                </article>
+              )}
+              </section>
               <div className="resume-entry">
                 <button
                   className="secondary-button"
@@ -600,6 +697,11 @@ function App() {
                   </section>
                 )}
               </div>
+              <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
+                <span>Securely saved</span>
+                <span>Pause anytime</span>
+                <span>Human help available</span>
+              </div>
             </div>
           </section>
           <HelpfulDetails />
@@ -618,8 +720,27 @@ function App() {
                 <article className={`message message-${message.actor}`} key={message.message_id}>
                   <p className="message-author">{message.actor === 'claimant' ? 'You' : 'Northwind'}</p>
                   <p>{messageText(message)}</p>
+                  <p className="message-state">
+                    Sender: {message.actor === 'claimant' ? 'You' : 'Northwind'} · Audience: Shared claim conversation · Delivered
+                  </p>
                 </article>
               ))}
+              {status === 'sending' && pendingMessage && (
+                <article className="message message-claimant is-pending" aria-label="Message sending">
+                  <p className="message-author">You</p>
+                  <p>{pendingMessage.text}</p>
+                  <p className="message-state">Audience: {pendingMessage.audience} · Sending…</p>
+                </article>
+              )}
+              {failedMessage && (
+                <article className="message message-claimant is-failed" role="alert">
+                  <p className="message-author">{failedMessage.sender}</p>
+                  <p>{failedMessage.text}</p>
+                  <p className="message-state">
+                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                  </p>
+                </article>
+              )}
             </div>
 
             {resumeContext && (
@@ -733,7 +854,7 @@ function App() {
                   ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
                   : 'Confirm or correct the details before continuing.'
               }
-              buttonLabel={status === 'sending' ? 'Sending...' : 'Send'}
+              buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
           </section>
@@ -972,6 +1093,7 @@ function MessageComposer({
   disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
+  placeholder = 'Write the details you know...',
 }) {
   return (
     <form className="report-box" onSubmit={onSubmit}>
@@ -981,7 +1103,7 @@ function MessageComposer({
         className="report-text"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        placeholder="Write the details you know..."
+        placeholder={placeholder}
         rows="4"
         disabled={busy || disabled}
       />

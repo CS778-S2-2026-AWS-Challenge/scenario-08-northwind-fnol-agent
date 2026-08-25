@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from backend.adapters.claims_service import (
@@ -74,11 +77,20 @@ def create_app(
         )
     else:
         bundle = data_runtime_bundle or build_data_runtime_bundle(resolved_settings)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            bundle.close()
+
     app = FastAPI(
         title='Northwind FNOL Backend',
         version='0.1.0',
         docs_url='/docs' if resolved_settings.expose_api_docs else None,
         redoc_url=None,
+        lifespan=lifespan,
     )
     app.state.settings = resolved_settings
     app.state.data_runtime_bundle = bundle

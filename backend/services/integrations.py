@@ -63,7 +63,7 @@ def _idempotency_error() -> ApiError:
     )
 
 
-def _assessor_operation_id(payload: RouteAssessorRequest) -> str:
+def assessor_operation_id(payload: RouteAssessorRequest) -> str:
     identity = {
         'claim_id': payload.claim_id,
         'external_claim_id': payload.external_claim_id,
@@ -222,6 +222,9 @@ def create_external_claim(
             'external_claim_source_revision': payload.claim_revision,
             'external_claim_fingerprint': fingerprint,
             'route': outcome.result.route,
+            'assignee_id': (
+                'stf_demo' if payload.route == 'standard_motor_intake' else claim.assignee_id
+            ),
             'claim_state': claim.claim_state.model_copy(
                 update={
                     'workflow_state': (
@@ -252,7 +255,7 @@ def route_assessor(
     authorisation_decision: AgentDecisionRecord | None = None,
 ) -> tuple[AssessorRoutingResult, bool]:
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    operation_id = _assessor_operation_id(payload)
+    operation_id = assessor_operation_id(payload)
     claim = repository.get_claim_internal(payload.claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -309,21 +312,28 @@ def route_assessor(
             'data scope.',
         )
 
-    if operation is None:
-        decision = authorisation_decision or repository.get_agent_decision_internal(
-            payload.claim_id, payload.authorisation_ref
+    decision = (
+        authorisation_decision
+        if operation is None and authorisation_decision is not None
+        else repository.get_agent_decision_internal(
+            payload.claim_id,
+            payload.authorisation_ref,
         )
-        if (
-            decision is None
-            or decision.decision_id != payload.authorisation_ref
-            or decision.claim_id != payload.claim_id
-            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
-            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
-            or decision.resulting_revision != claim.revision
-        ):
-            raise _authorisation_error(
-                'Assessor routing requires an authorised rule or staff decision.',
-            )
+    )
+    if (
+        decision is None
+        or decision.decision_id != payload.authorisation_ref
+        or decision.claim_id != payload.claim_id
+        or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        or decision.resulting_revision != claim.revision
+        or (operation is not None and operation.authorised_revision != claim.revision)
+    ):
+        raise _authorisation_error(
+            'Assessor routing requires current authority for this claim revision.',
+        )
+
+    if operation is None:
         timestamp = now_utc()
         operation = AssessorRoutingOperation(
             operation_id=operation_id,

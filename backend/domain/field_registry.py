@@ -1,6 +1,7 @@
 REGISTERED_FIELD_CODES = frozenset(
     {
         'policy.policy_number',
+        'claimant.client_number',
         'claimant.role',
         'claimant.contact_preference',
         'incident.type',
@@ -21,4 +22,4 @@ REGISTERED_FIELD_CODES = frozenset(
     }
 )
 
-FIELD_REGISTRY_VERSION = '2'
+FIELD_REGISTRY_VERSION = '3'

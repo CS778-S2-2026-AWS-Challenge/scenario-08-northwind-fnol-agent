@@ -41,7 +41,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyConflict
-from backend.services.support import now_utc
+from backend.services.support import now_utc, request_fingerprint
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
 ASSESSOR_CONSENT_FIELDS = [
@@ -73,6 +73,22 @@ class CountingAssessorAdapter(MockAssessorServiceAdapter):
         request_fingerprint: str,
     ) -> AssessorRoutingOutcome:
         self.invocations += 1
+        return super().route_assessor(command, request_fingerprint)
+
+
+class TimeoutOnceAssessorAdapter(MockAssessorServiceAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.invocations = 0
+
+    def route_assessor(
+        self,
+        command: RouteAssessorRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome:
+        self.invocations += 1
+        if self.invocations == 1:
+            raise AssessorAdapterFailure(AssessorFixtureFailure.TIMEOUT)
         return super().route_assessor(command, request_fingerprint)
 
 
@@ -969,6 +985,101 @@ def test_timeout_retry_is_safe_and_deduplicates_after_success() -> None:
     assert stored.revision == revision + 1
     assert stored.assessor_routing is not None
     assert stored.assessor_routing.routing_status is AssessorRoutingStatus.ASSIGNED
+
+
+def test_retryable_assessor_operation_rejects_stale_authority_before_provider_retry() -> None:
+    repository = FixtureRepository()
+    adapter = TimeoutOnceAssessorAdapter()
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, revision = prepare_assessor_request(
+            client,
+            repository,
+            key='retryable-stale-authority',
+        )
+        claim_id = str(payload['claim_id'])
+        original_decision = repository.get_agent_decision_internal(
+            claim_id,
+            str(payload['authorisation_ref']),
+        )
+        assert original_decision is not None
+
+        timed_out = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        corrected_summary = 'Claim details were corrected before assessor retry.'
+        repository.save_claim(
+            claim.model_copy(
+                update={
+                    'customer_next_step': claim.customer_next_step.model_copy(
+                        update={'summary': corrected_summary}
+                    ),
+                    'revision': revision + 1,
+                    'updated_at': now_utc(),
+                }
+            ),
+            expected_revision=revision,
+        )
+
+        stale_retry = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        invocations_after_stale_retry = adapter.invocations
+        stale_claim = repository.get_claim_internal(claim_id)
+        operation_identity = {
+            key: payload[key]
+            for key in (
+                'claim_id',
+                'external_claim_id',
+                'authorisation_ref',
+                'claimant_consent_ref',
+                'requested_action',
+            )
+        }
+        operation_id = f'asr_op_{request_fingerprint(operation_identity)}'
+        stale_operation = repository.get_assessor_routing_operation(operation_id)
+
+        fresh_decision_id = 'dec_route_retryable_stale_authority_current'
+        save_authorisation(
+            repository,
+            claim_id=claim_id,
+            customer_id='cus_demo',
+            session_id=original_decision.session_id,
+            decision_id=fresh_decision_id,
+            revision=revision + 1,
+            action=AgentAction.PROCEED,
+            reason_code='ASSESSOR_RULE_AUTHORISED',
+        )
+        refreshed = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json={**payload, 'authorisation_ref': fresh_decision_id},
+        )
+
+    assert timed_out.status_code == 503
+    assert stale_retry.status_code == 409
+    assert stale_retry.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert 'current authority' in stale_retry.json()['error']['message']
+    assert invocations_after_stale_retry == 1
+    assert stale_claim is not None
+    assert stale_claim.revision == revision + 1
+    assert stale_claim.customer_next_step.summary == corrected_summary
+    assert stale_claim.assessor_routing is None
+    assert stale_operation is not None
+    assert stale_operation.status is AssessorRoutingOperationStatus.RETRYABLE_FAILURE
+    assert stale_operation.authorised_revision == revision
+    assert refreshed.status_code == 201
+    assert adapter.invocations == 2
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.revision == revision + 2
+    assert stored.assessor_routing is not None
 
 
 def test_changed_payload_is_rejected_after_timeout_before_any_success() -> None:

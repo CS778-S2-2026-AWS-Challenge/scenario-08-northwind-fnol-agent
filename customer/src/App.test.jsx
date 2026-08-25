@@ -223,10 +223,92 @@ function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.custo
 describe('claimant intake', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    localStorage.clear()
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('lets claimants start without login and keeps employee access inside the login page', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
+    expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Employee access' })).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:8002/',
+    )
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('offers a three-step guided Motor claim without replacing conversational intake', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+
+    expect(screen.getByText('1 Details')).toBeVisible()
+    expect(screen.getByText('2 Materials')).toBeVisible()
+    expect(screen.getByText('3 Declaration')).toBeVisible()
+    expect(screen.getByLabelText('Client Number')).toBeRequired()
+    expect(screen.getByLabelText('What happened')).toBeRequired()
+    await user.click(screen.getByRole('button', { name: 'Incident date' }))
+    expect(screen.getByRole('dialog', { name: 'Choose incident date' })).toBeVisible()
+    expect(screen.getByText('Mon')).toBeVisible()
+    await user.click(screen.getByRole('heading', { name: 'Your details and incident' }))
+    expect(screen.queryByRole('dialog', { name: 'Choose incident date' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Incident date' }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Choose incident date' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Incident date' })).toHaveFocus()
+    expect(screen.getByLabelText('Vehicle registration plate number')).toHaveAttribute('placeholder', 'For example, ABC123')
+    expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
+  })
+
+  it('returns to guided details and continues without overwriting confirmed fields', async () => {
+    const today = new Date()
+    const selectedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-12`
+    const confirmed = (value) => ({ value, source: 'claimant', source_refs: [], status: 'confirmed', needed_for: 'current_action', confidence: null, updated_at: '2026-08-12T00:00:00Z', updated_by: { actor_type: 'claimant', actor_id: 'cus_demo' } })
+    const savedForm = {
+      'claimant.client_number': confirmed('NW-123456'), 'claimant.role': confirmed('policyholder'),
+      'claimant.contact_preference': confirmed('email'), 'incident.type': confirmed('motor'),
+      'incident.occurred_at': confirmed(selectedDate), 'incident.location': confirmed('Queen Street'),
+      'incident.description': confirmed('Another vehicle hit my parked car.'),
+      'loss.description': confirmed('Rear bumper damage.'),
+    }
+    fetch
+      .mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+      .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, incident_type: 'motor' }))
+      .mockImplementationOnce(() => jsonResponse(firstTurn()))
+      .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, revision: 2, incident_type: 'motor', form: { 'incident.description': firstTurn().form_changes[0].field } }))
+      .mockImplementationOnce(() => jsonResponse({ claim_id: 'clm_test', revision: 3, updated_fields: savedForm, invalidated_decision_ids: [], customer_next_step: nextStep }))
+      .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, revision: 3, incident_type: 'motor', form: savedForm }))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    await user.type(screen.getByLabelText('Client Number'), 'NW-123456')
+    await user.click(screen.getByRole('button', { name: 'Incident date' }))
+    await user.click(screen.getByRole('button', { name: '12' }))
+    await user.type(screen.getByLabelText('Where it happened'), 'Queen Street')
+    await user.type(screen.getByLabelText('What happened'), 'Another vehicle hit my parked car.')
+    await user.type(screen.getByLabelText('What was damaged or lost'), 'Rear bumper damage.')
+    await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+    expect(await screen.findByRole('heading', { name: 'Add supporting materials' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+    expect(await screen.findByRole('heading', { name: 'Add supporting materials' })).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledTimes(6)
   })
 
   it('creates shared claim state, submits the first message, and requires confirmation', async () => {
@@ -243,6 +325,8 @@ describe('claimant intake', () => {
 
     expect(await screen.findByText('Please check the incident description.')).toBeVisible()
     expect(screen.getAllByText('Another vehicle hit my parked car.')).toHaveLength(2)
+    expect(screen.getByText(/Sender: You · Audience: Shared claim conversation · Delivered/)).toBeVisible()
+    expect(screen.getByText(/Sender: Northwind · Audience: Shared claim conversation · Delivered/)).toBeVisible()
     expect(screen.getByText('Check this')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Confirm details' })).toBeEnabled()
     expect(screen.getByLabelText('Add more information')).toBeDisabled()
@@ -394,7 +478,9 @@ describe('claimant intake', () => {
         'We could not reach the claim service. Check your connection and try again.',
       )
     })
-    expect(screen.getByRole('button', { name: 'Continue claim' })).toBeEnabled()
+    expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
+    expect(screen.queryByText(/Failed before delivery/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
   })
 
   it('keeps the claimant entry path operable by keyboard', async () => {
@@ -405,6 +491,13 @@ describe('claimant intake', () => {
 
     await user.tab()
     expect(screen.getByRole('link', { name: 'Northwind home' })).toHaveFocus()
+    await user.tab() // Claims navigation
+    await user.tab() // How it works navigation
+    await user.tab() // Log in
+    await user.tab() // Motor
+    await user.tab() // Home
+    await user.tab() // Contents
+    await user.tab() // Guided Motor claim
     await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
@@ -527,7 +620,7 @@ describe('claimant intake', () => {
     expect(screen.getByLabelText('Add more information')).toBeEnabled()
   })
 
-  it('reuses the claim idempotency key when a failed submission is retried', async () => {
+  it('reconciles a committed message after its response is lost', async () => {
     fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Response lost')))
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
     fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
@@ -539,9 +632,13 @@ describe('claimant intake', () => {
       'Another vehicle hit my parked car.',
     )
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
-    await screen.findByRole('alert')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Retry claim message' }))
     await screen.findByRole('button', { name: 'Confirm details' })
+    expect(screen.getAllByText('Another vehicle hit my parked car.')[0]).toBeVisible()
+    expect(screen.queryByText(/Delivery outcome unknown/)).not.toBeInTheDocument()
 
     const firstHeaders = fetch.mock.calls[0][1].headers
     const retryHeaders = fetch.mock.calls[1][1].headers
