@@ -313,7 +313,8 @@ title
 document_type
 version
 section_path
-page
+printed_pages
+pdf_page_indices
 source_uri
 jurisdiction
 insurer
