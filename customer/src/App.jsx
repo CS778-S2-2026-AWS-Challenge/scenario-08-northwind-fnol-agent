@@ -28,6 +28,30 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const CLAIM_MATERIALS = {
+  motor: [
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'The date, time, location and a short account of what happened.'],
+    ['Vehicle and driver details', 'Registration plates, names, contact details and insurer information.'],
+    ['Photos or video', 'The damage, vehicles involved and the wider incident scene, when safe.'],
+    ['Police or witness information', 'A report number or witness contact details, if available.'],
+  ],
+  home: [
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'When it happened, what caused it and which parts of the home are affected.'],
+    ['Photos or video', 'Clear views of the damage and its likely source, when safe.'],
+    ['Emergency work records', 'Invoices or reports for urgent work already completed.'],
+    ['Quotes or reports', 'Repair estimates, tradesperson notes or official reports, if available.'],
+  ],
+  contents: [
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
+    ['A list of affected items', 'Include the brand, model, age and what happened to each item.'],
+    ['Proof of ownership', 'Receipts, order confirmations, photos or account statements, if available.'],
+    ['Photos of damage', 'Clear images of each damaged item and the surrounding area.'],
+    ['Police report details', 'For theft or malicious damage, include a report number if available.'],
+  ],
+}
+
 const HANDOFF_STATUS_LABELS = {
   queued: 'Queued',
   accepted: 'Accepted by Northwind support',
@@ -136,6 +160,21 @@ function App() {
       latestRevision.current = Math.max(latestRevision.current, claim.revision)
     }
   }, [claim?.revision])
+
+  useEffect(() => {
+    function handleHistoryNavigation(event) {
+      setPage(event.state?.page || 'home')
+      if (!event.state?.page) window.scrollTo({ top: 0 })
+    }
+
+    window.addEventListener('popstate', handleHistoryNavigation)
+    return () => window.removeEventListener('popstate', handleHistoryNavigation)
+  }, [])
+
+  function openPage(nextPage) {
+    window.history.pushState({ page: nextPage }, '', window.location.href)
+    setPage(nextPage)
+  }
 
   async function refreshAfterConflict() {
     if (!claim) return
@@ -449,7 +488,7 @@ function App() {
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => setPage('login')}>Log in</button>
+            <button className="login-button" type="button" onClick={() => openPage('login')}>Log in</button>
           </nav>
         )}
         {hasStarted && (
@@ -494,7 +533,26 @@ function App() {
           </section>
         </main>
       ) : !hasStarted ? (
-        <main className="entry-page">
+        <main>
+          <section className="home-hero" aria-labelledby="home-hero-title">
+            <div className="home-hero-shade" aria-hidden="true" />
+            <div className="home-hero-content">
+              <p className="home-hero-eyebrow">Northwind Insurance</p>
+              <h1 id="home-hero-title">When the unexpected happens, we&apos;re here.</h1>
+              <p>
+                Tell us what happened and we&apos;ll guide you through your claim, one clear step at a time.
+              </p>
+              <a className="home-hero-action" href="#claims">
+                Start a claim
+                <span aria-hidden="true">&#8594;</span>
+              </a>
+            </div>
+            <a className="home-hero-scroll" href="#claims" aria-label="Go to claim application">
+              <span>Claim online</span>
+              <span aria-hidden="true">&#8595;</span>
+            </a>
+          </section>
+          <div className="entry-page">
           <section className="entry-main">
             <div className="entry-content">
               <p className="eyebrow">Claims, made a little easier</p>
@@ -519,16 +577,38 @@ function App() {
                     </button>
                   ))}
                 </div>
+              <div className="materials-checklist" aria-live="polite">
+                <div className="materials-heading">
+                  <div>
+                    <p className="eyebrow">Helpful to have ready</p>
+                    <h3>{claimType[0].toUpperCase() + claimType.slice(1)} claim materials</h3>
+                  </div>
+                  <span>{CLAIM_MATERIALS[claimType].length} items</span>
+                </div>
+                <p className="materials-note">
+                  Don&apos;t worry if you don&apos;t have everything. You can start now and add missing materials later.
+                </p>
+                <ul>
+                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                    <li key={title}>
+                      <span className="material-check" aria-hidden="true">✓</span>
+                      <span><strong>{title}</strong><small>{description}</small></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               {claimType === 'motor' && (
-                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
+                <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
                   Start guided Motor claim
                   <span>Three clear steps with draft saving</span>
                 </button>
               )}
               {claimType !== 'motor' && (
-                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. Start with the conversational claim service below.</p>
+                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened under Other ways to claim.</p>
               )}
-              <div className="choice-divider"><span>or describe what happened</span></div>
+              <details className="other-claim-options" open={Boolean(draft || failedMessage || savedReports !== null)}>
+                <summary>Other ways to claim</summary>
+              <div className="choice-divider"><span>Describe what happened</span></div>
               <MessageComposer
                 draft={draft}
                 setDraft={setDraft}
@@ -548,7 +628,6 @@ function App() {
                   </p>
                 </article>
               )}
-              </section>
               <div className="resume-entry">
                 <button
                   className="secondary-button"
@@ -586,6 +665,8 @@ function App() {
                   </section>
                 )}
               </div>
+              </details>
+              </section>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>
                 <span>Pause anytime</span>
@@ -594,6 +675,7 @@ function App() {
             </div>
           </section>
           <HelpfulDetails />
+          </div>
         </main>
       ) : (
         <main className="intake-page">

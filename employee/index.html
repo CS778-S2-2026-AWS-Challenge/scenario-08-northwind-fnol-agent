@@ -19,27 +19,37 @@
     }
     a { color: inherit; text-decoration: none; }
 
-    .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
-    .sidebar { background: #0f172a; color: #f8fafc; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-    .brand { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
-    .brand span { color: #38bdf8; }
+    .page { display: grid; grid-template-columns: 292px 1fr; min-height: 100vh; }
+    .sidebar { position:sticky; top:0; height:100vh; overflow-y:auto; background:linear-gradient(180deg,#1d1662 0%,#26264b 58%,#3c1a69 100%); color:#f8fafc; padding:26px 20px 20px; display:flex; flex-direction:column; gap:20px; border-right:1px solid rgba(113, 94, 234, 0.853); box-shadow:12px 0 36px rgba(15,23,42,.08); scrollbar-width:thin; scrollbar-color:#315b57 transparent; }
+    .brand-lockup { display:flex; align-items:center; gap:10px; padding:0 4px 10px; border-bottom:1px solid rgba(148,210,199,.16); }
+    .brand-mark { display:grid; flex:0 0 40px; width:40px; height:40px; place-items:center; border-radius:10px; background:linear-gradient(145deg,#34b7a6,#147d75); box-shadow:0 8px 20px rgba(20,125,117,.3); color:#fff; font-size:20px; font-weight:800; }
+    .brand { font-size:18px; font-weight:800; letter-spacing:-.025em; line-height:1.15; }
+    .brand span { display:block; margin-top:4px; color:#8ce5d6; font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
     .sidebar p { margin: 0; color: #cbd5e1; line-height: 1.6; font-size: 14px; }
-    .filters { display: grid; gap: 12px; }
-    .filters label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .12em; }
-    .filters select, .filters button { width: 100%; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; background: #0f172a; color: #f8fafc; }
+    .sidebar-section-label { margin:0 4px 8px; color:#967fa6; font-size:10px; font-weight:750; letter-spacing:.16em; text-transform:uppercase; }
+    .filters { display:grid; gap:9px; }
+    .filters label { font-size:10px; color:#cac9f7; text-transform:uppercase; letter-spacing:.14em; font-weight:750; }
+    .filters select, .filters button { width:100%; min-height:46px; border:1px solid #315653; border-radius:11px; padding:11px 38px 11px 13px; background:#2f3e57; color:#f8fafc; }
+    .filters select { color-scheme:dark; cursor:pointer; }
     .filters button { cursor: pointer; border-color: #38bdf8; background: #0f172a; }
-    .sidebar-nav { display:grid; gap:8px; }
-    .sidebar-nav button { width:100%; border:1px solid #334155; border-radius:10px; padding:12px 14px; background:#0f172a; color:#f8fafc; text-align:left; cursor:pointer; }
-    .sidebar-nav button:hover, .sidebar-nav button.active { border-color:#38bdf8; background:#172b45; }
-    .demo-controls { display:grid; gap:8px; padding-top:14px; border-top:1px solid #334155; }
-    .demo-controls button { width:100%; border:1px solid #334155; border-radius:10px; padding:10px 12px; background:#172033; color:#e2e8f0; text-align:left; cursor:pointer; }
-    .demo-controls button:hover { border-color:#38bdf8; }
+    .sidebar-nav { display:grid; gap:6px; }
+    .sidebar-nav button { position:relative; width:100%; min-height:48px; display:flex; align-items:center; gap:11px; border:1px solid transparent; border-radius:11px; padding:10px 12px; background:transparent; color:#c9dcda; text-align:left; font-weight:650; cursor:pointer; transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease; }
+    .sidebar-nav button::after { position:absolute; right:12px; color:#6e928e; content:'›'; font-size:20px; font-weight:400; }
+    .sidebar-nav button:hover { border-color:rgba(94,234,212,.18); background:rgba(50,125,117,.16); color:#fff; transform:translateX(2px); }
+    .sidebar-nav button.active { border-color:rgba(94,234,212,.28); background:linear-gradient(90deg,rgba(36,155,143,.32),rgba(36,155,143,.12)); color:#fff; box-shadow:inset 3px 0 #52d6c5; }
+    .nav-icon { display:grid; flex:0 0 31px; width:31px; height:31px; place-items:center; border-radius:9px; background:rgba(148,210,199,.1); color:#9cded4; font-size:15px; }
+    .sidebar-nav button.active .nav-icon { background:#2b9b8f; color:#fff; box-shadow:0 5px 13px rgba(20,125,117,.28); }
+    .refresh-claims { min-height:44px; display:flex; align-items:center; justify-content:center; gap:8px; border:1px solid #3b6661; border-radius:11px; background:rgba(255,255,255,.04); color:#d5e8e5; font-weight:700; cursor:pointer; }
+    .refresh-claims:hover { border-color:#62cdbf; background:rgba(50,125,117,.16); }
+    .demo-controls { display:grid; gap:8px; padding-top:14px; border-top:1px solid rgba(148,210,199,.16); }
+    .demo-controls button { width:100%; border:1px solid #315653; border-radius:10px; padding:10px 12px; background:rgba(255,255,255,.04); color:#d6e8e5; text-align:left; cursor:pointer; }
+    .demo-controls button:hover { border-color:#62cdbf; }
     .demo-controls button.danger { border-color:#7f1d1d; background:#3f1d26; color:#fecaca; }
     .demo-status { margin:0; color:#94a3b8; font-size:11px; line-height:1.45; }
     .status-bar { margin-top: auto; font-size: 12px; color: #94a3b8; line-height: 1.7; }
 
-    .help { margin-top:auto; padding:17px 12px 0; border-top:1px solid #29475f; color:#aac0d1; font-size:12px; }.help b { display:block; color:#fff; margin-bottom:3px; }
-    .profile { margin-top:14px; padding:10px; border-radius:8px; background:#173a56; }.avatar { display:inline-grid; width:27px; height:27px; margin-right:7px; place-items:center; border-radius:50%; background:#2fa49f; color:#fff; font-size:10px; font-weight:700; vertical-align:middle; }
+    .help { margin-top:auto; padding:17px 4px 0; border-top:1px solid rgba(148,210,199,.16); color:#91aaa7; font-size:11px; line-height:1.5; }.help b { display:block; color:#e8f4f2; margin-bottom:4px; font-size:12px; }
+    .profile { position:relative; display:grid; grid-template-columns:38px 1fr; align-items:center; gap:10px; margin-top:14px; padding:11px; border:1px solid rgba(148,210,199,.16); border-radius:12px; background:rgba(255,255,255,.055); color:#f3faf9; font-size:12px; }.avatar { display:grid; width:38px; height:38px; place-items:center; border-radius:11px; background:linear-gradient(145deg,#38b8a8,#176e69); color:#fff; font-size:11px; font-weight:800; }.profile-copy { display:grid; gap:2px; }.profile-copy small { color:#8faeaa; }.profile-status { position:absolute; top:12px; left:39px; width:9px; height:9px; border:2px solid #163433; border-radius:50%; background:#4ade80; }
 
     .content { padding: 24px; }
     .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
@@ -401,7 +411,7 @@
     }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
     @media(max-width:1024px) {
-      .sidebar { width:100%; }
+      .sidebar { position:relative; width:100%; height:auto; overflow:visible; }
     }
     @media(max-width:720px) {
       .content { min-width:0; padding:16px; }
@@ -419,8 +429,10 @@
 <body>
   <div class="page">
     <aside class="sidebar">
-      <div class="brand">Northwind <span>Workbench</span></div>
-      
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">N</div>
+        <div class="brand">Northwind <span>Claims workbench</span></div>
+      </div>
 
       <div class="filters">
         <label for="viewSelect">Queue filter</label>
@@ -436,13 +448,16 @@
         </select>
       </div>
 
+      <div>
+      <p class="sidebar-section-label">Workspace</p>
       <nav class="sidebar-nav" aria-label="Workbench navigation">
-        <button id="workbenchNav" class="active" type="button">Claim workbench</button>
-        <button id="pendingEvidenceNav" type="button">Pending evidence</button>
-        <button id="customerChatNav" type="button">Customer chat</button>
+        <button id="workbenchNav" class="active" type="button"><span class="nav-icon" aria-hidden="true">▦</span>Claim workbench</button>
+        <button id="pendingEvidenceNav" type="button"><span class="nav-icon" aria-hidden="true">◷</span>Pending evidence</button>
+        <button id="customerChatNav" type="button"><span class="nav-icon" aria-hidden="true">◌</span>Customer chat</button>
       </nav>
+      </div>
 
-      <button id="refreshClaims" type="button">Refresh claims</button>
+      <button id="refreshClaims" class="refresh-claims" type="button"><span aria-hidden="true">↻</span>Refresh claims</button>
       <div class="demo-controls">
         <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
         <button id="resetDemoQueue" class="danger" type="button" hidden>Reset and load demo queue</button>
@@ -450,9 +465,11 @@
       </div>
 
       <div class="help">
-        <b>Need a hand?</b>
-        Start with the recommended next step. You can ask for help at any point.
-        <div class="profile"><span class="avatar">LZ</span>Lin Zhang<br><small style="margin-left:35px">Claims Professional</small>
+        
+        <div class="profile">
+          <span class="avatar">LZ</span>
+          <span class="profile-status" aria-label="Available"></span>
+          <span class="profile-copy"><strong>Lin Zhang</strong><small>Claims Professional</small></span>
         </div>
       </div>
     

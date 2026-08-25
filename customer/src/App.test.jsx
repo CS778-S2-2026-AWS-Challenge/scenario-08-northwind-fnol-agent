@@ -131,6 +131,8 @@ function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.custo
 describe('claimant intake', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('scrollTo', vi.fn())
+    window.history.replaceState(null, '', '/')
     localStorage.clear()
   })
 
@@ -181,6 +183,35 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Incident date' })).toHaveFocus()
     expect(screen.getByLabelText('Vehicle registration plate number')).toHaveAttribute('placeholder', 'For example, ABC123')
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
+  })
+
+  it('shows a preparation checklist for each claim type', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Motor claim materials' })).toBeVisible()
+    expect(screen.getByText('Vehicle and driver details')).toBeVisible()
+
+    await user.click(screen.getByRole('tab', { name: 'Home' }))
+    expect(screen.getByRole('heading', { name: 'Home claim materials' })).toBeVisible()
+    expect(screen.getByText('Emergency work records')).toBeVisible()
+
+    await user.click(screen.getByRole('tab', { name: 'Contents' }))
+    expect(screen.getByRole('heading', { name: 'Contents claim materials' })).toBeVisible()
+    expect(screen.getByText('Proof of ownership')).toBeVisible()
+  })
+
+  it('returns to the homepage when browser history goes back from the claim page', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    expect(screen.getByRole('heading', { name: 'Your details and incident' })).toBeVisible()
+
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
+
+    expect(await screen.findByRole('heading', { name: /When the unexpected happens/ })).toBeVisible()
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0 })
   })
 
   it('returns to guided details and continues without overwriting confirmed fields', async () => {
@@ -402,10 +433,18 @@ describe('claimant intake', () => {
     await user.tab() // Claims navigation
     await user.tab() // How it works navigation
     await user.tab() // Log in
+    await user.tab() // Start a claim hero action
+    expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveFocus()
+    expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveAttribute('href', '#claims')
+    await user.tab() // Claim online hero shortcut
     await user.tab() // Motor
     await user.tab() // Home
     await user.tab() // Contents
     await user.tab() // Guided Motor claim
+    await user.tab()
+    const otherWays = screen.getByText('Other ways to claim')
+    expect(otherWays).toHaveFocus()
+    await user.keyboard('{Enter}')
     await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
