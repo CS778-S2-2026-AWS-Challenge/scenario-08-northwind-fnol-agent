@@ -3,7 +3,13 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.scenario_loader import CANONICAL_SCENARIO_DIRECTORY, load_scenario
+from backend.repositories.scenario_loader import (
+    CANONICAL_SCENARIO_DIRECTORY,
+    FixtureVisibility,
+    load_evidence_path_fixtures,
+    load_mvp_journey_scenarios,
+    load_scenario,
+)
 from backend.services.professional_reviews import (
     PROFESSIONAL_REVIEW_NEXT_STEP_STATUS,
     PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY,
@@ -11,9 +17,16 @@ from backend.services.professional_reviews import (
 
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+PATH_FIXTURE = (
+    CANONICAL_SCENARIO_DIRECTORY.parents[2]
+    / 'tests'
+    / 'fixtures'
+    / 'evidence'
+    / 'path-entry-visibility.json'
+)
 
 
-def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> None:
+def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> None:
     scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
     linked = scenario.linked_records
     assert linked is not None
@@ -23,14 +36,15 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
         assert seeded.status_code == 200
         body = seeded.json()
         assert body['status'] == 'seeded'
-        assert set(body['scenario_ids']) == {
-            'AT-02-coverage-ambiguity',
-            'AT-04-urgent',
-            'AT-05-human-request',
+        assert body['scenario_ids'] == [
+            'AT-01-clear-motor',
             'AT-06-pending-evidence',
+            'AT-04-urgent',
+            'AT-02-coverage-ambiguity',
+            'AT-05-human-request',
             'AT-10-controlled-assessor',
-        }
-        assert len(body['claim_ids']) == 5
+        ]
+        assert len(body['claim_ids']) == 6
 
         pending = client.get('/api/v1/workbench/claims?view=awaiting_evidence', headers=STAFF_AUTH)
         assert pending.status_code == 200
@@ -104,6 +118,44 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
             'sig_at02_weather_date',
         ]
         assert all(item['status'] == 'review_required' for item in signals)
+
+
+def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None:
+    scenarios = load_mvp_journey_scenarios()
+    visibility_entries = {
+        entry.scenario_id: entry for entry in load_evidence_path_fixtures(PATH_FIXTURE).entries
+    }
+
+    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+        seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
+        assert seeded.status_code == 200
+
+        for scenario in scenarios:
+            claim_id = scenario.claim.claim_id
+            staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
+            claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
+            claimant_evidence = client.get(
+                f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH
+            )
+
+            assert staff.status_code == 200
+            assert claimant_claim.status_code == 200
+            assert claimant_evidence.status_code == 200
+            assert staff.json()['claim_state'] == scenario.claim.claim_state.model_dump(mode='json')
+            assert claimant_claim.json()['workflow_state'] == (
+                scenario.claim.claim_state.workflow_state.value
+            )
+            assert {item['evidence_id'] for item in staff.json()['evidence']} == {
+                item.evidence_id for item in scenario.evidence
+            }
+            expected_claimant_ids = {
+                fixture.evidence.evidence_id
+                for fixture in visibility_entries[scenario.scenario_id].evidence
+                if fixture.visibility is not FixtureVisibility.INTERNAL_ONLY
+            }
+            assert {
+                item['evidence_id'] for item in claimant_evidence.json()['items']
+            } == expected_claimant_ids
 
 
 def test_seed_scenarios_rejects_non_staff_credentials() -> None:

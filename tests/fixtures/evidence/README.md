@@ -27,21 +27,22 @@ professional-review, and handoff entry baselines, and classifies the complete
 canonical evidence set for each path. It does **not** own a second copy of any
 `EvidenceRecord` or `HandoffRecord`.
 
-Each entry names a canonical scenario in `backend/demo_data/scenarios`. Its
-entry baseline records the expected workflow, Agent action, evidence state,
-claimant status and responsibility, plus the bounded handoff shape when one is
-required. Each visibility item stores only:
+Each entry names a canonical scenario in `backend/demo_data/scenarios`. The
+scenario owns its `business_path`; the path fixture cannot declare a second path
+mapping. Its entry baseline records the expected workflow, Agent action,
+evidence state, claimant status and responsibility, plus the bounded handoff
+shape when one is required. Each visibility item stores only:
 
 - a fixture/classification id;
 - one visibility value (`claimant_visible`, `shared`, or `internal_only`);
 - the canonical `evidence_id` it classifies.
 
-`load_evidence_path_fixtures()` resolves the actual evidence and handoff payloads
-from the canonical scenario. The loader rejects embedded evidence payloads,
-unknown references, duplicate references, incomplete classifications, and a
-scenario that drifts from its recorded entry baseline. Claim id, Claim State,
-Evidence Summary, customer next step, and handoffs are projected from the
-canonical scenario.
+`load_evidence_path_fixtures()` resolves the business path, actual evidence, and
+handoff payloads from the canonical scenario. The loader rejects embedded path
+or evidence values, unknown references, duplicate references, incomplete
+classifications, and a scenario that drifts from its recorded entry baseline.
+Business path, claim id, Claim State, Evidence Summary, customer next step, and
+handoffs are projected from the canonical scenario.
 
 The fixture owns only entry expectations and visibility classifications.
 Evidence and handoff values, source, lifecycle state, provenance, timing, and

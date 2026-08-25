@@ -11,6 +11,7 @@ from backend.repositories.scenario_loader import (
     FixtureVisibility,
     claimant_evidence_for,
     load_evidence_path_fixtures,
+    load_mvp_journey_scenarios,
     load_scenario,
 )
 
@@ -28,6 +29,22 @@ def test_visibility_catalogue_loads_all_five_path_entries() -> None:
         'AT-04-urgent',
         'AT-05-human-request',
         'AT-06-pending-evidence',
+    ]
+
+
+def test_mvp_journey_catalogue_uses_one_canonical_scenario_per_path() -> None:
+    scenarios = load_mvp_journey_scenarios()
+    actual: list[tuple[str, str]] = []
+    for scenario in scenarios:
+        assert scenario.business_path is not None
+        actual.append((scenario.business_path.value, scenario.scenario_id))
+
+    assert actual == [
+        ('clear', 'AT-01-clear-motor'),
+        ('pending', 'AT-06-pending-evidence'),
+        ('urgent', 'AT-04-urgent'),
+        ('professional_review', 'AT-02-coverage-ambiguity'),
+        ('handoff', 'AT-05-human-request'),
     ]
 
 
@@ -51,6 +68,7 @@ def test_visibility_source_contains_only_canonical_references_and_classification
     for entry in payload['entries']:
         assert {
             'claim_id',
+            'business_path',
             'claim_state',
             'customer_next_step',
             'evidence_summary',
@@ -235,7 +253,7 @@ def test_visibility_loader_rejects_a_misclassified_professional_review_handoff(
 ) -> None:
     payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
     review = next(
-        entry for entry in payload['entries'] if entry['business_path'] == 'professional_review'
+        entry for entry in payload['entries'] if entry['scenario_id'] == 'AT-02-coverage-ambiguity'
     )
     review['entry_baseline']['handoff']['type'] = 'human_support'
     invalid = tmp_path / 'path-entry-visibility.json'
@@ -243,6 +261,28 @@ def test_visibility_loader_rejects_a_misclassified_professional_review_handoff(
 
     with pytest.raises(ValueError, match='does not match its handoff baseline'):
         load_evidence_path_fixtures(invalid)
+
+
+def test_mvp_journey_loader_rejects_a_duplicate_business_path(tmp_path: Path) -> None:
+    for source in CANONICAL_SCENARIO_DIRECTORY.glob('AT-*.json'):
+        payload = json.loads(source.read_text(encoding='utf-8'))
+        if source.name == 'AT-06-pending-evidence.json':
+            payload['business_path'] = 'clear'
+        (tmp_path / source.name).write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='clear must identify exactly one'):
+        load_mvp_journey_scenarios(tmp_path)
+
+
+def test_mvp_journey_loader_rejects_a_missing_business_path(tmp_path: Path) -> None:
+    for source in CANONICAL_SCENARIO_DIRECTORY.glob('AT-*.json'):
+        payload = json.loads(source.read_text(encoding='utf-8'))
+        if source.name == 'AT-06-pending-evidence.json':
+            payload.pop('business_path')
+        (tmp_path / source.name).write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match=r"missing: \['pending'\]"):
+        load_mvp_journey_scenarios(tmp_path)
 
 
 def test_visibility_loader_rejects_unknown_canonical_scenario(tmp_path: Path) -> None:

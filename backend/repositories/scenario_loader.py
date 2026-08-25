@@ -44,8 +44,23 @@ from backend.services.retrieval_review import persist_retrieval_record
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
-    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary', 'handoffs'}
+    {
+        'business_path',
+        'claim_id',
+        'claim_state',
+        'customer_next_step',
+        'evidence_summary',
+        'handoffs',
+    }
 )
+
+
+class EvidenceBusinessPath(str, Enum):
+    CLEAR = 'clear'
+    PENDING = 'pending'
+    URGENT = 'urgent'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    HANDOFF = 'handoff'
 
 
 class LinkedMvpRecordBaseline(ContractModel):
@@ -71,6 +86,7 @@ class LinkedMvpRecordBaseline(ContractModel):
 class ScenarioFixture(ContractModel):
     scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
     description: str = Field(min_length=1, max_length=500)
+    business_path: EvidenceBusinessPath | None = None
     claim: WorkingClaim
     sessions: list[SessionRecord] = Field(min_length=1)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
@@ -327,14 +343,6 @@ class EvidenceLifecycleFixtureSet(ContractModel):
         return self
 
 
-class EvidenceBusinessPath(str, Enum):
-    CLEAR = 'clear'
-    PENDING = 'pending'
-    URGENT = 'urgent'
-    PROFESSIONAL_REVIEW = 'professional_review'
-    HANDOFF = 'handoff'
-
-
 class ExpectedPathHandoff(ContractModel):
     type: HandoffType
     status: HandoffStatus
@@ -474,6 +482,32 @@ def load_scenarios(directory: Path) -> list[ScenarioFixture]:
     return [load_scenario(path) for path in sorted(directory.glob('AT-*.json'))]
 
 
+def load_mvp_journey_scenarios(
+    directory: Path = CANONICAL_SCENARIO_DIRECTORY,
+) -> list[ScenarioFixture]:
+    """Load the single canonical scenario assigned to every current MVP path."""
+
+    by_path: dict[EvidenceBusinessPath, ScenarioFixture] = {}
+    for scenario in load_scenarios(directory):
+        business_path = scenario.business_path
+        if business_path is None:
+            continue
+        if business_path in by_path:
+            raise ValueError(
+                f'MVP business path {business_path.value} must identify exactly one '
+                'canonical scenario.'
+            )
+        by_path[business_path] = scenario
+
+    missing = set(EvidenceBusinessPath) - set(by_path)
+    if missing:
+        raise ValueError(
+            'Canonical scenarios must cover every MVP business path; missing: '
+            f'{sorted(path.value for path in missing)}.'
+        )
+    return [by_path[path] for path in EvidenceBusinessPath]
+
+
 def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return EvidenceLifecycleFixtureSet.model_validate(payload)
@@ -485,7 +519,8 @@ def load_evidence_path_fixtures(
 ) -> EvidencePathFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     canonical_scenarios = {
-        scenario.scenario_id: scenario for scenario in load_scenarios(scenario_directory)
+        scenario.scenario_id: scenario
+        for scenario in load_mvp_journey_scenarios(scenario_directory)
     }
     for entry in payload.get('entries', []):
         duplicate_fields = SCENARIO_DERIVED_ENTRY_FIELDS.intersection(entry)
@@ -499,6 +534,10 @@ def load_evidence_path_fixtures(
         scenario = canonical_scenarios.get(scenario_id)
         if scenario is None:
             raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
+        business_path = scenario.business_path
+        if business_path is None:
+            raise ValueError(f'Canonical MVP scenario {scenario_id} requires a business path.')
+        entry['business_path'] = business_path.value
 
         canonical_evidence = {record.evidence_id: record for record in scenario.evidence}
         raw_fixtures = entry.get('evidence', [])

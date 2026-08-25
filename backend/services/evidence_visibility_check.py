@@ -24,7 +24,7 @@ from backend.repositories.scenario_loader import (
     CANONICAL_SCENARIO_DIRECTORY,
     EvidenceBusinessPath,
     ScenarioFixture,
-    load_scenarios,
+    load_mvp_journey_scenarios,
     seed_scenario,
 )
 from backend.services.evidence_fixtures import (
@@ -95,7 +95,7 @@ def check_path_evidence(
     """Walk every business path and report declared/runtime differences."""
 
     resolved = service or EvidenceFixtureService()
-    scenarios = {item.scenario_id: item for item in load_scenarios(scenario_directory)}
+    scenarios = {item.scenario_id: item for item in load_mvp_journey_scenarios(scenario_directory)}
     defects: list[PathDefect] = []
 
     for entry in resolved.path_entries():
