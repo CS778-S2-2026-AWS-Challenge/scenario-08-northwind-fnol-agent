@@ -5,10 +5,11 @@ Issue: #272
 ## Scope
 
 This record validates the claimant external-service UI and controlled assessor adapter on the
-stacked #302 implementation. All claim data, provider responses, identifiers, and failure
-outcomes are synthetic. The check covers clean success, a claimant choosing not to grant
-consent, service unavailable, timeout, retry, and replay behaviour through the public claimant
-API and visible claimant interface.
+current #302 implementation at `98cf8464ff2ff816bf51810d341c585e7924edf7`, synchronized
+through `main@79bc4eae6d47e506c7bdcdded536671cc2002e76`. All claim data, provider
+responses, identifiers, and failure outcomes are synthetic. The check covers clean success, a
+claimant choosing not to grant consent, service unavailable, timeout, retry, and replay
+behaviour through the public claimant API and visible claimant interface.
 
 ## Repeatable checks
 
@@ -24,10 +25,14 @@ the controlled claim, and then exercises the public consent and assessor-routing
 frontend suite checks the same optional consent, progress, failure, and retry states rendered to
 the claimant.
 
-Owner verification on 25 August 2026 recorded `4 passed` for the focused backend matrix and
-`19 passed` for the focused claimant component suite. The complete repository gate recorded
-`393 passed`, `90.77%` backend coverage, `14 passed` repository-policy checks, and `27 passed`
-frontend tests; formatting, lint, type checking, and the production build also passed.
+Owner verification on 26 August 2026 recorded `4 passed` for the focused backend matrix and
+`24 passed` for the focused claimant component suite. The complete local gate used quality
+source `none` and recorded `591 passed`, `90.32%` backend coverage, `21 passed`
+repository-policy checks, `15 passed` GitHub-automation checks, and `36 passed` customer tests;
+formatting, lint, type checking, dependency audits, and the production build also passed. The
+validated code-and-test tree before this result-record update was
+`a07ea083abc73d9fb04cac883fd20920eb8c84d3`; the PR validation record identifies the final
+documentation head and repeats the complete gate there.
 
 ## Result matrix
 
@@ -67,5 +72,6 @@ can be closed.
   persisted consent withdrawal or provider cancellation workflow.
 - Automatic retry counts remain unapproved. The claimant explicitly initiates the demonstrated
   retry.
-- #302 remains stacked on #300 and #298. This validation must be rerun after the dependency chain
-  is rebased or merged before it is treated as final independent acceptance evidence.
+- #300 and #298 are merged. #302 remains the immediate dependency and is synchronized to current
+  main; #308 must be refreshed and revalidated again if #302 advances before this validation PR
+  is reviewed or merged.
