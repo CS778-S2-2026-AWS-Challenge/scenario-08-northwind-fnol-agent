@@ -24,17 +24,25 @@ enum.
 
 | Compatibility value | Target direction | Migration note |
 | --- | --- | --- |
-| `ASK` | `conversation.ask` plus a runtime wait directive | The question is a communication move, not a claim mutation. |
-| `CLARIFY` | `conversation.clarify` plus proposed fact context | Confirmation and source rules remain server-controlled. |
-| `CONFIRM` | `conversation.confirm` and a validated Claim command where applicable | Confirmation changes Claim State only through the revision boundary. |
-| `UPDATE` | `claim.propose_update` | A proposal is not a confirmed fact. |
-| `PROCEED` | `runtime.continue` with validated Claim or external actions | Safe continuation depends on current WorkItems and authority. |
-| `HANDOFF` | `human.request_handoff` | Handoff context and claimant projection remain separate. |
-| `URGENT_HANDOFF` | `human.urgent_handoff` plus `runtime.interrupt` | Urgent handling interrupts ordinary intake. |
-| `CREATE_CLAIM` | `claim.create` after explicit authority and validated prerequisites | External creation remains idempotent and provider-neutral. |
+| `ASK` | `conversation.ask` plus `runtime.wait_for_user` | The question is a communication move, not a Claim mutation. |
+| `CLARIFY` | `conversation.clarify` plus `runtime.wait_for_user` | Any resulting fact proposal is derived and validated separately from the communication action. |
+| `CONFIRM` | `conversation.confirm_material` plus `runtime.wait_for_user` | A resulting `claim.apply_fact_patch` is a separate revision-checked action, not an effect of the compatibility label itself. |
+| `UPDATE` | `conversation.answer`, `conversation.explain`, or `conversation.summarise`, plus `runtime.continue` or `runtime.wait_for_user` | Status communication has no inherent Claim mutation; any real mutation is represented and authorised separately. |
+| `PROCEED` | `runtime.continue` | Claim or external actions are derived from their validated underlying proposals, not from the control label. |
+| `HANDOFF` | `human.create_handoff` plus `runtime.pause_for_review` | Handoff context and claimant projection remain separate. |
+| `URGENT_HANDOFF` | `human.create_handoff` plus `runtime.interrupt_urgent` | Urgent handling interrupts ordinary intake without adding diagnosis or emergency authority. |
+| `CREATE_CLAIM` | `claim.prepare_creation`, then `claim.create`, plus `runtime.continue` or `runtime.wait_for_external` | External creation remains revision-checked, idempotent, authorised, and provider-neutral. |
 
 The mapping is a compatibility aid. It must not be used to claim that the target schemas
-or namespaced actions are already implemented.
+or namespaced actions are already implemented. The mapping preserves semantic dimensions:
+conversation labels do not create business side effects, runtime labels do not grant tool
+authority, and material actions remain separate validated proposals.
+
+The mapping structure and namespace boundaries are checked by:
+
+```powershell
+py -3.12 scripts/check_agent_runtime_mapping.py
+```
 
 ## Removal Gate
 
