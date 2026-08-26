@@ -1187,7 +1187,8 @@ class MongoDBRepository:
         descending = sort_field.startswith('-')
         field = sort_field.removeprefix('-')
         records: list[ModelT] = []
-        for document in self._collection.find(query).sort(field, -1 if descending else 1):
+        direction = -1 if descending else 1
+        for document in self._collection.find(query).sort([(field, direction), ('_id', direction)]):
             record = self._model_from_document(document, model_type)
             if record is not None:
                 records.append(record)

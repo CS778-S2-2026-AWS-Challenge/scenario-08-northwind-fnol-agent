@@ -132,12 +132,17 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
         updated_at=claim.updated_at,
     )
     repository.save_message(message, 'cus_fixture')
+    earlier_tie_breaker = message.model_copy(update={'message_id': 'msg_a_fixture'})
+    repository.save_message(earlier_tie_breaker, 'cus_fixture')
     repository.save_evidence(evidence, 'cus_fixture')
 
     assert [item.claim_id for item in repository.list_claims_for_customer('cus_fixture')] == [
         claim.claim_id
     ]
-    assert repository.list_messages(claim.claim_id, session.session_id, 'cus_fixture') == [message]
+    assert repository.list_messages(claim.claim_id, session.session_id, 'cus_fixture') == [
+        earlier_tie_breaker,
+        message,
+    ]
     assert repository.list_messages(claim.claim_id, session.session_id, 'other_customer') == []
     assert repository.get_evidence(claim.claim_id, evidence.evidence_id, 'cus_fixture') == evidence
     assert repository.list_evidence(claim.claim_id, 'other_customer') == []

@@ -1,8 +1,12 @@
+import base64
+import re
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
+from backend.adapters.evidence_storage import EvidenceStorage, EvidenceStorageUnavailable
 from backend.core.auth import Principal, require_staff
+from backend.core.errors import ApiError
 from backend.domain.models import (
     AcceptHandoffRequest,
     CreateStaffActionRequest,
@@ -52,6 +56,28 @@ def repository_for(request: Request) -> PersistenceRepository:
     return cast(PersistenceRepository, request.app.state.claim_repository)
 
 
+def storage_for(request: Request) -> EvidenceStorage:
+    return cast(EvidenceStorage, request.app.state.evidence_storage)
+
+
+def _evidence_storage_key(
+    repository: PersistenceRepository, claim_id: str, evidence_id: str
+) -> str | None:
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        return None
+    evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if evidence is None:
+        return None
+    value = evidence.provenance.get('storage_key')
+    return value if isinstance(value, str) else None
+
+
+def _safe_download_filename(value: str | None) -> str:
+    filename = re.sub(r'[\x00-\x1f\x7f"\\]', '', value or 'evidence').strip()
+    return filename or 'evidence'
+
+
 @router.get('', response_model=WorkbenchClaimListResponse)
 def read_workbench_claims(
     request: Request,
@@ -68,6 +94,88 @@ def read_workbench_claim(
     principal: Principal = Depends(require_staff),
 ) -> WorkbenchClaimDetail:
     return get_review_connected_workbench_detail(repository_for(request), principal, claim_id)
+
+
+@router.get('/{claim_id}/evidence/{evidence_id}/content')
+def read_workbench_evidence_content(
+    claim_id: str,
+    evidence_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+) -> Response:
+    repository = repository_for(request)
+    # Reuse the Workbench permission boundary before reading any file content.
+    detail = get_review_connected_workbench_detail(repository, principal, claim_id)
+    evidence = next((item for item in detail.evidence if item.evidence_id == evidence_id), None)
+    if evidence is None or evidence.media_type is None:
+        raise ApiError(
+            status_code=404, code='RESOURCE_NOT_FOUND', message='The evidence file was not found.'
+        )
+    try:
+        content = storage_for(request).read_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            storage_key=_evidence_storage_key(repository, claim_id, evidence_id),
+        )
+    except EvidenceStorageUnavailable as error:
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable.',
+            retryable=True,
+        ) from error
+    if content is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The evidence file is not available to view.',
+        )
+    filename = _safe_download_filename(evidence.original_filename)
+    return Response(
+        content=content,
+        media_type=evidence.media_type,
+        headers={'Content-Disposition': f'inline; filename="{filename}"'},
+    )
+
+
+@router.get('/{claim_id}/evidence/{evidence_id}/content-data')
+def read_workbench_evidence_content_data(
+    claim_id: str,
+    evidence_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+) -> dict[str, str]:
+    repository = repository_for(request)
+    detail = get_review_connected_workbench_detail(repository, principal, claim_id)
+    evidence = next((item for item in detail.evidence if item.evidence_id == evidence_id), None)
+    if evidence is None or evidence.media_type is None:
+        raise ApiError(
+            status_code=404, code='RESOURCE_NOT_FOUND', message='The evidence file was not found.'
+        )
+    try:
+        content = storage_for(request).read_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            storage_key=_evidence_storage_key(repository, claim_id, evidence_id),
+        )
+    except EvidenceStorageUnavailable as error:
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable.',
+            retryable=True,
+        ) from error
+    if content is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The evidence file is not available to view.',
+        )
+    return {
+        'filename': evidence.original_filename or 'evidence',
+        'media_type': evidence.media_type,
+        'base64_data': base64.b64encode(content).decode('ascii'),
+    }
 
 
 @router.post(

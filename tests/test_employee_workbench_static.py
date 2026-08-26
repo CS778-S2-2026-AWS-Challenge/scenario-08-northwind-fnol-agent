@@ -52,16 +52,18 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert 'dirty: false' in page
     assert 'if (!draft.dirty) continue' in page
     assert "button.textContent = draft.locked ? 'Edit finding' : 'Save finding'" in page
-    assert "section.setAttribute('aria-label', 'Professional review workspace')" in page
-    assert "title.textContent = 'Professional review workspace'" in page
+    assert "? 'Professional review workspace'" in page
+    assert ": 'Claim review workspace'" in page
     assert "controlsAlreadyOpen ? 'Hide review controls' : 'Review and decide'" in page
     assert "action.setAttribute('aria-controls', 'detailStaffActions')" in page
     assert 'const shouldOpen = reviewControlsOpenClaimId !== detail.claim_id' in page
     assert 'reviewControlsOpenClaimId = shouldOpen ? detail.claim_id : null' in page
     assert "action.textContent = shouldOpen ? 'Hide review controls' : 'Review and decide'" in page
     assert 'controls.scrollIntoView' not in page
+    assert "detail.route === 'standard_motor_intake'" in page
+    assert 'const isReviewEligible = isProfessionalReview || isStandardIntakeReview' in page
     assert (
-        'const showReviewControls = isProfessionalReview '
+        'const showReviewControls = isReviewEligible '
         '&& reviewControlsOpenClaimId === detail.claim_id' in page
     )
     assert (
@@ -88,6 +90,11 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert "'AI credibility · Future assessment'" in page
     assert 'Staff remain responsible for the finding.' in page
     assert 'function deriveWorkflowFromEvidenceFindings()' in page
+    assert "'<strong>No evidence files submitted.</strong>" in page
+    assert "heading.textContent = 'Outstanding materials'" in page
+    assert 'const submittedItems = evidenceItems.filter' in page
+    assert "['Evidence sources', retrievals.length + submittedEvidence.length]" in page
+    assert "['Outstanding materials', outstandingEvidence.length]" in page
 
 
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
@@ -205,6 +212,8 @@ def test_employee_queue_cards_keep_details_in_an_accessible_hover_preview() -> N
     assert "button.setAttribute('aria-describedby', hoverDetails.id)" in page
     assert '.claim-list button:hover .claim-hover-details' in page
     assert '.claim-list button:focus .claim-hover-details' in page
+    assert '.claim-list button:hover, .claim-list button:focus { z-index:30;' in page
+    assert '.claim-detail-tabs { position:sticky; top:12px; z-index:20;' in page
     assignment = (
         'assignment.textContent = item.assignee_id '
         "? `Assigned to ${item.assignee_id}` : 'Not assigned'"
@@ -214,6 +223,29 @@ def test_employee_queue_cards_keep_details_in_an_accessible_hover_preview() -> N
     assert "previewRow('Evidence'" in page
     assert 'function evidencePreview(item)' in page
     assert 'claim-card-footer' not in page
+
+
+def test_employee_evidence_files_use_the_authorised_staff_viewer() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'async function viewEvidenceFile(item)' in page
+    assert '/evidence/${encodeURIComponent(item.evidence_id)}/content`' in page
+    assert '{ headers: { Authorization: `Bearer ${STAFF_TOKEN}` } }' in page
+    assert 'label: `View ${item.original_filename}`' in page
+    assert "['uploaded', 'processing', 'ready'].includes(item.file_status)" in page
+    assert 'id="evidencePreviewDialog"' in page
+    assert '.evidence-preview-body [hidden] { display:none !important; }' in page
+    assert "const isPdf = item.media_type === 'application/pdf'" in page
+    assert 'pdfPreview.location.replace(evidencePreviewUrl)' in page
+    assert 'image.src = imageDataUrl' in page
+    assert "byId('evidencePreviewDialog').showModal()" in page
+    assert "addEventListener('close', clearEvidencePreview)" in page
+    assert 'async function downloadEvidenceFile(item)' in page
+    assert 'label: `Download ${item.original_filename}`' in page
+    assert '/content-data`' in page
+    assert '`data:${file.media_type};base64,${file.base64_data}`' in page
+    assert "className: 'evidence-download-button'" in page
+    assert ".evidence-download-button::before { margin-right:6px; content:'↓';" in page
 
 
 def test_employee_queue_uses_simple_bounded_pagination() -> None:
@@ -252,3 +284,20 @@ def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigat
     assert "window.addEventListener('popstate', restoreViewFromHistory)" in page
     assert "window.addEventListener('hashchange', restoreViewFromHistory)" in page
     assert 'customerChatHistoryEntryCreated' in page
+
+
+def test_employee_messaging_defines_delivery_retry_and_template_states() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'Sender: ${formatLabel(item.actor)} · Audience: Claimant · Delivered' in page
+    assert 'Delivery outcome unknown · Retry to reconcile' in page
+    assert 'Rejected before delivery · Ready to retry' in page
+    assert "button.textContent = 'Retry message'" in page
+    assert 'Retry with the same safe request key to reconcile' in page
+    assert 'id="agentSuggestionStatus"' in page
+    for state in ('generating', 'suggested', 'accepted', 'edited', 'rejected', 'failed'):
+        assert f"setAgentSuggestionState('{state}'" in page
+    assert 'Internal draft only; nothing will be sent' in page
+    assert 'Copied for staff review; not sent' in page
+    assert '>Reply template<' in page
+    assert '>Agent reply suggestion<' not in page

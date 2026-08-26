@@ -177,6 +177,76 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert stored_handoff.resolved_at is not None
 
 
+def test_staff_message_requires_handoff_owner_and_same_session_reply_reference(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(
+        client, auth_headers, key_prefix='staff-message-authority'
+    )
+    accept_handoff(
+        client,
+        staff_auth_headers,
+        claim_id,
+        handoff_id,
+        key='staff-message-authority-accept',
+    )
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert handoff is not None
+    repository.save_handoff(handoff.model_copy(update={'assigned_to': 'stf_other'}), 'cus_demo')
+
+    wrong_assignee = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'staff-message-wrong-assignee',
+            'If-Match': '3',
+        },
+        json={'content': {'type': 'text', 'text': 'This must not be sent.'}},
+    )
+    assert wrong_assignee.status_code == 403
+    assert wrong_assignee.json()['error']['code'] == 'ACCESS_DENIED'
+
+    repository.save_handoff(handoff, 'cus_demo')
+    other_claim = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'reply-reference-other-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    ).json()
+    other_claim_id = other_claim['claim']['claim_id']
+    other_session_id = other_claim['session']['session_id']
+    other_turn = client.post(
+        f'/api/v1/claims/{other_claim_id}/sessions/{other_session_id}/messages',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'reply-reference-other-message',
+            'If-Match': '1',
+        },
+        json={
+            'client_message_id': 'reply-reference-other-message',
+            'content': {'type': 'text', 'text': 'A separate synthetic claim.'},
+            'evidence_refs': [],
+        },
+    ).json()
+
+    cross_claim_reply = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'staff-message-cross-claim-reply',
+            'If-Match': '3',
+        },
+        json={
+            'content': {'type': 'text', 'text': 'This reference must be rejected.'},
+            'in_reply_to': other_turn['claimant_message']['message_id'],
+        },
+    )
+    assert cross_claim_reply.status_code == 422
+    assert cross_claim_reply.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
 def test_repeated_support_request_reuses_owned_handoff_without_conflict(
     client: TestClient,
     auth_headers: dict[str, str],
