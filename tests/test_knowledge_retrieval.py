@@ -4,14 +4,22 @@ from datetime import UTC, datetime
 import pytest
 
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
-from backend.domain.knowledge import KnowledgeRetrievalUnavailable, KnowledgeSearch
+from backend.domain.knowledge import (
+    KnowledgePublicationStatus,
+    KnowledgeRetrievalUnavailable,
+    KnowledgeSearch,
+    KnowledgeSource,
+)
+from backend.services.knowledge_ingestion import KnowledgeManifestError
 
 
 class MemoryStore:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = objects
+        self.reads: list[str] = []
 
     def read(self, key: str) -> bytes | None:
+        self.reads.append(key)
         return self.objects.get(key)
 
     def write(self, key: str, data: bytes, *, content_type: str, metadata: dict[str, str]) -> None:
@@ -35,7 +43,7 @@ def chunk(**changes: object) -> dict[str, object]:
         'effective_to': '2027-01-01T00:00:00+00:00',
         'authority': 'northwind_synthetic_demo',
         'visibility': 'customer_and_staff',
-        'checksum': 'abc',
+        'checksum': 'a' * 64,
         'ingested_at': '2026-08-25T00:00:00+00:00',
         'text': 'The matching policy schedule supplies the motor claim excess amount.',
     }
@@ -59,20 +67,63 @@ def search(**changes: object) -> KnowledgeSearch:
     return KnowledgeSearch(**values)  # type: ignore[arg-type]
 
 
-def retriever(*chunks: dict[str, object]) -> S3CompatibleKnowledgeRetriever:
-    key = 'knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl'
-    payload = b''.join(json.dumps(value).encode() + b'\n' for value in chunks)
-    return S3CompatibleKnowledgeRetriever(
-        MemoryStore({key: payload}), {('motor', 'MVP-2026.1'): 'nw-motor'}
-    )
+def source(**changes: object) -> KnowledgeSource:
+    values: dict[str, object] = {
+        'document_id': 'nw-motor',
+        'source_key': 'knowledge/policies/nw-motor.md',
+        'title': 'Northwind Motor Policy',
+        'document_type': 'synthetic_policy_wording',
+        'version': 'MVP-2026.1',
+        'source_uri': 'northwind://synthetic-policy/motor/MVP-2026.1',
+        'jurisdiction': 'NZ',
+        'insurer': 'Northwind Insurance',
+        'product': 'motor',
+        'effective_from': datetime(2026, 1, 1, tzinfo=UTC),
+        'effective_to': datetime(2027, 1, 1, tzinfo=UTC),
+        'authority': 'northwind_synthetic_demo',
+        'visibility': 'customer_and_staff',
+        'publication_status': KnowledgePublicationStatus.APPROVED,
+        'expected_checksum': 'a' * 64,
+    }
+    values.update(changes)
+    return KnowledgeSource(**values)  # type: ignore[arg-type]
+
+
+def retriever(
+    *chunks: dict[str, object],
+    sources: tuple[KnowledgeSource, ...] | None = None,
+) -> S3CompatibleKnowledgeRetriever:
+    objects: dict[str, bytes] = {}
+    for value in chunks:
+        key = f'knowledge/indexed/{value["document_id"]}/{value["version"]}/chunks.jsonl'
+        objects[key] = objects.get(key, b'') + json.dumps(value).encode() + b'\n'
+    return S3CompatibleKnowledgeRetriever(MemoryStore(objects), sources or (source(),))
 
 
 def test_retrieval_filters_metadata_before_ranking_and_returns_citation() -> None:
-    wrong_product = chunk(chunk_id='nw-home#HOM-EXC-01', product='home')
-    results = retriever(chunk(), wrong_product).search(search())
+    home_source = source(
+        document_id='nw-home',
+        source_key='knowledge/policies/nw-home.md',
+        title='Northwind Home Policy',
+        source_uri='northwind://synthetic-policy/home/MVP-2026.1',
+        product='home',
+    )
+    home_chunk = chunk(
+        document_id='nw-home',
+        chunk_id='nw-home#HOM-EXC-01',
+        title='Northwind Home Policy',
+        source_uri='northwind://synthetic-policy/home/MVP-2026.1',
+        product='home',
+    )
+    value = retriever(chunk(), home_chunk, sources=(source(), home_source))
+
+    results = value.search(search())
 
     assert [result.chunk_id for result in results] == ['nw-motor#MTR-EXC-01']
     assert results[0].source_uri.endswith('/motor/MVP-2026.1')
+    store = value._store
+    assert isinstance(store, MemoryStore)
+    assert store.reads == ['knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl']
 
 
 def test_schedule_backed_retrieval_requires_the_exact_wording_document() -> None:
@@ -80,6 +131,41 @@ def test_schedule_backed_retrieval_requires_the_exact_wording_document() -> None
 
     assert value.search(search(document_id='nw-motor'))
     assert value.search(search(document_id='different-wording')) == []
+
+
+def test_manifest_catalog_supports_multiple_documents_in_the_same_product_version() -> None:
+    supplement_source = source(
+        document_id='nw-motor-supplement',
+        source_key='knowledge/policies/nw-motor-supplement.md',
+        title='Northwind Motor Claims Supplement',
+        source_uri='northwind://synthetic-policy/motor-supplement/MVP-2026.1',
+    )
+    supplement_chunk = chunk(
+        document_id='nw-motor-supplement',
+        chunk_id='nw-motor-supplement#MTR-EVD-01',
+        title='Northwind Motor Claims Supplement',
+        section_path='MTR-EVD-01 - Collision photographs',
+        source_uri='northwind://synthetic-policy/motor-supplement/MVP-2026.1',
+        text='Provide collision photographs when they are safely available.',
+    )
+
+    results = retriever(chunk(), supplement_chunk, sources=(source(), supplement_source)).search(
+        search(text='Which collision photographs should I provide?')
+    )
+
+    assert results[0].chunk_id == 'nw-motor-supplement#MTR-EVD-01'
+
+
+def test_retriever_rejects_malformed_governed_catalog_entries() -> None:
+    with pytest.raises(KnowledgeManifestError, match='visibility'):
+        S3CompatibleKnowledgeRetriever(MemoryStore({}), (source(visibility=' public '),))
+
+
+def test_retrieval_rejects_index_content_that_does_not_match_manifest_integrity() -> None:
+    value = retriever(chunk(checksum='b' * 64))
+
+    with pytest.raises(KnowledgeRetrievalUnavailable, match='governed source'):
+        value.search(search())
 
 
 def test_section_heading_terms_are_ranked_above_generic_body_matches() -> None:
@@ -140,12 +226,7 @@ def test_retrieval_rejects_explicit_cross_product_and_instruction_queries() -> N
 
 def test_retrieval_returns_empty_when_source_or_terms_are_absent() -> None:
     assert retriever(chunk()).search(search(text='earthquake volcanic eruption')) == []
-    assert (
-        S3CompatibleKnowledgeRetriever(
-            MemoryStore({}), {('motor', 'MVP-2026.1'): 'nw-motor'}
-        ).search(search())
-        == []
-    )
+    assert S3CompatibleKnowledgeRetriever(MemoryStore({}), (source(),)).search(search()) == []
 
 
 @pytest.mark.parametrize(
@@ -154,9 +235,7 @@ def test_retrieval_returns_empty_when_source_or_terms_are_absent() -> None:
 )
 def test_retrieval_normalises_invalid_index_data(payload: bytes) -> None:
     key = 'knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl'
-    value = S3CompatibleKnowledgeRetriever(
-        MemoryStore({key: payload}), {('motor', 'MVP-2026.1'): 'nw-motor'}
-    )
+    value = S3CompatibleKnowledgeRetriever(MemoryStore({key: payload}), (source(),))
 
     with pytest.raises(KnowledgeRetrievalUnavailable, match='index is invalid'):
         value.search(search())

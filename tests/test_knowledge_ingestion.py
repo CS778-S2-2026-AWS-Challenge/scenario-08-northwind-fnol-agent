@@ -233,7 +233,7 @@ def test_instruction_looking_source_text_remains_untrusted_document_content() ->
 
     chunks_key = 'knowledge/indexed/nw-motor-2026-1/MVP-2026.1/chunks.jsonl'
     chunks = [json.loads(line) for line in store.objects[chunks_key].splitlines()]
-    untrusted_chunk = next(chunk for chunk in chunks if chunk['chunk_id'].endswith('mtr-not-01'))
+    untrusted_chunk = next(chunk for chunk in chunks if chunk['chunk_id'].endswith('MTR-NOT-01'))
     assert injection_text in untrusted_chunk['text']
     assert untrusted_chunk['authority'] == 'northwind_synthetic_demo'
     assert untrusted_chunk['document_type'] == 'synthetic_policy_wording'

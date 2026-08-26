@@ -1601,6 +1601,9 @@ Provider errors and object-store identifiers are not exposed. Missing applicabil
 request validation rather than broadening the search.
 When a structured Policy Schedule supplies a wording document identifier, the caller includes
 `document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
+The approved document catalogue comes from the controlled publication manifest. Applicability is
+filtered before indexed objects are read, and a chunk whose governed identity, source metadata,
+or checksum differs from that manifest is treated as unavailable rather than returned as evidence.
 
 ### `POST /internal/v1/policy/search`
 

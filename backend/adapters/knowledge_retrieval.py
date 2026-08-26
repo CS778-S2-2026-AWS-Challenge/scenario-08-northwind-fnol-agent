@@ -1,15 +1,21 @@
 import json
 import re
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from backend.adapters.knowledge_object_store import KnowledgeObjectStoreUnavailable
 from backend.domain.knowledge import (
     KnowledgeChunk,
+    KnowledgePublicationStatus,
     KnowledgeRetrievalUnavailable,
     KnowledgeRetriever,
     KnowledgeSearch,
+    KnowledgeSource,
 )
-from backend.services.knowledge_ingestion import KnowledgeObjectStore
+from backend.services.knowledge_ingestion import (
+    KnowledgeObjectStore,
+    validate_manifest_source,
+)
 
 _STOP_WORDS = {
     'and',
@@ -47,12 +53,6 @@ _UNTRUSTED_INSTRUCTION_PATTERNS = (
     'reveal internal',
     'reveal private',
 )
-
-MVP_KNOWLEDGE_DOCUMENTS = {
-    ('motor', 'MVP-2026.1'): 'nw-policy-motor-standard-mvp-2026-1',
-    ('home', 'MVP-2026.1'): 'nw-policy-home-standard-mvp-2026-1',
-    ('contents', 'MVP-2026.1'): 'nw-policy-contents-standard-mvp-2026-1',
-}
 
 
 def _normalise_term(term: str) -> str:
@@ -116,17 +116,22 @@ def _chunk(value: dict[str, object]) -> KnowledgeChunk:
 
 
 class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
-    def __init__(self, store: KnowledgeObjectStore, documents: dict[tuple[str, str], str]) -> None:
+    def __init__(self, store: KnowledgeObjectStore, sources: Iterable[KnowledgeSource]) -> None:
         self._store = store
-        self._documents = documents
+        governed_sources: list[KnowledgeSource] = []
+        for source in sources:
+            validate_manifest_source(source)
+            if source.publication_status is KnowledgePublicationStatus.APPROVED:
+                governed_sources.append(source)
+        self._sources = tuple(governed_sources)
 
     def connection_status(self) -> str:
+        if not self._sources:
+            return 'unavailable'
         try:
-            for (product, version), document_id in self._documents.items():
-                key = f'knowledge/indexed/{document_id}/{version}/chunks.jsonl'
+            for source in self._sources:
+                key = self._chunks_key(source)
                 if self._store.read(key) is None:
-                    return 'unavailable'
-                if not product:
                     return 'unavailable'
         except KnowledgeObjectStoreUnavailable:
             return 'unavailable'
@@ -143,41 +148,86 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
             or request.effective_at is None
         ):
             return []
-        document_id = self._documents.get((request.product, request.version))
-        if document_id is None:
-            return []
-        if request.document_id is not None and request.document_id != document_id:
-            return []
         if not _query_matches_scope(request.text, request.product):
             return []
-        key = f'knowledge/indexed/{document_id}/{request.version}/chunks.jsonl'
-        try:
-            payload = self._store.read(key)
-        except KnowledgeObjectStoreUnavailable as error:
-            raise KnowledgeRetrievalUnavailable('The knowledge service is unavailable.') from error
-        if payload is None:
+        applicable_sources = [
+            source for source in self._sources if self._source_is_applicable(source, request)
+        ]
+        if not applicable_sources:
             return []
         query_terms = _terms(request.text) - _PRODUCT_TERMS.get(request.product, set())
         if not query_terms:
             return []
         scored: list[tuple[int, int, KnowledgeChunk]] = []
         try:
-            for line in payload.splitlines():
-                chunk = _chunk(json.loads(line))
-                if not self._applicable(chunk, request):
+            for source in applicable_sources:
+                payload = self._store.read(self._chunks_key(source))
+                if payload is None:
                     continue
-                heading_terms = _terms(chunk.section_path)
-                text_terms = _terms(chunk.text)
-                section_match = len(query_terms & heading_terms)
-                score = 4 * section_match + len(query_terms & text_terms)
-                if score:
-                    scored.append((score, section_match, chunk))
+                for line in payload.splitlines():
+                    chunk = _chunk(json.loads(line))
+                    if not self._chunk_matches_source(chunk, source):
+                        raise KnowledgeRetrievalUnavailable(
+                            'The knowledge index does not match its governed source.'
+                        )
+                    if not self._applicable(chunk, request):
+                        continue
+                    heading_terms = _terms(chunk.section_path)
+                    text_terms = _terms(chunk.text)
+                    section_match = len(query_terms & heading_terms)
+                    score = 4 * section_match + len(query_terms & text_terms)
+                    if score:
+                        scored.append((score, section_match, chunk))
+        except KnowledgeObjectStoreUnavailable as error:
+            raise KnowledgeRetrievalUnavailable('The knowledge service is unavailable.') from error
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
             raise KnowledgeRetrievalUnavailable(
                 'The knowledge index is invalid or unavailable.'
             ) from error
         scored.sort(key=lambda item: (-item[1], -item[0], item[2].chunk_id))
         return [chunk for _, _, chunk in scored[: request.limit]]
+
+    @staticmethod
+    def _chunks_key(source: KnowledgeSource) -> str:
+        return f'knowledge/indexed/{source.document_id}/{source.version}/chunks.jsonl'
+
+    @staticmethod
+    def _chunk_matches_source(chunk: KnowledgeChunk, source: KnowledgeSource) -> bool:
+        return (
+            chunk.document_id == source.document_id
+            and chunk.title == source.title
+            and chunk.document_type == source.document_type
+            and chunk.version == source.version
+            and chunk.source_uri == source.source_uri
+            and chunk.jurisdiction == source.jurisdiction
+            and chunk.insurer == source.insurer
+            and chunk.product == source.product
+            and chunk.effective_from == source.effective_from
+            and chunk.effective_to == source.effective_to
+            and chunk.authority == source.authority
+            and chunk.visibility == source.visibility
+            and source.expected_checksum is not None
+            and chunk.checksum.casefold() == source.expected_checksum.casefold()
+        )
+
+    @staticmethod
+    def _source_is_applicable(source: KnowledgeSource, request: KnowledgeSearch) -> bool:
+        effective_at = request.effective_at
+        if effective_at is None:
+            return False
+        if (
+            (request.document_id is not None and source.document_id != request.document_id)
+            or source.jurisdiction != request.jurisdiction
+            or source.visibility != request.visibility
+            or source.authority != request.authority
+            or source.version != request.version
+            or source.insurer != request.insurer
+            or source.product != request.product
+        ):
+            return False
+        if source.effective_from is not None and effective_at < source.effective_from:
+            return False
+        return source.effective_to is None or effective_at < source.effective_to
 
     @staticmethod
     def _applicable(chunk: KnowledgeChunk, request: KnowledgeSearch) -> bool:

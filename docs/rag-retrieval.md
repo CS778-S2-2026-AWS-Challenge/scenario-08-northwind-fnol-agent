@@ -7,6 +7,11 @@ requires exact jurisdiction, visibility, authority, version, insurer, product, a
 scope before ranking. It returns citable source chunks, not a coverage decision or a
 customer-specific policy fact.
 
+The document catalogue is derived from the same repository-controlled publication manifest used
+by ingestion. Retrieval filters that catalogue before any indexed object is read, supports more
+than one approved document in the same product/version scope, and rejects indexed chunks whose
+identity, governed metadata, or checksum no longer matches the approved source record.
+
 The deterministic keyword ranker is an MVP retrieval implementation. It does not claim vector or
 semantic-search capability. Customer policy schedules remain structured records and must be
 queried through the authorised policy boundary.
@@ -21,11 +26,11 @@ include a limitation.
 ## Repeatable local verification
 
 After the issue #246 ingestion output exists in MinIO, provide the protected S3-compatible settings
-through the process environment and run:
+through the process environment and run the evaluator against an anonymous synthetic evaluation
+file:
 
 ```powershell
-py -3.12 scripts/verify_local_rag.py `
-  ../outputs/northwind-rag-mvp-policy-draft-v1/evaluation/rag-evaluation-cases.json
+py -3.12 scripts/verify_local_rag.py path/to/rag-evaluation-cases.json
 ```
 
 Run the focused contract tests with:
@@ -38,6 +43,8 @@ py -3.12 -m pytest tests/test_knowledge_ingestion.py `
 The evaluator checks expected citation IDs for applicable examples and expects no result for
 wrong-product, wrong-insurer, expired, missing-version, and prompt-injection cases. Provider and
 malformed-index failures are normalised at the retrieval boundary rather than exposed to clients.
+The focused automated tests are repository-contained and provide the repeatable #255 acceptance
+check; the real MinIO upload-to-citation run is recorded separately under #265.
 
 ## Runtime boundary
 

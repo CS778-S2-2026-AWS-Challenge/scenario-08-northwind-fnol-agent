@@ -141,8 +141,14 @@ def test_knowledge_search_requires_integration_auth_and_complete_scope() -> None
             headers=AUTH,
             json=request_payload(effective_at='2026-08-25T00:00:00'),
         )
+        padded_product = client.post(
+            ENDPOINT,
+            headers=AUTH,
+            json=request_payload(product=' motor '),
+        )
 
     assert no_auth.status_code == 401
     assert claimant.status_code == 403
     assert missing_version.status_code == 422
     assert missing_timezone.status_code == 422
+    assert padded_product.status_code == 422

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import Field, field_validator
 
@@ -101,6 +101,22 @@ class KnowledgeSearchRequest(ContractModel):
     effective_at: datetime
     limit: int = Field(default=5, ge=1, le=10)
 
+    @field_validator(
+        'question',
+        'jurisdiction',
+        'visibility',
+        'document_id',
+        'authority',
+        'version',
+        'insurer',
+        'product',
+    )
+    @classmethod
+    def require_canonical_search_text(cls, value: str | None) -> str | None:
+        if value is not None and value != value.strip():
+            raise ValueError('knowledge search text fields must be canonical')
+        return value
+
     @field_validator('effective_at')
     @classmethod
     def require_effective_at_timezone(cls, value: datetime) -> datetime:
@@ -121,6 +137,6 @@ class KnowledgeCitation(ContractModel):
 
 
 class KnowledgeSearchResponse(ContractModel):
-    status: str
+    status: Literal['evidence_found', 'no_evidence', 'unavailable']
     results: list[KnowledgeCitation]
     limitations: list[str]

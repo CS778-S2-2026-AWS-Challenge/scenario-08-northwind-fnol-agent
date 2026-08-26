@@ -11,12 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.adapters.knowledge_object_store import S3CompatibleKnowledgeObjectStore
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
 from backend.domain.knowledge import KnowledgeSearch
-
-DOCUMENTS = {
-    ('motor', 'MVP-2026.1'): 'nw-policy-motor-standard-mvp-2026-1',
-    ('home', 'MVP-2026.1'): 'nw-policy-home-standard-mvp-2026-1',
-    ('contents', 'MVP-2026.1'): 'nw-policy-contents-standard-mvp-2026-1',
-}
+from scripts.ingest_knowledge_source import load_approved_sources
 
 
 def required_environment(name: str) -> str:
@@ -42,7 +37,7 @@ def main() -> None:
     store = S3CompatibleKnowledgeObjectStore(
         client, os.getenv('NORTHWIND_KNOWLEDGE_BUCKET', 'northwind-knowledge')
     )
-    results = S3CompatibleKnowledgeRetriever(store, DOCUMENTS).search(
+    results = S3CompatibleKnowledgeRetriever(store, load_approved_sources().values()).search(
         KnowledgeSearch(
             text=arguments.question,
             jurisdiction='NZ',

@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.adapters.knowledge_object_store import S3CompatibleKnowledgeObjectStore
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
 from backend.domain.knowledge import KnowledgeSearch
-from scripts.query_knowledge import DOCUMENTS, required_environment
+from scripts.ingest_knowledge_source import load_approved_sources
+from scripts.query_knowledge import required_environment
 
 
 def main() -> None:
@@ -31,7 +32,7 @@ def main() -> None:
     store = S3CompatibleKnowledgeObjectStore(
         client, os.getenv('NORTHWIND_KNOWLEDGE_BUCKET', 'northwind-knowledge')
     )
-    retriever = S3CompatibleKnowledgeRetriever(store, DOCUMENTS)
+    retriever = S3CompatibleKnowledgeRetriever(store, load_approved_sources().values())
     failures: list[str] = []
     for case in evaluation['cases']:
         filters = case['filters']
