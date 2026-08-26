@@ -17,6 +17,7 @@ time-bound commitments belong in `sprint/`.
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Persistence Contract](persistence-schema.md)
+- [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Policy and Claim-History Retrieval Contract](policy-history-mapping.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [MinIO Object-Storage Boundary](minio-object-storage.md)

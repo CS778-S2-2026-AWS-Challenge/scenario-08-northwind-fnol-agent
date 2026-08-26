@@ -11,6 +11,7 @@ from backend.domain.models import (
     SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
@@ -95,6 +96,28 @@ class FixtureRepository(PersistenceRepository):
             raise RevisionConflict(stored_claim.revision)
         self._claims[claim.claim_id] = deepcopy(claim)
 
+    def _validate_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        *,
+        allow_active_session_change: bool = False,
+    ) -> WorkingClaim:
+        """Validate the shared Claim State precondition before any child write."""
+        stored_claim = self._claims.get(claim.claim_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        if stored_claim.customer_id != claim.customer_id or claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
+        if (
+            not allow_active_session_change
+            and stored_claim.active_session_id != claim.active_session_id
+        ):
+            raise KeyError(claim.claim_id)
+        return stored_claim
+
     def get_session(
         self,
         claim_id: str,
@@ -119,14 +142,13 @@ class FixtureRepository(PersistenceRepository):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        stored_claim = self._validate_claim_mutation(
+            claim,
+            expected_revision,
+            allow_active_session_change=True,
+        )
         records_match = (
             stored_claim.customer_id == claim.customer_id
-            and claim.revision == expected_revision + 1
             and claim.active_session_id == session.session_id
             and session.claim_id == claim.claim_id
             and session.customer_id == claim.customer_id
@@ -222,11 +244,37 @@ class FixtureRepository(PersistenceRepository):
         message: MessageRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None or stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision if stored_claim else expected_revision)
-        if message.claim_id != claim.claim_id or message.session_id != session.session_id:
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        stored_session = self._sessions.get(session.session_id)
+        records_match = (
+            stored_session is not None
+            and stored_claim.active_session_id == session.session_id
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and claim.active_session_id == session.session_id
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.status is SessionStatus.ACTIVE
+            and session.context_revision == claim.revision
+            and message.claim_id == claim.claim_id
+            and message.session_id == session.session_id
+            and message.actor is ActorType.CLAIMANT
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.message_id == message.message_id
+        )
+        if not records_match:
             raise KeyError(claim.claim_id)
+        if message.message_id in self._messages:
+            raise IdempotencyConflict(message.message_id)
+        if message.client_message_id is not None and any(
+            existing.claim_id == claim.claim_id
+            and existing.client_message_id == message.client_message_id
+            for existing in self._messages.values()
+        ):
+            raise IdempotencyConflict(message.client_message_id)
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
@@ -353,17 +401,37 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        existing_claimant_message = self._messages.get(claimant_message.message_id)
+        existing_agent_message = self._messages.get(agent_message.message_id)
+        existing_decision = self._decisions.get(decision.decision_id)
+        existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        existing_evidence = (
+            self._evidence.get(evidence.evidence_id) if evidence is not None else None
+        )
+        existing_children = (
+            existing_claimant_message,
+            existing_agent_message,
+            existing_decision,
+            existing_handoff,
+            existing_evidence,
+        )
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id
+            for existing in existing_children
+        )
         records_match = (
-            stored_claim.customer_id == claim.customer_id
+            child_ownership_matches
+            and claimant_message.message_id != agent_message.message_id
+            and stored_claim.customer_id == claim.customer_id
             and stored_session is not None
             and stored_session.claim_id == claim.claim_id
             and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and stored_claim.active_session_id == session.session_id
+            and claim.active_session_id == session.session_id
+            and session.status is SessionStatus.ACTIVE
             and claim.customer_id == session.customer_id
             and idempotency.actor_id == claim.customer_id
             and claim.claim_id == session.claim_id
@@ -391,6 +459,20 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        immutable_collision = next(
+            (
+                identity
+                for identity, existing in (
+                    (claimant_message.message_id, existing_claimant_message),
+                    (agent_message.message_id, existing_agent_message),
+                    (decision.decision_id, existing_decision),
+                )
+                if existing is not None
+            ),
+            None,
+        )
+        if immutable_collision is not None:
+            raise IdempotencyConflict(immutable_collision)
         duplicate_client_message = next(
             (
                 message
@@ -456,13 +538,11 @@ class FixtureRepository(PersistenceRepository):
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        self._validate_claim_mutation(claim, expected_revision)
+        existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
             evidence.claim_id != claim.claim_id
+            or (existing_evidence is not None and existing_evidence.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')
@@ -584,16 +664,75 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
     ) -> None:
-        stored = self._claims.get(claim.claim_id)
-        if stored is None:
-            raise KeyError(claim.claim_id)
-        if stored.revision != expected_revision:
-            raise RevisionConflict(stored.revision)
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
         if not any((staff_action, customer_update, signal_decision, handoff, message)):
             raise KeyError(claim.claim_id)
         records = (staff_action, customer_update, signal_decision, handoff, message)
-        if any(item is not None and item.claim_id != claim.claim_id for item in records):
+        active_session_id = claim.active_session_id or ''
+        stored_session = self._sessions.get(active_session_id) if message is not None else None
+        existing_staff_action = (
+            self._staff_actions.get(staff_action.action_id) if staff_action is not None else None
+        )
+        existing_customer_update = (
+            self._customer_updates.get(customer_update.update_id)
+            if customer_update is not None
+            else None
+        )
+        existing_signal_decision = (
+            self._signal_decisions.get(signal_decision.signal_decision_id)
+            if signal_decision is not None
+            else None
+        )
+        existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        existing_message = self._messages.get(message.message_id) if message is not None else None
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id
+            for existing in (
+                existing_staff_action,
+                existing_customer_update,
+                existing_signal_decision,
+                existing_handoff,
+                existing_message,
+            )
+        )
+        records_match = (
+            child_ownership_matches
+            and all(item is None or item.claim_id == claim.claim_id for item in records)
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id in {'', active_session_id}
+            and (
+                staff_action is None
+                or (
+                    staff_action.status is not StaffActionStatus.COMPLETED
+                    and staff_action.completed_by is None
+                )
+                or (
+                    staff_action.status is StaffActionStatus.COMPLETED
+                    and staff_action.completed_by == idempotency.actor_id
+                )
+            )
+            and (customer_update is None or customer_update.created_by == idempotency.actor_id)
+            and (signal_decision is None or signal_decision.actor_id == idempotency.actor_id)
+            and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
+            and (
+                message is None
+                or (
+                    stored_claim.active_session_id == active_session_id
+                    and stored_session is not None
+                    and stored_session.claim_id == claim.claim_id
+                    and stored_session.customer_id == claim.customer_id
+                    and stored_session.status is SessionStatus.ACTIVE
+                    and message.actor is ActorType.STAFF
+                    and message.session_id == active_session_id
+                    and message.session_id == idempotency.session_id
+                    and idempotency.message_id == message.message_id
+                )
+            )
+        )
+        if not records_match:
             raise KeyError(claim.claim_id)
+        if existing_message is not None:
+            raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
@@ -644,13 +783,11 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        self._validate_claim_mutation(claim, expected_revision)
+        existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
+            or (existing_handoff is not None and existing_handoff.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')

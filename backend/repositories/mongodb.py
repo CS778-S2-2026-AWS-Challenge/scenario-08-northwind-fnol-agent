@@ -809,11 +809,14 @@ class MongoDBRepository:
     ) -> None:
         if (
             claim.revision != expected_revision + 1
+            or claim.active_session_id != session.session_id
             or session.claim_id != claim.claim_id
             or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
             or session.context_revision != claim.revision
             or message.claim_id != claim.claim_id
             or message.session_id != session.session_id
+            or message.actor is not ActorType.CLAIMANT
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
@@ -1001,7 +1004,13 @@ class MongoDBRepository:
                 customer_id=claim.customer_id,
                 session=mongo_session,
             )
-            if stored_session is None or stored_session.claim_id != claim.claim_id:
+            if (
+                stored_session is None
+                or stored_session.claim_id != claim.claim_id
+                or stored_session.status is not SessionStatus.ACTIVE
+                or session.status is not SessionStatus.ACTIVE
+                or claim.active_session_id != session.session_id
+            ):
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
             if kind == 'message':
@@ -1017,6 +1026,8 @@ class MongoDBRepository:
                 if (
                     message_session is None
                     or message_session.claim_id != claim.claim_id
+                    or message_session.status is not SessionStatus.ACTIVE
+                    or claim.active_session_id != record.session_id
                     or idempotency.session_id != record.session_id
                     or record.message_id
                     not in {idempotency.message_id, idempotency.agent_message_id}
@@ -1079,11 +1090,14 @@ class MongoDBRepository:
                 'customer_id': claim.customer_id,
                 'revision': expected_revision,
             },
-            projection={'revision': 1},
+            projection={'revision': 1, 'active_session_id': 1},
             session=mongo_session,
         )
         if current is None:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            return
+        if current.get('active_session_id') != claim.active_session_id:
+            raise KeyError(claim.claim_id)
 
     def _replace_claim_revision(
         self,
