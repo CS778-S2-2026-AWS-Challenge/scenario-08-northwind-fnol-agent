@@ -96,6 +96,27 @@ def test_local_minio_example_is_ready_only_with_a_verified_service(
     assert result['readiness']['evidence_storage'] == 'configured_service'  # type: ignore[index]
 
 
+def test_local_minio_example_refuses_startup_when_service_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnavailableMinio:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'unavailable'
+
+    monkeypatch.setattr('backend.core.runtime_profiles.MinioEvidenceStorage', UnavailableMinio)
+
+    result, exit_code = inspect_runtime(EXAMPLES / 'local-minio.env.example')
+
+    assert exit_code == 2
+    assert result['status'] == 'startup_refused'
+    assert result['readiness']['evidence_storage'] == 'unavailable'  # type: ignore[index]
+    assert 'evidence_storage=unavailable' in str(result['reason'])
+
+
 def test_environment_inspection_does_not_inherit_or_leak_managed_host_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -19,6 +19,7 @@ from backend.core.runtime_profiles import (
 _SETTING_NAME = re.compile(r'[A-Z][A-Z0-9_]*\Z')
 _MANAGED_PREFIXES = ('NORTHWIND_', 'MODEL_')
 _MANAGED_NAMES = {'DATA_RUNTIME_PROFILE', 'AGENT_RUNTIME_PROFILE'}
+_READY_CAPABILITY_STATES = {'using_fixture', 'configured_service', 'verified'}
 
 
 def load_environment_example(path: Path) -> dict[str, str]:
@@ -77,7 +78,23 @@ def inspect_runtime(path: Path) -> tuple[dict[str, object], int]:
             result.update(status='startup_refused', reason=str(error))
             return result, 2
         try:
-            result.update(status='startup_ready', readiness=bundle.readiness_checks())
+            readiness = bundle.readiness_checks()
+            result['readiness'] = readiness
+            refused = {
+                capability: status
+                for capability, status in readiness.items()
+                if status not in _READY_CAPABILITY_STATES
+            }
+            if refused:
+                details = ', '.join(
+                    f'{capability}={status}' for capability, status in sorted(refused.items())
+                )
+                result.update(
+                    status='startup_refused',
+                    reason=f'Runtime readiness check failed: {details}. Startup refused.',
+                )
+                return result, 2
+            result['status'] = 'startup_ready'
             return result, 0
         finally:
             bundle.close()
