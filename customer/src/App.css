@@ -743,6 +743,126 @@
   background: #edf8f3;
 }
 
+.external-service {
+  width: min(100%, 720px);
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid #8fc3b3;
+  border-left: 4px solid #2c806a;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.external-service h2 {
+  margin: 0;
+  font-size: 21px;
+}
+
+.external-service > p:not(.transfer-label) {
+  margin: 9px 0 16px;
+  color: #4d625b;
+  line-height: 1.55;
+}
+
+.external-service h3 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+}
+
+.service-details,
+.service-result dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.service-details div,
+.service-result dl div {
+  padding-top: 9px;
+  border-top: 1px solid #dbe8e3;
+}
+
+.service-details dt,
+.service-result dt {
+  color: #667a73;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.service-details dd,
+.service-result dd {
+  margin: 3px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.shared-data-list {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  color: #40564f;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.service-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 13px;
+  border-radius: 7px;
+  background: #eef8f4;
+  color: #304a42;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.service-consent input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  accent-color: #2c806a;
+}
+
+.service-progress,
+.service-result {
+  margin: 14px 0;
+  padding: 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.service-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #355d51;
+  background: #edf8f3;
+}
+
+.service-result p {
+  margin: 5px 0 0;
+}
+
+.service-result.is-success {
+  color: #285d4d;
+  background: #e8f6f0;
+}
+
+.service-result.is-error {
+  color: #8a3f39;
+  background: #fff3f1;
+}
+
+.service-result .service-limitation {
+  margin-top: 10px;
+  color: #667a73;
+  font-size: 11px;
+}
+
 .claim-created h2 {
   margin: 0 0 12px;
   font-size: 22px;
@@ -986,6 +1106,7 @@
 
 button:focus-visible,
 a:focus-visible,
+input:focus-visible,
 textarea:focus-visible {
   outline: 3px solid rgba(45, 137, 112, 0.24);
   outline-offset: 2px;
@@ -1102,6 +1223,11 @@ textarea:focus-visible {
   }
 
   .transfer-state dl {
+    grid-template-columns: 1fr;
+  }
+
+  .service-details,
+  .service-result dl {
     grid-template-columns: 1fr;
   }
 
