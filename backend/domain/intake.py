@@ -56,6 +56,10 @@ CURRENT_ACTION_REQUIREMENTS = (
     INCIDENT_TYPE_INTAKE_FIELD,
 )
 
+# Compatibility export for the existing controlled motor claim-creation boundary.
+# Claim creation uses this as a prerequisite set, not as the claimant question order.
+CONTROLLED_INTAKE_FIELDS = CURRENT_ACTION_REQUIREMENTS[:-1]
+
 # Registered branch-specific fields are active context for the supported claim family,
 # but are not made mandatory for the current action without approved Northwind rules.
 BRANCH_NON_BLOCKING_FIELDS: dict[str, tuple[str, ...]] = {
