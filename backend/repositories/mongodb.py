@@ -121,6 +121,24 @@ def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepos
         ) from None
 
 
+def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
+    """Ping MongoDB without constructing a repository or changing provider state."""
+
+    client: MongoClient[Any] | None = None
+    try:
+        client = MongoClient(
+            config.uri,
+            serverSelectionTimeoutMS=config.server_selection_timeout_ms,
+        )
+        client.admin.command('ping')
+        return 'verified'
+    except (PyMongoError, ValueError):
+        return 'unavailable'
+    finally:
+        if client is not None:
+            client.close()
+
+
 class MongoDBRepository:
     """MongoDB implementation of the core Claim/Session/Message boundary.
 

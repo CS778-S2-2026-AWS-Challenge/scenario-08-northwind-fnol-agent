@@ -14,6 +14,7 @@ time-bound commitments belong in `sprint/`.
 - [Provider-Neutral Model Gateway](model-gateway.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
+- [Runtime Profile Validation Record](runtime-profile-validation.md)
 - [RAG Knowledge Ingestion](rag-ingestion.md)
 - [Filtered RAG Retrieval](rag-retrieval.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
