@@ -266,6 +266,26 @@ def test_retrieval_fails_closed_when_one_of_multiple_applicable_indexes_is_missi
         retriever(chunk(), sources=(source(), missing)).search(search())
 
 
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('pipeline_identity', 'old-pipeline'),
+        ('source_metadata_fingerprint', 'b' * 64),
+    ],
+)
+def test_retrieval_rejects_stale_ingestion_provenance(field: str, value: str) -> None:
+    governed = source()
+    value_retriever = retriever(chunk(), sources=(governed,))
+    state_key = value_retriever._ingestion_state_key(governed)
+    store = value_retriever._store
+    assert isinstance(store, MemoryStore)
+    state = json.loads(store.objects[state_key])
+    state[field] = value
+    store.objects[state_key] = json.dumps(state).encode()
+    with pytest.raises(KnowledgeRetrievalUnavailable, match='governed ingestion state'):
+        value_retriever.search(search())
+
+
 @pytest.mark.parametrize('term', ['contents', 'belongings', 'possessions'])
 def test_retrieval_rejects_contents_product_terms_in_motor_scope(term: str) -> None:
     value = retriever(chunk())
