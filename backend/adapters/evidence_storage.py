@@ -35,6 +35,10 @@ class EvidenceUploadNotFound(EvidenceStorageError):
     pass
 
 
+class EvidenceUploadSizeMismatch(EvidenceStorageError):
+    pass
+
+
 class EvidenceStorageUnavailable(EvidenceStorageError):
     """The configured object store could not be reached.
 
@@ -135,6 +139,7 @@ class StoredUpload:
 class EvidenceStorage(Protocol):
     max_size_bytes: int
     allowed_media_types: tuple[str, ...]
+    supports_content_proxy: bool
 
     def connection_status(self) -> str:
         raise NotImplementedError
@@ -160,6 +165,14 @@ class EvidenceStorage(Protocol):
     ) -> StoredUpload:
         raise NotImplementedError
 
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        raise NotImplementedError
+
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
+        raise NotImplementedError
+
 
 @dataclass(frozen=True, slots=True)
 class _PendingUpload:
@@ -168,6 +181,7 @@ class _PendingUpload:
     media_type: str
     size_bytes: int
     storage_key: str
+    expires_at: datetime
 
 
 class MockEvidenceStorage(EvidenceStorage):
@@ -175,10 +189,12 @@ class MockEvidenceStorage(EvidenceStorage):
 
     max_size_bytes = MAX_UPLOAD_SIZE_BYTES
     allowed_media_types = ALLOWED_MEDIA_TYPES
+    supports_content_proxy = True
 
     def __init__(self, outage: EvidenceStorageUnavailable | None = None) -> None:
         self._pending: dict[tuple[str, str], _PendingUpload] = {}
         self._completed: dict[tuple[str, str], StoredUpload] = {}
+        self._content: dict[tuple[str, str], bytes] = {}
         self._outage = outage
 
     def set_outage(self, outage: EvidenceStorageUnavailable | None) -> None:
@@ -195,9 +211,11 @@ class MockEvidenceStorage(EvidenceStorage):
         cleared = {
             'mock_pending_uploads': len(self._pending),
             'mock_completed_uploads': len(self._completed),
+            'mock_uploaded_files': len(self._content),
         }
         self._pending.clear()
         self._completed.clear()
+        self._content.clear()
         self._outage = None
         return cleared
 
@@ -215,20 +233,46 @@ class MockEvidenceStorage(EvidenceStorage):
         if size_bytes > self.max_size_bytes:
             raise EvidenceUploadTooLarge(size_bytes)
         storage_key = f'claims/{claim_id}/evidence/{evidence_id}'
+        expires_at = now_utc() + timedelta(minutes=15)
         self._pending[(claim_id, evidence_id)] = _PendingUpload(
             claim_id=claim_id,
             evidence_id=evidence_id,
             media_type=media_type,
             size_bytes=size_bytes,
             storage_key=storage_key,
+            expires_at=expires_at,
         )
         return StoredUploadTarget(
             method='PUT',
-            url=f'https://example.invalid/uploads/{evidence_id}',
+            url=f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
             headers={'Content-Type': media_type},
-            expires_at=now_utc() + timedelta(minutes=15),
+            expires_at=expires_at,
             storage_key=storage_key,
         )
+
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        self._guard()
+        pending = self._pending.get((claim_id, evidence_id))
+        if pending is None:
+            raise EvidenceUploadNotFound(evidence_id)
+        if pending.expires_at <= now_utc():
+            self._pending.pop((claim_id, evidence_id), None)
+            self._content.pop((claim_id, evidence_id), None)
+            raise EvidenceUploadNotFound(evidence_id)
+        if len(content) != pending.size_bytes:
+            raise EvidenceUploadSizeMismatch(evidence_id)
+        self._content[(claim_id, evidence_id)] = content
+
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
+        self._guard()
+        if (claim_id, evidence_id) not in self._completed:
+            return None
+        completed = self._completed[(claim_id, evidence_id)]
+        if storage_key is not None and storage_key != completed.storage_key:
+            return None
+        return self._content.get((claim_id, evidence_id))
 
     def complete_upload(
         self,
@@ -243,9 +287,15 @@ class MockEvidenceStorage(EvidenceStorage):
         pending = self._pending.get((claim_id, evidence_id))
         if pending is None or pending.media_type != media_type or pending.size_bytes != size_bytes:
             raise EvidenceUploadNotFound(evidence_id)
+        content = self._content.get((claim_id, evidence_id))
+        if content is None:
+            raise EvidenceUploadNotFound(evidence_id)
+        verified_checksum = f'sha256:{sha256(content).hexdigest()}'
+        if checksum.lower() != verified_checksum:
+            raise EvidenceUploadNotFound(evidence_id)
         completed = StoredUpload(
             storage_key=pending.storage_key,
-            checksum=checksum,
+            checksum=verified_checksum,
             source_id='fixture_evidence_storage',
         )
         self._completed[(claim_id, evidence_id)] = completed
@@ -265,6 +315,7 @@ class MinioEvidenceStorage(EvidenceStorage):
 
     max_size_bytes = MAX_UPLOAD_SIZE_BYTES
     allowed_media_types = ALLOWED_MEDIA_TYPES
+    supports_content_proxy = False
 
     def __init__(self, config: S3CompatibleObjectStorageConfig, client: Any = None) -> None:
         self._config = config
@@ -361,6 +412,37 @@ class MinioEvidenceStorage(EvidenceStorage):
             expires_at=now_utc() + timedelta(seconds=self._config.presign_expiry_seconds),
             storage_key=storage_key,
         )
+
+    def put_upload(self, *, claim_id: str, evidence_id: str, content: bytes) -> None:
+        """Reject the fixture-only upload proxy when object storage is configured."""
+        raise EvidenceUploadNotFound(evidence_id)
+
+    def read_upload(
+        self, *, claim_id: str, evidence_id: str, storage_key: str | None = None
+    ) -> bytes | None:
+        expected_prefix = self._storage_key(claim_id, evidence_id).removesuffix('staging')
+        if storage_key is None or not storage_key.startswith(f'{expected_prefix}finalised/'):
+            return None
+        try:
+            response = self._client.get_object(Bucket=self._config.bucket, Key=storage_key)
+            body = response.get('Body')
+            if body is None or not callable(getattr(body, 'read', None)):
+                return None
+            try:
+                content = body.read(self.max_size_bytes + 1)
+            finally:
+                close = getattr(body, 'close', None)
+                if callable(close):
+                    close()
+        except ClientError as error:
+            if self._not_found(error):
+                return None
+            raise self._unavailable('read the uploaded object', error) from error
+        except BotoCoreError as error:
+            raise self._unavailable('read the uploaded object', error) from error
+        if not isinstance(content, bytes) or len(content) > self.max_size_bytes:
+            return None
+        return content
 
     def complete_upload(
         self,

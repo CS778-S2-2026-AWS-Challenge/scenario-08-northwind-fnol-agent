@@ -14,6 +14,18 @@ Idempotency records. Mock-backed tests verify document mapping, ownership filter
 relationship checks, revision conflicts, and mutation ordering. These tests do not prove
 MongoDB transaction rollback or concurrency behaviour.
 
+The adapter owns bounded environment parsing and verified client construction through
+`MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
+repository only after `ping` and index initialisation succeed; failure closes the client and
+raises a bounded error without returning the connection URI. The non-secret setting names are:
+
+- `NORTHWIND_MONGODB_URI` (secret-bearing value supplied only through process configuration);
+- `NORTHWIND_MONGODB_DATABASE`;
+- `NORTHWIND_MONGODB_COLLECTION`; and
+- `NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS`.
+
+These connection primitives do not by themselves enable the MongoDB runtime profile.
+
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
@@ -31,7 +43,7 @@ provider payloads, or SDK types.
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -86,7 +98,10 @@ and checksums rather than embedding those bytes.
   it; later unrelated messages remain session-only and must not overwrite claim facts.
 - A session summary records the claim revision it represents. That revision may lag but
   must not exceed the current claim revision.
-- Complete messages remain durable outside the bounded summary.
+- Complete messages remain durable outside the bounded summary. Message lists use the stable
+  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- A message `in_reply_to` reference may identify only a message belonging to the same claim and
+  interaction session.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later

@@ -235,6 +235,21 @@ def send_staff_message(
     )
     if active is None:
         raise _validation('An accepted handoff is required before sending a staff message.')
+    if active.assigned_to != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The handoff is assigned to another staff member.',
+        )
+    if payload.in_reply_to is not None:
+        referenced = repository.get_message(
+            claim_id,
+            claim.active_session_id or '',
+            payload.in_reply_to,
+            claim.customer_id,
+        )
+        if referenced is None:
+            raise _validation('The reply reference must belong to this claim and session.')
     timestamp = now_utc()
     message = MessageRecord(
         message_id=new_id('msg'),

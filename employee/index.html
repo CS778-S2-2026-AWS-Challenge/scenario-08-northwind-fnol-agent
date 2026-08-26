@@ -75,7 +75,7 @@
       gap: 10px;
       box-shadow:0 4px 14px rgba(15,23,42,.035);
       transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease;}
-    .claim-list button:hover, .claim-list button:focus { z-index:10; border-color:#5eead4; box-shadow:0 10px 26px rgba(15,23,42,.1); transform:translateY(-1px); outline:none; }
+    .claim-list button:hover, .claim-list button:focus { z-index:30; border-color:#5eead4; box-shadow:0 10px 26px rgba(15,23,42,.1); transform:translateY(-1px); outline:none; }
     .claim-list button:focus-visible { box-shadow:0 0 0 3px rgba(15,118,110,.18),0 10px 26px rgba(15,23,42,.1); }
     .claim-list button.active { border-color:#0f766e; box-shadow:0 0 0 2px rgba(15,118,110,.12),0 12px 28px rgba(15,23,42,.08); }
     .claim-list .claim-card-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -100,6 +100,21 @@
     .queue-pagination button:disabled { opacity:.45; cursor:not-allowed; }
     .queue-pagination span { min-width:92px; color:#64748b; font-size:12px; text-align:center; }
     .claim-list .badge { display: inline-flex; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .evidence-view-button { margin-top:9px; padding:7px 10px; border:1px solid #0f766e; border-radius:8px; background:#fff; color:#0f766e; font:inherit; font-weight:700; cursor:pointer; }
+    .evidence-view-button:hover { background:#f0fdfa; }
+    .evidence-download-button { margin:9px 0 0 7px; padding:7px 11px; border:1px solid #cbd5e1; border-radius:999px; background:#f1f5f9; color:#334155; font:inherit; font-weight:650; cursor:pointer; }
+    .evidence-download-button::before { margin-right:6px; content:'↓'; font-size:15px; line-height:0; }
+    .evidence-download-button:hover { border-color:#94a3b8; background:#e2e8f0; }
+    .evidence-preview-dialog { width:min(920px,calc(100vw - 32px)); height:min(760px,calc(100vh - 32px)); padding:0; border:0; border-radius:16px; background:#fff; box-shadow:0 28px 80px rgba(15,23,42,.3); }
+    .evidence-preview-dialog::backdrop { background:rgba(15,23,42,.68); }
+    .evidence-preview-shell { height:100%; display:grid; grid-template-rows:auto 1fr; }
+    .evidence-preview-header { display:flex; align-items:center; gap:12px; padding:13px 16px; border-bottom:1px solid #e2e8f0; }
+    .evidence-preview-header strong { margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .evidence-preview-header a, .evidence-preview-header button { padding:7px 10px; border:1px solid #94a3b8; border-radius:8px; background:#fff; color:#334155; font:inherit; font-weight:700; text-decoration:none; cursor:pointer; }
+    .evidence-preview-body { min-height:0; display:grid; place-items:center; overflow:auto; padding:16px; background:#f1f5f9; }
+    .evidence-preview-body [hidden] { display:none !important; }
+    .evidence-preview-body img { display:block; max-width:100%; max-height:100%; object-fit:contain; box-shadow:0 8px 28px rgba(15,23,42,.14); }
+    .evidence-preview-body iframe { width:100%; height:100%; border:0; background:#fff; }
     .badge.urgent { background: #fee2e2; color: #991b1b; }
     .badge.review { background: #e0f2fe; color: #075985; }
     .badge.ready { background: #dcfce7; color: #166534; }
@@ -360,6 +375,18 @@
     .customer-chat-title { display:flex; align-items:start; justify-content:space-between; gap:12px; margin-bottom:14px; }
     .customer-chat-status { color:#64748b; font-size:12px; margin-top:4px; }
     .customer-chat-history { min-height:0; flex:1; overflow:auto; display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid #e2e8f0; border-radius:14px; background:#f6fdff; }
+    .customer-chat-message-meta { margin-top:6px; color:#64748b; font-size:10px; line-height:1.4; }
+    .customer-chat-message.is-pending { border:1px dashed #94a3b8; opacity:.82; }
+    .customer-chat-message.is-failed { border:1px solid #fca5a5; background:#fff1f2; color:#881337; }
+    .customer-chat-message.is-unknown { border:1px solid #fbbf24; background:#fffbeb; color:#78350f; }
+    .agent-suggestion-panel { margin:12px 0; padding:12px; border:1px solid #c4b5fd; border-radius:12px; background:#faf5ff; }
+    .agent-suggestion-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .agent-suggestion-heading strong { margin-right:auto; color:#5b21b6; }
+    .agent-suggestion-status { color:#6b7280; font-size:11px; }
+    .agent-suggestion-copy { width:100%; min-height:72px; margin-top:9px; padding:9px 10px; border:1px solid #ddd6fe; border-radius:9px; background:#fff; color:#312e81; font:inherit; resize:vertical; }
+    .agent-suggestion-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+    .agent-suggestion-actions button { padding:7px 10px; border:1px solid #a78bfa; border-radius:8px; background:#fff; color:#5b21b6; font-weight:700; cursor:pointer; }
+    .agent-suggestion-actions button:disabled { opacity:.5; cursor:not-allowed; }
     .customer-chat-message { padding:12px 14px; border-radius:16px; max-width:78%; line-height:1.5; white-space:pre-wrap; }
     .customer-chat-message.customer { align-self:flex-start; background:#eef7f5; color:#0f4a47; }
     .customer-chat-message.staff { align-self:flex-end; background:#157f79; color:#fff; }
@@ -573,6 +600,18 @@
                 <div><strong id="customerChatHeader">Select a conversation</strong><div id="customerChatStatus" class="customer-chat-status"></div></div>
               </div>
               <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
+              <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
+                <div class="agent-suggestion-heading">
+                  <strong id="agentSuggestionTitle">Reply template</strong>
+                  <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
+                </div>
+                <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
+                <div class="agent-suggestion-actions">
+                  <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
+                  <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
+                  <button id="rejectAgentSuggestion" type="button" disabled>Reject</button>
+                </div>
+              </section>
               <div class="customer-chat-input">
                 <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
                 <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
@@ -584,6 +623,20 @@
       </section>
     </main>
   </div>
+
+  <dialog id="evidencePreviewDialog" class="evidence-preview-dialog" aria-labelledby="evidencePreviewTitle">
+    <div class="evidence-preview-shell">
+      <header class="evidence-preview-header">
+        <strong id="evidencePreviewTitle">Evidence preview</strong>
+        <a id="evidencePreviewDownload" href="#" download>Download</a>
+        <button id="evidencePreviewClose" type="button">Close</button>
+      </header>
+      <div class="evidence-preview-body">
+        <img id="evidencePreviewImage" alt="" hidden>
+        <iframe id="evidencePreviewDocument" title="Evidence document preview" hidden></iframe>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Internal AI assistant -->
   <div class="chat-widget closed" id="chatWidget">
@@ -622,6 +675,10 @@
     const signalDecisionDrafts = new Map();
     let activeDetailTab = 'overview';
     let detailTabClaimId = null;
+    let evidencePreviewUrl = null;
+    let agentSuggestionState = 'not_requested';
+    let agentSuggestionClaimId = null;
+    let acceptedSuggestionText = '';
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -707,10 +764,12 @@
           headers: { ...getHeaders(), ...options.headers },
         });
       } catch (error) {
-        throw new Error(
+        const requestError = new Error(
           'Cannot reach the Workbench API at http://127.0.0.1:8000. '
           + 'Start the backend and keep it running, then refresh this page.'
         );
+        requestError.code = 'NETWORK_ERROR';
+        throw requestError;
       }
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -722,6 +781,85 @@
         throw requestError;
       }
       return payload;
+    }
+
+    async function viewEvidenceFile(item) {
+      const isPdf = item.media_type === 'application/pdf';
+      const pdfPreview = isPdf ? window.open('about:blank', '_blank') : null;
+      if (pdfPreview) {
+        pdfPreview.opener = null;
+        pdfPreview.document.title = 'Loading evidence';
+        pdfPreview.document.body.textContent = 'Loading evidence…';
+      }
+      let blob;
+      try {
+        blob = isPdf ? await fetchEvidenceFile(item) : null;
+      } catch (error) {
+        pdfPreview?.close();
+        throw error;
+      }
+      if (isPdf) {
+        if (evidencePreviewUrl) URL.revokeObjectURL(evidencePreviewUrl);
+        evidencePreviewUrl = URL.createObjectURL(blob);
+        if (pdfPreview) pdfPreview.location.replace(evidencePreviewUrl);
+        else window.open(evidencePreviewUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(clearEvidencePreview, 60000);
+        return;
+      }
+      const imageData = await fetchEvidenceData(item);
+      const imageDataUrl = `data:${imageData.media_type};base64,${imageData.base64_data}`;
+      const image = byId('evidencePreviewImage');
+      const documentPreview = byId('evidencePreviewDocument');
+      image.hidden = false;
+      documentPreview.hidden = true;
+      image.src = imageDataUrl;
+      image.alt = `Preview of ${item.original_filename}`;
+      documentPreview.src = 'about:blank';
+      byId('evidencePreviewTitle').textContent = item.original_filename || 'Evidence preview';
+      byId('evidencePreviewDownload').href = imageDataUrl;
+      byId('evidencePreviewDownload').download = item.original_filename || 'evidence';
+      byId('evidencePreviewDialog').showModal();
+    }
+
+    async function fetchEvidenceFile(item) {
+      const response = await fetch(
+        `${API_BASE}/${encodeURIComponent(activeClaimId)}/evidence/${encodeURIComponent(item.evidence_id)}/content`,
+        { headers: { Authorization: `Bearer ${STAFF_TOKEN}` } },
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message || `The evidence file could not be opened (${response.status}).`);
+      }
+      return response.blob();
+    }
+
+    async function fetchEvidenceData(item) {
+      const response = await fetch(
+        `${API_BASE}/${encodeURIComponent(activeClaimId)}/evidence/${encodeURIComponent(item.evidence_id)}/content-data`,
+        { headers: { Authorization: `Bearer ${STAFF_TOKEN}` } },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || `The evidence file could not be read (${response.status}).`);
+      }
+      return payload;
+    }
+
+    async function downloadEvidenceFile(item) {
+      const file = await fetchEvidenceData(item);
+      const link = document.createElement('a');
+      link.href = `data:${file.media_type};base64,${file.base64_data}`;
+      link.download = file.filename || item.original_filename || 'evidence';
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
+
+    function clearEvidencePreview() {
+      byId('evidencePreviewImage').src = '';
+      byId('evidencePreviewDocument').src = 'about:blank';
+      if (evidencePreviewUrl) URL.revokeObjectURL(evidencePreviewUrl);
+      evidencePreviewUrl = null;
     }
 
     function mutationHeaders(revision) {
@@ -930,14 +1068,33 @@
     function renderEvidenceReviewForm(evidenceItems) {
       const list = byId('evidenceReviewList');
       list.replaceChildren();
-      if (!evidenceItems.length) {
+      const submittedItems = evidenceItems.filter(item => item.original_filename
+        || ['uploading', 'uploaded', 'processing', 'ready'].includes(item.file_status));
+      const outstandingItems = evidenceItems.filter(item => !submittedItems.includes(item));
+      if (!submittedItems.length) {
         const empty = document.createElement('p');
         empty.className = 'review-task-empty';
-        empty.textContent = 'The claimant has not supplied any evidence files for this claim.';
+        empty.innerHTML = '<strong>No evidence files submitted.</strong><br>The claimant has not uploaded a file for this claim.';
         list.append(empty);
-        return;
       }
-      evidenceItems.forEach((item, index) => {
+      if (outstandingItems.length) {
+        const missing = document.createElement('section');
+        missing.className = 'outstanding-evidence';
+        const heading = document.createElement('strong');
+        heading.textContent = 'Outstanding materials';
+        const intro = document.createElement('p');
+        intro.textContent = 'These records describe files that are still missing. They are not submitted evidence and do not require a credibility finding.';
+        const items = document.createElement('ul');
+        outstandingItems.forEach(item => {
+          const row = document.createElement('li');
+          const owner = item.responsible_party || item.wait_type || 'claimant';
+          row.textContent = `${formatLabel(item.kind)} — ${formatLabel(item.status)}; waiting on ${formatLabel(owner)}${item.claimant_note ? `. ${item.claimant_note}` : ''}`;
+          items.append(row);
+        });
+        missing.append(heading, intro, items);
+        list.append(missing);
+      }
+      submittedItems.forEach((item, index) => {
         const card = document.createElement('article');
         card.className = 'review-task-card evidence-review-card';
         card.dataset.evidenceId = item.evidence_id;
@@ -974,7 +1131,7 @@
         card.append(head, context, dispositionLabel, summaryLabel);
         list.append(card);
       });
-      deriveWorkflowFromEvidenceFindings();
+      if (submittedItems.length) deriveWorkflowFromEvidenceFindings();
     }
 
     function collectEvidenceFindings() {
@@ -1174,7 +1331,7 @@
     function definitionList(rows) {
       const list = document.createElement('dl');
       list.className = 'context-list';
-      rows.forEach(({ label, value, meta = [] }) => {
+      rows.forEach(({ label, value, meta = [], actions = [] }) => {
         const row = document.createElement('div');
         row.className = 'context-row';
         const term = document.createElement('dt');
@@ -1191,6 +1348,23 @@
           });
           description.append(metadata);
         }
+        actions.forEach(action => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = action.className || 'evidence-view-button';
+          button.textContent = action.label;
+          button.addEventListener('click', async () => {
+            button.disabled = true;
+            try {
+              await action.run();
+            } catch (error) {
+              setError(error.message);
+            } finally {
+              button.disabled = false;
+            }
+          });
+          description.append(button);
+        });
         row.append(term, description);
         list.append(row);
       });
@@ -1384,6 +1558,12 @@
           item.claimant_note,
           item.needed_for?.length ? `Needed for: ${item.needed_for.join(', ')}` : '',
         ],
+        actions: item.original_filename && ['uploaded', 'processing', 'ready'].includes(item.file_status)
+          ? [
+              { label: `View ${item.original_filename}`, run: () => viewEvidenceFile(item) },
+              { label: `Download ${item.original_filename}`, className: 'evidence-download-button', run: () => downloadEvidenceFile(item) },
+            ]
+          : [],
       }));
       evidenceContainer.append(contextBlock('Evidence', definitionList(evidenceRows)));
 
@@ -1618,12 +1798,21 @@
     }
 
     function professionalReviewWorkspace(detail) {
-      if (detail.claim_state.workflow_state !== 'professional_review') return null;
+      const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
+      const isStandardIntakeReview = detail.external_claim?.creation_status === 'created'
+        && detail.route === 'standard_motor_intake';
+      if (!isProfessionalReview && !isStandardIntakeReview) return null;
       const section = document.createElement('section');
       section.className = 'review-workspace';
-      section.setAttribute('aria-label', 'Professional review workspace');
+      section.setAttribute('aria-label', isProfessionalReview
+        ? 'Professional review workspace'
+        : 'Claim review workspace');
       const signals = detail.signals || [];
       const retrievals = detail.retrievals || [];
+      const evidenceRecords = detail.evidence || [];
+      const submittedEvidence = evidenceRecords.filter(item => item.original_filename
+        || ['uploading', 'uploaded', 'processing', 'ready'].includes(item.file_status));
+      const outstandingEvidence = evidenceRecords.filter(item => !submittedEvidence.includes(item));
       const uncertaintyCount = retrievals.reduce(
         (total, item) => total + (item.uncertainty || []).length, 0
       );
@@ -1639,14 +1828,18 @@
       const copy = document.createElement('div');
       const eyebrow = document.createElement('p');
       eyebrow.className = 'review-workspace-eyebrow';
-      eyebrow.textContent = 'Decision required';
+      eyebrow.textContent = isProfessionalReview ? 'Decision required' : 'Assigned intake review';
       const title = document.createElement('h3');
-      title.textContent = 'Professional review workspace';
+      title.textContent = isProfessionalReview
+        ? 'Professional review workspace'
+        : 'Claim review workspace';
       const summary = document.createElement('p');
       summary.className = 'review-workspace-summary';
       summary.textContent = activeHandoff?.requested_action
         || signals[0]?.summary
-        || 'Review the available evidence, record the reason and result, then send only a claimant-safe status update.';
+        || (isProfessionalReview
+          ? 'Review the available evidence, record the reason and result, then send only a claimant-safe status update.'
+          : 'Check the submitted form and evidence status, record the intake result, and send a claimant-safe next step.');
       copy.append(eyebrow, title, summary);
       const action = document.createElement('button');
       action.className = 'staff-action-button';
@@ -1676,7 +1869,8 @@
       const grid = document.createElement('div');
       grid.className = 'review-workspace-grid';
       [
-        ['Evidence sources', retrievals.length + (detail.evidence || []).length],
+        ['Evidence sources', retrievals.length + submittedEvidence.length],
+        ['Outstanding materials', outstandingEvidence.length],
         ['Uncertainties', uncertaintyCount],
         ['Review signals', signals.length],
         ['Open actions', openActions.length],
@@ -1740,8 +1934,11 @@
           byId('claimDetailTabs').hidden = false;
           populateStaffControls(detail);
           const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
-          byId('detailReview').open = isProfessionalReview || byId('detailReview').open;
-          const showReviewControls = isProfessionalReview && reviewControlsOpenClaimId === detail.claim_id;
+          const isStandardIntakeReview = detail.external_claim?.creation_status === 'created'
+            && detail.route === 'standard_motor_intake';
+          const isReviewEligible = isProfessionalReview || isStandardIntakeReview;
+          byId('detailReview').open = isReviewEligible || byId('detailReview').open;
+          const showReviewControls = isReviewEligible && reviewControlsOpenClaimId === detail.claim_id;
           byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none';
           byId('detailStaffActions').open = showReviewControls;
           syncClaimDetailTabs();
@@ -2016,6 +2213,12 @@
         list.append(button);
       });
       byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
+      if (agentSuggestionClaimId !== claim.claim_id) {
+        agentSuggestionClaimId = claim.claim_id;
+        acceptedSuggestionText = '';
+        byId('agentSuggestionText').value = '';
+        setAgentSuggestionState('not_requested', 'Internal draft only');
+      }
       byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
       const history = byId('customerChatHistory');
       history.replaceChildren();
@@ -2055,7 +2258,10 @@
           meta.textContent = formatLabel(item.actor);
           const body = document.createElement('div');
           body.textContent = item.text;
-          message.append(meta, body);
+          const messageState = document.createElement('div');
+          messageState.className = 'customer-chat-message-meta';
+          messageState.textContent = `Sender: ${formatLabel(item.actor)} · Audience: Claimant · Delivered`;
+          message.append(meta, body, messageState);
           history.append(message);
         });
         if (!uniqueEntries.length) history.textContent = 'No persisted customer communication is available.';
@@ -2093,6 +2299,68 @@
       byId('customerChatText').focus();
     }
 
+    function setAgentSuggestionState(state, message) {
+      agentSuggestionState = state;
+      byId('agentSuggestionStatus').textContent = `${formatLabel(state)} · ${message}`;
+      const ready = ['suggested', 'edited', 'accepted'].includes(state);
+      byId('useAgentSuggestion').disabled = !ready;
+      byId('rejectAgentSuggestion').disabled = !ready;
+      byId('generateAgentSuggestion').disabled = state === 'generating';
+    }
+
+    async function generateAgentSuggestion() {
+      setAgentSuggestionState('generating', 'Internal draft only; nothing will be sent');
+      try {
+        const claim = currentCustomerClaim();
+        if (!claim) throw new Error('Select a claim before generating a suggestion.');
+        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
+        const nextStep = detail.customer_next_step?.summary || 'We are reviewing your report.';
+        const suggestion = `${nextStep} If you have any questions or additional information, reply here and I will add it to your claim.`;
+        byId('agentSuggestionText').value = suggestion;
+        agentSuggestionClaimId = claim.claim_id;
+        acceptedSuggestionText = '';
+        setAgentSuggestionState('suggested', 'Review required; not sent');
+      } catch (error) {
+        byId('agentSuggestionText').value = '';
+        setAgentSuggestionState('failed', error.message || 'Suggestion unavailable; write the reply manually');
+      }
+    }
+
+    function useAgentSuggestion() {
+      const suggestion = byId('agentSuggestionText').value.trim();
+      if (!suggestion) return;
+      byId('customerChatText').value = suggestion;
+      acceptedSuggestionText = suggestion;
+      setAgentSuggestionState('accepted', 'Copied for staff review; not sent');
+      byId('customerChatText').focus();
+    }
+
+    function rejectAgentSuggestion() {
+      byId('agentSuggestionText').value = '';
+      acceptedSuggestionText = '';
+      setAgentSuggestionState('rejected', 'Discarded; nothing was sent');
+    }
+
+    function renderTransientStaffMessage(text, state) {
+      byId('pendingStaffMessage')?.remove();
+      const message = document.createElement('div');
+      message.id = 'pendingStaffMessage';
+      message.className = `customer-chat-message staff is-${state}`;
+      const meta = document.createElement('strong');
+      meta.textContent = 'Staff';
+      const body = document.createElement('div');
+      body.textContent = text;
+      const delivery = document.createElement('div');
+      delivery.className = 'customer-chat-message-meta';
+      delivery.textContent = state === 'failed'
+        ? 'Sender: Staff · Audience: Claimant · Rejected before delivery · Ready to retry'
+        : state === 'unknown'
+          ? 'Sender: Staff · Audience: Claimant · Delivery outcome unknown · Retry to reconcile'
+          : 'Sender: Staff · Audience: Claimant · Sending…';
+      message.append(meta, body, delivery);
+      byId('customerChatHistory').append(message);
+    }
+
     async function sendCustomerChatMessage() {
       const input = byId('customerChatText');
       const text = input.value.trim();
@@ -2105,6 +2373,8 @@
       const button = byId('customerChatSend');
       if (button.disabled) return;
       button.disabled = true;
+      button.textContent = pendingCustomerMessage?.text === text ? 'Retrying…' : 'Sending…';
+      byId('customerChatStatus').textContent = 'Sending to claimant…';
       try {
         const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
         const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
@@ -2121,6 +2391,7 @@
             key: requestKey('staff-message'),
           };
         }
+        renderTransientStaffMessage(text, 'pending');
         await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/messages`, {
           method: 'POST',
           headers: {
@@ -2133,12 +2404,21 @@
         });
         input.value = '';
         pendingCustomerMessage = null;
+        button.textContent = 'Send message';
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
         await renderCustomerChat();
       } catch (error) {
-        byId('customerChatStatus').textContent = error.message;
+        const knownRejection = Number.isInteger(error.status)
+          && error.status >= 400 && error.status < 500;
+        const state = knownRejection ? 'failed' : 'unknown';
+        if (pendingCustomerMessage) pendingCustomerMessage.state = state;
+        renderTransientStaffMessage(text, state);
+        byId('customerChatStatus').textContent = knownRejection
+          ? `Message rejected: ${error.message} Correct the issue, then retry with the same safe request key.`
+          : `Delivery outcome unknown: ${error.message} Retry with the same safe request key to reconcile the delivered message.`;
+        button.textContent = 'Retry message';
       } finally {
         button.disabled = false;
       }
@@ -2240,6 +2520,16 @@
     });
     byId('workbenchNav').addEventListener('click', () => selectQueue('all'));
     byId('pendingEvidenceNav').addEventListener('click', () => selectQueue('awaiting_evidence'));
+    byId('evidencePreviewClose').addEventListener('click', () => byId('evidencePreviewDialog').close());
+    byId('evidencePreviewDialog').addEventListener('close', clearEvidencePreview);
+    byId('generateAgentSuggestion').addEventListener('click', generateAgentSuggestion);
+    byId('useAgentSuggestion').addEventListener('click', useAgentSuggestion);
+    byId('rejectAgentSuggestion').addEventListener('click', rejectAgentSuggestion);
+    byId('customerChatText').addEventListener('input', event => {
+      if (agentSuggestionState === 'accepted' && event.target.value !== acceptedSuggestionText) {
+        setAgentSuggestionState('edited', 'Edited by staff; not sent');
+      }
+    });
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
     byId('customerChatBack').addEventListener('click', () => setView('workbench'));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
