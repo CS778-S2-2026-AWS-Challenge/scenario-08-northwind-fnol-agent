@@ -57,7 +57,9 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
 
     queue = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
     assert queue.status_code == 200
-    queue_item = next(item for item in queue.json()['items'] if item['claim_id'] == claim_id)
+    queue_item = next(
+        item for item in queue.json()['items'] if item['claim_id'] == claim_id
+    )
     assert queue_item['claim_id'] == claim_id
 
     staff_detail = client.get(
@@ -94,7 +96,10 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
         json={
             'content': {
                 'type': 'text',
-                'text': 'I have your saved report and can continue from the details already provided.',
+                'text': (
+                    'I have your saved report and can continue from the details '
+                    'already provided.'
+                ),
             }
         },
     )
@@ -107,8 +112,9 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
     )
     assert claimant_history.status_code == 200
     visible_messages = claimant_history.json()['items']
+    staff_message_id = staff_reply.json()['message']['message_id']
     staff_message = next(
-        item for item in visible_messages if item['message_id'] == staff_reply.json()['message']['message_id']
+        item for item in visible_messages if item['message_id'] == staff_message_id
     )
     assert staff_message['claim_id'] == claim_id
     assert staff_message['session_id'] == session_id
@@ -150,7 +156,9 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
     assert all(message.claim_id == claim_id for message in stored_messages)
     assert all(message.session_id == session_id for message in stored_messages)
     assert any(message.actor == 'staff' for message in stored_messages)
-    assert any(message.message_id == 'd4-267-continuation' for message in stored_messages)
+    assert any(
+        message.client_message_id == 'd4-267-continuation' for message in stored_messages
+    )
 
     final_staff_detail = client.get(
         f'/api/v1/workbench/claims/{claim_id}',
