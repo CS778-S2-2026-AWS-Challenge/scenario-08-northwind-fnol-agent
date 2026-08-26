@@ -3,6 +3,7 @@ from typing import Any, Protocol
 
 from backend.domain.models import (
     AgentDecisionRecord,
+    AssessorRoutingOperation,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -151,6 +152,19 @@ class PersistenceRepository(ClaimRepository, Protocol):
         raise NotImplementedError
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
+        raise NotImplementedError
+
+    def get_assessor_routing_operation(
+        self,
+        operation_id: str,
+    ) -> AssessorRoutingOperation | None:
+        raise NotImplementedError
+
+    def save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+    ) -> None:
+        """Persist an immutable operation identity and valid outcome transition."""
         raise NotImplementedError
 
     def get_agent_decision(
