@@ -82,7 +82,7 @@ MOTOR_INCIDENT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 HOME_INCIDENT_PATTERN = re.compile(
-    r'\b(?:home|house|building|property)\b',
+    r'\b(?:home|house|building)\b',
     re.IGNORECASE,
 )
 CONTENTS_INCIDENT_PATTERN = re.compile(
