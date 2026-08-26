@@ -96,6 +96,7 @@ def _populate_demo(
             claim_id='clm_reset_adapter',
             external_claim_id=claim_outcome.result.external_claim_id,
             authorisation_ref='dec_reset_assessor',
+            claimant_consent_ref='cns_reset_assessor',
             requested_action='route_assessor',
             location=AssessorLocation(region='Auckland'),
         ),

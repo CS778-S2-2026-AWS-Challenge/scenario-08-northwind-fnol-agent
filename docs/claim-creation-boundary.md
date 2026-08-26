@@ -53,6 +53,9 @@ real result before creation is described to the claimant.
 - Pending evidence remains recorded and is not silently discarded.
 - Model output, severity, retrieval, or an adapter response cannot independently
   authorise creation or assessor routing.
+- Assessor routing requires both a current Northwind rule/staff decision and a matching
+  active claimant-consent record from the shared Working Claim. These are separate
+  authorities and neither substitutes for the other.
 
 ## Failure Behaviour
 
@@ -77,7 +80,24 @@ provider-neutral command, result, authority, idempotency, visibility, and failur
 contract. Claim creation does not automatically grant an external participant access to
 the complete claim.
 
-External coordination separates capability discovery, request requirements,
+The current controlled assessor fixture requires `claimant_consent_ref` and validates the
+record's service identity, requested action, granted status, and minimum permitted fields
+before the adapter is called. The record must have been granted by the claimant linked to the
+Working Claim; authorised-representative consent remains unsupported until that identity and
+authority are modelled explicitly. The adapter supports deterministic assigned and queued
+successes plus timeout, unavailable, access-denied, and malformed failures. A failure preserves
+the current claim and never becomes an assignment. Timeout and unavailable are retryable with
+the same operation identity; access-denied and malformed responses require review before another
+attempt. Automatic retry counts remain unapproved.
+
+The service reserves an immutable operation identity and full request fingerprint before
+invocation. It records retryable failure, terminal failure, or provider acceptance separately
+from Claim State. A changed retry is rejected even before any success, and a provider-accepted
+result can be reconciled after a concurrent Claim revision advance without invoking a second
+external task.
+
+The target external-request lifecycle expands this boundary further. External coordination
+separates capability discovery, request requirements,
 preparation, request-type classification, consent and authority, submission, tracking,
 response verification, Claim reconciliation, safe retry, cancellation, and failure
 escalation. Each step uses the minimum disclosure and records its own result; a generic

@@ -3,6 +3,8 @@ from copy import deepcopy
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -30,6 +32,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
+        self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
@@ -50,6 +53,7 @@ class FixtureRepository(PersistenceRepository):
             'sessions': len(self._sessions),
             'messages': len(self._messages),
             'agent_decisions': len(self._decisions),
+            'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
@@ -63,6 +67,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions.clear()
         self._messages.clear()
         self._decisions.clear()
+        self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._retrievals.clear()
         self._review_signals.clear()
@@ -290,6 +295,68 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(decision.claim_id)
         self._decisions[decision.decision_id] = deepcopy(decision)
+
+    def get_assessor_routing_operation(
+        self,
+        operation_id: str,
+    ) -> AssessorRoutingOperation | None:
+        operation = self._assessor_routing_operations.get(operation_id)
+        return deepcopy(operation) if operation is not None else None
+
+    def save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+    ) -> None:
+        claim = self._claims.get(operation.claim_id)
+        if (
+            claim is None
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.authorised_revision > claim.revision
+        ):
+            raise KeyError(operation.claim_id)
+
+        existing = self._assessor_routing_operations.get(operation.operation_id)
+        if existing is None:
+            if operation.status is not AssessorRoutingOperationStatus.PREPARED:
+                raise IdempotencyConflict(operation.operation_id)
+            self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+            return
+
+        immutable_identity = (
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'authorised_revision',
+            'request_fingerprint',
+            'created_at',
+        )
+        if any(
+            getattr(existing, field_name) != getattr(operation, field_name)
+            for field_name in immutable_identity
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+        if operation.updated_at < existing.updated_at:
+            raise IdempotencyConflict(operation.operation_id)
+        if existing.status in {
+            AssessorRoutingOperationStatus.ACCEPTED,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+        }:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        allowed_statuses = {
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.ACCEPTED,
+        }
+        if operation.status not in allowed_statuses:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
     def get_agent_decision(
         self,
