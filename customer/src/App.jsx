@@ -14,6 +14,7 @@ import {
   updateClaimField,
 } from './api.js'
 import './App.css'
+import CustomerAccount from './CustomerAccount.jsx'
 import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 
 const FIELD_LABELS = {
@@ -105,6 +106,8 @@ function mergeFields(current, changes) {
 
 function App() {
   const [page, setPage] = useState('home')
+  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('northwind-prototype-auth') === 'true')
+  const [accountSection, setAccountSection] = useState('overview')
   const [claimType, setClaimType] = useState('motor')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
@@ -174,6 +177,24 @@ function App() {
   function openPage(nextPage) {
     window.history.pushState({ page: nextPage }, '', window.location.href)
     setPage(nextPage)
+  }
+
+  function signIn() {
+    localStorage.setItem('northwind-prototype-auth', 'true')
+    setIsLoggedIn(true)
+    setPage('home')
+    window.scrollTo({ top: 0 })
+  }
+
+  function signOut() {
+    localStorage.removeItem('northwind-prototype-auth')
+    setIsLoggedIn(false)
+    setPage('home')
+  }
+
+  function openAccount(section) {
+    setAccountSection(section)
+    openPage('account')
   }
 
   async function refreshAfterConflict() {
@@ -477,6 +498,14 @@ function App() {
     }
   }
 
+  let accountProfile = { firstName: 'Alex', lastName: 'Morgan', email: 'alex.morgan@example.com' }
+  try {
+    accountProfile = { ...accountProfile, ...JSON.parse(localStorage.getItem('northwind-customer-profile-prototype') || '{}') }
+  } catch {
+    // Keep the synthetic prototype defaults if local profile data is invalid.
+  }
+  const accountInitials = `${accountProfile.firstName[0] || ''}${accountProfile.lastName[0] || ''}`.toUpperCase()
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -488,7 +517,18 @@ function App() {
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => openPage('login')}>Log in</button>
+            {isLoggedIn ? (
+              <div className="header-account-menu">
+                <button className="header-avatar" type="button" aria-label="Customer account menu">{accountInitials}<span className="header-message-badge">2</span></button>
+                <div className="header-account-dropdown">
+                  <div className="header-account-summary"><strong>{accountProfile.firstName} {accountProfile.lastName}</strong><small>{accountProfile.email}</small></div>
+                  <button type="button" onClick={() => openAccount('overview')}>Account overview</button>
+                  <button type="button" onClick={() => openAccount('messages')}>Messages <span>2 unread</span></button>
+                  <button type="button" onClick={() => openAccount('profile')}>Profile and preferences</button>
+                  <button className="header-signout" type="button" onClick={signOut}>Sign out</button>
+                </div>
+              </div>
+            ) : <button className="login-button" type="button" onClick={() => openPage('login')}>Log in</button>}
           </nav>
         )}
         {hasStarted && (
@@ -508,6 +548,8 @@ function App() {
 
       {!hasStarted && page === 'guided-motor' ? (
         <GuidedMotorClaim onExit={() => setPage('home')} />
+      ) : !hasStarted && page === 'account' ? (
+        <CustomerAccount initialSection={accountSection} onSignOut={signOut} onStartClaim={() => setPage('home')} />
       ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
@@ -515,13 +557,13 @@ function App() {
             <p className="eyebrow">Your Northwind account</p>
             <h1 id="login-title">Welcome back</h1>
             <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
-            <form className="login-form" onSubmit={(event) => event.preventDefault()}>
+            <form className="login-form" onSubmit={(event) => { event.preventDefault(); signIn() }}>
               <label htmlFor="customer-email">Email address</label>
-              <input id="customer-email" name="email" type="email" autoComplete="email" />
+              <input id="customer-email" name="email" type="email" autoComplete="email" required />
               <label htmlFor="customer-password">Password</label>
-              <input id="customer-password" name="password" type="password" autoComplete="current-password" />
-              <button className="primary-button login-submit" type="submit" disabled>Log in</button>
-              <p className="prototype-note" role="note">Customer account authentication is not connected in this prototype. You can still start a claim without logging in.</p>
+              <input id="customer-password" name="password" type="password" autoComplete="current-password" required />
+              <button className="primary-button login-submit" type="submit">Log in to prototype</button>
+              <p className="prototype-note" role="note">Prototype only: authentication is not connected. Use any email and password to preview the account experience.</p>
             </form>
             <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
               Start a claim without logging in

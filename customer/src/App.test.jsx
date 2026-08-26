@@ -155,10 +155,42 @@ describe('claimant intake', () => {
       'href',
       'http://127.0.0.1:8002/',
     )
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Log in to prototype' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('opens a prototype customer account and saves profile preferences locally', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'alex@example.com')
+    await user.type(screen.getByLabelText('Password'), 'prototype-password')
+    await user.click(screen.getByRole('button', { name: 'Log in to prototype' }))
+
+    expect(screen.getByRole('heading', { name: /When the unexpected happens/ })).toBeVisible()
+    const accountMenu = screen.getByRole('button', { name: 'Customer account menu' })
+    expect(accountMenu).toBeVisible()
+    await user.hover(accountMenu)
+    await user.click(screen.getByRole('button', { name: 'Account overview' }))
+
+    expect(screen.getByRole('heading', { name: 'Good morning, Alex' })).toBeVisible()
+    expect(screen.getByText(/Information is stored only in this browser/)).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Profile and preferences' }))
+    const lastName = screen.getByLabelText('Last name')
+    await user.clear(lastName)
+    await user.type(lastName, 'Taylor')
+    await user.selectOptions(screen.getByLabelText('Preferred contact method'), 'sms')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Changes saved')
+    expect(JSON.parse(localStorage.getItem('northwind-customer-profile-prototype'))).toMatchObject({
+      lastName: 'Taylor',
+      contactPreference: 'sms',
+    })
   })
 
   it('offers a three-step guided Motor claim without replacing conversational intake', async () => {
