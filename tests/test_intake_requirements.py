@@ -2,9 +2,13 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.intake import (
+    BRANCH_NON_BLOCKING_FIELDS,
+    CURRENT_ACTION_REQUIREMENTS,
     infer_controlled_incident_type,
     next_controlled_intake_field,
+    next_controlled_intake_step,
     resolve_controlled_intake_requirements,
 )
 from backend.domain.models import (
@@ -55,6 +59,14 @@ def _claim(
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+def _complete_core_form() -> dict[str, StructuredFormField]:
+    return {
+        'incident.description': _field('A bounded synthetic incident.'),
+        'incident.location': _field('Auckland'),
+        'loss.description': _field('Synthetic loss'),
+    }
 
 
 def test_requirement_projection_skips_out_of_order_confirmed_facts() -> None:
@@ -142,30 +154,48 @@ def test_branch_fields_are_active_context_but_not_invented_as_mandatory(
     claim_family: str,
     expected_non_blocking: tuple[str, ...],
 ) -> None:
-    claim = _claim(
-        incident_type=claim_family,
-        form={
-            'incident.description': _field('A bounded synthetic incident.'),
-            'incident.location': _field('Auckland'),
-            'loss.description': _field('Synthetic loss'),
-        },
+    projection = resolve_controlled_intake_requirements(
+        _claim(incident_type=claim_family, form=_complete_core_form())
     )
-
-    projection = resolve_controlled_intake_requirements(claim)
 
     assert projection.missing_required_now == ()
     assert projection.non_blocking == expected_non_blocking
 
 
-def test_unsupported_claim_family_remains_a_missing_requirement() -> None:
-    claim = _claim(
-        incident_type='travel',
-        form={
-            'incident.description': _field('A bounded synthetic incident.'),
-            'incident.location': _field('Auckland'),
-            'loss.description': _field('Synthetic loss'),
-        },
+def test_requirement_snapshot_references_only_registered_fields() -> None:
+    requirement_codes = {requirement.field_code for requirement in CURRENT_ACTION_REQUIREMENTS}
+    branch_codes = {
+        field_code
+        for field_codes in BRANCH_NON_BLOCKING_FIELDS.values()
+        for field_code in field_codes
+    }
+
+    assert requirement_codes <= REGISTERED_FIELD_CODES
+    assert branch_codes <= REGISTERED_FIELD_CODES
+
+
+def test_non_motor_core_completion_does_not_claim_creation_readiness() -> None:
+    for claim_family in ('home', 'contents'):
+        next_step = next_controlled_intake_step(
+            _claim(incident_type=claim_family, form=_complete_core_form())
+        )
+
+        assert next_step.status == 'core_details_confirmed'
+        assert next_step.responsible_party is ResponsibleParty.NORTHWIND
+        assert next_step.required_items == []
+
+
+def test_motor_core_completion_preserves_existing_creation_readiness() -> None:
+    next_step = next_controlled_intake_step(
+        _claim(incident_type='motor', form=_complete_core_form())
     )
+
+    assert next_step.status == 'ready_to_create'
+    assert next_step.responsible_party is ResponsibleParty.CLAIMANT
+
+
+def test_unsupported_claim_family_remains_a_missing_requirement() -> None:
+    claim = _claim(incident_type='travel', form=_complete_core_form())
 
     projection = resolve_controlled_intake_requirements(claim)
 
