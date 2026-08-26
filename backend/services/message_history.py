@@ -23,16 +23,13 @@ def _session_not_found() -> ApiError:
     )
 
 
-def _invalid_cursor(error: Exception | None = None) -> ApiError:
-    validation = ApiError(
+def _invalid_cursor() -> ApiError:
+    return ApiError(
         status_code=422,
         code='VALIDATION_ERROR',
         message='The pagination cursor is invalid.',
         details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
     )
-    if error is not None:
-        validation.__cause__ = error
-    return validation
 
 
 def _claimant_message(message: MessageRecord) -> ClaimantMessage:
@@ -64,20 +61,17 @@ def _decode_message_cursor(cursor: str | None) -> tuple[datetime, str] | None:
     try:
         padded = cursor + '=' * (-len(cursor) % 4)
         raw = json.loads(urlsafe_b64decode(padded).decode())
-        if (
-            not isinstance(raw, list)
-            or len(raw) != 2
-            or not isinstance(raw[0], str)
-            or not isinstance(raw[1], str)
-            or not raw[1]
-        ):
+        if not isinstance(raw, list) or len(raw) != 2:
             raise ValueError('cursor shape')
-        created_at = datetime.fromisoformat(raw[0])
+        created_at_text, message_id = raw
+        if not isinstance(created_at_text, str) or not isinstance(message_id, str) or not message_id:
+            raise ValueError('cursor shape')
+        created_at = datetime.fromisoformat(created_at_text)
         if created_at.utcoffset() is None:
             raise ValueError('cursor timestamp timezone')
-        return created_at, raw[1]
+        return created_at, message_id
     except (Base64Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise _invalid_cursor(error) from error
+        raise _invalid_cursor() from error
 
 
 def list_claim_messages(
