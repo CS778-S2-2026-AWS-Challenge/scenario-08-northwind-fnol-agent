@@ -314,6 +314,25 @@ Messages MUST NOT be accepted for a closed session.
 
 Claimant text content uses `{ "type": "text", "text": "..." }`. File bytes are evidence resources, not embedded base64 message fields. Staff notes use `internal_only` and MUST NOT appear through claimant message endpoints.
 
+`actor` defines the sender and `visibility` defines the persisted audience boundary. A message
+returned by a successful mutation or list response is durably stored and therefore has delivery
+state `delivered` in the clients. This means durable in-app persistence, not email, SMS, or push
+delivery. `sending`, `rejected_before_delivery`, `delivery_outcome_unknown`, and `retrying` are
+transient client states and MUST NOT be inserted into persisted message history. A client MUST use
+`delivery_outcome_unknown` when a transport failure could have hidden a successful commit. It
+retains the text and original idempotency identifiers so replay restores the delivered record
+without creating a duplicate. The complete state
+and page flow is defined in `docs/claimant-staff-messaging-journey.md`.
+
+The current staff reply helper is a deterministic template built from claimant-safe state; it does
+not call the Agent or model gateway and MUST NOT be labelled as Agent- or AI-generated. Template
+draft state is internal UI state, not a `MessageRecord`. Only an authenticated, assigned staff
+submission creates a shared message; building or accepting a template never sends it automatically.
+
+An `in_reply_to` reference MUST identify a message in the same claim and interaction session.
+Message lists use the stable total order `(created_at, message_id)` ascending (newest-last). Equal
+timestamps therefore cannot cause cursor pagination to duplicate or skip records.
+
 ### Customer Next Step
 
 ```json
@@ -365,6 +384,7 @@ Initial common field codes:
 | Field code | Type | Purpose |
 |---|---|---|
 | `policy.policy_number` | string | Locate the relevant policy |
+| `claimant.client_number` | string | Claimant-facing Northwind client reference |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
 | `incident.type` | string | Motor, home, contents, or configured subtype |
@@ -606,6 +626,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
+| `PUT` | `/claims/{claim_id}/evidence/{evidence_id}/content` | Upload file bytes to an issued fixture-storage target |
 | `POST` | `/claims/{claim_id}/evidence/{evidence_id}/complete` | Complete and validate an upload |
 | `POST` | `/claims/{claim_id}/evidence/{evidence_id}/fact-decisions` | Confirm or reject proposed extracted facts |
 | `POST` | `/claims/{claim_id}/support-requests` | Explicitly request human support |
@@ -855,6 +876,27 @@ When all controlled intake fields are confirmed, `customer_next_step.status` bec
 
 ### `POST /api/v1/claims/{claim_id}/creation`
 
+The claimant client MAY offer a guided Motor presentation over the same resources used by the
+conversational intake. The guided presentation creates the Working Claim before its first page is
+saved, writes registered form fields through `PATCH /form`, uses the Evidence API for materials,
+and calls this creation endpoint only after the controlled intake fields are confirmed. It does
+not create a second draft store or a separate staff queue.
+
+The current guided prototype records acceptance of declaration
+`guided-motor-prototype-v1` as a persisted claimant message immediately before creation. This is
+repeatable prototype evidence of actor, wording, version, and time; it is not a Northwind-approved
+legal signature contract. A production declaration requires approved wording, identity assurance,
+consent rules, retention, and a dedicated typed acceptance contract before it may be described as
+an electronic signature.
+
+When the claimant continues without any supporting file, the guided Motor client registers one
+claimant-owned `incomplete` evidence item needed for a `later_action`. The created claim therefore
+remains visible in the Workbench `awaiting_evidence` view without blocking controlled creation.
+The `standard_motor_intake` fixture route assigns the created Working Claim deterministically to
+`stf_demo`. This is a repeatable prototype allocation rule, not an approved Northwind workforce
+routing policy; configured production allocation requires an authenticated assignment service and
+an approved routing rule.
+
 Creates an external claim through the configured provider-neutral claims adapter. The endpoint
 accepts no provider payload. It derives the confirmed form, evidence references, pending evidence,
 and controlled prototype route from the persisted Working Claim.
@@ -1017,10 +1059,30 @@ claimant-declared checksum as provider-verified provenance. Image-derived fields
 remain proposed until a claimant or authorised staff member confirms them;
 completion never silently writes extracted values into the confirmed form.
 
+For the fixture runtime, the upload target is the authenticated
+`PUT /api/v1/claims/{claim_id}/evidence/{evidence_id}/content` route. It requires the claimant
+bearer token, registered media type, exact registered byte length, and use before the target's
+`expires_at`. An expired target is rejected and the client must replay the upload-intent request to
+obtain a current target. Completion hashes the stored bytes and rejects a claimant-supplied checksum
+that does not match; the supplied value is never treated as proof by itself. The application reads
+fixture-proxy content as a stream and stops as soon as either the registered byte length or the
+application-wide evidence maximum would be exceeded. `Content-Length` is checked when present but
+is never the sole size control. Provider-backed profiles return an object-store URL and reject the
+fixture-only content route before consuming its request body, without changing the upload-target
+contract.
+
 The Sprint 2 mock adapter returns `202` and records the public `file_status` as
 `processing` after an image or PDF upload is accepted. Filename, media type,
 size, and processing status can be read back from the evidence list. Storage
 keys, checksums, processing references, and file contents remain internal.
+
+Authorised staff can read completed fixture evidence through
+`GET /api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content`. This applies the same
+staff claim-access boundary as Workbench detail and returns the registered media type with an
+inline filename. It never exposes a storage key or checksum, and claimant credentials cannot use
+the staff route. The sibling `/content-data` route applies the same checks and returns the filename,
+media type, and Base64 file bytes for browser-safe image preview and download in the static
+Workbench client.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions`
 
@@ -1087,6 +1149,8 @@ Returns staff and system updates visible to the claimant. Each update includes `
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
 | `GET` | `/workbench/claims/{claim_id}` | Read full authorised claim detail |
+| `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
+| `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
