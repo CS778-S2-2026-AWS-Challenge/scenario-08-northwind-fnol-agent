@@ -118,18 +118,45 @@ it('persists the collapsed employee sidebar across same-origin page loads', asyn
   restoredDom.window.close()
 })
 
-it('keeps mobile workbench navigation within a responsive top toolbar', () => {
+it('defines a responsive off-canvas employee menu without shrinking the main content', () => {
   expect(employeeHtml).toContain('@media(max-width:1024px)')
-  expect(employeeHtml).toContain('.sidebar-toggle { display:grid; }')
-  expect(employeeHtml).toContain('grid-template-columns:190px minmax(0,1fr) 132px;')
-  expect(employeeHtml).toContain('grid-template-columns:repeat(3,minmax(0,1fr));')
-  expect(employeeHtml).toContain('.sidebar-toolbar { grid-template-columns:minmax(0,1fr) 40px;')
-  expect(employeeHtml).toContain('.sidebar-toolbar .workspace-links { grid-column:1 / -1; grid-row:2;')
-  expect(employeeHtml).toContain('.sidebar-toolbar .sidebar-nav button { min-width:0; width:100%;')
-  expect(employeeHtml).toContain('.sidebar-toolbar .demo-controls, .sidebar-toolbar .help { display:none; }')
+  expect(employeeHtml).toContain('width:min(82vw,320px);')
+  expect(employeeHtml).toContain('transform:translateX(-105%);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar { transform:translateX(0);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }')
   expect(employeeHtml).toContain('.content { width:100%; min-width:0;')
-  expect(employeeHtml).toContain('.page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:none; }')
-  expect(employeeHtml).toContain('.page.sidebar-collapsed .brand { display:block; }')
+  expect(employeeHtml).toContain("document.addEventListener('touchstart'")
+  expect(employeeHtml).toContain("document.addEventListener('touchend'")
+})
+
+it('opens and closes the mobile employee drawer accessibly', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn() }))
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const openButton = dom.window.document.querySelector('#mobileSidebarOpen')
+  const closeButton = dom.window.document.querySelector('#sidebarToggle')
+  const sidebar = dom.window.document.querySelector('#employeeSidebar')
+
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'true')
+
+  openButton.click()
+  expect(page).toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'true')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'false')
+  expect(closeButton).toHaveAttribute('aria-label', 'Close workbench menu')
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
 })
 
 it('toggles professional review controls without navigating away from the claim', async () => {

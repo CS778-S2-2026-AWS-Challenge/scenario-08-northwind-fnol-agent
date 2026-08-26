@@ -32,6 +32,7 @@
     .brand span { display:block; margin-top:4px; color:#8ce5d6; font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
     .sidebar p { margin:0; color:#cac9f7; line-height:1.6; font-size:12px; }
     .sidebar-toolbar { display:contents; }
+    .mobile-workbench-header, .sidebar-backdrop { display:none; }
     .sidebar-section-label { margin:10px 4px 6px; color:#967fa6; font-size:9px; font-weight:750; letter-spacing:.16em; text-transform:uppercase; }
     .filters { display:grid; gap:10px; }
     .filters label { font-size:11px; color:#cac9f7; text-transform:uppercase; letter-spacing:.14em; font-weight:750; }
@@ -432,39 +433,35 @@
     }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
     @media(max-width:1024px) {
-      .sidebar { position:sticky; z-index:40; top:0; width:100%; height:auto; overflow:visible; padding:12px 14px; gap:10px; }
-      .brand-lockup { padding:0 0 10px; }
-      .sidebar-toggle { display:grid; }
-      .sidebar-toolbar { width:100%; min-width:0; display:grid; grid-template-columns:190px minmax(0,1fr) 132px; align-items:end; gap:9px; padding:0 1px 3px; }
-      .sidebar-toolbar > * { min-width:0; }
-      .sidebar-toolbar .filters { width:auto; }
-      .sidebar-toolbar .workspace-links { width:auto; }
-      .sidebar-toolbar .sidebar-section-label { margin-top:0; }
-      .sidebar-toolbar .sidebar-nav { min-width:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
-      .sidebar-toolbar .sidebar-nav button { min-width:0; }
-      .sidebar-toolbar .refresh-claims { min-width:0; }
-      .sidebar-toolbar .demo-controls, .sidebar-toolbar .help { display:none; }
-      .page.sidebar-collapsed { grid-template-columns:1fr; }
-      .page.sidebar-collapsed .sidebar { width:100%; padding:12px 16px; align-items:stretch; overflow:hidden; }
-      .page.sidebar-collapsed .brand-lockup { flex-direction:row; gap:9px; padding:0; border-bottom:0; }
-      .page.sidebar-collapsed .brand { display:block; }
-      .page.sidebar-collapsed .sidebar-toggle { width:36px; height:36px; margin-left:auto; }
-      .page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:none; }
+      .page, .page.sidebar-collapsed { display:block; }
+      .mobile-workbench-header { position:sticky; z-index:35; top:0; min-height:64px; display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #d7e2ea; background:rgba(255,255,255,.96); box-shadow:0 8px 24px rgba(15,23,42,.08); backdrop-filter:blur(12px); }
+      .mobile-workbench-header .brand-mark { flex-basis:38px; width:38px; height:38px; }
+      .mobile-workbench-title { min-width:0; color:#173a38; font-size:15px; font-weight:800; line-height:1.15; }
+      .mobile-workbench-title span { display:block; margin-top:3px; color:#64748b; font-size:9px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+      .mobile-sidebar-open { width:42px; height:42px; display:grid; place-items:center; margin-left:auto; border:1px solid #bcd5d0; border-radius:12px; background:#eef8f6; color:#145e59; cursor:pointer; }
+      .mobile-sidebar-open-icon, .mobile-sidebar-open-icon::before, .mobile-sidebar-open-icon::after { width:19px; height:2px; display:block; border-radius:2px; background:currentColor; }
+      .mobile-sidebar-open-icon { position:relative; }
+      .mobile-sidebar-open-icon::before, .mobile-sidebar-open-icon::after { position:absolute; left:0; content:''; }
+      .mobile-sidebar-open-icon::before { top:-6px; }
+      .mobile-sidebar-open-icon::after { top:6px; }
+      .sidebar, .page.sidebar-collapsed .sidebar { position:fixed; z-index:60; inset:0 auto 0 0; width:min(82vw,320px); max-width:calc(100vw - 48px); height:100dvh; padding:18px 15px 15px; align-items:stretch; gap:14px; overflow-y:auto; transform:translateX(-105%); transition:transform .24s ease,box-shadow .24s ease; }
+      .page.mobile-sidebar-open .sidebar { transform:translateX(0); box-shadow:24px 0 55px rgba(15,23,42,.3); }
+      .page.sidebar-collapsed .brand-lockup { flex-direction:row; gap:9px; padding:0 3px 11px; border-bottom:1px solid rgba(148,210,199,.16); }
+      .page.sidebar-collapsed .brand, .page.sidebar-collapsed .filters, .page.sidebar-collapsed .sidebar-section-label, .page.sidebar-collapsed .nav-label, .page.sidebar-collapsed .refresh-label, .page.sidebar-collapsed .demo-controls, .page.sidebar-collapsed .profile-copy { display:initial; }
+      .page.sidebar-collapsed .sidebar-toggle { width:34px; height:34px; margin-left:auto; }
+      .page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:contents; }
+      .page.sidebar-collapsed .sidebar-nav { display:grid; gap:4px; }
+      .page.sidebar-collapsed .sidebar-nav button { min-height:42px; justify-content:flex-start; padding:6px 10px; }
+      .page.sidebar-collapsed .sidebar-nav button::after { display:block; }
+      .page.sidebar-collapsed .nav-icon { flex-basis:27px; width:27px; height:27px; }
+      .page.sidebar-collapsed .refresh-claims { min-height:40px; padding:0; font-size:13px; }
+      .page.sidebar-collapsed .refresh-claims > [aria-hidden="true"] { font-size:inherit; }
+      .page.sidebar-collapsed .help { display:block; }
+      .sidebar-backdrop { position:fixed; z-index:50; inset:0; display:block; padding:0; border:0; background:rgba(8,15,30,.52); opacity:0; pointer-events:none; transition:opacity .24s ease; }
+      .page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }
+      body.mobile-sidebar-active { overflow:hidden; }
     }
     @media(max-width:720px) {
-      .sidebar { padding:10px 12px; }
-      .brand-lockup { padding-bottom:8px; }
-      .sidebar-toolbar { grid-template-columns:minmax(0,1fr) 40px; gap:6px; }
-      .sidebar-toolbar .filters { width:auto; }
-      .sidebar-toolbar .filters label, .sidebar-toolbar .sidebar-section-label, .sidebar-toolbar .nav-label, .sidebar-toolbar .refresh-label { display:none; }
-      .sidebar-toolbar .filters select { min-height:40px; padding:7px 24px 7px 8px; font-size:11px; }
-      .sidebar-toolbar .workspace-links { grid-column:1 / -1; grid-row:2; width:100%; }
-      .sidebar-toolbar .sidebar-nav { gap:5px; }
-      .sidebar-toolbar .sidebar-nav button { min-width:0; width:100%; min-height:40px; justify-content:center; padding:4px; }
-      .sidebar-toolbar .sidebar-nav button::after { display:none; }
-      .sidebar-toolbar .nav-icon { flex-basis:30px; width:30px; height:30px; }
-      .sidebar-toolbar .refresh-claims { grid-column:2; grid-row:1; min-width:40px; width:40px; min-height:40px; padding:0; font-size:0; }
-      .sidebar-toolbar .refresh-claims > [aria-hidden="true"] { font-size:16px; }
       .content { width:100%; min-width:0; padding:14px 12px; }
       .panel, .detail-panel, .panel-body, .review-workspace { min-width:0; }
       .panel-header { align-items:flex-start; padding:14px; }
@@ -483,7 +480,12 @@
 </head>
 <body>
   <div class="page" id="workbenchPage">
-    <aside class="sidebar">
+    <header class="mobile-workbench-header">
+      <div class="brand-mark" aria-hidden="true">N</div>
+      <div class="mobile-workbench-title">Northwind <span>Claims workbench</span></div>
+      <button id="mobileSidebarOpen" class="mobile-sidebar-open" type="button" aria-controls="employeeSidebar" aria-expanded="false" aria-label="Open workbench menu"><span class="mobile-sidebar-open-icon" aria-hidden="true"></span></button>
+    </header>
+    <aside id="employeeSidebar" class="sidebar" aria-label="Workbench menu">
       <div class="brand-lockup">
         <div class="brand-mark" aria-hidden="true">N</div>
         <div class="brand">Northwind <span>Claims workbench</span></div>
@@ -530,6 +532,7 @@
         </div>
       </div>
     </aside>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" tabindex="-1" aria-label="Close workbench menu"></button>
 
     <main class="content">
       <section id="workbenchView" aria-busy="false">
@@ -737,13 +740,31 @@
 
     const byId = id => document.getElementById(id);
     const SIDEBAR_STORAGE_KEY = 'northwind-workbench-sidebar-collapsed';
+    const mobileSidebarQuery = globalThis.matchMedia?.('(max-width: 1024px)');
+
+    function isMobileSidebar() {
+      return mobileSidebarQuery?.matches === true;
+    }
+
+    function setMobileSidebarOpen(open, returnFocus = false) {
+      const shouldOpen = Boolean(open && isMobileSidebar());
+      byId('workbenchPage').classList.toggle('mobile-sidebar-open', shouldOpen);
+      document.body.classList.toggle('mobile-sidebar-active', shouldOpen);
+      byId('mobileSidebarOpen').setAttribute('aria-expanded', String(shouldOpen));
+      byId('employeeSidebar').setAttribute('aria-hidden', String(isMobileSidebar() && !shouldOpen));
+      byId('employeeSidebar').inert = isMobileSidebar() && !shouldOpen;
+      if (shouldOpen) byId('sidebarToggle').focus();
+      if (!shouldOpen && returnFocus) byId('mobileSidebarOpen').focus();
+    }
 
     function setSidebarCollapsed(collapsed, persist = true) {
-      byId('workbenchPage').classList.toggle('sidebar-collapsed', collapsed);
+      sidebarCollapsed = collapsed;
+      byId('workbenchPage').classList.toggle('sidebar-collapsed', collapsed && !isMobileSidebar());
       const toggle = byId('sidebarToggle');
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-      toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
-      toggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      const effectiveCollapsed = collapsed && !isMobileSidebar();
+      toggle.setAttribute('aria-expanded', String(isMobileSidebar() ? true : !effectiveCollapsed));
+      toggle.setAttribute('aria-label', isMobileSidebar() ? 'Close workbench menu' : effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      toggle.title = toggle.getAttribute('aria-label');
       if (persist) {
         try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed)); } catch (_) { /* Storage may be unavailable. */ }
       }
@@ -753,8 +774,43 @@
     try { sidebarCollapsed = localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'; } catch (_) { /* Use the expanded default. */ }
     setSidebarCollapsed(sidebarCollapsed, false);
     byId('sidebarToggle').addEventListener('click', () => {
+      if (isMobileSidebar()) {
+        setMobileSidebarOpen(false, true);
+        return;
+      }
       setSidebarCollapsed(!byId('workbenchPage').classList.contains('sidebar-collapsed'));
     });
+    byId('mobileSidebarOpen').addEventListener('click', () => setMobileSidebarOpen(true));
+    byId('sidebarBackdrop').addEventListener('click', () => setMobileSidebarOpen(false, true));
+
+    let sidebarTouchStart = null;
+    document.addEventListener('touchstart', event => {
+      const touch = event.touches[0];
+      if (!touch || !isMobileSidebar()) return;
+      const menuOpen = byId('workbenchPage').classList.contains('mobile-sidebar-open');
+      if (menuOpen || touch.clientX <= 28) sidebarTouchStart = { x: touch.clientX, y: touch.clientY, menuOpen };
+    }, { passive:true });
+    document.addEventListener('touchend', event => {
+      const touch = event.changedTouches[0];
+      if (!touch || !sidebarTouchStart) return;
+      const deltaX = touch.clientX - sidebarTouchStart.x;
+      const deltaY = touch.clientY - sidebarTouchStart.y;
+      if (Math.abs(deltaX) >= 56 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        if (!sidebarTouchStart.menuOpen && deltaX > 0) setMobileSidebarOpen(true);
+        if (sidebarTouchStart.menuOpen && deltaX < 0) setMobileSidebarOpen(false, true);
+      }
+      sidebarTouchStart = null;
+    }, { passive:true });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && byId('workbenchPage').classList.contains('mobile-sidebar-open')) {
+        setMobileSidebarOpen(false, true);
+      }
+    });
+    mobileSidebarQuery?.addEventListener?.('change', () => {
+      setMobileSidebarOpen(false);
+      setSidebarCollapsed(sidebarCollapsed, false);
+    });
+    setMobileSidebarOpen(false);
 
     let claims = [];
     let activeClaimId = null;
