@@ -118,6 +118,13 @@ it('persists the collapsed employee sidebar across same-origin page loads', asyn
   restoredDom.window.close()
 })
 
+it('keeps the sidebar toggle available and collapses mobile sidebar content', () => {
+  expect(employeeHtml).toContain('@media(max-width:1024px)')
+  expect(employeeHtml).toContain('.sidebar-toggle { display:grid; }')
+  expect(employeeHtml).toContain('.page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:none; }')
+  expect(employeeHtml).toContain('.page.sidebar-collapsed .brand { display:block; }')
+})
+
 it('toggles professional review controls without navigating away from the claim', async () => {
   const item = queueItem(90)
   const fetchMock = vi.fn((url) => {
