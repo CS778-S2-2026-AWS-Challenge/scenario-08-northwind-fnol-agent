@@ -28,6 +28,26 @@ These documents are normative only for the boundaries they explicitly own. A con
 change must update affected implementation, consumers, fixtures, and tests in the same
 pull request when the changed behaviour is implemented.
 
+## Documentation Layers
+
+`SPEC/` defines product behaviour and acceptance. Current engineering contracts define
+implemented boundaries. The Agent Runtime Target defines the future engineering direction
+without claiming implementation. The Migration document isolates the deprecated fallback,
+and the Progress document records exact-head evidence. These layers must not be treated as
+interchangeable proof.
+
+- [Agent Runtime Target](agent-runtime-target.md) - future engineering direction
+- [Agent Runtime Migration](agent-runtime-migration.md) - deprecated compatibility path
+- [Agent Runtime Progress](agent-runtime-progress.md) - current evidence ledger
+
+## Non-Normative Design Rationale
+
+- [Agent Behaviour and Model Gateway Design](agent-behaviour-and-model-gateway-design.md)
+
+This research and decision draft supports issues #233 and #234. It records sources,
+alternatives, and rationale, but it does not replace the target document, current API, or
+runtime policy.
+
 ## User Research
 
 - [Research directory](User_Research_and_Pain_Points/)

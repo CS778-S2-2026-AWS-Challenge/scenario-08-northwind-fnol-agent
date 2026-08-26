@@ -34,11 +34,19 @@ Every result contains:
 
 The public API remains unchanged when the active adapter changes.
 
+Creation is one registered Claim action within a larger turn. A model may propose
+`claim.prepare_creation` or `claim.create`, but Runtime must place an approved
+`claim.create` ActionEnvelope in the `ExecutionPlan` before the adapter is called. The
+adapter result becomes part of `TurnResult`; the response draft is corrected from that
+real result before creation is described to the claimant.
+
 ## Authority, Revision, and Idempotency
 
 - Required material facts and confirmations must satisfy the current controlled rule.
 - Claim creation requires the current Working Claim revision and an authorised
-  `CREATE_CLAIM` decision.
+  `claim.create` ActionEnvelope. During migration, the existing `CREATE_CLAIM` Agent
+  Decision may satisfy this boundary only through an explicit, tested mapping to the new
+  action contract.
 - The provider-neutral operation identity and fingerprint enforce idempotency.
 - An identical retry returns the accepted claim identity and current authorised
   projection; changed input under the same key is a conflict.
@@ -53,6 +61,12 @@ responses preserve the working claim and return a bounded error or pending resul
 service must not report success, fabricate a reference, or fall through to a second data
 runtime profile.
 
+A timeout after submission may be `unknown_outcome`, not an ordinary failure. Runtime
+must reconcile through the existing operation identity, idempotency key, or provider
+reference before retrying. The claimant is told only the real known state and recovery
+path; the system must not create a duplicate formal Claim because acknowledgement was
+lost.
+
 An explicitly configured fixture adapter may be used for controlled development. It is
 not a silent production fallback and its result remains labelled `fixture`.
 
@@ -62,6 +76,12 @@ Routing, assessor tasks, repair tasks, or another participant action require the
 provider-neutral command, result, authority, idempotency, visibility, and failure
 contract. Claim creation does not automatically grant an external participant access to
 the complete claim.
+
+External coordination separates capability discovery, request requirements,
+preparation, request-type classification, consent and authority, submission, tracking,
+response verification, Claim reconciliation, safe retry, cancellation, and failure
+escalation. Each step uses the minimum disclosure and records its own result; a generic
+external-service call cannot collapse these states.
 
 ## Runtime-profile Relationship
 
