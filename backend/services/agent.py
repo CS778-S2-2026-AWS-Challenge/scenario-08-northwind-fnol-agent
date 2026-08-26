@@ -2,7 +2,11 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from backend.domain.intake import infer_controlled_incident_type, next_controlled_intake_field
+from backend.domain.intake import (
+    infer_controlled_incident_type,
+    next_controlled_intake_field,
+    next_controlled_intake_step,
+)
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -619,13 +623,7 @@ class ControlledAgent:
                     'I have added that information to your report. You can continue with any '
                     'available evidence or request human support.'
                 ),
-                customer_next_step=CustomerNextStep(
-                    status='core_details_confirmed',
-                    summary=(
-                        'Your core incident details are confirmed. Review them before continuing.'
-                    ),
-                    responsible_party=ResponsibleParty.CLAIMANT,
-                ),
+                customer_next_step=next_controlled_intake_step(context.claim),
                 form_changes=[],
                 state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
                 proposed_signals=[],
