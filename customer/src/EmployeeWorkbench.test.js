@@ -121,6 +121,9 @@ it('persists the collapsed employee sidebar across same-origin page loads', asyn
 it('keeps the sidebar toggle available and collapses mobile sidebar content', () => {
   expect(employeeHtml).toContain('@media(max-width:1024px)')
   expect(employeeHtml).toContain('.sidebar-toggle { display:grid; }')
+  expect(employeeHtml).toContain('.sidebar-toolbar { width:100%; display:flex;')
+  expect(employeeHtml).toContain('.sidebar-toolbar .sidebar-nav { display:flex; }')
+  expect(employeeHtml).toContain('.sidebar-toolbar .demo-controls, .sidebar-toolbar .help { display:none; }')
   expect(employeeHtml).toContain('.page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:none; }')
   expect(employeeHtml).toContain('.page.sidebar-collapsed .brand { display:block; }')
 })
