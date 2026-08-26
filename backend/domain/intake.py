@@ -164,16 +164,31 @@ def next_controlled_intake_field(claim: WorkingClaim) -> ControlledIntakeField |
 
 
 def next_controlled_intake_step(claim: WorkingClaim) -> CustomerNextStep:
-    intake_field = next_controlled_intake_field(claim)
-    if intake_field is not None:
+    projection = resolve_controlled_intake_requirements(claim)
+    if projection.missing_required_now:
+        next_code = projection.missing_required_now[0]
+        intake_field = next(
+            requirement
+            for requirement in CURRENT_ACTION_REQUIREMENTS
+            if requirement.field_code == next_code
+        )
         return CustomerNextStep(
             status=intake_field.status,
             summary=intake_field.prompt,
             responsible_party=ResponsibleParty.CLAIMANT,
             required_items=[intake_field.field_code],
         )
+    if projection.claim_family == 'motor':
+        return CustomerNextStep(
+            status='ready_to_create',
+            summary='Your confirmed report is ready for controlled claim creation.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        )
     return CustomerNextStep(
-        status='ready_to_create',
-        summary='Your confirmed report is ready for controlled claim creation.',
-        responsible_party=ResponsibleParty.CLAIMANT,
+        status='core_details_confirmed',
+        summary=(
+            'Your core incident details are confirmed. Northwind must determine the next '
+            'applicable step for this claim type before claim creation.'
+        ),
+        responsible_party=ResponsibleParty.NORTHWIND,
     )
