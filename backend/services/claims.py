@@ -457,9 +457,27 @@ def update_form(
             updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
         )
 
+    projected_form = {**claim.form, **updated_fields}
+    incident_type = claim.incident_type
+    updated_incident_type = updated_fields.get('incident.type')
+    if (
+        updated_incident_type is not None
+        and updated_incident_type.status is FormStatus.CONFIRMED
+        and isinstance(updated_incident_type.value, str)
+    ):
+        incident_type = updated_incident_type.value.strip().lower()
+    projected_claim = claim.model_copy(
+        update={
+            'form': projected_form,
+            'incident_type': incident_type,
+        }
+    )
+    next_step = next_controlled_intake_step(projected_claim)
     updated_claim = claim.model_copy(
         update={
-            'form': {**claim.form, **updated_fields},
+            'form': projected_form,
+            'incident_type': incident_type,
+            'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
@@ -478,7 +496,7 @@ def update_form(
         claim_id=claim_id,
         revision=updated_claim.revision,
         updated_fields=updated_fields,
-        customer_next_step=updated_claim.customer_next_step,
+        customer_next_step=next_step,
     )
 
 
