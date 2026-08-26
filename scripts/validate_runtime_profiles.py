@@ -6,9 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.repositories.mongodb import (
-    MongoDBConfigurationError,
     MongoDBConnectionConfig,
-    connect_mongodb_repository,
+    probe_mongodb_connectivity,
 )
 from scripts.check_runtime_profile import (
     inspect_environment,
@@ -36,15 +35,10 @@ def _local_minio_result(endpoint: str | None) -> dict[str, object]:
 def _mongodb_connectivity(probe: bool) -> str:
     if not probe:
         return 'not_checked'
-    repository = None
     try:
-        repository = connect_mongodb_repository(MongoDBConnectionConfig.from_environment())
-        return repository.connection_status()
-    except MongoDBConfigurationError:
+        return probe_mongodb_connectivity(MongoDBConnectionConfig.from_environment())
+    except ValueError:
         return 'unavailable'
-    finally:
-        if repository is not None:
-            repository.close()
 
 
 def build_validation_report(

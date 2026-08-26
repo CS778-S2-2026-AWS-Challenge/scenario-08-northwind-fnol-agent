@@ -1,8 +1,5 @@
-from typing import Any
-
 import pytest
 
-from backend.repositories.mongodb import MongoDBConfigurationError
 from scripts.validate_runtime_profiles import build_validation_report
 
 
@@ -98,11 +95,9 @@ def test_mongodb_probe_failure_is_bounded_to_availability(
         lambda _endpoint: _startup('startup_refused'),
     )
 
-    def fail_connection(_config: object) -> Any:
-        raise MongoDBConfigurationError('provider detail must not enter the report')
-
     monkeypatch.setattr(
-        'scripts.validate_runtime_profiles.connect_mongodb_repository', fail_connection
+        'scripts.validate_runtime_profiles.probe_mongodb_connectivity',
+        lambda _config: 'unavailable',
     )
 
     report, expected = build_validation_report(probe_mongodb=True)
@@ -111,4 +106,34 @@ def test_mongodb_probe_failure_is_bounded_to_availability(
     assert isinstance(profiles, dict)
     assert profiles['mongodb']['connectivity'] == 'unavailable'
     assert 'provider detail' not in str(report)
+    assert expected is True
+
+
+def test_successful_mongodb_ping_keeps_runtime_profile_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        'scripts.validate_runtime_profiles._runtime_result',
+        lambda filename: _startup(
+            'startup_ready' if filename == 'fixture.env.example' else 'startup_refused'
+        ),
+    )
+    monkeypatch.setattr(
+        'scripts.validate_runtime_profiles._local_minio_result',
+        lambda _endpoint: _startup('startup_refused'),
+    )
+    monkeypatch.setattr(
+        'scripts.validate_runtime_profiles.probe_mongodb_connectivity',
+        lambda _config: 'verified',
+    )
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://unused')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+
+    report, expected = build_validation_report(probe_mongodb=True)
+
+    profiles = report['profiles']
+    assert isinstance(profiles, dict)
+    assert profiles['mongodb']['connectivity'] == 'verified'
+    assert profiles['mongodb']['classification'] == 'partial'
+    assert profiles['mongodb']['startup']['status'] == 'startup_refused'
     assert expected is True

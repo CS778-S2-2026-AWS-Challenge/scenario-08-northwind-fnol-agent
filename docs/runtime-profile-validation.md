@@ -43,10 +43,12 @@ py -3.12 scripts/validate_runtime_profiles.py `
   --probe-mongodb
 ```
 
-`--probe-mongodb` reads `NORTHWIND_MONGODB_*` only from process configuration. The command prints
-`verified`, `unavailable`, or `not_checked`; it never prints the URI, credentials, database name,
-collection name, or provider exception. A successful connectivity probe still leaves the MongoDB
-profile `partial` until every required runtime capability passes the shared contracts.
+`--probe-mongodb` reads `NORTHWIND_MONGODB_*` only from process configuration and performs only an
+administrative `ping`. It does not construct `MongoDBRepository`, create indexes, or write provider
+state. The command prints `verified`, `unavailable`, or `not_checked`; it never prints the URI,
+credentials, database name, collection name, or provider exception. A successful connectivity
+probe still leaves the MongoDB profile `partial` until every required runtime capability passes the
+shared contracts.
 
 ## Local MinIO Contract Check
 
