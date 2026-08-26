@@ -7,8 +7,9 @@ actual connectivity and temporary-container results observed on 26 August 2026, 
 another contributor can repeat. It does not promote an incomplete profile or claim production
 deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
-The validation used one image built from `main@79bc4ea`. Final pull-request evidence must name the
-exact reviewed head after the repository quality gate passes.
+The validation branch was synchronized with `main@17f059d8` before the checks below. The temporary
+containers use one image built from the final reviewed branch head; the pull-request evidence names
+that exact head after the repository quality gate passes.
 
 ## Results
 
