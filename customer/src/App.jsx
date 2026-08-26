@@ -110,12 +110,13 @@ function App() {
   const [page, setPage] = useState('home')
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('northwind-prototype-auth') === 'true')
   const [accountSection, setAccountSection] = useState('overview')
+  const [historyOpen, setHistoryOpen] = useState(() => window.innerWidth > 900)
   const [claimType, setClaimType] = useState('')
-  const [showHelpfulStep, setShowHelpfulStep] = useState(false)
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
+  const [claimHistory, setClaimHistory] = useState([])
   const [form, setForm] = useState({})
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -134,7 +135,6 @@ function App() {
   const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
-  const helpfulHeadingRef = useRef(null)
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
@@ -183,12 +183,6 @@ function App() {
       consentChecked: current.claimId === claim?.claim_id ? current.consentChecked : false,
       error: serviceErrorValue,
     }))
-  }
-
-  const claimTypePrompts = {
-    motor: 'For example: Another car reversed into mine while it was parked.',
-    home: 'For example: A pipe burst overnight and damaged the kitchen floor.',
-    contents: 'For example: My laptop and camera were stolen from my apartment.',
   }
 
   useEffect(() => {
@@ -279,7 +273,21 @@ function App() {
   async function sendMessage(event) {
     event?.preventDefault()
     const text = draft.trim()
-    if (!text || isBusy || proposedFields.length > 0) return
+    if (!text || isBusy) return
+    const isStartingFreshClaim = !hasStarted || page === 'home'
+    const shouldOpenConversation = page !== 'conversation'
+
+    if (hasStarted && page === 'home') {
+      const firstClaimantMessage = messages.find((message) => message.actor === 'claimant')
+      setClaimHistory((current) => current.some((item) => item.claimId === claim.claim_id) ? current : [
+        {
+          claimId: claim.claim_id,
+          title: firstClaimantMessage ? messageText(firstClaimantMessage).slice(0, 62) : 'Claim conversation',
+          messageCount: messages.length,
+        },
+        ...current,
+      ])
+    }
 
     setError('')
     setFailedMessage(null)
@@ -295,8 +303,8 @@ function App() {
       }
       const operation = pendingSubmission.current
       setPendingMessage({ text, audience: 'Northwind claim team' })
-      let activeClaim = claim
-      let activeSessionId = sessionId
+      let activeClaim = isStartingFreshClaim ? null : claim
+      let activeSessionId = isStartingFreshClaim ? null : sessionId
       if (!activeClaim) {
         const created = await createClaim({ idempotencyKey: operation.claimKey })
         activeClaim = created.claim
@@ -316,7 +324,7 @@ function App() {
         clientMessageId: operation.clientMessageId,
       })
       setMessages((current) => [
-        ...current,
+        ...(isStartingFreshClaim ? [] : current),
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
       ])
@@ -329,6 +337,7 @@ function App() {
       setPendingMessage(null)
       setFailedMessage(null)
       setStatus('idle')
+      if (shouldOpenConversation) openPage('conversation')
     } catch (requestError) {
       setPendingMessage(null)
       const knownRejection = requestError instanceof ApiRequestError
@@ -345,15 +354,9 @@ function App() {
     }
   }
 
-  function reviewHelpfulInformation(event) {
-    event.preventDefault()
-    if (!draft.trim() || !claimType || isBusy) return
-    setShowHelpfulStep(true)
+  function exitGuidedClaim() {
+    setPage('home')
   }
-
-  useEffect(() => {
-    if (showHelpfulStep) helpfulHeadingRef.current?.focus()
-  }, [showHelpfulStep])
 
   async function confirmProposedFields() {
     if (!claim || proposedFields.length === 0 || isBusy) return
@@ -616,6 +619,7 @@ function App() {
       setResumeContext(session.resume)
       setSavedReports(null)
       setStatus('idle')
+      openPage('conversation')
     } catch (requestError) {
       showError(requestError)
     }
@@ -636,7 +640,7 @@ function App() {
           <span className="brand-mark">N</span>
           <span>Northwind Insurance</span>
         </a>
-        {!hasStarted && page === 'home' && (
+        {page === 'home' && (
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
@@ -654,7 +658,7 @@ function App() {
             ) : <button className="login-button" type="button" onClick={() => openPage('login')}>Log in</button>}
           </nav>
         )}
-        {hasStarted && (
+        {hasStarted && page === 'conversation' && (
           <div className="header-actions">
             <span className="draft-label">Draft report</span>
             <button
@@ -669,11 +673,11 @@ function App() {
         )}
       </header>
 
-      {!hasStarted && page === 'guided-motor' ? (
-        <GuidedMotorClaim onExit={() => setPage('home')} />
-      ) : !hasStarted && page === 'account' ? (
+      {page === 'guided-motor' ? (
+        <GuidedMotorClaim initialDescription={draft} onExit={exitGuidedClaim} />
+      ) : page === 'account' ? (
         <CustomerAccount initialSection={accountSection} onSignOut={signOut} onStartClaim={() => setPage('home')} />
-      ) : !hasStarted && page === 'login' ? (
+      ) : page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
@@ -697,7 +701,7 @@ function App() {
             </div>
           </section>
         </main>
-      ) : !hasStarted ? (
+      ) : page === 'home' || !hasStarted ? (
         <main>
           <section className="home-hero" aria-labelledby="home-hero-title">
             <div className="home-hero-shade" aria-hidden="true" />
@@ -717,7 +721,7 @@ function App() {
               <span aria-hidden="true">&#8595;</span>
             </a>
           </section>
-          <div className="entry-page">
+          <div className={`entry-page${historyOpen ? '' : ' history-is-collapsed'}`}>
           <section className="entry-main">
             <div className="entry-content">
               <p className="eyebrow">Claims, made a little easier</p>
@@ -727,82 +731,21 @@ function App() {
               </p>
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
                 <div className="claim-primary-entry">
-                  <p className="eyebrow">Start your claim</p>
+                  <p className="eyebrow">AI-assisted claim</p>
                   <h2 id="claim-starter-title">Tell us what happened</h2>
                   <p className="claim-primary-note">
-                    Describe the incident in your own words. We&apos;ll preserve what you tell us and ask only for the details still needed.
+                    Describe the incident in your own words. The conversational claim assistant will preserve known facts and ask only for information still needed.
                   </p>
-                  {!showHelpfulStep ? (
-                    <>
-                      <MessageComposer
-                        draft={draft}
-                        setDraft={setDraft}
-                        onSubmit={reviewHelpfulInformation}
-                        inputLabel="Incident description"
-                        busy={isBusy}
-                        hideActions
-                        error={error}
-                        placeholder={claimTypePrompts[claimType]}
-                      />
-                      <section className="claim-guidance" aria-labelledby="claim-guidance-title">
-                        <p className="eyebrow">Helpful, not required</p>
-                        <h2 id="claim-guidance-title">Prepare by claim type</h2>
-                        <p className="claim-guidance-note">Choose the closest type after describing what happened. You can skip the preparation information on the next step.</p>
-                        <div className="claim-tabs" role="tablist" aria-label="Claim type">
-                          {['motor', 'home', 'contents'].map((type) => (
-                            <button
-                              key={type}
-                              type="button"
-                              role="tab"
-                              aria-selected={claimType === type}
-                              className={claimType === type ? 'is-selected' : ''}
-                              onClick={() => setClaimType(type)}
-                            >
-                              <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
-                              {type[0].toUpperCase() + type.slice(1)}
-                            </button>
-                          ))}
-                        </div>
-                        {!claimType && <p className="claim-type-note">Select the claim type that fits best to continue.</p>}
-                        {claimType === 'motor' && (
-                          <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
-                            Use the guided Motor form instead
-                            <span>Alternative fixed three-step form with draft saving</span>
-                          </button>
-                        )}
-                        {claimType && claimType !== 'motor' && (
-                          <p className="guided-unavailable">A fixed guided form is not configured for this claim type. Continue with your description below.</p>
-                        )}
-                      </section>
-                    </>
-                  ) : (
-                    <section className="helpful-step" aria-labelledby="helpful-step-title">
-                      <p className="eyebrow">Optional preparation</p>
-                      <h2 id="helpful-step-title" ref={helpfulHeadingRef} tabIndex="-1">Helpful to have ready</h2>
-                      <p>You do not need these items to start. Continue now and add anything missing later.</p>
-                      {error && (
-                        <div className="backend-status is-error" role="alert">
-                          <span className="status-dot" />
-                          <span>{error}</span>
-                        </div>
-                      )}
-                      <ul>
-                        {CLAIM_MATERIALS[claimType].map(([title, description]) => (
-                          <li key={title}>
-                            <span className="material-check" aria-hidden="true">✓</span>
-                            <span><strong>{title}</strong><small>{description}</small></span>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="helpful-actions">
-                        <button className="primary-button" type="button" onClick={() => sendMessage()} disabled={isBusy}>
-                          {status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
-                        </button>
-                        <button className="secondary-button" type="button" onClick={() => sendMessage()} disabled={isBusy}>Skip for now</button>
-                        <button className="text-button" type="button" onClick={() => setShowHelpfulStep(false)} disabled={isBusy}>Back</button>
-                      </div>
-                    </section>
-                  )}
+                  <MessageComposer
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSubmit={sendMessage}
+                    inputLabel="Incident description"
+                    busy={isBusy}
+                    buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue with claim assistant'}
+                    error={error}
+                    placeholder="Briefly tell us what happened. You can add more details in the conversation."
+                  />
                   {failedMessage && (
                     <article className="message message-claimant is-failed">
                       <p className="message-author">{failedMessage.sender}</p>
@@ -812,15 +755,7 @@ function App() {
                       </p>
                     </article>
                   )}
-                  {!showHelpfulStep && <div className="claim-start-actions">
-                    <button
-                      className="primary-button"
-                      type="button"
-                      onClick={reviewHelpfulInformation}
-                      disabled={!draft.trim() || !claimType || isBusy}
-                    >
-                      Continue claim
-                    </button>
+                  <div className="claim-start-actions">
                     <button
                       className="secondary-button"
                       type="button"
@@ -829,7 +764,7 @@ function App() {
                     >
                       {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
                     </button>
-                  </div>}
+                  </div>
                   <div className="resume-entry">
                     {savedReports !== null && (
                       <section className="saved-reports" aria-labelledby="saved-reports-title">
@@ -860,6 +795,39 @@ function App() {
                     )}
                   </div>
                 </div>
+                <section className="guided-entry" aria-labelledby="claim-guidance-title">
+                  <p className="eyebrow">Fixed form option</p>
+                  <h2 id="claim-guidance-title">Prepare by claim type</h2>
+                  <p className="claim-guidance-note">Choose a claim type to review a helpful preparation list and use an available guided form.</p>
+                  <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                    {['motor', 'home', 'contents'].map((type) => (
+                      <button key={type} type="button" role="tab" aria-selected={claimType === type} className={claimType === type ? 'is-selected' : ''} onClick={() => setClaimType(type)}>
+                        <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
+                        {type[0].toUpperCase() + type.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  {!claimType ? (
+                    <p className="claim-type-note">Select a type to see its helpful preparation list.</p>
+                  ) : (
+                    <div className="preparation-list">
+                      <h3>Helpful to have ready for your {claimType} claim</h3>
+                      <p>These items are useful, not required. You can start without them and add missing information later.</p>
+                      <ul>
+                        {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                          <li key={title}><span className="material-check" aria-hidden="true">✓</span><span><strong>{title}</strong><small>{description}</small></span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {claimType === 'motor' && (
+                    <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
+                      Start guided Motor claim
+                      <span>Three-step form with draft saving</span>
+                    </button>
+                  )}
+                  {claimType && claimType !== 'motor' && <p className="guided-unavailable">A guided form is not configured for this claim type yet.</p>}
+                </section>
               </section>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>
@@ -868,7 +836,15 @@ function App() {
               </div>
             </div>
           </section>
-          <HelpfulDetails />
+          <ClaimHistorySidebar
+            claim={claim}
+            messages={messages}
+            history={claimHistory}
+            open={historyOpen}
+            onToggle={() => setHistoryOpen((current) => !current)}
+            onOpenConversation={() => openPage('conversation')}
+            onOpenHistory={resumeSavedReport}
+          />
           </div>
         </main>
       ) : (
@@ -1013,7 +989,6 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0 && !handoff}
               disabledNote={
                 handoff
                   ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
@@ -1293,17 +1268,50 @@ function MessageComposer({
   )
 }
 
-function HelpfulDetails() {
+function ClaimHistorySidebar({ claim, messages, history, open, onToggle, onOpenConversation, onOpenHistory }) {
+  const firstClaimantMessage = messages.find((message) => message.actor === 'claimant')
+  const conversationTitle = firstClaimantMessage
+    ? messageText(firstClaimantMessage).slice(0, 62)
+    : 'Current claim conversation'
+
   return (
-    <aside className="entry-side" aria-labelledby="helpful-details-title">
+    <aside className={`entry-side history-sidebar${open ? ' is-open' : ' is-collapsed'}`} aria-label="Conversation and claim history">
       <div className="side-content">
-        <p className="side-label">When available</p>
-        <h2 id="helpful-details-title">Helpful details to include</h2>
-        <ul className="detail-list">
-          <li>When and where the incident happened</li>
-          <li>Who or what was involved</li>
-          <li>Any damage, injuries, or immediate safety concerns</li>
-        </ul>
+        <button
+          className="history-toggle"
+          type="button"
+          aria-expanded={open}
+          onClick={onToggle}
+          aria-label={open ? 'Collapse conversation history' : 'Expand conversation history'}
+          title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <span className="history-toggle-icon" aria-hidden="true"><span /></span>
+          <span className="history-toggle-arrow" aria-hidden="true">{open ? '›' : '‹'}</span>
+        </button>
+        {open && <>
+          <div className="history-heading">
+            <span className="history-mark" aria-hidden="true">N</span>
+            <div><strong>Claim conversations</strong><small>Browser-local prototype</small></div>
+          </div>
+          <nav className="history-content" aria-label="Recent claim conversations">
+            <p className="history-group-label">Recent</p>
+            {claim ? (
+              <button className="history-thread is-current" type="button" onClick={onOpenConversation}>
+                <span className="history-thread-icon" aria-hidden="true">◇</span>
+                <span className="history-thread-copy"><strong>{conversationTitle}</strong><small>{claim.claim_id} · {messages.length} messages</small></span>
+              </button>
+            ) : (
+              <p className="history-empty">Claim conversations will appear here after you start.</p>
+            )}
+            {history.map((item) => (
+              <button className="history-thread" type="button" key={item.claimId} onClick={() => onOpenHistory(item.claimId)}>
+                <span className="history-thread-icon" aria-hidden="true">◇</span>
+                <span className="history-thread-copy"><strong>{item.title}</strong><small>{item.claimId} · {item.messageCount} messages</small></span>
+              </button>
+            ))}
+          </nav>
+          <p className="history-boundary">History is synthetic and stored only in this browser.</p>
+        </>}
       </div>
     </aside>
   )
