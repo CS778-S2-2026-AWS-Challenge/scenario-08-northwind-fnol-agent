@@ -33,7 +33,13 @@ derived artifact; controlled re-publication or rebuild is required.
 
 The repository-controlled `config/knowledge-sources.json` manifest is the approval authority. Each
 entry binds document ID and version to its source key, URI, scope metadata, publication status, and
-required SHA-256 checksum. A request supplies only the controlled identity:
+required SHA-256 checksum. The manifest is also a validated trust boundary: the current slice
+accepts only `.md` source keys below the `knowledge/` namespace (excluding generated
+`knowledge/indexed/` objects), supported controlled source URIs, explicit jurisdiction, authority
+and visibility, valid effective periods, and canonical SHA-256 integrity metadata. Synthetic
+product-policy entries additionally require insurer and product applicability. Invalid entries
+fail before any object-store read or indexed-object write. A request supplies only the controlled
+identity:
 
 ```json
 {"document_id": "nw-policy-motor-standard-mvp-2026-1", "version": "MVP-2026.1"}

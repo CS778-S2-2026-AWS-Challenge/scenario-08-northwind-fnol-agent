@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.services.knowledge_ingestion import KnowledgeManifestError
 from scripts.ingest_knowledge_source import (
     IngestionRequest,
     load_approved_sources,
@@ -49,3 +50,30 @@ def test_request_cannot_supply_governed_metadata(tmp_path: Path) -> None:
 def test_unknown_identity_cannot_resolve_from_manifest() -> None:
     with pytest.raises(ValueError, match='not registered'):
         resolve_source(IngestionRequest('unknown', 'MVP-2026.1'), load_approved_sources())
+
+
+@pytest.mark.parametrize(
+    ('field', 'value', 'message'),
+    [
+        ('source_key', 'knowledge/policies/policy.pdf', 'Markdown source'),
+        ('source_uri', '', 'source_uri'),
+        ('jurisdiction', '', 'jurisdiction'),
+        ('authority', '', 'authority'),
+        ('visibility', 'claimant_only', 'visibility'),
+        ('product', None, 'insurer and product'),
+        ('effective_to', '2025-12-31T00:00:00Z', 'later than'),
+        ('checksum_sha256', 'bad-digest', 'SHA-256'),
+    ],
+)
+def test_manifest_loader_rejects_invalid_governed_entries(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    manifest_path = Path('config/knowledge-sources.json')
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    manifest['documents'][0][field] = value
+
+    with pytest.raises(KnowledgeManifestError, match=message):
+        load_approved_sources(write_json(tmp_path / 'manifest.json', manifest))

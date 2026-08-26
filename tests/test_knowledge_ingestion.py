@@ -10,6 +10,7 @@ from backend.services.knowledge_ingestion import (
     INGESTION_PIPELINE_IDENTITY,
     KnowledgeIngestionError,
     KnowledgeIngestionService,
+    KnowledgeManifestError,
     KnowledgeSourceNotFound,
 )
 
@@ -17,9 +18,11 @@ from backend.services.knowledge_ingestion import (
 class MemoryObjectStore:
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
         self.objects = objects or {}
+        self.reads: list[str] = []
         self.writes: list[str] = []
 
     def read(self, key: str) -> bytes | None:
+        self.reads.append(key)
         return self.objects.get(key)
 
     def write(self, key: str, data: bytes, *, content_type: str, metadata: dict[str, str]) -> None:
@@ -129,8 +132,45 @@ def test_controlled_manifest_must_approve_source_and_bind_checksum() -> None:
     with pytest.raises(KnowledgeIngestionError, match='not approved'):
         service(store, draft).ingest(draft)
     checksumless = source(expected_checksum=None)
-    with pytest.raises(KnowledgeIngestionError, match='requires a source checksum'):
+    with pytest.raises(KnowledgeManifestError, match='requires a source checksum'):
         service(store, checksumless).ingest(checksumless)
+
+
+@pytest.mark.parametrize(
+    ('changes', 'message'),
+    [
+        ({'document_id': '../outside'}, 'document_id'),
+        ({'version': '../outside'}, 'version'),
+        ({'source_key': 'knowledge/policies/policy.pdf'}, 'Markdown source'),
+        ({'source_key': 'private/policy.md'}, 'knowledge namespace'),
+        ({'source_key': 'knowledge/indexed/policy.md'}, 'knowledge namespace'),
+        ({'source_uri': ''}, 'source_uri'),
+        ({'source_uri': 'file:///private/policy.md'}, 'source_uri'),
+        ({'source_uri': 'https://user:secret@example.invalid/policy'}, 'source_uri'),
+        ({'jurisdiction': ''}, 'jurisdiction'),
+        ({'authority': ''}, 'authority'),
+        ({'visibility': 'claimant_only'}, 'visibility'),
+        ({'insurer': None}, 'insurer and product'),
+        ({'product': ''}, 'product'),
+        ({'effective_to': datetime(2026, 1, 1, tzinfo=UTC)}, 'later than'),
+        ({'expected_checksum': 'not-a-sha256'}, 'SHA-256'),
+        ({'expected_checksum': 123}, 'SHA-256'),
+    ],
+)
+def test_invalid_governed_manifest_source_is_rejected_before_object_access(
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    invalid_source = source(**changes)
+    store = MemoryObjectStore({invalid_source.source_key: POLICY})
+    original_objects = dict(store.objects)
+
+    with pytest.raises(KnowledgeManifestError, match=message):
+        service(store, invalid_source)
+
+    assert store.reads == []
+    assert store.writes == []
+    assert store.objects == original_objects
 
 
 def test_changed_content_cannot_replace_an_existing_version() -> None:

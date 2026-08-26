@@ -3,11 +3,15 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import PurePosixPath
 from typing import Protocol
+from urllib.parse import urlparse
 
 from backend.domain.knowledge import KnowledgeChunk, KnowledgePublicationStatus, KnowledgeSource
 
 INGESTION_PIPELINE_IDENTITY = 'markdown-sections-v1+keyword-index-v1+state-v2'
+SUPPORTED_VISIBILITY = frozenset({'public', 'customer_and_staff', 'staff_only'})
+SUPPORTED_SOURCE_URI_SCHEMES = frozenset({'https', 'northwind'})
 
 
 class KnowledgeIngestionError(ValueError):
@@ -15,6 +19,10 @@ class KnowledgeIngestionError(ValueError):
 
 
 class KnowledgeSourceNotFound(KnowledgeIngestionError):
+    pass
+
+
+class KnowledgeManifestError(KnowledgeIngestionError):
     pass
 
 
@@ -65,10 +73,115 @@ def _source_metadata_fingerprint(source: KnowledgeSource) -> str:
     return sha256(canonical).hexdigest()
 
 
+def _require_manifest_text(source: KnowledgeSource, field: str) -> str:
+    value = getattr(source, field)
+    if not isinstance(value, str) or not value.strip():
+        raise KnowledgeManifestError(f'Knowledge manifest {field} must be a non-empty string.')
+    return value.strip()
+
+
+def validate_manifest_source(source: KnowledgeSource) -> None:
+    """Fail closed before a governed source can authorise object-store access."""
+    for field in (
+        'document_id',
+        'title',
+        'document_type',
+        'version',
+        'jurisdiction',
+        'authority',
+    ):
+        _require_manifest_text(source, field)
+    for field in ('document_id', 'version'):
+        value = getattr(source, field)
+        if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', value) is None:
+            raise KnowledgeManifestError(
+                f'Knowledge manifest {field} contains unsupported path characters.'
+            )
+
+    source_key = _require_manifest_text(source, 'source_key')
+    key = PurePosixPath(source_key)
+    if (
+        '\\' in source_key
+        or source_key.startswith('/')
+        or '//' in source_key
+        or '..' in key.parts
+        or not source_key.startswith('knowledge/')
+        or source_key.startswith('knowledge/indexed/')
+        or key.suffix.casefold() != '.md'
+    ):
+        raise KnowledgeManifestError(
+            'Knowledge manifest source_key must identify a Markdown source '
+            'in the knowledge namespace.'
+        )
+
+    source_uri = _require_manifest_text(source, 'source_uri')
+    parsed_uri = urlparse(source_uri)
+    try:
+        uri_host = parsed_uri.hostname
+    except ValueError:
+        uri_host = None
+    if (
+        any(character.isspace() for character in source_uri)
+        or parsed_uri.scheme.casefold() not in SUPPORTED_SOURCE_URI_SCHEMES
+        or not uri_host
+        or parsed_uri.username is not None
+        or parsed_uri.password is not None
+    ):
+        raise KnowledgeManifestError('Knowledge manifest source_uri is invalid or unsupported.')
+
+    visibility = _require_manifest_text(source, 'visibility')
+    if visibility not in SUPPORTED_VISIBILITY:
+        raise KnowledgeManifestError('Knowledge manifest visibility is unsupported.')
+
+    for field in ('insurer', 'product'):
+        value = getattr(source, field)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise KnowledgeManifestError(
+                f'Knowledge manifest {field} must be omitted or a non-empty string.'
+            )
+    if source.document_type == 'synthetic_policy_wording' and (
+        source.insurer is None or source.product is None
+    ):
+        raise KnowledgeManifestError(
+            'Synthetic policy manifest entries require insurer and product applicability.'
+        )
+
+    for field in ('effective_from', 'effective_to'):
+        value = getattr(source, field)
+        if value is not None and (not isinstance(value, datetime) or value.utcoffset() is None):
+            raise KnowledgeManifestError(
+                f'Knowledge manifest {field} must be a timestamp with an explicit timezone.'
+            )
+    if (
+        source.effective_from is not None
+        and source.effective_to is not None
+        and source.effective_to <= source.effective_from
+    ):
+        raise KnowledgeManifestError(
+            'Knowledge manifest effective_to must be later than effective_from.'
+        )
+
+    checksum = source.expected_checksum
+    if source.publication_status is KnowledgePublicationStatus.APPROVED and checksum is None:
+        raise KnowledgeManifestError('Approved manifest entry requires a source checksum.')
+    if checksum is not None and (
+        not isinstance(checksum, str) or re.fullmatch(r'[0-9a-fA-F]{64}', checksum) is None
+    ):
+        raise KnowledgeManifestError(
+            'Knowledge manifest checksum must be a 64-character SHA-256 hexadecimal digest.'
+        )
+
+
 class KnowledgeIngestionService:
     def __init__(
         self, store: KnowledgeObjectStore, approved_sources: dict[tuple[str, str], KnowledgeSource]
     ) -> None:
+        for identity, source in approved_sources.items():
+            validate_manifest_source(source)
+            if identity != (source.document_id, source.version):
+                raise KnowledgeManifestError(
+                    'Knowledge manifest lookup identity does not match its governed source.'
+                )
         self._store = store
         self._approved_sources = approved_sources
 
@@ -90,12 +203,12 @@ class KnowledgeIngestionService:
                 'Knowledge source metadata does not match the controlled manifest.'
             )
         if source.expected_checksum is None:
-            raise KnowledgeIngestionError('Approved manifest entry requires a source checksum.')
+            raise KnowledgeManifestError('Approved manifest entry requires a source checksum.')
         raw = self._store.read(source.source_key)
         if raw is None:
             raise KnowledgeSourceNotFound(f'Knowledge source not found: {source.source_key}')
         checksum = sha256(raw).hexdigest()
-        if checksum != source.expected_checksum:
+        if checksum != source.expected_checksum.casefold():
             raise KnowledgeIngestionError('Knowledge source checksum does not match the manifest.')
         metadata_fingerprint = _source_metadata_fingerprint(source)
 
