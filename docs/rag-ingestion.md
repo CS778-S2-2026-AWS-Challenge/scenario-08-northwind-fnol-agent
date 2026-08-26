@@ -41,6 +41,11 @@ product-policy entries additionally require insurer and product applicability. I
 fail before any object-store read or indexed-object write. A request supplies only the controlled
 identity:
 
+Governed text values must already be canonical and cannot contain leading or trailing whitespace;
+the pipeline does not validate one value and then index a different unnormalised value. Effective
+dates accept only `null` or non-empty, timezone-aware ISO 8601 strings. Other JSON types and padded
+or malformed date strings fail as bounded manifest errors.
+
 ```json
 {"document_id": "nw-policy-motor-standard-mvp-2026-1", "version": "MVP-2026.1"}
 ```

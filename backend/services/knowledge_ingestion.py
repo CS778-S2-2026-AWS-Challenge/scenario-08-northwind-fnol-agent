@@ -77,7 +77,9 @@ def _require_manifest_text(source: KnowledgeSource, field: str) -> str:
     value = getattr(source, field)
     if not isinstance(value, str) or not value.strip():
         raise KnowledgeManifestError(f'Knowledge manifest {field} must be a non-empty string.')
-    return value.strip()
+    if value != value.strip():
+        raise KnowledgeManifestError(f'Knowledge manifest {field} must be canonical text.')
+    return value
 
 
 def validate_manifest_source(source: KnowledgeSource) -> None:
@@ -135,10 +137,13 @@ def validate_manifest_source(source: KnowledgeSource) -> None:
 
     for field in ('insurer', 'product'):
         value = getattr(source, field)
-        if value is not None and (not isinstance(value, str) or not value.strip()):
-            raise KnowledgeManifestError(
-                f'Knowledge manifest {field} must be omitted or a non-empty string.'
-            )
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                raise KnowledgeManifestError(
+                    f'Knowledge manifest {field} must be omitted or a non-empty string.'
+                )
+            if value != value.strip():
+                raise KnowledgeManifestError(f'Knowledge manifest {field} must be canonical text.')
     if source.document_type == 'synthetic_policy_wording' and (
         source.insurer is None or source.product is None
     ):

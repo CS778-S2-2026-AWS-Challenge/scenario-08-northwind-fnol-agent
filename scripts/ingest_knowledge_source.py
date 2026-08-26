@@ -25,8 +25,19 @@ from backend.services.knowledge_ingestion import (
 APPROVED_MANIFEST = Path(__file__).resolve().parents[1] / 'config' / 'knowledge-sources.json'
 
 
-def _optional_datetime(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value.replace('Z', '+00:00')) if value else None
+def _optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise KnowledgeManifestError(
+            'Knowledge manifest effective dates must be null or canonical datetime strings.'
+        )
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        raise KnowledgeManifestError(
+            'Knowledge manifest effective dates must be valid ISO 8601 datetime strings.'
+        ) from None
 
 
 @dataclass(frozen=True, slots=True)
