@@ -617,9 +617,15 @@ def test_message_reads_hide_internal_records_and_validate_session_state(
     )
 
     assert listed.status_code == 200
-    assert listed.json()['items'][0]['actor'] == 'claimant'
     assert second_page.status_code == 200
-    assert [item['actor'] for item in second_page.json()['items']] == ['agent']
+    returned_ids = [
+        listed.json()['items'][0]['message_id'],
+        second_page.json()['items'][0]['message_id'],
+    ]
+    expected_ids = sorted(
+        [turn['claimant_message']['message_id'], turn['agent_message']['message_id']]
+    )
+    assert returned_ids == expected_ids
     assert missing_session.status_code == 404
 
 

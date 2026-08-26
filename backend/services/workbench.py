@@ -185,7 +185,7 @@ def list_workbench_claims(
         )
         assignee_id = next(
             (handoff.assigned_to for handoff in open_handoffs if handoff.assigned_to),
-            None,
+            claim.assignee_id,
         )
         if not _matches_view(view, queue, open_handoffs, pending_evidence):
             continue

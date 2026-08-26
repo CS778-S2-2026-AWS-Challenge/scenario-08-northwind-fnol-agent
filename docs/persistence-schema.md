@@ -39,6 +39,7 @@ fixtures, and transaction tests change together.
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Agent turn | TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelopes, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
@@ -103,7 +104,10 @@ and checksums rather than embedding those bytes.
   it; later unrelated messages remain session-only and must not overwrite claim facts.
 - A session summary records the claim revision it represents. That revision may lag but
   must not exceed the current claim revision.
-- Complete messages remain durable outside the bounded summary.
+- Complete messages remain durable outside the bounded summary. Message lists use the stable
+  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- A message `in_reply_to` reference may identify only a message belonging to the same claim and
+  interaction session.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later
