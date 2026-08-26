@@ -76,7 +76,7 @@ function queueDetail(item) {
   }
 }
 
-it('collapses and restores the employee sidebar', async () => {
+it('persists the collapsed employee sidebar across same-origin page loads', async () => {
   const dom = new JSDOM(employeeHtml, {
     runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
     beforeParse(window) {
@@ -91,12 +91,31 @@ it('collapses and restores the employee sidebar', async () => {
   expect(page).toHaveClass('sidebar-collapsed')
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
   expect(toggle).toHaveAttribute('aria-label', 'Expand sidebar')
-
-  toggle.click()
-  expect(page).not.toHaveClass('sidebar-collapsed')
-  expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  expect(dom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('true')
   await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
   dom.window.close()
+
+  const restoredDom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.localStorage.setItem('northwind-workbench-sidebar-collapsed', 'true')
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const restoredPage = restoredDom.window.document.querySelector('#workbenchPage')
+  const restoredToggle = restoredDom.window.document.querySelector('#sidebarToggle')
+
+  expect(restoredPage).toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'false')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Expand sidebar')
+
+  restoredToggle.click()
+  expect(restoredPage).not.toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'true')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+  expect(restoredDom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('false')
+  await waitFor(() => expect(restoredDom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  restoredDom.window.close()
 })
 
 it('toggles professional review controls without navigating away from the claim', async () => {

@@ -177,7 +177,10 @@ describe('claimant intake', () => {
     await user.click(screen.getByRole('button', { name: 'Account overview' }))
 
     expect(screen.getByRole('heading', { name: 'Good morning, Alex' })).toBeVisible()
-    expect(screen.getByText(/Information is stored only in this browser/)).toBeVisible()
+    const accountDisclosure = screen.getByRole('note')
+    expect(accountDisclosure).toHaveTextContent('profile, claim, and message data shown here is synthetic')
+    expect(accountDisclosure).toHaveTextContent('stored only in this browser')
+    expect(accountDisclosure).toHaveTextContent('Authentication is not connected')
     expect(screen.getByText(/Claim detail navigation is not connected/)).toBeVisible()
     expect(screen.queryByRole('button', { name: 'View claim details' })).not.toBeInTheDocument()
 

@@ -101,7 +101,9 @@ export default function CustomerAccount({ initialSection = 'overview', onSignOut
       </aside>
 
       <div className="account-content">
-        <div className="account-prototype-note" role="note">Prototype account · Information is stored only in this browser.</div>
+        <div className="account-prototype-note" role="note">
+          Prototype account · The profile, claim, and message data shown here is synthetic. Profile changes are stored only in this browser. Authentication is not connected.
+        </div>
 
         {section === 'overview' && <>
           <header className="account-heading">
