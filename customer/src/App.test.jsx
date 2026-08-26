@@ -236,7 +236,10 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Contents' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.queryByText(/Helpful to have ready for/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
     expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
 
@@ -297,7 +300,9 @@ describe('claimant intake', () => {
     expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
     expect(screen.getByLabelText('Incident description')).toBeVisible()
     expect(screen.queryByText('Other ways to claim')).not.toBeInTheDocument()
-    expect(screen.getByText('Optional preparation guidance')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Prepare by claim type' })).toBeVisible()
+    expect(screen.queryByText('Vehicle and driver details')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
 
     expect(screen.getByText('1 Details')).toBeVisible()
@@ -318,26 +323,26 @@ describe('claimant intake', () => {
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
   })
 
-  it('shows a preparation checklist for each claim type', async () => {
+  it('shows optional preparation only after the claimant continues and allows it to be skipped', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Motor claim materials' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Helpful to have ready' })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine at an intersection.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(screen.getByRole('heading', { name: 'Helpful to have ready' })).toBeVisible()
     expect(screen.getByText('Vehicle and driver details')).toBeVisible()
-
-    await user.click(screen.getByRole('tab', { name: 'Home' }))
-    expect(screen.getByRole('heading', { name: 'Home claim materials' })).toBeVisible()
-    expect(screen.getByText('Emergency work records')).toBeVisible()
-
-    await user.click(screen.getByRole('tab', { name: 'Contents' }))
-    expect(screen.getByRole('heading', { name: 'Contents claim materials' })).toBeVisible()
-    expect(screen.getByText('Proof of ownership')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Skip for now' })).toBeEnabled()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('returns to the homepage when browser history goes back from the claim page', async () => {
     const user = userEvent.setup()
     render(<App />)
 
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
     expect(screen.getByRole('heading', { name: 'Your details and incident' })).toBeVisible()
 
@@ -367,6 +372,7 @@ describe('claimant intake', () => {
       .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, revision: 3, incident_type: 'motor', form: savedForm }))
     const user = userEvent.setup()
     render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
     await user.type(screen.getByLabelText('Client Number'), 'NW-123456')
     await user.click(screen.getByRole('button', { name: 'Incident date' }))
@@ -393,7 +399,9 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     expect(await screen.findByText('Please check the incident description.')).toBeVisible()
     expect(screen.getAllByText('Another vehicle hit my parked car.')).toHaveLength(2)
@@ -438,7 +446,9 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
 
     await waitFor(() => {
@@ -499,7 +509,9 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Edit' }))
 
     const correction = screen.getByRole('textbox', { name: 'Correct What happened' })
@@ -531,7 +543,9 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     expect(await screen.findByText('Suggested from your description')).toBeVisible()
     expect(screen.queryByText('Source: inference')).not.toBeInTheDocument()
@@ -543,7 +557,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A synthetic incident.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -574,8 +590,20 @@ describe('claimant intake', () => {
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
     await user.type(description, 'Another vehicle hit my parked car.')
+    await user.tab() // Motor claim type
+    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    await user.tab() // Home
+    await user.tab() // Contents
+    await user.tab() // Guided Motor alternative
+    await user.tab() // Continue claim
+    expect(screen.getByRole('button', { name: 'Continue claim' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('heading', { name: 'Helpful to have ready' })).toBeVisible()
     await user.tab()
     expect(screen.getByRole('button', { name: 'Continue claim' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Skip for now' })).toHaveFocus()
     await user.keyboard('{Enter}')
 
     expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
@@ -703,7 +731,9 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
     expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
@@ -746,7 +776,9 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
 
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
@@ -799,7 +831,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
     await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
 
@@ -854,7 +888,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
     await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
 
@@ -881,7 +917,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Police report is due next week.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     expect(await screen.findByText('Pending')).toBeVisible()
     expect(screen.getByText('Expected later')).toBeVisible()
@@ -953,7 +991,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1038,7 +1078,9 @@ describe('claimant intake', () => {
     expect(screen.queryByRole('heading', { name: 'Request a vehicle damage assessment' }))
       .not.toBeInTheDocument()
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1090,7 +1132,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1178,7 +1222,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
     await user.click(await screen.findByRole('checkbox', { name: /I give Northwind permission/ }))
@@ -1248,7 +1294,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
     await user.click(await screen.findByRole('checkbox', { name: /I give Northwind permission/ }))
@@ -1387,7 +1435,9 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A passenger is injured.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Skip for now' }))
 
     expect(await screen.findByText('Normal intake has paused')).toBeVisible()
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)

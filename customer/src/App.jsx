@@ -110,7 +110,8 @@ function App() {
   const [page, setPage] = useState('home')
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('northwind-prototype-auth') === 'true')
   const [accountSection, setAccountSection] = useState('overview')
-  const [claimType, setClaimType] = useState('motor')
+  const [claimType, setClaimType] = useState('')
+  const [showHelpfulStep, setShowHelpfulStep] = useState(false)
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -133,6 +134,7 @@ function App() {
   const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
+  const helpfulHeadingRef = useRef(null)
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
@@ -275,7 +277,7 @@ function App() {
   }
 
   async function sendMessage(event) {
-    event.preventDefault()
+    event?.preventDefault()
     const text = draft.trim()
     if (!text || isBusy || proposedFields.length > 0) return
 
@@ -342,6 +344,16 @@ function App() {
       showError(requestError)
     }
   }
+
+  function reviewHelpfulInformation(event) {
+    event.preventDefault()
+    if (!draft.trim() || !claimType || isBusy) return
+    setShowHelpfulStep(true)
+  }
+
+  useEffect(() => {
+    if (showHelpfulStep) helpfulHeadingRef.current?.focus()
+  }, [showHelpfulStep])
 
   async function confirmProposedFields() {
     if (!claim || proposedFields.length === 0 || isBusy) return
@@ -720,16 +732,77 @@ function App() {
                   <p className="claim-primary-note">
                     Describe the incident in your own words. We&apos;ll preserve what you tell us and ask only for the details still needed.
                   </p>
-                  <MessageComposer
-                    draft={draft}
-                    setDraft={setDraft}
-                    onSubmit={sendMessage}
-                    inputLabel="Incident description"
-                    busy={isBusy}
-                    buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
-                    error={error}
-                    placeholder={claimTypePrompts[claimType]}
-                  />
+                  {!showHelpfulStep ? (
+                    <>
+                      <MessageComposer
+                        draft={draft}
+                        setDraft={setDraft}
+                        onSubmit={reviewHelpfulInformation}
+                        inputLabel="Incident description"
+                        busy={isBusy}
+                        hideActions
+                        error={error}
+                        placeholder={claimTypePrompts[claimType]}
+                      />
+                      <section className="claim-guidance" aria-labelledby="claim-guidance-title">
+                        <p className="eyebrow">Helpful, not required</p>
+                        <h2 id="claim-guidance-title">Prepare by claim type</h2>
+                        <p className="claim-guidance-note">Choose the closest type after describing what happened. You can skip the preparation information on the next step.</p>
+                        <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                          {['motor', 'home', 'contents'].map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              role="tab"
+                              aria-selected={claimType === type}
+                              className={claimType === type ? 'is-selected' : ''}
+                              onClick={() => setClaimType(type)}
+                            >
+                              <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
+                              {type[0].toUpperCase() + type.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                        {!claimType && <p className="claim-type-note">Select the claim type that fits best to continue.</p>}
+                        {claimType === 'motor' && (
+                          <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
+                            Use the guided Motor form instead
+                            <span>Alternative fixed three-step form with draft saving</span>
+                          </button>
+                        )}
+                        {claimType && claimType !== 'motor' && (
+                          <p className="guided-unavailable">A fixed guided form is not configured for this claim type. Continue with your description below.</p>
+                        )}
+                      </section>
+                    </>
+                  ) : (
+                    <section className="helpful-step" aria-labelledby="helpful-step-title">
+                      <p className="eyebrow">Optional preparation</p>
+                      <h2 id="helpful-step-title" ref={helpfulHeadingRef} tabIndex="-1">Helpful to have ready</h2>
+                      <p>You do not need these items to start. Continue now and add anything missing later.</p>
+                      {error && (
+                        <div className="backend-status is-error" role="alert">
+                          <span className="status-dot" />
+                          <span>{error}</span>
+                        </div>
+                      )}
+                      <ul>
+                        {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                          <li key={title}>
+                            <span className="material-check" aria-hidden="true">✓</span>
+                            <span><strong>{title}</strong><small>{description}</small></span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="helpful-actions">
+                        <button className="primary-button" type="button" onClick={() => sendMessage()} disabled={isBusy}>
+                          {status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => sendMessage()} disabled={isBusy}>Skip for now</button>
+                        <button className="text-button" type="button" onClick={() => setShowHelpfulStep(false)} disabled={isBusy}>Back</button>
+                      </div>
+                    </section>
+                  )}
                   {failedMessage && (
                     <article className="message message-claimant is-failed">
                       <p className="message-author">{failedMessage.sender}</p>
@@ -739,7 +812,15 @@ function App() {
                       </p>
                     </article>
                   )}
-                  <div className="resume-entry">
+                  {!showHelpfulStep && <div className="claim-start-actions">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={reviewHelpfulInformation}
+                      disabled={!draft.trim() || !claimType || isBusy}
+                    >
+                      Continue claim
+                    </button>
                     <button
                       className="secondary-button"
                       type="button"
@@ -748,6 +829,8 @@ function App() {
                     >
                       {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
                     </button>
+                  </div>}
+                  <div className="resume-entry">
                     {savedReports !== null && (
                       <section className="saved-reports" aria-labelledby="saved-reports-title">
                         <h2 id="saved-reports-title">Saved reports</h2>
@@ -777,57 +860,6 @@ function App() {
                     )}
                   </div>
                 </div>
-
-                <div className="choice-divider"><span>Optional preparation guidance</span></div>
-                <section className="claim-guidance" aria-labelledby="claim-guidance-title">
-                  <p className="eyebrow">Helpful, not required</p>
-                  <h2 id="claim-guidance-title">Prepare by claim type</h2>
-                  <p className="claim-guidance-note">Choose a type to see materials that may help later. You do not need these before telling us what happened.</p>
-                <div className="claim-tabs" role="tablist" aria-label="Claim type">
-                  {['motor', 'home', 'contents'].map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      role="tab"
-                      aria-selected={claimType === type}
-                      className={claimType === type ? 'is-selected' : ''}
-                      onClick={() => setClaimType(type)}
-                    >
-                      <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
-                      {type[0].toUpperCase() + type.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              <div className="materials-checklist" aria-live="polite">
-                <div className="materials-heading">
-                  <div>
-                    <p className="eyebrow">Helpful to have ready</p>
-                    <h3>{claimType[0].toUpperCase() + claimType.slice(1)} claim materials</h3>
-                  </div>
-                  <span>{CLAIM_MATERIALS[claimType].length} items</span>
-                </div>
-                <p className="materials-note">
-                  Don&apos;t worry if you don&apos;t have everything. You can start now and add missing materials later.
-                </p>
-                <ul>
-                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
-                    <li key={title}>
-                      <span className="material-check" aria-hidden="true">✓</span>
-                      <span><strong>{title}</strong><small>{description}</small></span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {claimType === 'motor' && (
-                <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
-                  Use the guided Motor form instead
-                  <span>Alternative fixed three-step form with draft saving</span>
-                </button>
-              )}
-              {claimType !== 'motor' && (
-                <p className="guided-unavailable">A fixed guided form is not configured for this claim type. You can start above by describing what happened naturally.</p>
-              )}
-                </section>
               </section>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>
@@ -1226,6 +1258,7 @@ function MessageComposer({
   disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
+  hideActions = false,
   placeholder = 'Write the details you know...',
 }) {
   return (
@@ -1247,7 +1280,7 @@ function MessageComposer({
           <span>{error}</span>
         </div>
       )}
-      <div className="report-actions">
+      {!hideActions && <div className="report-actions">
         <button
           className="primary-button"
           type="submit"
@@ -1255,7 +1288,7 @@ function MessageComposer({
         >
           {buttonLabel}
         </button>
-      </div>
+      </div>}
     </form>
   )
 }

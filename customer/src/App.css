@@ -297,34 +297,18 @@
 .claim-primary-entry h2, .claim-guidance h2 { margin: 0; color: #20312d; }
 .claim-primary-note, .claim-guidance-note { margin: 8px 0 16px; color: #566b64; font-size: 13px; line-height: 1.55; }
 .claim-primary-entry .report-box { margin-top: 0; }
-.claim-guidance { padding-top: 5px; }
+.claim-guidance { margin-top: 18px; padding-top: 18px; border-top: 1px solid #d3e6df; }
+.claim-start-actions, .helpful-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.claim-start-actions > button { flex: 1 1 180px; }
+.helpful-step > p:not(.eyebrow) { color: #566b64; font-size: 13px; line-height: 1.55; }
+.helpful-step ul { display: grid; gap: 0; margin: 16px 0 0; padding: 0; list-style: none; }
+.helpful-step li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 11px 0; border-top: 1px solid #d9e9e3; }
+.helpful-step li > span:last-child { display: grid; gap: 3px; }
+.helpful-step strong { color: #334a42; font-size: 13px; }
+.helpful-step small { color: #6a7d76; font-size: 11px; line-height: 1.45; }
 
-.materials-checklist {
-  margin: 16px 0 14px;
-  padding: 20px;
-  border: 1px solid #c9ddd5;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 10px 28px rgba(38, 91, 75, .06);
-}
-
-.materials-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.materials-heading .eyebrow { margin-bottom: 5px; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
-.materials-heading h3 { margin: 0; color: #20312d; font-size: 19px; line-height: 1.3; }
-.materials-heading > span { flex: 0 0 auto; padding: 5px 8px; border-radius: 999px; color: #246f5c; background: #eaf6f1; font-size: 10px; font-weight: 750; }
-.materials-note { margin: 10px 0 16px; color: #60746d; font-size: 12px; line-height: 1.5; }
-.materials-checklist ul { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.materials-checklist li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 11px 0; border-top: 1px solid #e4eeea; }
 .material-check { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: #246f5c; background: #eaf6f1; font-size: 12px; font-weight: 800; }
-.materials-checklist li > span:last-child { display: grid; gap: 3px; }
-.materials-checklist strong { color: #334a42; font-size: 13px; }
-.materials-checklist small { color: #6a7d76; font-size: 11px; line-height: 1.45; }
+.claim-type-note { margin: 12px 0; color: #667a73; font-size: 12px; line-height: 1.5; }
 
 .other-claim-options { margin-top: 14px; padding-top: 14px; border-top: 1px solid #dce9e4; }
 .other-claim-options summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; color: #50655e; font-size: 12px; font-weight: 700; cursor: pointer; list-style: none; }
@@ -1445,9 +1429,7 @@ textarea:focus-visible {
   .guided-grid .wide { grid-column: auto; }
   .guided-grid input, .guided-grid select, .guided-grid textarea, .date-trigger { min-height: 48px; font-size: 16px; }
   .guided-start-button { min-height: 55px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 3px; }
-  .materials-checklist { padding: 17px 15px; }
-  .materials-heading h3 { font-size: 17px; }
-  .materials-checklist li { grid-template-columns: 28px 1fr; }
+  .helpful-step li { grid-template-columns: 28px 1fr; }
   .calendar-popover { position: fixed; top: 50%; left: 50%; width: min(340px, calc(100vw - 28px)); transform: translate(-50%, -50%); }
   .calendar-grid > * { min-height: 38px; }
   .material-card { grid-template-columns: 1fr; gap: 14px; padding: 15px; }
