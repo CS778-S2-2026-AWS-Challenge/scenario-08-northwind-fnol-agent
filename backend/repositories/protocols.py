@@ -66,6 +66,15 @@ class ClaimRepository(Protocol):
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
         raise NotImplementedError
 
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a claim revision and its retry metadata."""
+        raise NotImplementedError
+
     def get_session(
         self,
         claim_id: str,
@@ -165,6 +174,15 @@ class PersistenceRepository(ClaimRepository, Protocol):
         operation: AssessorRoutingOperation,
     ) -> None:
         """Persist an immutable operation identity and valid outcome transition."""
+        raise NotImplementedError
+
+    def save_assessor_routing_preparation(
+        self,
+        operation: AssessorRoutingOperation,
+        decision: AgentDecisionRecord,
+        customer_id: str,
+    ) -> None:
+        """Atomically persist routing authority and its immutable operation identity."""
         raise NotImplementedError
 
     def get_agent_decision(
