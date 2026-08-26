@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from backend.domain.models import HandoffStatus
+from backend.domain.models import ActorType, HandoffStatus
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -165,7 +165,7 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
     stored_messages = repository.list_messages(claim_id, session_id, 'cus_demo')
     assert all(message.claim_id == claim_id for message in stored_messages)
     assert all(message.session_id == session_id for message in stored_messages)
-    assert any(message.actor == 'staff' for message in stored_messages)
+    assert any(message.actor is ActorType.STAFF for message in stored_messages)
     assert any(
         message.client_message_id == 'd4-267-continuation' for message in stored_messages
     )
