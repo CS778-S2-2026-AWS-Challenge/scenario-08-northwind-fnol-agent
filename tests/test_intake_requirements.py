@@ -21,14 +21,14 @@ from backend.domain.models import (
 )
 
 
-def _field(value: object) -> StructuredFormField:
+def _field(value: object, *, status: FormStatus = FormStatus.CONFIRMED) -> StructuredFormField:
     timestamp = datetime(2026, 8, 26, 4, 0, tzinfo=UTC)
     return StructuredFormField(
         value=value,
         source=FormSource.CLAIMANT,
-        status=FormStatus.CONFIRMED,
+        status=status,
         needed_for=NeededFor.CURRENT_ACTION,
-        confidence=1.0,
+        confidence=1.0 if status is FormStatus.CONFIRMED else 0.9,
         updated_at=timestamp,
         updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_dynamic'),
     )
@@ -91,6 +91,42 @@ def test_requirement_projection_skips_out_of_order_confirmed_facts() -> None:
     assert next_controlled_intake_field(updated_claim) is None
 
 
+def test_proposed_fact_remains_missing_until_confirmation() -> None:
+    claim = _claim(
+        incident_type='motor',
+        form={
+            'incident.description': _field(
+                'Another car hit mine from behind.',
+                status=FormStatus.PROPOSED,
+            ),
+            'incident.location': _field('Queen Street'),
+            'loss.description': _field('Rear bumper damage'),
+        },
+    )
+
+    projection = resolve_controlled_intake_requirements(claim)
+
+    assert projection.missing_required_now == ('incident.description',)
+    assert 'incident.description' not in projection.satisfied
+
+
+def test_confirmed_incident_type_field_supplies_branch_context_before_denormalised_type() -> None:
+    claim = _claim(
+        form={
+            'incident.description': _field('Water entered my house.'),
+            'incident.location': _field('Auckland'),
+            'loss.description': _field('Ceiling damage'),
+            'incident.type': _field('home'),
+        }
+    )
+
+    projection = resolve_controlled_intake_requirements(claim)
+
+    assert projection.claim_family == 'home'
+    assert projection.missing_required_now == ()
+    assert projection.non_blocking == ('property.address', 'property.affected_areas')
+
+
 @pytest.mark.parametrize(
     ('claim_family', 'expected_non_blocking'),
     [
@@ -121,6 +157,23 @@ def test_branch_fields_are_active_context_but_not_invented_as_mandatory(
     assert projection.non_blocking == expected_non_blocking
 
 
+def test_unsupported_claim_family_remains_a_missing_requirement() -> None:
+    claim = _claim(
+        incident_type='travel',
+        form={
+            'incident.description': _field('A bounded synthetic incident.'),
+            'incident.location': _field('Auckland'),
+            'loss.description': _field('Synthetic loss'),
+        },
+    )
+
+    projection = resolve_controlled_intake_requirements(claim)
+
+    assert projection.claim_family is None
+    assert projection.missing_required_now == ('incident.type',)
+    assert projection.non_blocking == ()
+
+
 def test_requirement_projection_is_deterministic_for_unchanged_claim_state() -> None:
     claim = _claim(
         incident_type='motor',
@@ -139,6 +192,7 @@ def test_requirement_projection_is_deterministic_for_unchanged_claim_state() -> 
         ('There was water damage in my house.', 'home'),
         ('Some of my belongings were stolen.', 'contents'),
         ('My car and house were both damaged.', None),
+        ('My car damaged someone else\'s property.', 'motor'),
     ],
 )
 def test_claim_family_inference_is_bounded_and_ambiguous_input_stays_unknown(
