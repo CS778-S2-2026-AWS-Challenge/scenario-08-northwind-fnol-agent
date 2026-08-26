@@ -1073,6 +1073,46 @@ describe('claimant intake', () => {
     )
   })
 
+  it('keeps the created claim unchanged when optional assessment consent is declined', async () => {
+    const completeTurn = completeMotorTurn()
+    const confirmedFields = confirmedMotorFields()
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(completeTurn))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      claim_id: 'clm_test',
+      revision: 3,
+      confirmed_fields: confirmedFields,
+      decision: null,
+      customer_next_step: {
+        ...nextStep,
+        status: 'ready_to_create',
+        summary: 'Your confirmed report is ready for controlled claim creation.',
+      },
+    }))
+    fetch.mockImplementationOnce(() => jsonResponse(createdMotorClaimResponse(), 201))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
+    await user.click(await screen.findByRole('button', { name: 'Create claim' }))
+
+    expect(await screen.findByText('NWF-2026-TEST01')).toBeVisible()
+    expect(screen.getByText('Optional next step')).toBeVisible()
+    const checkbox = screen.getByRole('checkbox', { name: /I give Northwind permission/ })
+    const requestButton = screen.getByRole('button', { name: 'Agree and request assessor' })
+    await user.click(checkbox)
+    await user.click(checkbox)
+
+    expect(checkbox).not.toBeChecked()
+    expect(requestButton).toBeDisabled()
+    expect(screen.getByText('NWF-2026-TEST01')).toBeVisible()
+    expect(screen.getAllByText('Claims intake review').length).toBeGreaterThan(0)
+    expect(fetch).toHaveBeenCalledTimes(4)
+    expect(fetch.mock.calls.some(([path]) => path.includes('/assessor-routing'))).toBe(false)
+  })
+
   it('keeps the claim saved after a retryable assessment failure and safely retries', async () => {
     const completeTurn = completeMotorTurn()
     const confirmedFields = confirmedMotorFields()
