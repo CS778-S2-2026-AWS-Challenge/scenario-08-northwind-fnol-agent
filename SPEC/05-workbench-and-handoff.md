@@ -1,5 +1,10 @@
 # Workbench, Handoff, and Administration
 
+The staff `@Agent` entry point below is a target product capability. Its bounded authority,
+source visibility, and proof requirements are defined in [Agent Runtime Target](../docs/agent-runtime-target.md).
+The current Workbench transport remains governed by `docs/api.md` and the implementation
+status is recorded in [Agent Runtime Progress](../docs/agent-runtime-progress.md).
+
 ## Claim Operations Workbench
 
 The Staff Workbench is a role-safe projection of shared Claim State, evidence,
@@ -18,8 +23,26 @@ It supports:
 - source-preserving professional decisions; and
 - authorised write-back to shared Claim State and an appropriate claimant update.
 
+Queues, priority, owner, and next action are calculated from the Claim lifecycle,
+WorkItems, applicable service timing, content branches, and staff decisions. Staff may
+record decisions and complete work, but they do not maintain a competing queue truth.
+
 Sensitive signals, internal reasons, provider payloads, and staff-only notes must not be
 exposed in claimant responses.
+
+## Open Staff Agent Entry
+
+`@Agent` invokes the Agent within the current staff member's identity, role, Claim scope,
+and task. It is not a fixed natural-language command set. Staff may ask open questions or
+combine supported capabilities such as reading and summarising a Claim, explaining gaps,
+comparing evidence, retrieving and explaining policy, proposing next steps, drafting
+communication, inspecting handoff quality, or preparing an external request.
+
+The Agent returns source-linked facts, limitations, proposals, and required authority.
+Suggested UI actions may aid discovery, but staff remain free to use natural language.
+Read-only assistance has no business side effect. Sending communication, mutating Claim
+State, disclosing data, or executing an external action requires a registered action,
+fresh authority validation, and any required confirmation or stronger approval.
 
 ## Handoff Packet
 
@@ -44,6 +67,13 @@ write authorised results back to the same claim context. Each transfer records
 responsibility, permitted data, expected output, timing, and status. External participant
 access is incremental product scope and requires a confirmed integration and authority
 contract.
+
+External coordination is a lifecycle rather than one generic request. The system keeps
+capability discovery, requirement loading, request preparation, request classification,
+authority and consent checks, submission, tracking, response verification,
+reconciliation, safe retry, cancellation, and failure escalation distinguishable. An
+unknown submission outcome is checked by idempotency key or provider reference before
+any retry.
 
 ## Administration and Control Plane
 

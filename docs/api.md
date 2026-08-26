@@ -188,15 +188,24 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | Staff action | `act_01J4Y80B7D` |
 | Claim event | `evt_01J4Y81HNM` |
 
-### Agent Action
+### Current Agent Action Compatibility
 
-`AgentAction` is one of:
+The currently implemented transport field `AgentAction` is one of:
 
 ```text
 ASK | CLARIFY | CONFIRM | PROCEED | UPDATE | HANDOFF | URGENT_HANDOFF | CREATE_CLAIM
 ```
 
-Policy lookup, history lookup, evidence extraction, claim creation, and assessor routing are tools or side effects. They are not additional agent actions.
+This flat enum is retained for compatibility with current clients, fixtures, and stored
+Agent Decisions. It must not be extended as the foundation of new Agent behaviour.
+Policy lookup, history lookup, evidence extraction, claim creation, and assessor routing
+remain tools or side effects in the current transport.
+
+The target product action system uses separate `conversation`, `claim`, `human`,
+`external`, and `runtime` namespaces and permits several conversation moves and command
+proposals in one turn. It requires a coordinated transport migration described under
+the internal Agent turn boundary below. No target field or route is treated as
+implemented merely because it is described in the design documents.
 
 ### Claim State
 
@@ -432,7 +441,7 @@ The backend MUST maintain a versioned field registry with validation and display
 
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
-### Agent Decision
+### Current Compatibility Agent Decision
 
 ```json
 {
@@ -468,6 +477,12 @@ Extracted facts use the structured form envelope with `source` set to `image` or
 ```
 
 `authority.outcome` is `authorised`, `blocked`, or `review_required`. A blocked or review-required proposal MUST NOT execute its high-impact state change.
+
+`AgentDecision` is the current persisted and transported compatibility shape. It must not
+be relabelled as a target `TurnPlan`, `AgentProposal`, `ExecutionPlan`, or `TurnResult`.
+Those records distinguish model proposal, runtime approval, execution, and actual outcome
+and require new schemas, persistence, consumers, fixtures, and contract tests before
+entering this normative HTTP contract.
 
 ### Internal Signal
 
@@ -897,6 +912,11 @@ by itself block this operation and is passed to the adapter as outstanding work.
 Before invoking the adapter, the service records a deterministic `CREATE_CLAIM` decision with
 `CLAIM_CREATION_AUTHORISED`. A model proposal or claimant-supplied decision ID cannot authorise
 this operation.
+
+During the action-contract migration, this deterministic decision is the compatibility
+representation of an authorised `claim.create` action. The public response remains
+unchanged until the new ActionEnvelope and turn-result schemas are implemented and
+versioned together with clients and tests.
 
 Response `201`:
 
@@ -1471,7 +1491,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/internal/v1/agent/turns` | Produce and validate one agent decision proposal |
+| `POST` | `/internal/v1/agent/turns` | Produce the current compatibility Agent Decision proposal |
 | `POST` | `/internal/v1/policy/search` | Retrieve cited policy evidence |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
@@ -1499,15 +1519,12 @@ The orchestration request contains references and a bounded context package, not
 }
 ```
 
-Response is a complete `AgentDecision` proposal. Deterministic validation MUST run before high-impact changes or side effects. The full model prompt, hidden reasoning, and secrets are not part of the public contract or ordinary logs.
+Response is a complete current-compatibility `AgentDecision` proposal. Deterministic validation MUST run before high-impact changes or side effects. The full model prompt, hidden reasoning, and secrets are not part of the public contract or ordinary logs.
 
-The canonical product actions are `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`,
-`UPDATE`, `HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM`. They are business
-action semantics rather than MCP commands or provider tool names. Each action
-has stable preconditions, allowed state paths, tool policy, authority outcome,
-claimant-response requirement, and prohibited outcomes. A model-backed provider
-or MCP-connected tool adapter must implement these semantics rather than create
-an incompatible private action vocabulary.
+The current endpoint maps `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`, `UPDATE`,
+`HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM` to its legacy decision shape. New
+provider adapters must not create an incompatible private vocabulary or mistake this
+compatibility enum for the complete target action model.
 
 The persisted decision records both `customer_response` and
 `customer_next_step`. `customer_response` is the contextual conversational
@@ -1527,6 +1544,31 @@ preferences, addresses and incident locations, other parties, police references,
 emergency-service records, and vehicle registrations are excluded. A model proposal
 cannot create internal review signals; a non-empty model `proposed_signals` value
 invalidates the complete turn before persistence.
+
+#### Target Agent Turn Migration Boundary
+
+The target Agent Runtime contract uses:
+
+```text
+provider-neutral ModelRequest
+-> current ModelResponse or a future higher-level ModelResult
+-> structured AgentProposal
+-> Registry and authority validation
+-> ExecutionPlan containing approved and rejected ActionEnvelopes
+-> tool and Claim-state execution
+-> TurnResult containing actual outcomes and final role projection
+```
+
+A target `TurnPlan` may contain multiple detected intents, conversation moves,
+content-branch candidates, form-patch proposals, Claim-command proposals, tool requests,
+unresolved work, and limitations, with one primary Runtime control directive.
+
+This section is a migration boundary, not an implemented route or payload. The target
+types beyond the existing `ModelRequest`, `ModelResponse`, and legacy `AgentProposal`
+enter a versioned HTTP contract only when backend models, Model Gateway,
+persistence, claimant and Workbench consumers, fixtures, generated OpenAPI, and contract
+tests are updated in the same pull request. Until then, `/internal/v1/agent/turns`
+continues to use the compatibility request and `AgentDecision` response above.
 
 ### `POST /internal/v1/policy/search`
 
@@ -1849,6 +1891,18 @@ All errors use one envelope:
 
 Customer error messages MUST be actionable and MUST NOT expose stack traces, prompts, credentials, internal-only signals, policy records belonging to another customer, or infrastructure details.
 
+Agent Runtime and Model Gateway may use a richer internal error record with `layer`,
+`retry_class`, `state_effect`, safe message key, diagnostic reference, and optional safe
+provider category. That internal record maps to the existing public error envelope; it
+does not expose provider payloads or silently create new HTTP status semantics.
+
+The target internal registry includes distinct conditions for model timeout, rate limit,
+unavailability, refusal, incomplete or malformed output, capability mismatch, context
+overflow, inapplicable or conflicting retrieval, unverifiable evidence, invalid tool
+arguments, unavailable tools, unknown external outcomes, idempotency conflict, and
+handoff-queue failure. These codes become normative API values only with implementation
+and contract tests.
+
 ## Health Endpoints
 
 ### `GET /health/live`
@@ -1919,10 +1973,17 @@ The persistence layer MUST support at least:
 - sessions, compact summaries, unresolved questions, and commitments;
 - complete messages stored outside routine model context;
 - evidence metadata, provenance, processing state, and secure object references;
-- agent decisions, reason codes, tool references, and validation outcomes;
+- current Agent Decisions and, after the coordinated migration, TurnPlans,
+  AgentProposals, ExecutionPlans, ActionEnvelopes, ToolRequests and results, and
+  TurnResults;
+- content-branch references, lifecycle state, and independent WorkItems;
+- reason codes, policy and Registry versions, authority checks, state effects, usage,
+  latency, and limitations;
 - internal signals and lifecycle decisions;
 - handoffs, assignments, staff actions, and claimant updates;
 - external claim creation results and conditional assessor actions;
+- external-request preparation, disclosure, authority, submission, tracking,
+  verification, unknown outcome, and reconciliation records;
 - append-only claim events and aggregate metric events;
 - idempotency records and optimistic-concurrency revisions.
 
@@ -1937,9 +1998,11 @@ unimplemented Cloudflare, MongoDB, or AWS profile fails process startup explicit
 does not create a partial provider bundle or fall back to fixture capabilities. The
 selected deployment profile itself is not returned by the public API.
 
-The model gateway and future Admin API also remain provider-neutral. Their HTTP routes
-and payloads are added to this contract only with the corresponding implementation,
-consumer, fixture, and contract-test changes.
+The model gateway remains an implemented provider-neutral internal dependency, and model
+selection is independent of the mutually exclusive data-runtime profile. Future model
+profile management, Gateway administration, and other Admin API routes and payloads are
+added to this contract only with the corresponding implementation, consumer,
+persistence, fixture, generated-OpenAPI, and contract-test changes.
 
 ## Contract Verification
 
@@ -1968,3 +2031,8 @@ These decisions do not prevent continued MVP implementation, but production beha
 8. Final deployment topology: in-process adapters or separately deployed internal services.
 9. Admin API resources, configuration approval levels, publication, rollback, secret references, and audit access.
 10. Model-gateway and knowledge-management API capabilities introduced by issues #204 and the Control Plane delivery plan.
+11. Versioning and compatibility period for replacing the legacy eight-action
+    `AgentDecision` transport with TurnPlan, namespaced ActionEnvelope, ExecutionPlan,
+    and TurnResult contracts.
+12. Production model-profile capabilities, privacy classes, fallback groups, evaluation
+    thresholds, and validity periods for each Agent purpose.

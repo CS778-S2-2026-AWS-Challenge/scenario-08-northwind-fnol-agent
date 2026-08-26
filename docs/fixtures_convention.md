@@ -29,8 +29,17 @@ Examples in this repository include:
 - `tests/fixtures/media/`: synthetic image or document bytes when a test needs
   to exercise the upload boundary. This directory is currently empty.
 
-Fixture data may contain an oracle such as `expected_action` or
-`expected_status`. The oracle is data; it is not executable verification.
+Fixture data may contain a current compatibility oracle such as `expected_action` or
+`expected_status`. The oracle is data; it is not executable verification. The legacy
+eight-action `expected_action` field must not be relabelled as proof of the target
+multidimensional turn contract.
+
+When the target turn contract is implemented, a journey oracle may instead identify
+expected intents, conversation moves, content-branch candidates, form-patch proposals,
+approved and rejected ActionEnvelopes, one Runtime control directive, tool outcomes,
+WorkItem and lifecycle effects, and the final role projection. These expectations must
+remain separate so a correct response sentence cannot hide an unauthorised or failed
+side effect.
 
 ### Executable tests
 
@@ -60,7 +69,8 @@ tests. Each Day 4 journey record should contain:
 
 1. fixture or input identifier and exact claimant/staff input;
 2. expected Agent action and observable next step;
-3. actual response and state changes;
+3. actual response and state changes, including proposed, authorised, completed, failed,
+   or unknown status where the target turn contract applies;
 4. claimant and staff projections where applicable;
 5. pass or fail result; and
 6. a defect reference when the result is not accepted.
@@ -106,6 +116,10 @@ image-derived fact was shown, confirmed, or corrected.
 - Assert reason codes, state transitions, visibility, and next-step ownership
   where they are part of the contract. Avoid asserting incidental wording or
   generated identifiers.
+- For target Agent Runtime tests, assert the trajectory from `AgentProposal` through
+  `ExecutionPlan` and `TurnResult`, including rejected overreach, tool authority, unknown
+  external outcomes, and the final Claim revision. Do not infer execution from the model
+  response text.
 - Keep claimant-visible and staff-only assertions separate.
 - Mark controlled prototype rules and mock results as synthetic; never present
   them as Northwind production policy or confirmed AWS behaviour.

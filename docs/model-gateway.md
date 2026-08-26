@@ -4,6 +4,11 @@ The model gateway is the internal provider-neutral boundary between Agent orches
 and model transports. It does not add a public model endpoint or grant model output any
 new authority.
 
+The target turn and FNOL problem mapping are defined in [Agent Runtime Target](agent-runtime-target.md),
+and the compatibility path is isolated in [Agent Runtime Migration](agent-runtime-migration.md).
+This document remains authoritative for what the current Gateway implementation actually
+supports.
+
 ## Implemented Boundary
 
 Agent orchestration sends `ModelRequest` and receives `ModelResponse`. These contracts
@@ -141,3 +146,28 @@ unchanged.
 - Readiness reports `configured` after successful local composition. It does not claim
   that remote credentials, connectivity, model quality, or production readiness have
   been verified.
+
+## Target Runtime Relationship
+
+The implemented Gateway is the first provider-neutral transport and validation layer. It
+does not yet implement the complete target Agent Runtime contract:
+
+- the current `ModelRequest` carries messages, response schema, and tool declarations;
+  the target request also binds purpose, actor, Claim scope, policy and Registry versions,
+  privacy class, budgets, trace context, and the exact actions and tools allowed;
+- the current `ModelResponse` normalises transport output; the target Runtime additionally
+  distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
+  and final `TurnResult`;
+- the current `GatewayAgent` produces the legacy eight-action `AgentProposal`; the target
+  action model separates conversation moves, Claim commands, human actions, external
+  coordination, and one Runtime control directive;
+- the current configuration declares endpoint capabilities; the target Model Profile
+  Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
+  and qualified fallback groups; and
+- the current Gateway rejects tool calls from Agent turns; future tool use requires a
+  published Tool Registry, per-turn allow-list, server authority checks, typed results,
+  idempotency, and trajectory tests before execution is enabled.
+
+These are incremental extensions, not reasons to replace the implemented provider-neutral
+port. Current compatibility types remain supported until the versioned API, persistence,
+consumers, fixtures, and tests migrate together.

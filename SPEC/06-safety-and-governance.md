@@ -6,6 +6,11 @@ Model output, retrieved knowledge, structured provider results, and extracted ev
 are inputs to a decision, not unlimited authority. Deterministic rules or authorised
 staff control high-impact actions.
 
+User intent, model proposal, runtime approval, tool execution, and execution result are
+separate records. Prompt compliance, valid JSON, a tool-call-shaped response, or a staff
+read permission cannot independently authorise a Claim mutation, data disclosure, human
+handoff, external request, or high-impact decision.
+
 - Ambiguous coverage, excess, liability, or policy applicability moves to professional
   review before a related high-impact action.
 - A fraud signal requests review and retains evidence; it never declares a claimant
@@ -33,6 +38,9 @@ production policy.
   sent.
 - Unsupported structured output, tool use, or model capability is an explicit error, not
   a reason to bypass validation.
+- Model profiles declare verified capabilities, allowed purposes, privacy terms, and
+  evaluation results. A fallback profile must satisfy the same boundary and must not
+  silently expand data scope or weaken structured-output requirements.
 
 ## Configuration Governance
 
@@ -51,6 +59,13 @@ Material facts, retrievals, interpretations, signals, routing, overrides, handof
 configuration publications, and tool actions record source references, reason codes,
 actor, time, and outcome. A staff decision is stored separately from the source evidence
 that motivated it.
+
+Each turn must preserve the model proposal, rejected and approved actions, authority
+results, tool outcomes, new Claim revision, unresolved work, limitations, and final
+role-safe response. Errors record their layer, retry class, state effect, safe message,
+and diagnostic reference. A timeout during an external side effect remains an unknown
+outcome until reconciled; it must not be treated as either success or safe-to-retry
+failure without evidence.
 
 ## Privacy and Access
 
