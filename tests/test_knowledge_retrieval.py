@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from hashlib import sha256
 
 import pytest
 
@@ -97,6 +98,21 @@ def retriever(
     for value in chunks:
         key = f'knowledge/indexed/{value["document_id"]}/{value["version"]}/chunks.jsonl'
         objects[key] = objects.get(key, b'') + json.dumps(value).encode() + b'\n'
+    for governed in sources or (source(),):
+        key = f'knowledge/indexed/{governed.document_id}/{governed.version}/chunks.jsonl'
+        payload = objects.get(key)
+        if payload is not None:
+            state_key = (
+                f'knowledge/indexed/{governed.document_id}/{governed.version}/ingestion.json'
+            )
+            objects[state_key] = json.dumps(
+                {
+                    'document_id': governed.document_id,
+                    'version': governed.version,
+                    'source_checksum': governed.expected_checksum,
+                    'chunks_checksum': sha256(payload).hexdigest(),
+                }
+            ).encode()
     return S3CompatibleKnowledgeRetriever(MemoryStore(objects), sources or (source(),))
 
 
@@ -123,7 +139,10 @@ def test_retrieval_filters_metadata_before_ranking_and_returns_citation() -> Non
     assert results[0].source_uri.endswith('/motor/MVP-2026.1')
     store = value._store
     assert isinstance(store, MemoryStore)
-    assert store.reads == ['knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl']
+    assert store.reads == [
+        'knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl',
+        'knowledge/indexed/nw-motor/MVP-2026.1/ingestion.json',
+    ]
 
 
 def test_schedule_backed_retrieval_requires_the_exact_wording_document() -> None:
@@ -226,7 +245,35 @@ def test_retrieval_rejects_explicit_cross_product_and_instruction_queries() -> N
 
 def test_retrieval_returns_empty_when_source_or_terms_are_absent() -> None:
     assert retriever(chunk()).search(search(text='earthquake volcanic eruption')) == []
-    assert S3CompatibleKnowledgeRetriever(MemoryStore({}), (source(),)).search(search()) == []
+    with pytest.raises(KnowledgeRetrievalUnavailable):
+        S3CompatibleKnowledgeRetriever(MemoryStore({}), (source(),)).search(search())
+
+
+def test_retrieval_fails_closed_when_one_of_multiple_applicable_indexes_is_missing() -> None:
+    missing = source(
+        document_id='nw-motor-supplement',
+        source_key='knowledge/policies/nw-motor-supplement.md',
+        title='Northwind Motor Supplement',
+        source_uri='northwind://synthetic-policy/motor-supplement/MVP-2026.1',
+    )
+    with pytest.raises(KnowledgeRetrievalUnavailable, match='incomplete'):
+        retriever(chunk(), sources=(source(), missing)).search(search())
+
+
+@pytest.mark.parametrize('term', ['contents', 'belongings', 'possessions'])
+def test_retrieval_rejects_contents_product_terms_in_motor_scope(term: str) -> None:
+    value = retriever(chunk())
+    assert value.search(search(text=f'How much {term} excess do I pay?')) == []
+
+
+def test_retrieval_rejects_forged_chunk_payload_with_matching_inner_checksum() -> None:
+    original = chunk()
+    value = retriever(original)
+    key = 'knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl'
+    forged = dict(original, text='Forged excess text.')
+    value._store.objects[key] = json.dumps(forged).encode() + b'\n'  # type: ignore[attr-defined]
+    with pytest.raises(KnowledgeRetrievalUnavailable, match='ingestion state'):
+        value.search(search())
 
 
 @pytest.mark.parametrize(
@@ -237,5 +284,5 @@ def test_retrieval_normalises_invalid_index_data(payload: bytes) -> None:
     key = 'knowledge/indexed/nw-motor/MVP-2026.1/chunks.jsonl'
     value = S3CompatibleKnowledgeRetriever(MemoryStore({key: payload}), (source(),))
 
-    with pytest.raises(KnowledgeRetrievalUnavailable, match='index is invalid'):
+    with pytest.raises(KnowledgeRetrievalUnavailable, match='index|ingestion state'):
         value.search(search())

@@ -226,11 +226,16 @@ class KnowledgeIngestionService:
                 state = json.loads(existing)
                 recorded_checksum = state['source_checksum']
                 chunk_count = state['chunk_count']
+                chunks_checksum = state['chunks_checksum']
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 raise KnowledgeIngestionError(
                     'Existing ingestion state is invalid and cannot be trusted.'
                 ) from error
             if not isinstance(chunk_count, int) or chunk_count < 1:
+                raise KnowledgeIngestionError(
+                    'Existing ingestion state is invalid and cannot be trusted.'
+                )
+            if not isinstance(chunks_checksum, str) or len(chunks_checksum) != 64:
                 raise KnowledgeIngestionError(
                     'Existing ingestion state is invalid and cannot be trusted.'
                 )
@@ -256,6 +261,7 @@ class KnowledgeIngestionService:
             json.dumps(self._serialise_chunk(chunk), sort_keys=True).encode() + b'\n'
             for chunk in chunks
         )
+        chunks_checksum = sha256(chunk_payload).hexdigest()
         index: dict[str, list[str]] = {}
         for chunk in chunks:
             for term in _terms(f'{chunk.title} {chunk.section_path} {chunk.text}'):
@@ -266,6 +272,7 @@ class KnowledgeIngestionService:
             'version': source.version,
             'source_key': source.source_key,
             'source_checksum': checksum,
+            'chunks_checksum': chunks_checksum,
             'source_metadata_fingerprint': metadata_fingerprint,
             'pipeline_identity': INGESTION_PIPELINE_IDENTITY,
             'chunk_count': len(chunks),

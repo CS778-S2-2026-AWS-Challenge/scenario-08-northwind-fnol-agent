@@ -2,6 +2,7 @@ import json
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from backend.adapters.knowledge_object_store import KnowledgeObjectStoreUnavailable
 from backend.domain.knowledge import (
@@ -71,6 +72,11 @@ def _terms(value: str) -> set[str]:
         for term in re.findall(r"[a-z0-9']+", value.casefold())
         if len(term) > 2 and term not in _STOP_WORDS
     }
+
+
+_PRODUCT_TERMS = {
+    product: {_normalise_term(term) for term in terms} for product, terms in _PRODUCT_TERMS.items()
+}
 
 
 def _query_matches_scope(text: str, product: str) -> bool:
@@ -163,7 +169,25 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
             for source in applicable_sources:
                 payload = self._store.read(self._chunks_key(source))
                 if payload is None:
-                    continue
+                    raise KnowledgeRetrievalUnavailable(
+                        'The applicable knowledge index is incomplete or unavailable.'
+                    )
+                state_payload = self._store.read(self._ingestion_state_key(source))
+                if state_payload is None:
+                    raise KnowledgeRetrievalUnavailable(
+                        'The applicable knowledge index has no trusted ingestion state.'
+                    )
+                state = json.loads(state_payload)
+                if (
+                    not isinstance(state, dict)
+                    or state.get('document_id') != source.document_id
+                    or state.get('version') != source.version
+                    or state.get('source_checksum') != source.expected_checksum
+                    or state.get('chunks_checksum') != sha256(payload).hexdigest()
+                ):
+                    raise KnowledgeRetrievalUnavailable(
+                        'The knowledge index does not match its governed ingestion state.'
+                    )
                 for line in payload.splitlines():
                     chunk = _chunk(json.loads(line))
                     if not self._chunk_matches_source(chunk, source):
@@ -190,6 +214,10 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
     @staticmethod
     def _chunks_key(source: KnowledgeSource) -> str:
         return f'knowledge/indexed/{source.document_id}/{source.version}/chunks.jsonl'
+
+    @staticmethod
+    def _ingestion_state_key(source: KnowledgeSource) -> str:
+        return f'knowledge/indexed/{source.document_id}/{source.version}/ingestion.json'
 
     @staticmethod
     def _chunk_matches_source(chunk: KnowledgeChunk, source: KnowledgeSource) -> bool:
