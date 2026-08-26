@@ -480,7 +480,7 @@
 </head>
 <body>
   <div class="page" id="workbenchPage">
-    <header class="mobile-workbench-header">
+    <header id="mobileWorkbenchHeader" class="mobile-workbench-header">
       <div class="brand-mark" aria-hidden="true">N</div>
       <div class="mobile-workbench-title">Northwind <span>Claims workbench</span></div>
       <button id="mobileSidebarOpen" class="mobile-sidebar-open" type="button" aria-controls="employeeSidebar" aria-expanded="false" aria-label="Open workbench menu"><span class="mobile-sidebar-open-icon" aria-hidden="true"></span></button>
@@ -534,7 +534,7 @@
     </aside>
     <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" tabindex="-1" aria-label="Close workbench menu"></button>
 
-    <main class="content">
+    <main id="workbenchContent" class="content">
       <section id="workbenchView" aria-busy="false">
       <div class="visually-hidden" aria-live="polite">
         <h1 id="queueTitle">Employee workbench</h1>
@@ -753,8 +753,16 @@
       byId('mobileSidebarOpen').setAttribute('aria-expanded', String(shouldOpen));
       byId('employeeSidebar').setAttribute('aria-hidden', String(isMobileSidebar() && !shouldOpen));
       byId('employeeSidebar').inert = isMobileSidebar() && !shouldOpen;
+      byId('mobileWorkbenchHeader').inert = shouldOpen;
+      byId('workbenchContent').inert = shouldOpen;
+      byId('chatWidget').inert = shouldOpen;
       if (shouldOpen) byId('sidebarToggle').focus();
       if (!shouldOpen && returnFocus) byId('mobileSidebarOpen').focus();
+    }
+
+    function getMobileSidebarFocusable() {
+      return [...byId('employeeSidebar').querySelectorAll('button, select, input, textarea, a[href], [tabindex]')]
+        .filter(element => !element.disabled && !element.hidden && element.tabIndex >= 0);
     }
 
     function setSidebarCollapsed(collapsed, persist = true) {
@@ -802,8 +810,22 @@
       sidebarTouchStart = null;
     }, { passive:true });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && byId('workbenchPage').classList.contains('mobile-sidebar-open')) {
+      const menuOpen = byId('workbenchPage').classList.contains('mobile-sidebar-open');
+      if (event.key === 'Escape' && menuOpen) {
         setMobileSidebarOpen(false, true);
+        return;
+      }
+      if (event.key === 'Tab' && menuOpen) {
+        const focusable = getMobileSidebarFocusable();
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
       }
     });
     mobileSidebarQuery?.addEventListener?.('change', () => {
