@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -19,6 +19,7 @@ from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
 SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def test_resume_drops_resolved_evidence_pending_context() -> None:
@@ -91,7 +92,7 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
             'cus_demo',
         )
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at06-after-ready'},

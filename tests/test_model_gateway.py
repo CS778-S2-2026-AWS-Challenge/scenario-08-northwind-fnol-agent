@@ -13,7 +13,7 @@ from backend.adapters.model_gateway import (
 )
 from backend.app import create_app
 from backend.core.auth import Principal
-from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelGatewayError,
@@ -323,6 +323,8 @@ class FailingGateway:
 
 def model_gateway_settings(protocol: str) -> Settings:
     return Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter=protocol,
         model_base_url='https://model.example.test/v1',
@@ -678,7 +680,13 @@ def test_model_signal_injection_is_rejected_before_workbench_persistence() -> No
     )
     detail = get_workbench_claim_detail(
         repository,
-        Principal(subject='stf_demo', actor_type='staff'),
+        Principal(
+            subject='stf_demo',
+            actor_type='staff',
+            scopes=frozenset({'workbench:read', 'workbench:write'}),
+            auth_source='developer:synthetic_staff',
+            synthetic=True,
+        ),
         claim_id,
     )
     assert detail.signals == []

@@ -12,6 +12,7 @@ from backend.adapters.claims_service import (
     MockClaimsServiceAdapter,
 )
 from backend.app import create_app
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -446,7 +447,12 @@ class PendingClaimsAdapter(ClaimsServiceAdapter):
 
 def test_app_accepts_replaceable_claims_adapter_without_public_schema_changes() -> None:
     repository = FixtureRepository()
-    app = create_app(repository=repository, claims_service_adapter=PendingClaimsAdapter())
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    app = create_app(
+        settings,
+        repository=repository,
+        claims_service_adapter=PendingClaimsAdapter(),
+    )
     with TestClient(app) as client:
         created = create_working_claim(client, 'replaceable-adapter')
         claim = created['claim']
