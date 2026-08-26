@@ -179,6 +179,10 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 - Read API endpoints from environment configuration.
 - Keep server state, domain state, and visual component state distinct.
+- Scope consent controls, pending operation keys, and action errors to the active record identity;
+  switching or resuming another claim must clear the previous claim's interaction state.
+- After an ambiguous side-effect failure, reload authoritative server state before telling the
+  user that the action did not happen.
 - Prevent empty or duplicate submissions and expose loading, retry, and error states accessibly.
 - Do not expose internal-only tags or review signals in claimant code or UI.
 - Verify keyboard operation, visible focus, semantic labels, responsive layouts, and error announcements.
