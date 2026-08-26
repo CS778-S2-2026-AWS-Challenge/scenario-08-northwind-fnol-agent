@@ -209,16 +209,18 @@ quality gate and record its exact result:
 
 ### #240 implementation record
 
-- Date: 2026-08-24 (Pacific/Auckland)
+- Date: 2026-08-26 (Pacific/Auckland)
 - Branch: `docs/issue-240-control-plane-interface`
+- Synchronized base: `origin/main@3a2c172821092318b23858f6be05b3d9b91d9e4b`.
 - `git diff --check`: passed.
 - The five `rg` acceptance commands above: passed; 16 bounded Admin routes and all five
   required interface areas were found.
-- `./scripts/check.ps1 -SkipInstall`: not started because `scripts/check.ps1` is not
-  executable in this macOS workspace (`permission denied`).
-- `pwsh -NoProfile -File scripts/check.ps1 -SkipInstall`: not started because `pwsh` is
-  not installed in this workspace. The full gate must be repeated in a PowerShell-capable
-  environment before push or review.
+- `pwsh -NoProfile -Command 'Set-Alias python /private/tmp/pr303-venv/bin/python; &
+  ./scripts/check.ps1'`: passed using an isolated Python virtual environment. Result: PASS.
+- Complete gate result: Ruff format and lint passed; mypy passed for 129 source files;
+  466 backend tests passed with 90.03% coverage; 21 repository-policy tests passed;
+  15 GitHub-automation tests passed; 31 customer tests passed; and the customer production
+  build passed.
 
 ## Dependencies and Follow-up Ownership
 
