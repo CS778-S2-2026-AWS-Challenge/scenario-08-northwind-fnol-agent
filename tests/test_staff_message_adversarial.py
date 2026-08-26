@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from fastapi.testclient import TestClient
 
@@ -24,8 +25,8 @@ def _queued_handoff(
     )
     assert created.status_code == 201
     body = created.json()
-    claim_id = body['claim']['claim_id']
-    session_id = body['session']['session_id']
+    claim_id = cast(str, body['claim']['claim_id'])
+    session_id = cast(str, body['session']['session_id'])
     requested = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
@@ -41,7 +42,12 @@ def _queued_handoff(
     )
     assert requested.status_code == 200
     result = requested.json()
-    return claim_id, session_id, result['handoff']['handoff_id'], result['claim_revision']
+    return (
+        claim_id,
+        session_id,
+        cast(str, result['handoff']['handoff_id']),
+        cast(int, result['claim_revision']),
+    )
 
 
 def _accept(
@@ -65,7 +71,7 @@ def _accept(
         json=payload,
     )
     assert response.status_code == 200
-    return response.json()['revision']
+    return cast(int, response.json()['revision'])
 
 
 def test_staff_message_rejects_wrong_handoff_assignee_without_mutation(
