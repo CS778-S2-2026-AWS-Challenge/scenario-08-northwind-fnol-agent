@@ -4,11 +4,13 @@ import {
   confirmClaimFields,
   createClaim,
   createExternalClaim,
+  grantAssessorConsent,
   getClaim,
   getClaimMessages,
   listClaims,
   requestId,
   requestHumanSupport,
+  requestAssessorRouting,
   resumeClaimSession,
   submitClaimMessage,
   updateClaimField,
@@ -122,12 +124,18 @@ function App() {
   const [handoff, setHandoff] = useState(null)
   const [savedReports, setSavedReports] = useState(null)
   const [resumeContext, setResumeContext] = useState(null)
+  const [externalServiceInteraction, setExternalServiceInteraction] = useState({
+    claimId: null,
+    consentChecked: false,
+    error: null,
+  })
   const [failedMessage, setFailedMessage] = useState(null)
   const [pendingMessage, setPendingMessage] = useState(null)
   const pendingSubmission = useRef(null)
   const pendingConfirmation = useRef(null)
   const pendingSupportRequest = useRef(null)
   const pendingClaimCreation = useRef(null)
+  const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
 
   const isBusy = [
@@ -140,6 +148,8 @@ function App() {
     'creating-claim',
     'loading-reports',
     'resuming',
+    'granting-service-consent',
+    'requesting-assessor',
   ].includes(status)
   const proposedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
@@ -151,6 +161,27 @@ function App() {
   )
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
+  const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
+    && externalServiceInteraction.consentChecked
+  const serviceError = externalServiceInteraction.claimId === claim?.claim_id
+    ? externalServiceInteraction.error
+    : null
+
+  function setServiceConsentChecked(consentChecked) {
+    setExternalServiceInteraction((current) => ({
+      claimId: claim?.claim_id || null,
+      consentChecked,
+      error: current.claimId === claim?.claim_id ? current.error : null,
+    }))
+  }
+
+  function setServiceError(serviceErrorValue) {
+    setExternalServiceInteraction((current) => ({
+      claimId: claim?.claim_id || null,
+      consentChecked: current.claimId === claim?.claim_id ? current.consentChecked : false,
+      error: serviceErrorValue,
+    }))
+  }
 
   const claimTypePrompts = {
     motor: 'For example: Another car reversed into mine while it was parked.',
@@ -431,12 +462,92 @@ function App() {
         ...current,
         revision: response.revision,
         external_claim: response.external_claim,
+        external_service_action: response.external_service_action,
       }))
       setNextStep(response.customer_next_step)
       pendingClaimCreation.current = null
       setStatus('idle')
     } catch (requestError) {
       showError(requestError)
+    }
+  }
+
+  async function requestVehicleAssessment() {
+    const action = claim?.external_service_action
+    if (!claim || !action?.can_request || isBusy) return
+    if (action.status === 'consent_required' && !serviceConsentChecked) return
+
+    setServiceError(null)
+    if (pendingExternalService.current?.claimId !== claim.claim_id) {
+      pendingExternalService.current = {
+        claimId: claim.claim_id,
+        consentKey: requestId('assessor-consent'),
+        routeKey: requestId('assessor-routing'),
+      }
+    }
+    const operation = pendingExternalService.current
+    let revision = claim.revision
+    try {
+      if (action.status === 'consent_required') {
+        setStatus('granting-service-consent')
+        const consent = await grantAssessorConsent({
+          claimId: claim.claim_id,
+          revision,
+          idempotencyKey: operation.consentKey,
+        })
+        revision = consent.revision
+        latestRevision.current = revision
+        setClaim((current) => ({
+          ...current,
+          revision,
+          external_service_action: consent.action,
+        }))
+        setNextStep(consent.customer_next_step)
+      }
+
+      setStatus('requesting-assessor')
+      const routed = await requestAssessorRouting({
+        claimId: claim.claim_id,
+        revision,
+        idempotencyKey: operation.routeKey,
+      })
+      latestRevision.current = routed.revision
+      setClaim((current) => ({
+        ...current,
+        revision: routed.revision,
+        external_service_action: routed.action,
+      }))
+      setNextStep(routed.customer_next_step)
+      pendingExternalService.current = null
+      setServiceConsentChecked(false)
+      setStatus('idle')
+    } catch (requestError) {
+      try {
+        const current = await getClaim(claim.claim_id)
+        const currentAction = current.external_service_action
+        latestRevision.current = current.revision
+        setClaim(current)
+        setForm(current.form)
+        setNextStep(current.customer_next_step)
+        setHandoff(current.handoff || null)
+        if (['assigned', 'queued'].includes(currentAction?.status)) {
+          pendingExternalService.current = null
+          setServiceConsentChecked(false)
+          setServiceError(null)
+          setStatus('idle')
+          return
+        }
+      } catch {
+        // Keep the original request error when authoritative state cannot be restored.
+      }
+      setServiceError({
+        message: requestError.message || 'We could not send the assessment request.',
+        retryable: Boolean(requestError.retryable),
+      })
+      if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
+        refreshAfterConflict().catch(() => {})
+      }
+      setStatus('idle')
     }
   }
 
@@ -844,6 +955,17 @@ function App() {
               </section>
             )}
 
+            {claim.external_service_action && (
+              <ExternalServiceAction
+                action={claim.external_service_action}
+                consentChecked={serviceConsentChecked}
+                setConsentChecked={setServiceConsentChecked}
+                onRequest={requestVehicleAssessment}
+                status={status}
+                error={serviceError}
+              />
+            )}
+
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
@@ -962,6 +1084,126 @@ function App() {
         </main>
       )}
     </div>
+  )
+}
+
+function ExternalServiceAction({
+  action,
+  consentChecked,
+  setConsentChecked,
+  onRequest,
+  status,
+  error,
+}) {
+  const isRecordingConsent = status === 'granting-service-consent'
+  const isRequesting = status === 'requesting-assessor'
+  const isBusy = isRecordingConsent || isRequesting
+  const needsConsent = action.status === 'consent_required'
+  const routing = action.routing
+  const succeeded = action.status === 'assigned' || action.status === 'queued'
+
+  return (
+    <section className="external-service" aria-labelledby="external-service-title">
+      <p className="transfer-label">Optional next step</p>
+      <h2 id="external-service-title">Request a vehicle damage assessment</h2>
+      <p>{action.purpose}</p>
+      <dl className="service-details">
+        <div>
+          <dt>Service</dt>
+          <dd>{action.service_name}</dd>
+        </div>
+        <div>
+          <dt>Provider</dt>
+          <dd>{action.provider}</dd>
+        </div>
+      </dl>
+
+      <h3>What Northwind will share</h3>
+      <ul className="shared-data-list">
+        {action.shared_data_summary.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+
+      {needsConsent && (
+        <label className="service-consent">
+          <input
+            type="checkbox"
+            checked={consentChecked}
+            onChange={(event) => setConsentChecked(event.target.checked)}
+            disabled={isBusy}
+          />
+          <span>
+            I give Northwind permission to share only these details for this assessment request.
+          </span>
+        </label>
+      )}
+
+      {isBusy && (
+        <div className="service-progress" role="status">
+          <span className="status-dot" />
+          <span>
+            {isRecordingConsent
+              ? 'Recording your permission...'
+              : 'Sending the assessment request...'}
+          </span>
+        </div>
+      )}
+
+      {error && (
+        <div className="service-result is-error" role="alert">
+          <strong>Assessment request not sent</strong>
+          <p>{error.message}</p>
+          <p>Your claim is saved, and no assessor has been assigned.</p>
+          {!error.retryable && <p>Northwind needs to review this before another request.</p>}
+        </div>
+      )}
+
+      {succeeded && routing && (
+        <div className="service-result is-success" role="status">
+          <strong>
+            {action.status === 'assigned'
+              ? 'Assessor assigned'
+              : 'Request accepted into the assessor queue'}
+          </strong>
+          <p>{routing.next_step}</p>
+          <dl>
+            {routing.assessor_reference && (
+              <div><dt>Assessor reference</dt><dd>{routing.assessor_reference}</dd></div>
+            )}
+            {routing.queue_reference && (
+              <div><dt>Queue reference</dt><dd>{routing.queue_reference}</dd></div>
+            )}
+            {routing.expected_by && (
+              <div>
+                <dt>Expected by</dt>
+                <dd>{new Date(routing.expected_by).toLocaleString()}</dd>
+              </div>
+            )}
+          </dl>
+          {routing.limitations.map((limitation) => (
+            <p className="service-limitation" key={limitation}>{limitation}</p>
+          ))}
+        </div>
+      )}
+
+      {action.can_request && (!error || error.retryable) && (
+        <button
+          className="primary-button"
+          type="button"
+          onClick={onRequest}
+          disabled={isBusy || (needsConsent && !consentChecked)}
+        >
+          {isRecordingConsent
+            ? 'Recording permission...'
+            : isRequesting
+              ? 'Sending request...'
+              : error?.retryable
+                ? 'Retry assessment request'
+                : needsConsent
+                  ? 'Agree and request assessor'
+                  : 'Request assessor'}
+        </button>
+      )}
+    </section>
   )
 }
 

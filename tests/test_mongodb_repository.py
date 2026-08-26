@@ -44,6 +44,7 @@ from backend.repositories.mongodb import (
 )
 from backend.repositories.protocols import (
     IdempotencyConflict,
+    IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
 )
@@ -343,6 +344,40 @@ def test_claim_save_uses_optimistic_revision(repository: MongoDBRepository) -> N
     with pytest.raises(RevisionConflict) as error:
         repository.save_claim(updated.model_copy(update={'revision': 3}), expected_revision=1)
     assert error.value.current_revision == 2
+
+
+def test_claim_mutation_persists_revision_and_idempotency_together(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    updated = claim.model_copy(update={'revision': 2})
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/clm_mongo_001/consent',
+        key='claim-mutation-key',
+        request_fingerprint='claim-mutation-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    repository.save_claim_mutation(updated, 1, idempotency)
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+    with pytest.raises(KeyError):
+        repository.save_claim_mutation(
+            updated.model_copy(update={'revision': 3}),
+            2,
+            IdempotencyRecord(**{**idempotency.__dict__, 'actor_id': 'another-customer'}),
+        )
 
 
 def test_idempotency_rejects_changed_replay(repository: MongoDBRepository) -> None:
