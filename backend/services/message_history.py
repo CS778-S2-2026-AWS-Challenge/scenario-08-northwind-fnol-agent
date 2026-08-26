@@ -64,7 +64,11 @@ def _decode_message_cursor(cursor: str | None) -> tuple[datetime, str] | None:
         if not isinstance(raw, list) or len(raw) != 2:
             raise ValueError('cursor shape')
         created_at_text, message_id = raw
-        if not isinstance(created_at_text, str) or not isinstance(message_id, str) or not message_id:
+        if (
+            not isinstance(created_at_text, str)
+            or not isinstance(message_id, str)
+            or not message_id
+        ):
             raise ValueError('cursor shape')
         created_at = datetime.fromisoformat(created_at_text)
         if created_at.utcoffset() is None:
