@@ -116,9 +116,19 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
     staff_message = next(
         item for item in visible_messages if item['message_id'] == staff_message_id
     )
-    assert staff_message['claim_id'] == claim_id
-    assert staff_message['session_id'] == session_id
     assert staff_message['actor'] == 'staff'
+    assert 'claim_id' not in staff_message
+    assert 'session_id' not in staff_message
+
+    persisted_staff_message = repository.get_message(
+        claim_id,
+        session_id,
+        staff_message_id,
+        'cus_demo',
+    )
+    assert persisted_staff_message is not None
+    assert persisted_staff_message.claim_id == claim_id
+    assert persisted_staff_message.session_id == session_id
 
     continuation = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
