@@ -714,7 +714,75 @@ function App() {
                 Start your claim online in a few minutes. No account or insurance jargon needed.
               </p>
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
-                <h2 id="claim-starter-title">What would you like to claim for?</h2>
+                <div className="claim-primary-entry">
+                  <p className="eyebrow">Start your claim</p>
+                  <h2 id="claim-starter-title">Tell us what happened</h2>
+                  <p className="claim-primary-note">
+                    Describe the incident in your own words. We&apos;ll preserve what you tell us and ask only for the details still needed.
+                  </p>
+                  <MessageComposer
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSubmit={sendMessage}
+                    inputLabel="Incident description"
+                    busy={isBusy}
+                    buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
+                    error={error}
+                    placeholder={claimTypePrompts[claimType]}
+                  />
+                  {failedMessage && (
+                    <article className="message message-claimant is-failed">
+                      <p className="message-author">{failedMessage.sender}</p>
+                      <p>{failedMessage.text}</p>
+                      <p className="message-state">
+                        Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                      </p>
+                    </article>
+                  )}
+                  <div className="resume-entry">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={loadSavedReports}
+                      disabled={isBusy}
+                    >
+                      {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
+                    </button>
+                    {savedReports !== null && (
+                      <section className="saved-reports" aria-labelledby="saved-reports-title">
+                        <h2 id="saved-reports-title">Saved reports</h2>
+                        {savedReports.length === 0 ? (
+                          <p>No saved reports are available to resume.</p>
+                        ) : (
+                          <ul>
+                            {savedReports.map((report) => (
+                              <li key={report.claim_id}>
+                                <div>
+                                  <strong>{report.incident_type || 'Incident report'}</strong>
+                                  <span>{report.customer_next_step.summary}</span>
+                                </div>
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => resumeSavedReport(report.claim_id)}
+                                  disabled={isBusy}
+                                >
+                                  {status === 'resuming' ? 'Resuming...' : 'Resume report'}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                  </div>
+                </div>
+
+                <div className="choice-divider"><span>Optional preparation guidance</span></div>
+                <section className="claim-guidance" aria-labelledby="claim-guidance-title">
+                  <p className="eyebrow">Helpful, not required</p>
+                  <h2 id="claim-guidance-title">Prepare by claim type</h2>
+                  <p className="claim-guidance-note">Choose a type to see materials that may help later. You do not need these before telling us what happened.</p>
                 <div className="claim-tabs" role="tablist" aria-label="Claim type">
                   {['motor', 'home', 'contents'].map((type) => (
                     <button
@@ -752,73 +820,14 @@ function App() {
               </div>
               {claimType === 'motor' && (
                 <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
-                  Start guided Motor claim
-                  <span>Three clear steps with draft saving</span>
+                  Use the guided Motor form instead
+                  <span>Alternative fixed three-step form with draft saving</span>
                 </button>
               )}
               {claimType !== 'motor' && (
-                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened under Other ways to claim.</p>
+                <p className="guided-unavailable">A fixed guided form is not configured for this claim type. You can start above by describing what happened naturally.</p>
               )}
-              <details className="other-claim-options" open={Boolean(draft || failedMessage || savedReports !== null)}>
-                <summary>Other ways to claim</summary>
-              <div className="choice-divider"><span>Describe what happened</span></div>
-              <MessageComposer
-                draft={draft}
-                setDraft={setDraft}
-                onSubmit={sendMessage}
-                inputLabel="Incident description"
-                busy={isBusy}
-                buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
-                error={error}
-                placeholder={claimTypePrompts[claimType]}
-              />
-              {failedMessage && (
-                <article className="message message-claimant is-failed">
-                  <p className="message-author">{failedMessage.sender}</p>
-                  <p>{failedMessage.text}</p>
-                  <p className="message-state">
-                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
-                  </p>
-                </article>
-              )}
-              <div className="resume-entry">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={loadSavedReports}
-                  disabled={isBusy}
-                >
-                  {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
-                </button>
-                {savedReports !== null && (
-                  <section className="saved-reports" aria-labelledby="saved-reports-title">
-                    <h2 id="saved-reports-title">Saved reports</h2>
-                    {savedReports.length === 0 ? (
-                      <p>No saved reports are available to resume.</p>
-                    ) : (
-                      <ul>
-                        {savedReports.map((report) => (
-                          <li key={report.claim_id}>
-                            <div>
-                              <strong>{report.incident_type || 'Incident report'}</strong>
-                              <span>{report.customer_next_step.summary}</span>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => resumeSavedReport(report.claim_id)}
-                              disabled={isBusy}
-                            >
-                              {status === 'resuming' ? 'Resuming...' : 'Resume report'}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                )}
-              </div>
-              </details>
+                </section>
               </section>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>

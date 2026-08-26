@@ -294,7 +294,11 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(screen.getByLabelText('Incident description')).toBeVisible()
+    expect(screen.queryByText('Other ways to claim')).not.toBeInTheDocument()
+    expect(screen.getByText('Optional preparation guidance')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
 
     expect(screen.getByText('1 Details')).toBeVisible()
     expect(screen.getByText('2 Materials')).toBeVisible()
@@ -334,7 +338,7 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
     expect(screen.getByRole('heading', { name: 'Your details and incident' })).toBeVisible()
 
     window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
@@ -363,7 +367,7 @@ describe('claimant intake', () => {
       .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, revision: 3, incident_type: 'motor', form: savedForm }))
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    await user.click(screen.getByRole('button', { name: /Use the guided Motor form instead/ }))
     await user.type(screen.getByLabelText('Client Number'), 'NW-123456')
     await user.click(screen.getByRole('button', { name: 'Incident date' }))
     await user.click(screen.getByRole('button', { name: '12' }))
@@ -566,15 +570,7 @@ describe('claimant intake', () => {
     expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveFocus()
     expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveAttribute('href', '#claims')
     await user.tab() // Claim online hero shortcut
-    await user.tab() // Motor
-    await user.tab() // Home
-    await user.tab() // Contents
-    await user.tab() // Guided Motor claim
-    await user.tab()
-    const otherWays = screen.getByText('Other ways to claim')
-    expect(otherWays).toHaveFocus()
-    await user.keyboard('{Enter}')
-    await user.tab()
+    await user.tab() // Directly visible incident description
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
     await user.type(description, 'Another vehicle hit my parked car.')

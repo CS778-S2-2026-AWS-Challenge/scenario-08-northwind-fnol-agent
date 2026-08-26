@@ -285,13 +285,19 @@
 
 .guided-start-button {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
-  padding: 15px 18px; border: 0; border-radius: 9px; color: #fff; background: #246f5c;
+  padding: 13px 16px; border: 1px solid #9bbdb2; border-radius: 9px; color: #28594d; background: #fff;
   font: inherit; font-weight: 750; cursor: pointer;
 }
-.guided-start-button span { font-size: 11px; font-weight: 500; opacity: .82; }
+.guided-start-button span { color: #667a73; font-size: 11px; font-weight: 500; }
 .guided-unavailable { margin: 10px 0; padding: 10px 12px; border-radius: 7px; color: #665b3d; background: #fff8e7; font-size: 12px; }
 .choice-divider { display: flex; align-items: center; gap: 12px; margin: 13px 0; color: #778981; font-size: 11px; }
 .choice-divider::before,.choice-divider::after { content: ''; height: 1px; flex: 1; background: #dce9e4; }
+
+.claim-primary-entry { padding: 20px; border: 1px solid #9bc9ba; border-radius: 13px; background: #f3fbf7; box-shadow: 0 12px 30px rgba(38,91,75,.07); }
+.claim-primary-entry h2, .claim-guidance h2 { margin: 0; color: #20312d; }
+.claim-primary-note, .claim-guidance-note { margin: 8px 0 16px; color: #566b64; font-size: 13px; line-height: 1.55; }
+.claim-primary-entry .report-box { margin-top: 0; }
+.claim-guidance { padding-top: 5px; }
 
 .materials-checklist {
   margin: 16px 0 14px;
