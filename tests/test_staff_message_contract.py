@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from fastapi.testclient import TestClient
 
@@ -19,8 +20,8 @@ def _accepted_handoff(
     )
     assert created.status_code == 201
     created_body = created.json()
-    claim_id = created_body['claim']['claim_id']
-    session_id = created_body['session']['session_id']
+    claim_id = cast(str, created_body['claim']['claim_id'])
+    session_id = cast(str, created_body['session']['session_id'])
 
     requested = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
@@ -37,7 +38,7 @@ def _accepted_handoff(
     )
     assert requested.status_code == 200
     requested_body = requested.json()
-    handoff_id = requested_body['handoff']['handoff_id']
+    handoff_id = cast(str, requested_body['handoff']['handoff_id'])
 
     accepted = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
@@ -51,19 +52,7 @@ def _accepted_handoff(
     assert accepted.status_code == 200
     accepted_body = accepted.json()
     assert accepted_body['handoff']['assigned_to'] == 'stf_demo'
-    return claim_id, session_id, handoff_id, accepted_body['revision']
-
-
-def _staff_message_snapshot(
-    repository: FixtureRepository,
-    claim_id: str,
-) -> tuple[int, list[MessageRecord], object]:
-    claim = repository.get_claim_internal(claim_id)
-    assert claim is not None
-    assert claim.active_session_id is not None
-    messages = repository.list_messages(claim_id, claim.active_session_id, claim.customer_id)
-    handoffs = repository.list_handoffs(claim_id, claim.customer_id)
-    return claim.revision, messages, handoffs
+    return claim_id, session_id, handoff_id, cast(int, accepted_body['revision'])
 
 
 def test_staff_message_fails_closed_without_authoritative_active_session(
