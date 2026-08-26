@@ -1,3 +1,4 @@
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Barrier, Lock
@@ -255,7 +256,9 @@ def test_mongodb_connection_failure_closes_client_without_exposing_uri(
         @staticmethod
         def command(name: str) -> None:
             assert name == 'ping'
-            raise ServerSelectionTimeoutError('provider detail')
+            raise ServerSelectionTimeoutError(
+                'provider rejected mongodb+srv://ping-user:ping-secret@example.invalid'
+            )
 
     class FailingClient:
         admin = FailingAdmin()
@@ -274,8 +277,11 @@ def test_mongodb_connection_failure_closes_client_without_exposing_uri(
         connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
 
     assert client.closed
-    assert secret_uri not in str(error.value)
-    assert 'secret' not in str(error.value)
+    formatted = ''.join(traceback.format_exception(error.value))
+    assert secret_uri not in formatted
+    assert 'ping-user' not in formatted
+    assert 'ping-secret' not in formatted
+    assert 'provider rejected' not in formatted
 
 
 @pytest.mark.parametrize('provider_error', [ValueError, ConfigurationError])
@@ -293,9 +299,11 @@ def test_mongodb_constructor_failure_is_bounded_without_exposing_uri(
     with pytest.raises(MongoDBConfigurationError) as error:
         connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
 
-    assert secret_uri not in str(error.value)
-    assert 'constructor-user' not in str(error.value)
-    assert 'constructor-secret' not in str(error.value)
+    formatted = ''.join(traceback.format_exception(error.value))
+    assert secret_uri not in formatted
+    assert 'constructor-user' not in formatted
+    assert 'constructor-secret' not in formatted
+    assert 'invalid provider URI' not in formatted
 
 
 def test_mongodb_connection_status_bounds_local_configuration_failure(

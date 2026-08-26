@@ -113,12 +113,12 @@ def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepos
             config.database_name,
             collection_name=config.collection_name,
         )
-    except (PyMongoError, ValueError) as error:
+    except (PyMongoError, ValueError):
         if client is not None:
             client.close()
         raise MongoDBConfigurationError(
             'MongoDB connection or repository initialisation failed.'
-        ) from error
+        ) from None
 
 
 class MongoDBRepository:
