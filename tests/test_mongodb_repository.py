@@ -2,7 +2,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Barrier, Lock
-from typing import Any
+from typing import Any, ClassVar
 
 import mongomock
 import pytest
@@ -41,6 +41,7 @@ from backend.repositories.mongodb import (
     MongoDBConnectionConfig,
     MongoDBRepository,
     connect_mongodb_repository,
+    probe_mongodb_connectivity,
 )
 from backend.repositories.protocols import (
     IdempotencyConflict,
@@ -248,6 +249,70 @@ def test_connected_mongodb_repository_reports_verified_and_can_close(
 
     assert repository.connection_status() == 'verified'
     repository.close()
+
+
+def test_mongodb_connectivity_probe_pings_and_closes_without_repository_initialisation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ProbeAdmin:
+        calls: ClassVar[list[str]] = []
+
+        @classmethod
+        def command(cls, name: str) -> None:
+            cls.calls.append(name)
+
+    class ProbeClient:
+        admin = ProbeAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = ProbeClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig('mongodb://unused', 'northwind_test')
+    )
+
+    assert status == 'verified'
+    assert client.admin.calls == ['ping']
+    assert client.closed is True
+
+
+def test_mongodb_connectivity_probe_bounds_failure_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingAdmin:
+        @staticmethod
+        def command(_name: str) -> None:
+            raise ServerSelectionTimeoutError(
+                'provider rejected mongodb+srv://probe-user:probe-secret@example.invalid'
+            )
+
+    class FailingClient:
+        admin = FailingAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FailingClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig(
+            'mongodb+srv://configured-user:configured-secret@example.invalid',
+            'northwind_test',
+        )
+    )
+
+    assert status == 'unavailable'
+    assert client.closed is True
 
 
 def test_mongodb_connection_failure_closes_client_without_exposing_uri(

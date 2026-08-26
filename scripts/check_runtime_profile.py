@@ -63,8 +63,9 @@ def isolated_environment(values: dict[str, str]) -> Iterator[None]:
         os.environ.update(original)
 
 
-def inspect_runtime(path: Path) -> tuple[dict[str, object], int]:
-    values = load_environment_example(path)
+def inspect_environment(values: dict[str, str]) -> tuple[dict[str, object], int]:
+    """Inspect already parsed runtime settings without inheriting managed host values."""
+
     with isolated_environment(values):
         settings = Settings.from_environment()
         result: dict[str, object] = {
@@ -98,6 +99,10 @@ def inspect_runtime(path: Path) -> tuple[dict[str, object], int]:
             return result, 0
         finally:
             bundle.close()
+
+
+def inspect_runtime(path: Path) -> tuple[dict[str, object], int]:
+    return inspect_environment(load_environment_example(path))
 
 
 def main() -> None:
