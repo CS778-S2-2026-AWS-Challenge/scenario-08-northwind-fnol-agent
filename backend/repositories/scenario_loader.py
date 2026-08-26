@@ -24,12 +24,18 @@ from backend.domain.models import (
     EvidenceState,
     EvidenceStatus,
     EvidenceSummary,
+    HandoffPriority,
     HandoffRecord,
+    HandoffStatus,
+    HandoffTrigger,
+    HandoffType,
     MessageRecord,
+    ResponsibleParty,
     SessionRecord,
     SessionStatus,
     StaffActionRecord,
     StaffActionStatus,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord
@@ -38,7 +44,7 @@ from backend.services.retrieval_review import persist_retrieval_record
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
-    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}
+    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary', 'handoffs'}
 )
 
 
@@ -209,11 +215,28 @@ class EvidenceLifecycleFixtureSet(ContractModel):
 
 
 class EvidenceBusinessPath(str, Enum):
-    FAST = 'fast'
-    PROFESSIONAL_REVIEW = 'professional_review'
+    CLEAR = 'clear'
+    PENDING = 'pending'
     URGENT = 'urgent'
-    HUMAN_REQUEST = 'human_request'
-    PENDING_EVIDENCE = 'pending_evidence'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    HANDOFF = 'handoff'
+
+
+class ExpectedPathHandoff(ContractModel):
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str = Field(min_length=1, max_length=100)
+    trigger: HandoffTrigger
+
+
+class ScenarioEntryBaseline(ContractModel):
+    workflow_state: WorkflowState
+    next_action: AgentAction
+    evidence_state: EvidenceState
+    customer_next_step_status: str = Field(min_length=1, max_length=100)
+    responsible_party: ResponsibleParty
+    handoff: ExpectedPathHandoff | None = None
 
 
 class VisibilityEvidenceFixture(ContractModel):
@@ -232,21 +255,66 @@ class EvidencePathEntry(ContractModel):
     claim_state: ClaimState
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
+    handoffs: list[HandoffRecord]
+    entry_baseline: ScenarioEntryBaseline
     evidence: list[VisibilityEvidenceFixture] = Field(min_length=1)
 
     @model_validator(mode='after')
     def validate_entry_state(self) -> 'EvidencePathEntry':
         expected_action = {
-            EvidenceBusinessPath.FAST: AgentAction.CREATE_CLAIM,
-            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.CLEAR: AgentAction.CREATE_CLAIM,
+            EvidenceBusinessPath.PENDING: AgentAction.PROCEED,
             EvidenceBusinessPath.URGENT: AgentAction.URGENT_HANDOFF,
-            EvidenceBusinessPath.HUMAN_REQUEST: AgentAction.HANDOFF,
-            EvidenceBusinessPath.PENDING_EVIDENCE: AgentAction.PROCEED,
+            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.HANDOFF: AgentAction.HANDOFF,
         }
-        if self.claim_state.next_action is not expected_action[self.business_path]:
+        required_action = expected_action[self.business_path]
+        if self.entry_baseline.next_action is not required_action:
             raise ValueError(
-                f'{self.business_path.value} entry does not use its required next action.'
+                f'{self.business_path.value} baseline must use {required_action.value}.'
             )
+        if self.claim_state.next_action is not self.entry_baseline.next_action:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its next-action baseline.'
+            )
+        if self.claim_state.workflow_state is not self.entry_baseline.workflow_state:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its workflow baseline.'
+            )
+        if self.claim_state.evidence is not self.entry_baseline.evidence_state:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its evidence-state baseline.'
+            )
+        if self.customer_next_step.status != self.entry_baseline.customer_next_step_status:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its customer-status baseline.'
+            )
+        if self.customer_next_step.responsible_party is not self.entry_baseline.responsible_party:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its responsibility baseline.'
+            )
+
+        expected_handoff = self.entry_baseline.handoff
+        if expected_handoff is None:
+            if self.handoffs:
+                raise ValueError(f'{self.business_path.value} entry must not contain a handoff.')
+        else:
+            if len(self.handoffs) != 1:
+                raise ValueError(
+                    f'{self.business_path.value} entry must contain exactly one handoff.'
+                )
+            handoff = self.handoffs[0]
+            actual_handoff = ExpectedPathHandoff(
+                type=handoff.type,
+                status=handoff.status,
+                priority=handoff.priority,
+                queue=handoff.queue,
+                trigger=handoff.trigger,
+            )
+            if actual_handoff != expected_handoff:
+                raise ValueError(
+                    f'{self.business_path.value} entry does not match its handoff baseline.'
+                )
         fixture_ids = {fixture.fixture_id for fixture in self.evidence}
         if len(fixture_ids) != len(self.evidence):
             raise ValueError('Path evidence fixture identifiers must be unique.')
@@ -354,6 +422,7 @@ def load_evidence_path_fixtures(
         entry['claim_state'] = scenario.claim.claim_state.model_dump(mode='json')
         entry['evidence_summary'] = scenario.claim.evidence_summary.model_dump(mode='json')
         entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
+        entry['handoffs'] = [handoff.model_dump(mode='json') for handoff in scenario.handoffs]
     return EvidencePathFixtureSet.model_validate(payload)
 
 
