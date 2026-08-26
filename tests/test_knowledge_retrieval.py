@@ -11,7 +11,11 @@ from backend.domain.knowledge import (
     KnowledgeSearch,
     KnowledgeSource,
 )
-from backend.services.knowledge_ingestion import KnowledgeManifestError
+from backend.services.knowledge_ingestion import (
+    INGESTION_PIPELINE_IDENTITY,
+    KnowledgeManifestError,
+    _source_metadata_fingerprint,
+)
 
 
 class MemoryStore:
@@ -111,6 +115,8 @@ def retriever(
                     'version': governed.version,
                     'source_checksum': governed.expected_checksum,
                     'chunks_checksum': sha256(payload).hexdigest(),
+                    'source_metadata_fingerprint': _source_metadata_fingerprint(governed),
+                    'pipeline_identity': INGESTION_PIPELINE_IDENTITY,
                 }
             ).encode()
     return S3CompatibleKnowledgeRetriever(MemoryStore(objects), sources or (source(),))

@@ -14,7 +14,9 @@ from backend.domain.knowledge import (
     KnowledgeSource,
 )
 from backend.services.knowledge_ingestion import (
+    INGESTION_PIPELINE_IDENTITY,
     KnowledgeObjectStore,
+    _source_metadata_fingerprint,
     validate_manifest_source,
 )
 
@@ -139,6 +141,8 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
                 key = self._chunks_key(source)
                 if self._store.read(key) is None:
                     return 'unavailable'
+                if self._store.read(self._ingestion_state_key(source)) is None:
+                    return 'unavailable'
         except KnowledgeObjectStoreUnavailable:
             return 'unavailable'
         return 'configured_service'
@@ -184,6 +188,9 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
                     or state.get('version') != source.version
                     or state.get('source_checksum') != source.expected_checksum
                     or state.get('chunks_checksum') != sha256(payload).hexdigest()
+                    or state.get('source_metadata_fingerprint')
+                    != _source_metadata_fingerprint(source)
+                    or state.get('pipeline_identity') != INGESTION_PIPELINE_IDENTITY
                 ):
                     raise KnowledgeRetrievalUnavailable(
                         'The knowledge index does not match its governed ingestion state.'

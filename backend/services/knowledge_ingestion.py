@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from backend.domain.knowledge import KnowledgeChunk, KnowledgePublicationStatus, KnowledgeSource
 
-INGESTION_PIPELINE_IDENTITY = 'markdown-sections-v1+keyword-index-v1+state-v2'
+INGESTION_PIPELINE_IDENTITY = 'markdown-sections-v1+keyword-index-v1+state-v3'
 SUPPORTED_VISIBILITY = frozenset({'public', 'customer_and_staff', 'staff_only'})
 SUPPORTED_SOURCE_URI_SCHEMES = frozenset({'https', 'northwind'})
 
