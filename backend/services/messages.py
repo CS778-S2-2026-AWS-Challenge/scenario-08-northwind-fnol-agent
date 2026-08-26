@@ -10,6 +10,7 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     AgentDecisionRecord,
+    AgentProposalSource,
     AuthorityOutcome,
     ClaimantDecision,
     ClaimantMessage,
@@ -108,9 +109,11 @@ def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
     return ClaimantDecision(
         decision_id=decision.decision_id,
         action=decision.action,
-        reason_codes=[
-            code for code in decision.reason_codes if code not in INTERNAL_ONLY_REASON_CODES
-        ],
+        reason_codes=(
+            []
+            if decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
+            else [code for code in decision.reason_codes if code not in INTERNAL_ONLY_REASON_CODES]
+        ),
         customer_reason=decision.customer_reason,
         customer_next_step=decision.customer_next_step,
     )
@@ -205,12 +208,70 @@ def _effective_next_step(
     )
 
 
+def _safe_model_customer_content(
+    proposal: AgentProposal,
+    outcome: AuthorityOutcome,
+    current_next_step: CustomerNextStep,
+) -> tuple[str, str, CustomerNextStep]:
+    if outcome is AuthorityOutcome.REVIEW_REQUIRED:
+        return (
+            'The proposed action requires professional review.',
+            'I have recorded what you shared. A Northwind claims professional must review the '
+            'proposed next step before it can continue.',
+            _effective_next_step(proposal.customer_next_step, outcome),
+        )
+    if outcome is AuthorityOutcome.BLOCKED:
+        return (
+            'The proposed action was not applied.',
+            'I have recorded what you shared, but I could not safely apply the proposed next '
+            'step. Your current report remains available.',
+            _effective_next_step(proposal.customer_next_step, outcome),
+        )
+
+    if proposal.action is AgentAction.ASK:
+        return (
+            'More incident information is needed.',
+            'Thanks. Please share the next incident detail you want Northwind to record.',
+            CustomerNextStep(
+                status='more_information_needed',
+                summary='Provide the next incident detail.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+        )
+    if proposal.action is AgentAction.CLARIFY:
+        return (
+            'A material incident detail needs clarification.',
+            'Thanks. Please clarify or correct the incident detail before the report continues.',
+            CustomerNextStep(
+                status='clarification_needed',
+                summary='Clarify or correct the incident detail.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+        )
+    if proposal.action is AgentAction.CONFIRM:
+        return (
+            'A proposed incident detail needs claimant confirmation.',
+            'Thanks. Please review the proposed information and confirm or correct it.',
+            CustomerNextStep(
+                status='confirmation_needed',
+                summary='Confirm or correct the proposed information.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+            ),
+        )
+    return (
+        'The claimant update was recorded without a high-impact decision.',
+        'Thanks. I have recorded your update. You can continue when you are ready.',
+        current_next_step,
+    )
+
+
 def _build_form_changes(
     existing_form: dict[str, StructuredFormField],
     proposals: list[ProposedFormChange],
     claimant_message: MessageRecord,
     timestamp: datetime,
     authority_outcome: AuthorityOutcome,
+    proposal_source: AgentProposalSource,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     for proposal in proposals:
@@ -236,7 +297,10 @@ def _build_form_changes(
             needed_for=proposal.needed_for,
             confidence=proposal.confidence,
             updated_at=timestamp,
-            updated_by=ActorReference(actor_type=ActorType.AGENT, actor_id='controlled_agent'),
+            updated_by=ActorReference(
+                actor_type=ActorType.AGENT,
+                actor_id=proposal_source.value,
+            ),
         )
     return form_changes
 
@@ -579,13 +643,26 @@ def submit_message(
     )
     authority = validate_proposal(proposal)
     executed_state_changes = authorised_state_changes(proposal, authority)
+    effective_customer_reason = proposal.customer_reason
+    effective_customer_response = proposal.customer_response
     effective_next_step = _effective_next_step(proposal.customer_next_step, authority.outcome)
+    if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
+        (
+            effective_customer_reason,
+            effective_customer_response,
+            effective_next_step,
+        ) = _safe_model_customer_content(
+            proposal,
+            authority.outcome,
+            claim.customer_next_step,
+        )
     form_changes = _build_form_changes(
         claim.form,
         proposal.form_changes,
         claimant_message,
         timestamp,
         authority.outcome,
+        proposal.proposal_source,
     )
     pending_evidence = _pending_evidence_for_proposal(
         claim_id,
@@ -749,7 +826,7 @@ def submit_message(
         session_id=session_id,
         actor=ActorType.AGENT,
         visibility=MessageVisibility.CLAIMANT_VISIBLE,
-        content={'type': 'text', 'text': proposal.customer_response},
+        content={'type': 'text', 'text': effective_customer_response},
         in_reply_to=claimant_message.message_id,
         created_at=timestamp,
     )
@@ -760,8 +837,8 @@ def submit_message(
         trigger_message_id=claimant_message.message_id,
         action=proposal.action,
         reason_codes=proposal.reason_codes,
-        customer_reason=proposal.customer_reason,
-        customer_response=proposal.customer_response,
+        customer_reason=effective_customer_reason,
+        customer_response=effective_customer_response,
         state_changes=proposal.state_changes,
         proposed_signals=proposal.proposed_signals,
         required_tools=proposal.required_tools,
@@ -770,6 +847,8 @@ def submit_message(
         handoff_id=handoff.handoff_id if handoff is not None else None,
         customer_next_step=effective_next_step,
         authority=authority,
+        proposal_source=proposal.proposal_source,
+        model_provenance=proposal.model_provenance,
         form_changes=form_changes,
         resulting_revision=resulting_revision,
         created_at=timestamp,

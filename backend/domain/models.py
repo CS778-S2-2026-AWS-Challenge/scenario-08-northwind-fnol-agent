@@ -26,6 +26,11 @@ class AuthorityOutcome(str, Enum):
     REVIEW_REQUIRED = 'review_required'
 
 
+class AgentProposalSource(str, Enum):
+    CONTROLLED_AGENT = 'controlled_agent'
+    MODEL_GATEWAY = 'model_gateway'
+
+
 class Severity(str, Enum):
     UNASSESSED = 'unassessed'
     FAST_TRACK = 'fast_track'
@@ -297,6 +302,7 @@ class WorkingClaim(ContractModel):
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
+    assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
@@ -366,6 +372,12 @@ class AgentAuthority(ContractModel):
     outcome: AuthorityOutcome
 
 
+class ModelDecisionProvenance(ContractModel):
+    runtime_profile: Literal['model_gateway'] = 'model_gateway'
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
+
+
 class AgentDecisionRecord(ContractModel):
     decision_id: str
     claim_id: str
@@ -383,6 +395,8 @@ class AgentDecisionRecord(ContractModel):
     handoff_id: str | None = None
     customer_next_step: CustomerNextStep
     authority: AgentAuthority
+    proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
+    model_provenance: ModelDecisionProvenance | None = None
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
     resulting_revision: int = Field(ge=1)
     created_at: datetime

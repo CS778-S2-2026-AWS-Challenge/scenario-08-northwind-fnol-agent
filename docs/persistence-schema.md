@@ -31,7 +31,7 @@ provider payloads, or SDK types.
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -86,7 +86,10 @@ and checksums rather than embedding those bytes.
   it; later unrelated messages remain session-only and must not overwrite claim facts.
 - A session summary records the claim revision it represents. That revision may lag but
   must not exceed the current claim revision.
-- Complete messages remain durable outside the bounded summary.
+- Complete messages remain durable outside the bounded summary. Message lists use the stable
+  `(created_at, message_id)` ascending order, including when timestamps are equal.
+- A message `in_reply_to` reference may identify only a message belonging to the same claim and
+  interaction session.
 - Resuming creates or activates an interaction session for the same `claim_id`; it does
   not create a duplicate working claim.
 - At most one claimant interaction session is active for a working claim unless a later
@@ -150,6 +153,13 @@ and checksums rather than embedding those bytes.
   decision.
 - Staff decisions are separate immutable records and retain the source references that
   motivated the review.
+- An Agent decision identifies whether its proposal came from `controlled_agent` or
+  `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
+  profile, provider-reported model identifier, and provider request identifier when supplied.
+  These provider references are internal-only and never enter claimant projections.
+- Model-authored customer prose and model-proposed internal signals are not persistence
+  authority. Claimant-visible response fields are server-rendered after deterministic
+  validation, and any non-empty model signal proposal rejects the complete turn before write.
 
 ## Handoff and Staff-work Invariants
 

@@ -11,4 +11,4 @@ if ($LASTEXITCODE -ne 0 -or $configuredPath -ne ".githooks") {
     throw "The repository Git hooks path was not configured as expected."
 }
 
-Write-Host "Git hooks enabled from .githooks. The pre-push hook runs scripts/check.ps1."
+Write-Host "Git hooks enabled from .githooks. The pre-push hook routes through scripts/pre-push-quality-gate.ps1."

@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   policy:
-    name: PR policy
+    name: Northwind PR policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -42,4 +42,9 @@ jobs:
         with:
           script: |
             const policy = require('./.github/scripts/pr_policy.cjs');
-            await policy.run({ github, context, core });
+            await policy.run({
+              github,
+              context,
+              core,
+              requireLocalQualityEvidence: false,
+            });

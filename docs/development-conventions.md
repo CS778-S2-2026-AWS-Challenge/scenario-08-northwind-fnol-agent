@@ -36,6 +36,11 @@ Kanban collaboration details within that boundary.
   ./scripts/check.ps1
   ```
 
+- The installed pre-push hook uses `scripts/pre-push-quality-gate.ps1`. In `auto` mode it skips
+  the additional local run only after a configured GitHub Actions or verified CircleCI provider is
+  available; otherwise it runs the local gate. `NORTHWIND_QUALITY_GATE_MODE=local` forces the
+  local gate, while `NORTHWIND_QUALITY_GATE_MODE=off` is reserved for authorised maintenance.
+
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
@@ -64,7 +69,7 @@ GitHub Project 12 is the shared source for assignment, dependencies, progress, a
 | `In review` | The deliverable is accessible in a pull request or agreed shared location, verification has been recorded, and another team member can check the acceptance criteria. |
 | `Done` | Every acceptance criterion has evidence, required review is complete, and repository changes are merged or a non-code deliverable is accepted in its agreed shared location. |
 
-Plan weekly work as Project DraftIssues. Set `Tracking` to `Repository issue` for work that must become a repository Issue, or `Delivery without repo` for non-repository deliverables that remain manually managed. During Auckland working hours, the Kanban sync checks `Ready` DraftIssues every 15 minutes and converts only repository-tracked cards whose assignees, estimate, size, dates, acceptance criteria, and dependencies are complete. Conversion preserves the same Project item and its multiple assignees. The first assignee who starts the shared task moves the card to `In progress`; individual assignees do not maintain separate card statuses.
+Plan weekly work as Project DraftIssues. Set `Tracking` to `Repository issue` for work that must become a repository Issue, or `Delivery without repo` for non-repository deliverables that remain manually managed. During Auckland working hours, the Kanban sync checks `Ready` DraftIssues every 15 minutes and converts only repository-tracked cards whose assignees, estimate, size, dates, acceptance criteria, and dependencies are complete. Conversion preserves the same Project item and its multiple assignees. Opening a Draft pull request with a closing reference is the explicit start signal and moves the linked card to `In progress`; no manual status move or separate start command is required.
 
 Link a complete delivery with a closing reference such as `Closes #123`. A draft pull request keeps the linked card `In progress`; a pull request ready for review moves it to `In review`; closing without merge returns it to `In progress`; and merge moves it to `Done`. `Refs #123` records a partial relationship but does not drive this closing-reference automation.
 
@@ -190,7 +195,13 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 ## Quality Gate
 
-Before merge, the relevant format, lint, type, unit, contract, build, and end-to-end checks must pass. `main` requires `Backend quality`, `Customer quality`, and `PR policy` for the final pull-request head. The pull request must also record the exact local checks run and their results. A successful build alone does not demonstrate product correctness.
+Before merge, the active quality profile must pass its relevant format, lint, type, unit, contract,
+build, and end-to-end checks. The `github` profile uses the GitHub Actions `Backend quality`,
+`Customer quality`, and `Northwind PR policy` checks; the `circleci` profile uses their CircleCI
+equivalents; the `none` profile uses `Northwind PR policy` with recorded local gate evidence. A ready pull request must
+identify its quality source in `Local validation`: record the exact `./scripts/check.ps1` command
+and `Result: PASS` for `none`, or name the active remote provider for `github` or `circleci`.
+A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 

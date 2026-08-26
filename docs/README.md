@@ -8,9 +8,11 @@ time-bound commitments belong in `sprint/`.
 
 - [Repository Operation Rules](repo_rule.md)
 - [Current API Contract](api.md)
+- [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Development Conventions](development-conventions.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
+- [Provider-Neutral Model Gateway](model-gateway.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
@@ -18,6 +20,7 @@ time-bound commitments belong in `sprint/`.
 - [Policy and Claim-History Retrieval Contract](policy-history-mapping.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [MinIO Object-Storage Boundary](minio-object-storage.md)
+- [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
