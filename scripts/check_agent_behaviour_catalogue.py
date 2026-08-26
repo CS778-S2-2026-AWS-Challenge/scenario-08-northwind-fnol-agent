@@ -50,6 +50,10 @@ REQUIRED_FIELDS = (
     'Delivery level',
 )
 
+TARGET_ACTION_PATTERN = re.compile(
+    r'`(?:conversation|claim|human|external|runtime)\.[a-z][a-z0-9_]*`'
+)
+
 
 class CatalogueError(ValueError):
     """Raised when the catalogue is missing a required behaviour or contract."""
@@ -117,9 +121,9 @@ def validate_catalogue(path: Path = CATALOGUE_PATH) -> None:
             raise CatalogueError(
                 f'{behaviour} missing or empty fields: {", ".join(missing_fields)}'
             )
-        section = '\n'.join(section_lines)
-        if not re.search(r'`(?:conversation|claim|human|external|runtime)\.[^`]+`', section):
-            raise CatalogueError(f'{behaviour} has no namespaced target action')
+        target_actions = _field_value(section_lines, 'Target actions')
+        if target_actions is None or not TARGET_ACTION_PATTERN.search(target_actions):
+            raise CatalogueError(f'{behaviour} Target actions has no valid namespaced action')
 
     contracts = _cross_cutting_contracts(lines)
     missing_contracts = [

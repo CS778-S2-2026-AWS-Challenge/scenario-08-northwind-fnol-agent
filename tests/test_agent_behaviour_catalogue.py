@@ -48,6 +48,24 @@ def test_agent_behaviour_catalogue_rejects_empty_required_field(tmp_path: Path) 
         validate_catalogue(path)
 
 
+def test_agent_behaviour_catalogue_rejects_invalid_target_actions_field(
+    tmp_path: Path,
+) -> None:
+    text = CATALOGUE_PATH.read_text(encoding='utf-8')
+    text = text.replace(
+        '- **Target actions:** `conversation.answer` and `runtime.continue`.',
+        '- **Target actions:** no valid action',
+        1,
+    )
+    path = _catalogue_copy(tmp_path, text)
+
+    with pytest.raises(
+        CatalogueError,
+        match='status_query Target actions has no valid namespaced action',
+    ):
+        validate_catalogue(path)
+
+
 def test_agent_behaviour_catalogue_rejects_missing_cross_cutting_contract(
     tmp_path: Path,
 ) -> None:

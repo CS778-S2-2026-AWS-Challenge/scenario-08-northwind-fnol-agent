@@ -67,7 +67,7 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A credible loss description with one dominant purpose and no higher-precedence urgent, human, resume, command, or lookup signal.
 - **Input context:** Current Claim State, current-action fields, unresolved WorkItems, recent claimant message, channel, locale, and claimant scope.
 - **Output:** Claimant receives acknowledgement and the smallest useful next question or next step; staff receives nothing unless a handoff or review is required; Runtime returns a bounded plan and limitations.
-- **Target actions:** `conversation.acknowledge`, `conversation.ask`, `claim.propose_update`, `runtime.continue` or `runtime.wait_for_user`.
+- **Target actions:** `conversation.acknowledge`, `conversation.ask`, `claim.propose_fact_patch`, `runtime.continue`, or `runtime.wait_for_user`.
 - **Authority:** The model may propose facts and wording; claimant confirmation and deterministic field/revision validation authorise Claim State changes.
 - **Tool allow-list:** `none` for ordinary intake unless a separately selected behaviour exposes a declared tool.
 - **Permitted actions:** Extract explicit facts as proposals, preserve confirmed facts, ask for a required-now field, and record a later evidence commitment.
@@ -86,7 +86,7 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** One input contains two or more recognised FNOL intents that can be handled without contradicting safety or authority rules.
 - **Input context:** Same claimant context as `ordinary_intake`, plus the route candidates, active content branches, safety signals, support preference, and current WorkItems.
 - **Output:** Claimant receives one coherent acknowledgement and only the unresolved question that matters for the next safe action; Runtime returns multiple bounded proposals and one primary route; staff receives a complete handoff context only if required.
-- **Target actions:** `conversation.acknowledge`, multiple `claim.propose_update` actions, `human.request_handoff` when requested, and one `runtime.continue`, `runtime.wait_for_user`, or `runtime.interrupt` directive.
+- **Target actions:** `conversation.acknowledge`, multiple `claim.propose_fact_patch` actions, `human.create_handoff` when authorised, and one `runtime.continue`, `runtime.wait_for_user`, or `runtime.interrupt_urgent` directive.
 - **Authority:** Each proposal is independently validated; one primary runtime directive controls the turn and higher-precedence safety/support authority wins.
 - **Tool allow-list:** Union of the tools declared by the selected bounded behaviours; no undeclared tool becomes available because several intents coexist.
 - **Permitted actions:** Record each explicit fact separately, identify conflicts, preserve source and confidence, and select one primary route while retaining other proposals.
@@ -124,9 +124,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** Explicit human request, repeated request, distress, accessibility need, or a support preference that requires staff involvement and is not superseded by urgent safety handling.
 - **Input context:** Claimant message, support history, current Claim State, unresolved WorkItems, handoff queue capability, and claimant-safe communication rules.
 - **Output:** Claimant receives a bounded handoff acknowledgement and responsibility/next step; staff receives a source-preserving handoff packet; Runtime returns handoff status and any dispatch limitation.
-- **Target actions:** `conversation.acknowledge`, `human.request_handoff`, `runtime.pause_for_review` or `runtime.wait_for_external`.
+- **Target actions:** `conversation.acknowledge`, `human.offer_support` or `human.create_handoff`, and `runtime.continue` or `runtime.pause_for_review`.
 - **Authority:** A versioned configured rule controls the first ordinary request; repeated requests, urgency, distress, and accessibility needs deterministically require immediate handoff.
-- **Tool allow-list:** `human.handoff_create` and `human.handoff_status` when permitted; no staff-acceptance or high-impact decision tool.
+- **Tool allow-list:** `handoff.create` and `handoff.status` when permitted; no staff-acceptance or high-impact decision tool.
 - **Permitted actions:** Create or update a handoff, preserve the conversation and unresolved work, and continue only safe non-blocked work.
 - **Prohibited actions:** Repeatedly resisting the request, exposing internal risk signals, promising a staff contact time not known, or allowing the Agent to accept a staff handoff on behalf of staff.
 - **Claim State effect:** Handoff responsibility and WorkItems are recorded through the shared Claim revision; confirmed incident facts remain unchanged.
@@ -143,9 +143,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** The claimant explicitly corrects an existing fact, confirms or rejects a proposed material interpretation, or answers a focused confirmation request.
 - **Input context:** Current Claim revision, the referenced confirmed or proposed field, its source and status, the claimant message, unresolved conflicts, and claimant scope.
 - **Output:** Claimant receives the corrected or confirmed interpretation and its next effect; staff sees the revised source-preserving fact and any remaining conflict; Runtime returns a bounded update proposal and continuation directive.
-- **Target actions:** `claim.propose_correction`, `claim.confirm_fact`, `conversation.acknowledge_correction`, and `runtime.continue` or `runtime.wait_for_user`.
+- **Target actions:** `claim.correct_fact`, `conversation.acknowledge`, `conversation.confirm_material`, and `runtime.continue` or `runtime.wait_for_user`.
 - **Authority:** The claimant authorises corrections to claimant-controlled facts; deterministic field, conflict, and revision validation authorises the resulting Claim State revision.
-- **Tool allow-list:** Claim-scoped fact read and the declared correction or confirmation mutation for the referenced current revision only.
+- **Tool allow-list:** `claim.read` and `claim.apply_patch` for the referenced current revision only.
 - **Permitted actions:** Preserve the original source, record the claimant correction or confirmation, resolve only the referenced conflict, and recalculate the next safe action from the new revision.
 - **Prohibited actions:** Silently overwriting an unrelated field, treating an ambiguous reply as confirmation, deleting provenance, rewriting staff-controlled decisions, or preserving an obsolete interpretation in claimant output.
 - **Claim State effect:** One validated correction or confirmation advances one Claim revision with actor, source, prior value, new value, and outcome; rejected or ambiguous input creates no partial mutation.
@@ -162,9 +162,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** Explicit injury, continuing danger, or another approved immediate safety signal.
 - **Input context:** Latest claimant text, current safety attributes, Claim State, channel, location only when already authorised, and urgent-handoff capability.
 - **Output:** Claimant receives concise bounded safety guidance and urgent handoff status; staff receives priority, reason, and context; Runtime returns an interrupt directive.
-- **Target actions:** `conversation.acknowledge`, `human.urgent_handoff`, `runtime.interrupt`.
+- **Target actions:** `conversation.acknowledge`, `human.create_handoff`, and `runtime.interrupt_urgent`.
 - **Authority:** Only an approved deterministic urgent trigger may authorise the urgent state and handoff; model recognition alone is a proposal.
-- **Tool allow-list:** `human.urgent_handoff_create` and its status operation; no diagnosis, emergency-service, coverage, or liability tool.
+- **Tool allow-list:** `handoff.create` and `handoff.status`; no diagnosis, emergency-service, coverage, or liability tool.
 - **Permitted actions:** Stop ordinary intake, record the approved urgency reason, create an urgent handoff, and preserve already confirmed facts.
 - **Prohibited actions:** Diagnosing injury, claiming emergency services were contacted, inferring urgency from a negative safety statement, or continuing ordinary questions before the urgent path is handled.
 - **Claim State effect:** Urgency and handoff status change only through approved deterministic authority and one revision; no coverage or liability decision is created.
@@ -181,9 +181,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A request for current progress, responsibility, outstanding work, or next step without a new material fact.
 - **Input context:** Authoritative Claim State, lifecycle projection, WorkItems, handoff status, claimant/staff visibility, and current revision.
 - **Output:** Claimant receives a safe status and next step; staff receives the operational projection and ownership; Runtime returns a read-only result.
-- **Target actions:** `conversation.answer_status`, `claim.read`, `runtime.continue`.
+- **Target actions:** `conversation.answer` and `runtime.continue`.
 - **Authority:** Authorised current-state read access supplies the answer; neither model wording nor the query itself may change state.
-- **Tool allow-list:** `claim.read_current` only for the actor's authorised Claim scope.
+- **Tool allow-list:** `claim.read` only for the actor's authorised Claim scope.
 - **Permitted actions:** Read the latest authorised projection and identify pending work or responsible party.
 - **Prohibited actions:** Reading stale private session state, exposing internal risk or provider detail, changing status to satisfy the question, or implying an external completion that is unknown.
 - **Claim State effect:** None; a status query must not advance the Claim revision.
@@ -200,9 +200,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** Session resume, explicit “continue where I left off”, or a detected active Claim with resumable work.
 - **Input context:** Latest Claim revision, session summary, confirmed facts, unresolved WorkItems, prior commitments, evidence lifecycle, and claimant scope.
 - **Output:** Claimant receives a concise resume summary and next safe step; staff sees restored responsibility and unresolved work; Runtime returns a resume result.
-- **Target actions:** `claim.read`, `conversation.summarise_resume`, `runtime.continue` or `runtime.wait_for_user`.
+- **Target actions:** `claim.resume_draft`, `conversation.summarise`, `runtime.continue`, or `runtime.wait_for_user`.
 - **Authority:** Current Claim State overrides session summaries; ordinary validation authorises any new claimant answer.
-- **Tool allow-list:** `claim.read_current` and an authorised session-summary read; no historical write or cross-Claim search.
+- **Tool allow-list:** `claim.read` and an authorised session-summary read; no historical write or cross-Claim search.
 - **Permitted actions:** Reload current Claim State, restore unresolved work, and ask only the next focused question.
 - **Prohibited actions:** Overwriting newer Claim State with an old session snapshot, requesting confirmed facts again, or treating an interruption as an adverse customer signal.
 - **Claim State effect:** Normally read-only; a new claimant answer creates a new revision after ordinary validation.
@@ -219,9 +219,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** Claimant reports missing evidence, asks about an outstanding item, uploads an item, or a service records a future evidence commitment.
 - **Input context:** Evidence metadata and lifecycle, WorkItems, current action dependencies, Claim State, source references, and storage/processing capability.
 - **Output:** Claimant receives what is pending and what can continue; staff receives evidence state, source, and blocked action; Runtime returns a work-item or evidence result.
-- **Target actions:** `claim.record_evidence`, `claim.create_work_item`, `conversation.explain_next_step`, `runtime.continue` or `runtime.wait_for_external`.
+- **Target actions:** `claim.set_evidence_state`, `claim.upsert_work_item`, `conversation.explain`, `runtime.continue`, or `runtime.wait_for_external`.
 - **Authority:** Evidence metadata rules and Claim revision validation authorise records; extracted or promised evidence never authorises a material fact by itself.
-- **Tool allow-list:** Declared evidence registration, upload, status, and processing tools for the actor and evidence state.
+- **Tool allow-list:** `evidence.register`, `evidence.verify`, and declared upload or processing tools for the actor and evidence state.
 - **Permitted actions:** Record evidence state and provenance, create a bounded WorkItem, process accepted uploads, and continue actions that do not depend on the missing item.
 - **Prohibited actions:** Treating pending evidence as proof, blocking all claim progress, silently replacing an occupied field, or claiming an external document exists.
 - **Claim State effect:** Evidence metadata and WorkItems update through their own validated records linked to the current Claim revision; material facts remain proposed until accepted.
@@ -238,7 +238,7 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A bounded question about policy wording, policy facts, or relevant claim history.
 - **Input context:** Claim scope, authorised purpose, policy/history reference, effective time, role, visibility, and retrieval capability.
 - **Output:** Claimant receives only an approved safe explanation when permitted; staff receives facts, citations, uncertainty, and limitations; Runtime returns evidence status.
-- **Target actions:** `external.policy_lookup` or `external.claim_history_lookup`, `conversation.explain_evidence`, `runtime.continue` or `runtime.pause_for_review`.
+- **Target actions:** `conversation.explain`, `runtime.continue`, or `runtime.pause_for_review`.
 - **Authority:** Purpose-limited access authorises retrieval only; deterministic rules or authorised staff retain authority over coverage, fraud, liability, and high-impact conclusions.
 - **Tool allow-list:** `policy.lookup`, `claim_history.lookup`, and filtered `knowledge.search` only when explicitly permitted for the actor and purpose.
 - **Permitted actions:** Query an authorised structured record or filtered knowledge source, preserve source/version/time, and create a professional-review WorkItem for ambiguity.
@@ -257,9 +257,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** Claimant or staff supplies an image/document or asks the Agent to explain an evidence requirement.
 - **Input context:** Evidence metadata, protected object reference, processing state, current Claim form, field registry, source visibility, and extraction capability.
 - **Output:** Claimant sees upload/processing status and a safe proposed fact for confirmation; staff sees source-linked extraction and conflicts; Runtime returns an evidence proposal or failure.
-- **Target actions:** `external.evidence_extract`, `claim.propose_update`, `conversation.request_confirmation`, `runtime.wait_for_external` or `runtime.continue`.
+- **Target actions:** `claim.register_evidence`, `claim.propose_fact_patch`, `conversation.confirm_material`, `runtime.wait_for_external`, or `runtime.continue`.
 - **Authority:** The evidence service may propose extracted facts; claimant confirmation, occupied-field protection, and deterministic validation authorise any Claim update.
-- **Tool allow-list:** Declared upload, evidence-status, extraction, and fact-confirmation tools scoped to the accepted evidence item.
+- **Tool allow-list:** `evidence.register`, `evidence.extract`, `evidence.verify`, and declared upload tools scoped to the accepted evidence item.
 - **Permitted actions:** Register accepted evidence, request typed extraction, create proposed fields with source references, and ask for confirmation.
 - **Prohibited actions:** Treating extraction as confirmation, overwriting an occupied field, exposing protected object details, or inferring a coverage/fraud result from an image.
 - **Claim State effect:** Evidence lifecycle and proposed facts update through the evidence boundary; claimant confirmation or staff authority creates the next revision.
@@ -276,9 +276,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A validated rule identifies a coverage, liability, review-signal, evidence-conflict, or other approved judgement that exceeds automated authority.
 - **Input context:** Current Claim revision, material facts and provenance, evidence and conflicts, relevant cited retrievals, prior communication, pending WorkItems, authority result, staff queue capability, and visibility rules.
 - **Output:** Claimant receives an accurate explanation of the review and next responsibility; staff receives a structured source-preserving handoff packet and requested action; Runtime returns a paused-for-review result.
-- **Target actions:** `human.create_professional_review`, `conversation.explain_review`, and `runtime.pause_for_review`.
+- **Target actions:** `human.request_professional_review`, `conversation.explain`, and `runtime.pause_for_review`.
 - **Authority:** Deterministic review rules or authorised staff may require professional review; the model may identify candidate ambiguity but cannot create a high-impact conclusion.
-- **Tool allow-list:** `human.professional_review_create` and status operations, plus read-only source retrieval needed to assemble the authorised packet.
+- **Tool allow-list:** `handoff.create`, `handoff.status`, `claim.read`, and read-only source retrieval needed to assemble the authorised packet.
 - **Permitted actions:** Record the review reason without alleging an outcome, assemble the standard handoff packet, assign responsibility through the configured queue, and preserve unrelated safe progress.
 - **Prohibited actions:** Declaring coverage, fraud, liability, approval, or rejection; exposing internal signals to the claimant; omitting conflicting sources; or blocking unrelated work solely because review is pending.
 - **Claim State effect:** Create a source-linked professional-review WorkItem and handoff status through one validated revision; no high-impact decision exists until authorised staff records it separately.
@@ -295,9 +295,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A validated next-action request after required-now facts, confirmation, evidence rules, and authority checks pass.
 - **Input context:** Current Claim revision, confirmed form, evidence refs, pending WorkItems, authorised decision, idempotency key, route, and claims-service capability.
 - **Output:** Claimant receives created, pending, or failed status and next step; staff receives external result and limitations; Runtime returns a typed external outcome.
-- **Target actions:** `claim.prepare_creation`, `external.claim_create`, `runtime.wait_for_external`, `runtime.continue`, or `runtime.fail_safely`.
+- **Target actions:** `claim.prepare_creation`, `claim.create`, `runtime.wait_for_external`, `runtime.continue`, or `runtime.fail_safe`.
 - **Authority:** Deterministic prerequisites plus the documented claimant, rule, or staff authority must authorise creation before the external call.
-- **Tool allow-list:** `external.claim_create` and provider-neutral status/reconciliation operations using one idempotency reference.
+- **Tool allow-list:** `claim.prepare_creation`, `claim.create`, and provider-neutral status or reconciliation tools using one idempotency reference.
 - **Permitted actions:** Prepare and submit an idempotent provider-neutral creation request after deterministic or staff authority.
 - **Prohibited actions:** Creating from an unconfirmed proposal, treating pending evidence as silently resolved, retrying an unknown outcome without reconciliation, or exposing provider payloads.
 - **Claim State effect:** Record an authorised decision and external operation status; preserve the working Claim and revision regardless of provider result.
@@ -314,9 +314,9 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** A staff member invokes `@Agent` in an authorised Claim scope using natural language.
 - **Input context:** Staff identity, role, task, Claim State, evidence, WorkItems, handoff context, permitted retrieval/tool capabilities, and visibility rules.
 - **Output:** Staff receives a source-linked answer, proposal, comparison, or draft; claimant receives nothing until staff explicitly sends an authorised update; Runtime returns advisory status.
-- **Target actions:** `conversation.summarise`, `conversation.explain_evidence`, `human.propose_next_step`, `external.retrieve`, or `runtime.wait_for_staff`.
+- **Target actions:** `conversation.summarise`, `conversation.explain`, `human.request_approval`, `runtime.continue`, or `runtime.wait_for_user`.
 - **Authority:** Staff role and task scope authorise reads; explicit staff approval separately authorises sends, mutations, disclosures, or high-impact actions.
-- **Tool allow-list:** Claim-scoped read, cited retrieval, comparison, and drafting tools declared for the staff role; no autonomous mutation or send tool.
+- **Tool allow-list:** `claim.read`, `knowledge.search`, `policy.lookup`, `claim_history.lookup`, and `communication.draft` when declared for the staff role; no autonomous mutation or send tool.
 - **Permitted actions:** Read authorised context, retrieve evidence, explain uncertainty, propose next steps, and draft communication.
 - **Prohibited actions:** Autonomous Claim mutation, claimant send, disclosure, high-impact decision, unrestricted cross-claim search, or treating read permission as execution authority.
 - **Claim State effect:** Advisory assistance is read-only; staff acceptance creates a separate authorised action and revision.
@@ -333,7 +333,7 @@ permitted next action; it is not a keyword shortcut.
 - **Trigger / intent:** No declared route matches safely, the input attempts prompt injection, the requested action exceeds scope, or model output cannot be validated.
 - **Input context:** Raw claimant/staff input, current Claim State, actor scope, route registry, policy, capability set, and validation result.
 - **Output:** Claimant or staff receives a bounded clarification or limitation; Runtime returns a rejected proposal or safe failure with no hidden side effect.
-- **Target actions:** `conversation.clarify`, `runtime.stop_without_mutation`, or `runtime.fail_safely`.
+- **Target actions:** `conversation.clarify`, `conversation.state_limitation`, `runtime.stop_no_claim`, or `runtime.fail_safe`.
 - **Authority:** Validation and safety policy authorise only clarification, rejection, or bounded failure; untrusted input and model output grant no authority.
 - **Tool allow-list:** `none`; a later recognised and authorised behaviour may expose its own tools.
 - **Permitted actions:** Ask one focused clarification, explain an unavailable capability, preserve context, and offer an authorised human path.
