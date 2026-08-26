@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +19,10 @@ def _claim_and_session(
     )
     assert created.status_code == 201
     body = created.json()
-    return body['claim']['claim_id'], body['session']['session_id']
+    return (
+        cast(str, body['claim']['claim_id']),
+        cast(str, body['session']['session_id']),
+    )
 
 
 def _save_message(
@@ -66,7 +70,7 @@ def test_message_cursor_uses_total_order_and_filters_visibility_before_paging(
     first = client.get(route, headers=auth_headers, params={'limit': 1})
     assert first.status_code == 200
     assert [item['message_id'] for item in first.json()['items']] == ['msg_a']
-    first_cursor = first.json()['page']['next_cursor']
+    first_cursor = cast(str, first.json()['page']['next_cursor'])
     assert first_cursor
 
     # Simulate a concurrent record whose durable order key sorts before the cursor.
@@ -80,7 +84,7 @@ def test_message_cursor_uses_total_order_and_filters_visibility_before_paging(
     )
     assert second.status_code == 200
     assert [item['message_id'] for item in second.json()['items']] == ['msg_b']
-    second_cursor = second.json()['page']['next_cursor']
+    second_cursor = cast(str, second.json()['page']['next_cursor'])
     assert second_cursor
 
     third = client.get(
