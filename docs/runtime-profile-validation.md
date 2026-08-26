@@ -7,7 +7,7 @@ actual connectivity and temporary-container results observed on 26 August 2026, 
 another contributor can repeat. It does not promote an incomplete profile or claim production
 deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
-The validation branch was synchronized with `main@17f059d8` before the checks below. The temporary
+The validation branch was synchronized with `main@a0313f9` before the checks below. The temporary
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the repository quality gate passes.
 
