@@ -7,6 +7,8 @@ from typing import Protocol
 
 from backend.domain.knowledge import KnowledgeChunk, KnowledgePublicationStatus, KnowledgeSource
 
+INGESTION_PIPELINE_IDENTITY = 'markdown-sections-v1+keyword-index-v1+state-v2'
+
 
 class KnowledgeIngestionError(ValueError):
     pass
@@ -121,6 +123,11 @@ class KnowledgeIngestionService:
                 raise KnowledgeIngestionError(
                     'An immutable document version already exists with different governed metadata.'
                 )
+            if state.get('pipeline_identity') != INGESTION_PIPELINE_IDENTITY:
+                raise KnowledgeIngestionError(
+                    'An indexed document version already exists from a different '
+                    'ingestion pipeline.'
+                )
             return KnowledgeIngestionResult(
                 source.document_id, source.version, checksum, chunk_count, 'unchanged'
             )
@@ -141,6 +148,7 @@ class KnowledgeIngestionService:
             'source_key': source.source_key,
             'source_checksum': checksum,
             'source_metadata_fingerprint': metadata_fingerprint,
+            'pipeline_identity': INGESTION_PIPELINE_IDENTITY,
             'chunk_count': len(chunks),
             'status': 'indexed',
         }

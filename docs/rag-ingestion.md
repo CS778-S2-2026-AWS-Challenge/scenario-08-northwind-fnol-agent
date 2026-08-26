@@ -23,9 +23,11 @@ knowledge/indexed/{document_id}/{version}/ingestion.json
 
 The ingestion record binds the document and version to both the source checksum and a deterministic
 fingerprint of every governed source field. Repeating an import returns `unchanged` only when the
-bytes and governed metadata are identical, and writes no duplicate objects. Different bytes or
+bytes, governed metadata, and code-controlled ingestion pipeline identity are identical, and writes
+no duplicate objects. Different bytes or
 changed provenance, applicability, effective dates, authority, or visibility cannot replace an
-existing document version; the publisher must issue a new version.
+existing document version. A changed chunker/index pipeline also cannot silently reuse an older
+derived artifact; controlled re-publication or rebuild is required.
 
 ## Run
 
@@ -51,6 +53,9 @@ The knowledge bucket defaults to `northwind-knowledge` and may be overridden wit
 unknown document versions, request metadata that differs from the manifest, invalid UTF-8,
 duplicate section identifiers, missing versions, and attempted mutation of an existing version
 fail explicitly.
+
+Source text is always untrusted document content. Instruction-looking passages are preserved for
+traceability but are never interpreted by ingestion as Agent authority or executable tool requests.
 
 ## Current boundary
 
