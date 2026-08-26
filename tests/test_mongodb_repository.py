@@ -2,7 +2,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Barrier, Lock
-from typing import Any
+from typing import Any, ClassVar
 
 import mongomock
 import pytest
@@ -41,9 +41,11 @@ from backend.repositories.mongodb import (
     MongoDBConnectionConfig,
     MongoDBRepository,
     connect_mongodb_repository,
+    probe_mongodb_connectivity,
 )
 from backend.repositories.protocols import (
     IdempotencyConflict,
+    IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
 )
@@ -249,6 +251,70 @@ def test_connected_mongodb_repository_reports_verified_and_can_close(
     repository.close()
 
 
+def test_mongodb_connectivity_probe_pings_and_closes_without_repository_initialisation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ProbeAdmin:
+        calls: ClassVar[list[str]] = []
+
+        @classmethod
+        def command(cls, name: str) -> None:
+            cls.calls.append(name)
+
+    class ProbeClient:
+        admin = ProbeAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = ProbeClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig('mongodb://unused', 'northwind_test')
+    )
+
+    assert status == 'verified'
+    assert client.admin.calls == ['ping']
+    assert client.closed is True
+
+
+def test_mongodb_connectivity_probe_bounds_failure_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingAdmin:
+        @staticmethod
+        def command(_name: str) -> None:
+            raise ServerSelectionTimeoutError(
+                'provider rejected mongodb+srv://probe-user:probe-secret@example.invalid'
+            )
+
+    class FailingClient:
+        admin = FailingAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FailingClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig(
+            'mongodb+srv://configured-user:configured-secret@example.invalid',
+            'northwind_test',
+        )
+    )
+
+    assert status == 'unavailable'
+    assert client.closed is True
+
+
 def test_mongodb_connection_failure_closes_client_without_exposing_uri(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -343,6 +409,40 @@ def test_claim_save_uses_optimistic_revision(repository: MongoDBRepository) -> N
     with pytest.raises(RevisionConflict) as error:
         repository.save_claim(updated.model_copy(update={'revision': 3}), expected_revision=1)
     assert error.value.current_revision == 2
+
+
+def test_claim_mutation_persists_revision_and_idempotency_together(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    updated = claim.model_copy(update={'revision': 2})
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/clm_mongo_001/consent',
+        key='claim-mutation-key',
+        request_fingerprint='claim-mutation-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    repository.save_claim_mutation(updated, 1, idempotency)
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+    with pytest.raises(KeyError):
+        repository.save_claim_mutation(
+            updated.model_copy(update={'revision': 3}),
+            2,
+            IdempotencyRecord(**{**idempotency.__dict__, 'actor_id': 'another-customer'}),
+        )
 
 
 def test_idempotency_rejects_changed_replay(repository: MongoDBRepository) -> None:
