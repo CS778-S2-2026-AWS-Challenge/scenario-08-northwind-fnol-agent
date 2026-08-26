@@ -15,6 +15,7 @@ time-bound commitments belong in `sprint/`.
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
 - [RAG Knowledge Ingestion](rag-ingestion.md)
+- [Filtered RAG Retrieval](rag-retrieval.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Persistence Contract](persistence-schema.md)
