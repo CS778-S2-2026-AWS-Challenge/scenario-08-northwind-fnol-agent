@@ -98,7 +98,7 @@ def test_claimant_handoff_staff_reply_and_continuation_share_one_authoritative_c
                     'I have your saved report and can continue from the details '
                     'already provided.'
                 ),
-            }
+            },
         },
     )
     assert staff_reply.status_code == 200
