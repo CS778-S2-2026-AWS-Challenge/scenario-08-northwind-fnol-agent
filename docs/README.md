@@ -14,7 +14,9 @@ time-bound commitments belong in `sprint/`.
 - [Provider-Neutral Model Gateway](model-gateway.md)
 - [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
+- [Runtime Profile Validation Record](runtime-profile-validation.md)
 - [RAG Knowledge Ingestion](rag-ingestion.md)
+- [Filtered RAG Retrieval](rag-retrieval.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Persistence Contract](persistence-schema.md)
@@ -84,3 +86,7 @@ current document explicitly adopts the same rule.
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also
 historical evidence. They must not silently override current requirements, API schemas,
 data architecture, authority rules, or sprint commitments.
+
+## Sprint 2 Validation Evidence
+
+- [Day 4 external-service validation](day4-external-service-validation.md)

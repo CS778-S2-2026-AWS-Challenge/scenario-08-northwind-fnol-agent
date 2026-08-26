@@ -4,6 +4,7 @@ import pytest
 
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from scripts.check_runtime_profile import (
+    inspect_environment,
     inspect_runtime,
     isolated_environment,
     load_environment_example,
@@ -54,6 +55,16 @@ def test_fixture_example_passes_the_real_startup_preflight() -> None:
         'knowledge_documents': 'using_fixture',
         'knowledge_retrieval': 'using_fixture',
     }
+
+
+def test_parsed_environment_can_be_inspected_with_a_process_accessible_override() -> None:
+    values = load_environment_example(EXAMPLES / 'fixture.env.example')
+    values['NORTHWIND_CORS_ALLOW_ORIGINS'] = 'http://localhost:5173'
+
+    result, exit_code = inspect_environment(values)
+
+    assert exit_code == 0
+    assert result['status'] == 'startup_ready'
 
 
 @pytest.mark.parametrize(
