@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 
@@ -36,6 +37,31 @@ class KnowledgeSearch:
     product: str | None = None
     effective_at: datetime | None = None
     limit: int = 5
+
+
+class KnowledgePublicationStatus(StrEnum):
+    APPROVED = 'approved'
+    DRAFT = 'draft'
+    WITHDRAWN = 'withdrawn'
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSource:
+    document_id: str
+    source_key: str
+    title: str
+    document_type: str
+    version: str
+    source_uri: str
+    jurisdiction: str
+    insurer: str | None
+    product: str | None
+    effective_from: datetime | None
+    effective_to: datetime | None
+    authority: str
+    visibility: str
+    publication_status: KnowledgePublicationStatus
+    expected_checksum: str | None = None
 
 
 class KnowledgeDocumentStore(Protocol):
