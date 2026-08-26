@@ -110,12 +110,20 @@ and checksums rather than embedding those bytes.
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
   reactivate consent.
+- The claimant consent mutation atomically stores its idempotency result with the one Claim State
+  revision advance. The assessor request uses a separate operation identity so provider retry does
+  not replay or rewrite the consent mutation.
 - Assessor routing persists its immutable identity, complete request fingerprint, consent and
   authority references, authorised claim revision, and `prepared` state before provider
-  invocation. Retryable failure, terminal failure, and accepted result are explicit transitions.
+  invocation. The authority decision and prepared operation are one atomic repository mutation;
+  retries never replace the durable decision record. Retryable failure, terminal failure, and
+  accepted result are explicit transitions.
 - Provider acceptance is durable before the final Claim State compare-and-set. If another claim
   mutation advances the revision first, an unchanged retry reconciles the accepted result into a
   new claim revision without invoking or creating a second external task.
+- If the Claim result is durable but the public route-idempotency response is not, an unchanged
+  retry derives the same decision identity, verifies its authorised revision, restores the stored
+  routing result, and then completes the missing idempotency response.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 

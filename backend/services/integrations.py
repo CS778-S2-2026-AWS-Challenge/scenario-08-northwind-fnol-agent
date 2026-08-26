@@ -6,9 +6,14 @@ from backend.adapters.claims_service import (
     ClaimsServiceAdapter,
 )
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.external_services import (
+    ASSESSOR_CONSENT_FIELDS,
+    ASSESSOR_SERVICE_IDENTITY,
+)
 from backend.domain.models import (
     ActorType,
     AgentAction,
+    AgentDecisionRecord,
     AssessorRoutingFailureCode,
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
@@ -58,7 +63,7 @@ def _idempotency_error() -> ApiError:
     )
 
 
-def _assessor_operation_id(payload: RouteAssessorRequest) -> str:
+def assessor_operation_id(payload: RouteAssessorRequest) -> str:
     identity = {
         'claim_id': payload.claim_id,
         'external_claim_id': payload.external_claim_id,
@@ -246,9 +251,11 @@ def route_assessor(
     repository: PersistenceRepository,
     adapter: AssessorServiceAdapter,
     payload: RouteAssessorRequest,
+    *,
+    authorisation_decision: AgentDecisionRecord | None = None,
 ) -> tuple[AssessorRoutingResult, bool]:
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    operation_id = _assessor_operation_id(payload)
+    operation_id = assessor_operation_id(payload)
     claim = repository.get_claim_internal(payload.claim_id)
     if claim is None:
         raise _claim_not_found()
@@ -291,20 +298,12 @@ def route_assessor(
         ),
         None,
     )
-    required_consent_fields = {
-        'claim_id',
-        'external_claim_id',
-        'authorisation_ref',
-        'claimant_consent_ref',
-        'requested_action',
-        'location.region',
-    }
     if (
         consent is None
         or consent.status is not ExternalServiceConsentStatus.GRANTED
-        or consent.service_identity != 'vehicle_damage_assessment_routing'
+        or consent.service_identity != ASSESSOR_SERVICE_IDENTITY
         or consent.requested_action != payload.requested_action
-        or not required_consent_fields.issubset(consent.permitted_fields)
+        or not ASSESSOR_CONSENT_FIELDS.issubset(consent.permitted_fields)
         or consent.granted_by.actor_type is not ActorType.CLAIMANT
         or consent.granted_by.actor_id != claim.customer_id
     ):
@@ -313,12 +312,18 @@ def route_assessor(
             'data scope.',
         )
 
-    decision = repository.get_agent_decision_internal(
-        payload.claim_id,
-        payload.authorisation_ref,
+    decision = (
+        authorisation_decision
+        if operation is None and authorisation_decision is not None
+        else repository.get_agent_decision_internal(
+            payload.claim_id,
+            payload.authorisation_ref,
+        )
     )
     if (
         decision is None
+        or decision.decision_id != payload.authorisation_ref
+        or decision.claim_id != payload.claim_id
         or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
         or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
         or decision.resulting_revision != claim.revision
@@ -344,7 +349,14 @@ def route_assessor(
             updated_at=timestamp,
         )
         try:
-            repository.save_assessor_routing_operation(operation)
+            if authorisation_decision is None:
+                repository.save_assessor_routing_operation(operation)
+            else:
+                repository.save_assessor_routing_preparation(
+                    operation,
+                    authorisation_decision,
+                    claim.customer_id,
+                )
         except IdempotencyConflict as conflict:
             raise _idempotency_error() from conflict
 

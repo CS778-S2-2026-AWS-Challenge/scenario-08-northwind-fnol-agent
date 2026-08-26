@@ -96,6 +96,15 @@ from Claim State. A changed retry is rejected even before any success, and a pro
 result can be reconciled after a concurrent Claim revision advance without invoking a second
 external task.
 
+The claimant experience uses two versioned public mutations. The first records a fixed,
+task-specific consent scope; the second derives the current decision, consent, external claim,
+requested action, and confirmed region from the shared Working Claim before invoking this
+adapter. The action is projected only for a created controlled motor claim when no open handoff
+or professional review has priority. The claimant client shows the participant, controlled
+fixture provider label, purpose, shared-data summary, submission progress, assigned or queued
+result, and bounded failure. It does not construct an internal adapter command or expose the raw
+consent and authority references.
+
 The target external-request lifecycle expands this boundary further. External coordination
 separates capability discovery, request requirements,
 preparation, request-type classification, consent and authority, submission, tracking,
