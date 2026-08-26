@@ -99,7 +99,9 @@ def test_staff_message_fails_closed_without_authoritative_active_session(
     assert repository.list_handoffs(claim_id, after.customer_id) == before_handoffs
     assert (
         repository.find_idempotency(
-            'stf_demo', f'/api/v1/workbench/claims/{claim_id}/messages', 'missing-active-session-send'
+            'stf_demo',
+            f'/api/v1/workbench/claims/{claim_id}/messages',
+            'missing-active-session-send',
         )
         is None
     )
