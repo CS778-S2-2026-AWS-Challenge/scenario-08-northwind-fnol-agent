@@ -34,7 +34,7 @@ from backend.core.runtime_profiles import (
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.protocols import PersistenceRepository
-from backend.services.agent import AgentTurnProvider, ControlledAgent
+from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
 from backend.services.model_agent import GatewayAgent
 
 
@@ -109,11 +109,12 @@ def create_app(
         model_gateway = build_model_gateway(resolved_settings, model_gateway_registry)
         if not model_gateway.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        app.state.agent_turn_provider = GatewayAgent(model_gateway)
+        base_agent_turn_provider: AgentTurnProvider = GatewayAgent(model_gateway)
         app.state.agent_runtime_status = 'configured'
     else:
-        app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
+        base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
+    app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage

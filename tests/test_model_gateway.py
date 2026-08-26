@@ -298,12 +298,14 @@ class StaticGateway:
     def __init__(self, response: ModelResponse) -> None:
         self.response = response
         self.last_request: ModelRequest | None = None
+        self.call_count = 0
 
     @property
     def capabilities(self) -> ModelCapabilities:
         return ModelCapabilities(structured_output=True, tools=False)
 
     def complete(self, request: ModelRequest) -> ModelResponse:
+        self.call_count += 1
         self.last_request = request
         return self.response
 
@@ -312,12 +314,14 @@ class FailingGateway:
     def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
         self.code = code
         self.retryable = retryable
+        self.call_count = 0
 
     @property
     def capabilities(self) -> ModelCapabilities:
         return ModelCapabilities(structured_output=True, tools=False)
 
     def complete(self, _request: ModelRequest) -> ModelResponse:
+        self.call_count += 1
         raise ModelGatewayError(self.code, retryable=self.retryable)
 
 
@@ -334,6 +338,7 @@ def submit_model_message(
     gateway: StaticGateway | FailingGateway,
     *,
     protocol: str,
+    message_text: str = 'A synthetic rear-end incident.',
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
     registry = ModelGatewayRegistry()
     registry.register(protocol, lambda _config: gateway)
@@ -366,7 +371,7 @@ def submit_model_message(
             },
             json={
                 'client_message_id': f'{protocol}-client-message',
-                'content': {'type': 'text', 'text': 'A synthetic rear-end incident.'},
+                'content': {'type': 'text', 'text': message_text},
                 'evidence_refs': [],
             },
         )
@@ -900,6 +905,122 @@ def test_model_gateway_failures_are_bounded_and_atomic_at_message_api(
         session_id,
         protocol,
     )
+
+
+@pytest.mark.parametrize('failure_kind', ['timeout', 'malformed'])
+@pytest.mark.parametrize(
+    ('message_text', 'expected_action', 'expected_reason', 'expected_type', 'expected_trigger'),
+    [
+        (
+            'A passenger is injured and the road is still unsafe.',
+            'URGENT_HANDOFF',
+            'EXPLICIT_SAFETY_SIGNAL',
+            'urgent_support',
+            'urgent_safety_risk',
+        ),
+        (
+            'I want to speak to a person.',
+            'HANDOFF',
+            'HUMAN_SUPPORT_REQUESTED',
+            'human_support',
+            'claimant_support_request',
+        ),
+    ],
+)
+def test_deterministic_interrupts_precede_model_gateway(
+    failure_kind: str,
+    message_text: str,
+    expected_action: str,
+    expected_reason: str,
+    expected_type: str,
+    expected_trigger: str,
+) -> None:
+    gateway: StaticGateway | FailingGateway
+    if failure_kind == 'timeout':
+        gateway = FailingGateway(ModelGatewayErrorCode.TIMEOUT, retryable=True)
+    else:
+        gateway = StaticGateway(ModelResponse(structured_output=None))
+    protocol = f'interrupt_{failure_kind}_{expected_action.lower()}'
+
+    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+        message_text=message_text,
+    )
+
+    assert response.status_code == 200
+    turn = response.json()
+    assert turn['decision']['action'] == expected_action
+    assert turn['decision']['reason_codes'] == [expected_reason]
+    assert gateway.call_count == 0
+    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
+    assert decision.authority.outcome is AuthorityOutcome.AUTHORISED
+    assert decision.proposal_source is AgentProposalSource.CONTROLLED_AGENT
+    assert decision.model_provenance is None
+    handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
+    assert handoff.type.value == expected_type
+    assert handoff.trigger.value == expected_trigger
+    assert handoff.priority.value == turn['handoff']['priority']
+    assert handoff.source_message_id == turn['claimant_message']['message_id']
+
+
+@pytest.mark.parametrize(
+    'message_text',
+    [
+        'No one is injured and we are no longer in danger.',
+        'A support person emailed me yesterday.',
+    ],
+)
+def test_non_interrupt_input_delegates_to_model_gateway(message_text: str) -> None:
+    gateway = StaticGateway(ModelResponse(structured_output=_model_proposal_output()))
+    protocol = f'non_interrupt_{gateway.call_count}_{len(message_text)}'
+
+    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+        gateway,
+        protocol=protocol,
+        message_text=message_text,
+    )
+
+    assert response.status_code == 200
+    assert response.json()['decision']['action'] == 'UPDATE'
+    assert gateway.call_count == 1
+    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
+    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
+
+
+@pytest.mark.parametrize(
+    ('action', 'reason_code'),
+    [
+        ('HANDOFF', 'MODEL_PROPOSED_HANDOFF'),
+        ('URGENT_HANDOFF', 'MODEL_PROPOSED_URGENT_HANDOFF'),
+    ],
+)
+def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output=_model_proposal_output(
+                action=action,
+                state_changes=[{'path': 'claim_state.next_action', 'to': action}],
+            )
+            | {'reason_codes': [reason_code], 'handoff_priority': 'urgent'},
+        )
+    )
+
+    candidate = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-gateway',
+            trigger_message_id='msg-gateway',
+            message_text='A routine synthetic update.',
+            evidence_refs=[],
+        )
+    )
+    authority = validate_proposal(candidate)
+
+    assert candidate.controlled_rule_authorised is False
+    assert candidate.proposal_source is AgentProposalSource.MODEL_GATEWAY
+    assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
+    assert authorised_state_changes(candidate, authority) == []
 
 
 def test_gateway_agent_rejects_model_requested_server_tools() -> None:
