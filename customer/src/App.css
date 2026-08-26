@@ -121,7 +121,7 @@
   overflow: hidden;
   padding: clamp(70px, 10vw, 140px) clamp(28px, 8vw, 124px);
   color: #ffffff;
-  background-image: url('./assets/home-landscape.jpg');
+  background-image: url('./assets/home-landscape.png');
   background-position: center;
   background-size: cover;
   isolation: isolate;
