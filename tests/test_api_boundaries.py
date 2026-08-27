@@ -5,7 +5,12 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.auth import require_claimant, require_integration_service, require_staff
+from backend.core.auth import (
+    require_claimant,
+    require_claimant_session,
+    require_integration_service,
+    require_staff,
+)
 from backend.core.config import Settings
 
 
@@ -39,7 +44,9 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         expected: Callable[..., object] | None
         if route.path.startswith('/api/v1/workbench/'):
             expected = require_staff
-        elif route.path.startswith(('/api/v1/claims', '/api/v1/auth/', '/api/v1/account')):
+        elif route.path.startswith(('/api/v1/auth/', '/api/v1/account')):
+            expected = require_claimant_session
+        elif route.path.startswith('/api/v1/claims'):
             expected = require_claimant
         elif route.path.startswith('/internal/v1/'):
             expected = require_integration_service
