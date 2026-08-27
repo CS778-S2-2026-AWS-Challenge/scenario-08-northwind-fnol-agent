@@ -55,6 +55,32 @@ def test_login_rejects_invalid_credentials_without_revealing_account(client: Tes
     assert 'email or password' in response.json()['error']['message']
 
 
+def test_fixed_compatibility_token_cannot_bypass_account_session_lifecycle(
+    client: TestClient,
+) -> None:
+    headers = {'Authorization': 'Bearer synthetic-claimant'}
+    responses = (
+        client.get('/api/v1/auth/session', headers=headers),
+        client.delete('/api/v1/auth/session', headers=headers),
+        client.get('/api/v1/account', headers=headers),
+        client.patch(
+            '/api/v1/account/profile',
+            headers=headers,
+            json={'display_name': 'Bypass attempt', 'phone': ''},
+        ),
+        client.patch(
+            '/api/v1/account/preferences',
+            headers=headers,
+            json={'email': False, 'sms': True},
+        ),
+    )
+
+    assert all(response.status_code == 401 for response in responses)
+    assert all(
+        response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED' for response in responses
+    )
+
+
 def test_authenticated_claimant_cannot_select_another_customer_identity(client: TestClient) -> None:
     first = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
     second = login(client, 'claimant.two@example.invalid', 'northwind-demo-two')

@@ -2,7 +2,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 
-from backend.core.auth import Principal, require_claimant
+from backend.core.auth import Principal, require_claimant_session
 from backend.core.errors import ApiError
 from backend.domain.identity import (
     AccountProjection,
@@ -48,7 +48,7 @@ def create_auth_session(request: Request, payload: LoginRequest) -> Authenticate
 
 @router.get('/auth/session', response_model=CurrentAuthSession)
 def read_auth_session(
-    request: Request, principal: Principal = Depends(require_claimant)
+    request: Request, principal: Principal = Depends(require_claimant_session)
 ) -> CurrentAuthSession:
     return session_projection(identity_repository_for(request), principal)
 
@@ -57,7 +57,7 @@ def read_auth_session(
 def delete_auth_session(
     request: Request,
     authorization: str | None = Header(default=None),
-    principal: Principal = Depends(require_claimant),
+    principal: Principal = Depends(require_claimant_session),
 ) -> Response:
     del principal
     token = (authorization or '').removeprefix('Bearer ').strip()
@@ -72,7 +72,7 @@ def delete_auth_session(
 
 @router.get('/account', response_model=AccountProjection)
 def read_account(
-    request: Request, principal: Principal = Depends(require_claimant)
+    request: Request, principal: Principal = Depends(require_claimant_session)
 ) -> AccountProjection:
     return account_projection(identity_repository_for(request), principal)
 
@@ -81,7 +81,7 @@ def read_account(
 def patch_account_profile(
     request: Request,
     payload: ProfilePatchRequest,
-    principal: Principal = Depends(require_claimant),
+    principal: Principal = Depends(require_claimant_session),
 ) -> AccountProjection:
     return update_profile(identity_repository_for(request), principal, payload)
 
@@ -90,6 +90,6 @@ def patch_account_profile(
 def patch_account_preferences(
     request: Request,
     payload: PreferencesPatchRequest,
-    principal: Principal = Depends(require_claimant),
+    principal: Principal = Depends(require_claimant_session),
 ) -> AccountProjection:
     return update_preferences(identity_repository_for(request), principal, payload)
