@@ -18,13 +18,19 @@ normalise:
 - system, user, assistant, and tool messages;
 - optional JSON-schema structured output;
 - function-tool declarations and calls;
-- assistant text, finish reason, provider model and request identity; and
+- assistant text, provider-neutral completion status, raw finish reason, provider model and
+  request identity; and
 - input, output, and total token usage when supplied by the endpoint.
 
 `GatewayAgent` converts a normalised structured response into the existing
 `AgentProposal`. The existing deterministic validation then authorises, blocks, or
 requires review for the proposal. A model response never executes a tool, writes claim
 state, creates a claim, or authorises a handoff by itself.
+
+Every adapter maps provider termination data to `complete`, `incomplete`, `refused`, or
+`unknown`. `GatewayAgent` accepts a proposal only from a `complete` response. Truncated,
+refused, filtered, cancelled, and unrecognised results are discarded before proposal
+validation or persistence, even when their partial content happens to match the schema.
 
 The model receives an explicit minimum context projection rather than the durable
 `WorkingClaim`. The projection contains the channel, locale, incident type, customer-safe
@@ -121,11 +127,13 @@ name `AWS_BEARER_TOKEN_BEDROCK`. The adapter never reads a credential from a sou
 profile.
 
 Bedrock Converse does not use the OpenAI request or response shape. The adapter maps system and
-conversation messages to Converse content blocks, requests the supplied proposal schema through
-the system instruction, strictly parses the returned JSON, and normalises text, stop reason,
-usage, configured model identity, and AWS request identity into `ModelResponse`. HTTP authentication,
-rate-limit, provider, timeout, and malformed-output failures use the same provider-neutral errors
-as other adapters.
+conversation messages to Converse content blocks and supplies the response schema as a forced
+`toolChoice` with `toolSpec.inputSchema.json`. Only one `toolUse` block for the reserved
+`northwind_agent_proposal` transport tool is accepted as structured output; prompt-only JSON text
+does not satisfy the declared capability. The adapter normalises text, completion status, stop
+reason, usage, configured model identity, and AWS request identity into `ModelResponse`. HTTP
+authentication, rate-limit, provider, timeout, and malformed-output failures use the same
+provider-neutral errors as other adapters.
 
 The executable claimant prompt is `northwind-fnol-motor-claimant-v1`, stored under
 `backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
@@ -155,6 +163,8 @@ The gateway distinguishes:
 - `authentication`;
 - `rate_limit`;
 - `provider`;
+- `incomplete_response`;
+- `refused_response`;
 - `malformed_response`;
 - `unsupported_capability`; and
 - `configuration`.
@@ -164,10 +174,10 @@ retryable provider failures retain a retryable flag for later orchestration poli
 
 At the claimant message API boundary, a timeout, rate limit, or other retryable provider
 failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`. Authentication,
-configuration, unsupported capability, malformed response, and other non-retryable model
-failures return `502 DEPENDENCY_FAILED` with `retryable: false`. These responses expose no
-provider detail and leave the Claim revision, messages, decisions, and idempotency records
-unchanged.
+configuration, unsupported capability, incomplete or refused completion, malformed response, and
+other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. These
+responses expose no provider detail and leave the Claim revision, messages, decisions, and
+idempotency records unchanged.
 
 ## Current Limitations
 

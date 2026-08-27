@@ -22,10 +22,18 @@ def _bedrock_response(proposal: dict[str, object], request_number: int) -> httpx
             'output': {
                 'message': {
                     'role': 'assistant',
-                    'content': [{'text': json.dumps(proposal)}],
+                    'content': [
+                        {
+                            'toolUse': {
+                                'toolUseId': f'bedrock-motor-tool-{request_number}',
+                                'name': 'northwind_agent_proposal',
+                                'input': proposal,
+                            }
+                        }
+                    ],
                 }
             },
-            'stopReason': 'end_turn',
+            'stopReason': 'tool_use',
             'usage': {'inputTokens': 200, 'outputTokens': 100, 'totalTokens': 300},
         },
     )

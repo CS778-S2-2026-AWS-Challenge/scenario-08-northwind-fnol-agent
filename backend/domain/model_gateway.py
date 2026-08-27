@@ -53,6 +53,13 @@ class ModelUsage(ModelContract):
     total_tokens: int | None = Field(default=None, ge=0)
 
 
+class ModelCompletionStatus(str, Enum):
+    COMPLETE = 'complete'
+    INCOMPLETE = 'incomplete'
+    REFUSED = 'refused'
+    UNKNOWN = 'unknown'
+
+
 class ModelCapabilities(ModelContract):
     structured_output: bool = False
     tools: bool = False
@@ -68,6 +75,7 @@ class ModelResponse(ModelContract):
     text: str | None = None
     structured_output: dict[str, object] | None = None
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
+    completion_status: ModelCompletionStatus = ModelCompletionStatus.UNKNOWN
     finish_reason: str | None = None
     usage: ModelUsage | None = None
     provider_model: str | None = Field(default=None, max_length=300)
@@ -134,6 +142,8 @@ class ModelGatewayErrorCode(str, Enum):
     AUTHENTICATION = 'authentication'
     RATE_LIMIT = 'rate_limit'
     PROVIDER = 'provider'
+    INCOMPLETE_RESPONSE = 'incomplete_response'
+    REFUSED_RESPONSE = 'refused_response'
     MALFORMED_RESPONSE = 'malformed_response'
     UNSUPPORTED_CAPABILITY = 'unsupported_capability'
     CONFIGURATION = 'configuration'
@@ -144,6 +154,10 @@ _ERROR_MESSAGES = {
     ModelGatewayErrorCode.AUTHENTICATION: 'The model endpoint rejected authentication.',
     ModelGatewayErrorCode.RATE_LIMIT: 'The model endpoint rate limit was reached.',
     ModelGatewayErrorCode.PROVIDER: 'The model endpoint could not complete the request.',
+    ModelGatewayErrorCode.INCOMPLETE_RESPONSE: (
+        'The model endpoint returned an incomplete response.'
+    ),
+    ModelGatewayErrorCode.REFUSED_RESPONSE: 'The model endpoint refused the request.',
     ModelGatewayErrorCode.MALFORMED_RESPONSE: 'The model endpoint returned an invalid response.',
     ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY: (
         'The selected model endpoint does not support a required capability.'

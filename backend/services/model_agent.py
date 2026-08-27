@@ -6,6 +6,7 @@ from backend.domain.model_gateway import (
     ModelAgentProposal,
     ModelClaimContext,
     ModelClaimStateContext,
+    ModelCompletionStatus,
     ModelFormFieldContext,
     ModelGateway,
     ModelGatewayError,
@@ -141,6 +142,12 @@ class GatewayAgent:
             response_schema=_PROPOSAL_ADAPTER.json_schema(),
         )
         response = self._gateway.complete(request)
+        if response.completion_status is ModelCompletionStatus.INCOMPLETE:
+            raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
+        if response.completion_status is ModelCompletionStatus.REFUSED:
+            raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
+        if response.completion_status is not ModelCompletionStatus.COMPLETE:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         if response.structured_output is None:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         try:

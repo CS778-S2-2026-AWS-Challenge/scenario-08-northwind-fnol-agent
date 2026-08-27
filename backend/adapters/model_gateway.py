@@ -8,6 +8,7 @@ import httpx
 
 from backend.domain.model_gateway import (
     ModelCapabilities,
+    ModelCompletionStatus,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
@@ -219,8 +220,22 @@ class OpenAICompatibleModelGateway:
         if content is not None and not isinstance(content, str):
             raise TypeError
 
+        refusal = message.get('refusal')
+        if refusal is not None and not isinstance(refusal, str):
+            raise TypeError
+        finish_reason = choice.get('finish_reason')
+        if finish_reason is not None and not isinstance(finish_reason, str):
+            raise TypeError
+        completion_status = OpenAICompatibleModelGateway._completion_status(
+            finish_reason,
+            refused=refusal is not None,
+        )
+
         structured_output: dict[str, object] | None = None
-        if request.response_schema is not None:
+        if (
+            request.response_schema is not None
+            and completion_status is ModelCompletionStatus.COMPLETE
+        ):
             if content is None:
                 raise TypeError
             parsed_content = json.loads(content)
@@ -233,10 +248,7 @@ class OpenAICompatibleModelGateway:
         )
         usage = OpenAICompatibleModelGateway._normalise_usage(payload.get('usage'))
         model = payload.get('model')
-        finish_reason = choice.get('finish_reason')
         if model is not None and not isinstance(model, str):
-            raise TypeError
-        if finish_reason is not None and not isinstance(finish_reason, str):
             raise TypeError
         request_id = headers.get('x-request-id') or payload.get('id')
         if request_id is not None and not isinstance(request_id, str):
@@ -245,11 +257,26 @@ class OpenAICompatibleModelGateway:
             text=content,
             structured_output=structured_output,
             tool_calls=tool_calls,
+            completion_status=completion_status,
             finish_reason=finish_reason,
             usage=usage,
             provider_model=model,
             provider_request_id=request_id,
         )
+
+    @staticmethod
+    def _completion_status(
+        finish_reason: str | None,
+        *,
+        refused: bool,
+    ) -> ModelCompletionStatus:
+        if refused or finish_reason == 'content_filter':
+            return ModelCompletionStatus.REFUSED
+        if finish_reason in {'stop', 'tool_calls'}:
+            return ModelCompletionStatus.COMPLETE
+        if finish_reason in {'length', 'max_tokens'}:
+            return ModelCompletionStatus.INCOMPLETE
+        return ModelCompletionStatus.UNKNOWN
 
     @staticmethod
     def _normalise_tool_calls(value: object) -> list[ModelToolCall]:
@@ -288,6 +315,8 @@ class OpenAICompatibleModelGateway:
 class BedrockConverseModelGateway:
     """HTTP adapter for the Bedrock Runtime Converse API using a bearer token."""
 
+    _STRUCTURED_OUTPUT_TOOL = 'northwind_agent_proposal'
+
     def __init__(
         self,
         config: ModelGatewayConfig,
@@ -314,6 +343,21 @@ class BedrockConverseModelGateway:
         payload: dict[str, object] = {'messages': messages}
         if system:
             payload['system'] = [{'text': system}]
+        if request.response_schema is not None:
+            payload['toolConfig'] = {
+                'tools': [
+                    {
+                        'toolSpec': {
+                            'name': self._STRUCTURED_OUTPUT_TOOL,
+                            'description': (
+                                'Return the structured Northwind Agent proposal for this turn.'
+                            ),
+                            'inputSchema': {'json': request.response_schema},
+                        }
+                    }
+                ],
+                'toolChoice': {'tool': {'name': self._STRUCTURED_OUTPUT_TOOL}},
+            }
         try:
             with httpx.Client(
                 base_url=f'{self._config.base_url.rstrip("/")}/',
@@ -344,7 +388,7 @@ class BedrockConverseModelGateway:
     def _validate_capabilities(self, request: ModelRequest) -> None:
         if request.response_schema is not None and not self.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        if request.tools and not self.capabilities.tools:
+        if request.tools:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
     @staticmethod
@@ -362,11 +406,6 @@ class BedrockConverseModelGateway:
                     'role': message.role.value,
                     'content': [{'text': message.content}],
                 }
-            )
-        if request.response_schema is not None:
-            system_parts.append(
-                'Return exactly one JSON object matching this schema. Do not wrap it in markdown. '
-                + json.dumps(request.response_schema, separators=(',', ':'))
             )
         if not messages:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
@@ -400,18 +439,43 @@ class BedrockConverseModelGateway:
         content = message.get('content')
         if not isinstance(content, list):
             raise TypeError
+        stop_reason = payload.get('stopReason')
+        if stop_reason is not None and not isinstance(stop_reason, str):
+            raise TypeError
+        completion_status = self._completion_status(stop_reason)
         text_parts: list[str] = []
+        structured_blocks: list[dict[str, object]] = []
         for block in content:
-            if not isinstance(block, dict) or not isinstance(block.get('text'), str):
+            if not isinstance(block, dict):
                 raise TypeError
-            text_parts.append(block['text'])
+            if 'text' in block:
+                if not isinstance(block['text'], str):
+                    raise TypeError
+                text_parts.append(block['text'])
+                continue
+            tool_use = block.get('toolUse')
+            if not isinstance(tool_use, dict):
+                raise TypeError
+            structured_blocks.append(tool_use)
         text = ''.join(text_parts)
         structured_output: dict[str, object] | None = None
-        if request.response_schema is not None:
-            parsed_content = json.loads(text)
-            if not isinstance(parsed_content, dict):
+        if (
+            request.response_schema is not None
+            and completion_status is ModelCompletionStatus.COMPLETE
+        ):
+            if len(structured_blocks) != 1:
                 raise TypeError
-            structured_output = parsed_content
+            tool_use = structured_blocks[0]
+            structured_input = tool_use.get('input')
+            if (
+                tool_use.get('name') != self._STRUCTURED_OUTPUT_TOOL
+                or not isinstance(tool_use.get('toolUseId'), str)
+                or not isinstance(structured_input, dict)
+            ):
+                raise TypeError
+            structured_output = structured_input
+        elif request.response_schema is None and structured_blocks:
+            raise TypeError
         usage_value = payload.get('usage')
         usage = None
         if usage_value is not None:
@@ -429,17 +493,25 @@ class BedrockConverseModelGateway:
             if candidate is not None and not isinstance(candidate, str):
                 raise TypeError
             request_id = candidate
-        stop_reason = payload.get('stopReason')
-        if stop_reason is not None and not isinstance(stop_reason, str):
-            raise TypeError
         return ModelResponse(
-            text=text,
+            text=text or None,
             structured_output=structured_output,
+            completion_status=completion_status,
             finish_reason=stop_reason,
             usage=usage,
             provider_model=self._config.model,
             provider_request_id=request_id,
         )
+
+    @staticmethod
+    def _completion_status(stop_reason: str | None) -> ModelCompletionStatus:
+        if stop_reason in {'end_turn', 'stop_sequence', 'tool_use'}:
+            return ModelCompletionStatus.COMPLETE
+        if stop_reason in {'max_tokens', 'model_context_window_exceeded'}:
+            return ModelCompletionStatus.INCOMPLETE
+        if stop_reason in {'guardrail_intervened', 'content_filtered'}:
+            return ModelCompletionStatus.REFUSED
+        return ModelCompletionStatus.UNKNOWN
 
 
 def default_model_gateway_registry() -> ModelGatewayRegistry:

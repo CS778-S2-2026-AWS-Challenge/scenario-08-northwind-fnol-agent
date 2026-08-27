@@ -787,11 +787,12 @@ Request:
 
 When the explicitly configured Agent runtime uses a model gateway, a timeout, rate limit,
 or retryable provider failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
-Authentication, configuration, unsupported-capability, malformed-response, and other
-non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. Both
-outcomes use provider-neutral messages, preserve the current Claim revision, and do not
-write the claimant message, Agent decision, or idempotency result. Provider response bodies,
-credentials, prompts, and internal model context are never returned.
+Authentication, configuration, unsupported-capability, incomplete, refused, malformed-response,
+and other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`.
+Both outcomes use provider-neutral messages, preserve the current Claim revision, and do not write
+the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
+discarded unless the adapter normalises the provider termination state as complete. Provider
+response bodies, credentials, prompts, and internal model context are never returned.
 
 Response `200`:
 
@@ -2096,6 +2097,10 @@ Model transport is an internal dependency and does not add a public API route. A
 orchestration consumes the provider-neutral `ModelRequest` and `ModelResponse` contracts,
 then converts structured output to the existing `AgentProposal`. Existing deterministic
 authority and state validation still controls execution.
+
+`ModelResponse` distinguishes complete, incomplete, refused, and unknown provider termination.
+Only a complete response can become an `AgentProposal`; all other outcomes fail before the Message
+API writes Claim State, messages, decisions, or idempotency results.
 
 The implemented `openai_compatible` adapter supports official, relay, and local
 compatible chat-completions endpoints through configuration. Non-compatible protocols

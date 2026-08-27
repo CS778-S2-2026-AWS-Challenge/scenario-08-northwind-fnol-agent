@@ -17,6 +17,8 @@ from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
 from backend.domain.model_gateway import (
     ModelCapabilities,
+    ModelCompletionStatus,
+    ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
     ModelMessage,
@@ -222,10 +224,18 @@ def test_bedrock_converse_normalises_structured_response_and_usage(
                 'output': {
                     'message': {
                         'role': 'assistant',
-                        'content': [{'text': '{"answer":"ok"}'}],
+                        'content': [
+                            {
+                                'toolUse': {
+                                    'toolUseId': 'structured-output-1',
+                                    'name': 'northwind_agent_proposal',
+                                    'input': {'answer': 'ok'},
+                                }
+                            }
+                        ],
                     }
                 },
-                'stopReason': 'end_turn',
+                'stopReason': 'tool_use',
                 'usage': {'inputTokens': 15, 'outputTokens': 5, 'totalTokens': 20},
             },
         )
@@ -260,12 +270,25 @@ def test_bedrock_converse_normalises_structured_response_and_usage(
     payload = cast(dict[str, object], observed['payload'])
     assert payload['messages'] == [{'role': 'user', 'content': [{'text': 'Return a test object.'}]}]
     system = cast(list[dict[str, str]], payload['system'])[0]['text']
-    assert 'System instruction.' in system
-    assert '"required":["answer"]' in system
+    assert system == 'System instruction.'
+    tool_config = cast(dict[str, object], payload['toolConfig'])
+    assert tool_config['toolChoice'] == {'tool': {'name': 'northwind_agent_proposal'}}
+    tool_spec = cast(
+        dict[str, object],
+        cast(list[dict[str, object]], tool_config['tools'])[0]['toolSpec'],
+    )
+    assert tool_spec['inputSchema'] == {
+        'json': {
+            'type': 'object',
+            'properties': {'answer': {'type': 'string'}},
+            'required': ['answer'],
+        }
+    }
     assert response.structured_output == {'answer': 'ok'}
+    assert response.completion_status is ModelCompletionStatus.COMPLETE
     assert response.provider_model == 'amazon.nova-2-lite-v1:0'
     assert response.provider_request_id == 'bedrock-request-1'
-    assert response.finish_reason == 'end_turn'
+    assert response.finish_reason == 'tool_use'
     assert response.usage is not None and response.usage.total_tokens == 20
 
 
@@ -493,7 +516,10 @@ def test_bedrock_converse_normalises_plain_text_and_metadata_request_id(
         {'output': []},
         {'output': {'message': {'content': {}}}},
         {'output': {'message': {'content': [{}]}}},
-        {'output': {'message': {'content': [{'text': '[]'}]}}},
+        {
+            'output': {'message': {'content': [{'text': '[]'}]}},
+            'stopReason': 'tool_use',
+        },
         {'output': {'message': {'content': [{'text': '{}'}]}}, 'usage': []},
         {
             'output': {'message': {'content': [{'text': '{}'}]}},
@@ -707,7 +733,12 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
 
 class StaticGateway:
     def __init__(self, response: ModelResponse) -> None:
-        self.response = response
+        self.response = (
+            response.model_copy(update={'completion_status': ModelCompletionStatus.COMPLETE})
+            if response.completion_status is ModelCompletionStatus.UNKNOWN
+            and response.structured_output is not None
+            else response
+        )
         self.last_request: ModelRequest | None = None
 
     @property
@@ -742,7 +773,7 @@ def model_gateway_settings(protocol: str) -> Settings:
 
 
 def submit_model_message(
-    gateway: StaticGateway | FailingGateway,
+    gateway: ModelGateway,
     *,
     protocol: str,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
@@ -796,6 +827,104 @@ def assert_model_message_failure_is_atomic(
     assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
     assert repository.find_idempotency('cus_demo', route, f'{protocol}-message') is None
+
+
+@pytest.mark.parametrize(
+    ('adapter', 'provider_reason', 'expected_status'),
+    [
+        ('openai', 'length', ModelCompletionStatus.INCOMPLETE),
+        ('openai', 'refusal', ModelCompletionStatus.REFUSED),
+        ('bedrock', 'max_tokens', ModelCompletionStatus.INCOMPLETE),
+        ('bedrock', 'guardrail_intervened', ModelCompletionStatus.REFUSED),
+    ],
+)
+def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: str,
+    provider_reason: str,
+    expected_status: ModelCompletionStatus,
+) -> None:
+    proposal = _model_proposal_output(
+        form_changes=[
+            {
+                'field_code': 'incident.description',
+                'value': 'A provider result that must not be persisted.',
+            }
+        ]
+    )
+    observed_status: list[ModelCompletionStatus] = []
+
+    if adapter == 'openai':
+        finish_reason = 'stop' if provider_reason == 'refusal' else provider_reason
+        message: dict[str, object] = {
+            'role': 'assistant',
+            'content': json.dumps(proposal),
+        }
+        if provider_reason == 'refusal':
+            message['refusal'] = 'The provider refused this synthetic request.'
+
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'choices': [{'finish_reason': finish_reason, 'message': message}],
+                },
+            )
+        )
+        inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
+            gateway_config(tools=False),
+            transport=transport,
+        )
+    else:
+        monkeypatch.setenv('TEST_BEDROCK_COMPLETION_TOKEN', 'synthetic-bedrock-token')
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'output': {
+                        'message': {
+                            'role': 'assistant',
+                            'content': [{'text': json.dumps(proposal)[:80]}],
+                        }
+                    },
+                    'stopReason': provider_reason,
+                },
+            )
+        )
+        inner_gateway = BedrockConverseModelGateway(
+            gateway_config(
+                credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
+                tools=False,
+            ),
+            transport=transport,
+        )
+
+    class ObservedGateway:
+        @property
+        def capabilities(self) -> ModelCapabilities:
+            return inner_gateway.capabilities
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            result = inner_gateway.complete(request)
+            observed_status.append(result.completion_status)
+            return result
+
+    protocol = f'{adapter}_{provider_reason}'
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        ObservedGateway(),
+        protocol=protocol,
+    )
+
+    assert observed_status == [expected_status]
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
 
 
 def _working_claim() -> WorkingClaim:
