@@ -8,6 +8,7 @@ export interface PullRequestPolicyInput {
 
 export interface PullRequestPolicyResult {
   errors: string[];
+  warnings: string[];
   references: number[];
 }
 

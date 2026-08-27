@@ -10,6 +10,11 @@
 <!-- State whether this is a feature, bug fix, regression validation, integration validation, or documentation/tooling change. -->
 <!-- Draft PRs must still state what exists now and what remains incomplete. -->
 
+- Primary owner:
+- Owned behavior:
+- Non-goals:
+- Scope changed since issue: No
+
 
 ## Acceptance evidence
 
@@ -31,9 +36,51 @@
 - Fixtures and tests:
 - Claimant and staff projections:
 
+## Ownership and overlap
+
+- Expected impact area:
+- Cross-owner impact: None
+- Overlapping issues or PRs: None
+- Owner agreement: Not required
+
+<!-- File overlap is advisory topology evidence, not proof of shared ownership. Stacked or stale
+bases may contain inherited history. Declare only semantic overlap in owned behaviour. -->
+
+## Base and delivery topology
+
+- Base reviewed against:
+- Stacked parent: None
+- Intended merge order: Independent
+- Main changes affecting this PR: None
+
+## Failure-path analysis
+
+- Risk class: Standard
+- Ownership or stale authority:
+- Retry, concurrency, or duplicate delivery:
+- Partial side effect or unknown outcome:
+- Recovery or reconciliation:
+- Sensitive-data or model-output exposure:
+
+<!-- Use None with a reason when a failure-path category cannot apply. High-risk PRs must describe
+the relevant failure states and tests before requesting review. -->
+
 ## Dependencies and risks
 
 - Dependencies:
 - Remaining risks:
+
+## Governance exception
+
+- Protected actions: None
+- Reason: Not required
+- Operator: Not required
+- Allowed PRs: None
+- Window starts: Not required
+- Window expires: Not required
+- Restoration evidence: Not required
+
+<!-- Complete this only when the PR requires a protected repository operation. Use an @operator,
+exact #PR allowlist, ISO-8601 UTC timestamps, and the required ruleset or service restoration check. -->
 
 <!-- If this PR follows a discovered regression or integration gap, explain the relationship here and state whether it changes the original issue's acceptance boundary. -->
