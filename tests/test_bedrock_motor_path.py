@@ -10,7 +10,7 @@ from backend.adapters.model_gateway import (
     ModelGatewayRegistry,
 )
 from backend.app import create_app
-from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -142,6 +142,8 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
         ),
     )
     settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
         model_protocol_adapter='bedrock_converse',
         model_base_url='https://bedrock-runtime.us-east-1.amazonaws.com',
