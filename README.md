@@ -87,6 +87,15 @@ Start the backend:
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+To run a configured model profile from the ignored project `.env`, load it explicitly:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+```
+
+Deployment environments inject the same variable names through their secret and configuration
+mechanisms; they must not package the local `.env` file.
+
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
@@ -148,7 +157,8 @@ The command clears only the in-memory fixture repository and mock adapter state,
 prints a record count for every cleared store, and exits non-zero when the backend
 cannot confirm the reset. It refuses to run against components that have not
 explicitly opted into the synthetic reset boundary. The concrete API and logical
-DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
+DynamoDB mapping is preserved as a historical Sprint 1
+[fixture example](docs/archive/sprint-1/validation/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 

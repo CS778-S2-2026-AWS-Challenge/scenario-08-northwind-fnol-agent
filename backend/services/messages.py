@@ -204,6 +204,53 @@ def _effective_next_step(
     )
 
 
+_MODEL_FIELD_QUESTIONS: dict[str, tuple[str, str, str]] = {
+    'incident.injury_or_danger': (
+        'provide_safety_status',
+        'Is anyone injured or in immediate danger?',
+        'Tell us whether anyone is injured or in immediate danger.',
+    ),
+    'vehicle.drivable': (
+        'provide_vehicle_status',
+        'Is the vehicle safe to drive?',
+        'Tell us whether the vehicle is safe to drive.',
+    ),
+    'incident.occurred_at': (
+        'provide_incident_time',
+        'About when did this happen?',
+        'Tell us approximately when the incident happened.',
+    ),
+    'incident.location': (
+        'provide_incident_location',
+        'Where did the incident happen?',
+        'Tell us where the incident happened.',
+    ),
+    'loss.description': (
+        'describe_loss',
+        'What was damaged or lost?',
+        'Describe what was damaged or lost.',
+    ),
+}
+
+
+def _validated_model_question(proposal: AgentProposal) -> tuple[str, CustomerNextStep] | None:
+    for field_code in proposal.customer_next_step.required_items:
+        question = _MODEL_FIELD_QUESTIONS.get(field_code)
+        if question is None:
+            continue
+        status, response_text, summary = question
+        return (
+            response_text,
+            CustomerNextStep(
+                status=status,
+                summary=summary,
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=[field_code],
+            ),
+        )
+    return None
+
+
 def _safe_model_customer_content(
     proposal: AgentProposal,
     outcome: AuthorityOutcome,
@@ -224,6 +271,14 @@ def _safe_model_customer_content(
             _effective_next_step(proposal.customer_next_step, outcome),
         )
 
+    validated_question = _validated_model_question(proposal)
+    if proposal.action is AgentAction.ASK and validated_question is not None:
+        question, next_step = validated_question
+        return (
+            'More incident information is needed.',
+            f'Thanks. {question}',
+            next_step,
+        )
     if proposal.action is AgentAction.ASK:
         return (
             'More incident information is needed.',
@@ -243,6 +298,13 @@ def _safe_model_customer_content(
                 summary='Clarify or correct the incident detail.',
                 responsible_party=ResponsibleParty.CLAIMANT,
             ),
+        )
+    if proposal.action is AgentAction.CONFIRM and validated_question is not None:
+        question, next_step = validated_question
+        return (
+            'Proposed incident details need claimant confirmation.',
+            f'Thanks. Please review the proposed information. {question}',
+            next_step,
         )
     if proposal.action is AgentAction.CONFIRM:
         return (
