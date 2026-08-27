@@ -112,6 +112,16 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
             claimant_text
         )
 
+        # The policy fact keeps staff-side provenance without leaking the retrieval identifier
+        # into the claimant projection.
+        staff_policy_field = detail['form']['policy.policy_number']
+        assert staff_policy_field['source'] == 'policy'
+        assert staff_policy_field['source_refs'] == [linked.policy_retrieval_id]
+        claimant_policy_field = claimant_claim.json()['form']['policy.policy_number']
+        assert claimant_policy_field['source'] == 'policy'
+        assert claimant_policy_field['value'] == staff_policy_field['value']
+        assert claimant_policy_field['source_refs'] == []
+
         signals = detail['signals']
         assert [item['signal_id'] for item in signals] == [
             'sig_at02_policy_cause',

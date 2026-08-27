@@ -43,7 +43,7 @@
       "policy.policy_number": {
         "value": "POL-MVP-HOME-2048",
         "source": "policy",
-        "source_refs": [],
+        "source_refs": ["ret_fixture_at02_policy"],
         "status": "confirmed",
         "needed_for": "current_action",
         "confidence": 1.0,
@@ -288,7 +288,7 @@
           "policy.policy_number": {
             "value": "POL-MVP-HOME-2048",
             "source": "policy",
-            "source_refs": [],
+            "source_refs": ["ret_fixture_at02_policy"],
             "status": "confirmed",
             "needed_for": "current_action",
             "confidence": 1.0,

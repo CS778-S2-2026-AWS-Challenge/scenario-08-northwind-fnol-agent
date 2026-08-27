@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.adapters.knowledge import (
@@ -80,6 +81,33 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
     }
 
 
+def test_app_lifespan_closes_an_injected_repository() -> None:
+    class ClosableFixtureRepository(FixtureRepository):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    repository = ClosableFixtureRepository()
+
+    with TestClient(create_app(Settings(), repository=repository)):
+        assert not repository.closed
+
+    assert repository.closed
+
+
+def test_bundle_reports_repository_connection_status() -> None:
+    class ConnectedFixtureRepository(FixtureRepository):
+        @staticmethod
+        def connection_status() -> str:
+            return 'verified'
+
+    fixture_bundle = build_data_runtime_bundle(Settings())
+    bundle = replace(fixture_bundle, repository=ConnectedFixtureRepository())
+
+    assert bundle.readiness_checks()['persistence'] == 'verified'
+
+
 def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_profile() -> None:
     for profile in DataRuntimeProfile:
         statuses = runtime_capability_statuses(profile)
@@ -93,6 +121,9 @@ def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_prof
         RUNTIME_CAPABILITIES
     )
     assert set(missing_runtime_capabilities(DataRuntimeProfile.AWS)) == set(RUNTIME_CAPABILITIES)
+    assert runtime_capability_statuses(DataRuntimeProfile.MONGODB)['persistence'] == (
+        'pending_confirmation'
+    )
 
 
 def test_capability_status_table_is_returned_as_a_copy() -> None:

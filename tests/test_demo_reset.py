@@ -1,4 +1,5 @@
-from typing import cast
+from hashlib import sha256
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,6 +64,13 @@ def _populate_demo(
         },
     )
     assert upload.status_code == 201
+    content = b'a' * 100
+    storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
+    storage.put_upload(
+        claim_id=claim['claim_id'],
+        evidence_id=upload.json()['evidence_id'],
+        content=content,
+    )
     completed = client.post(
         f'/api/v1/claims/{claim["claim_id"]}/evidence/{upload.json()["evidence_id"]}/complete',
         headers={
@@ -70,7 +78,7 @@ def _populate_demo(
             'Idempotency-Key': 'reset-demo-complete',
             'If-Match': str(upload.json()['revision']),
         },
-        json={'upload_checksum': f'sha256:{"a" * 64}'},
+        json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
     assert completed.status_code == 202
 
@@ -88,6 +96,7 @@ def _populate_demo(
             claim_id='clm_reset_adapter',
             external_claim_id=claim_outcome.result.external_claim_id,
             authorisation_ref='dec_reset_assessor',
+            claimant_consent_ref='cns_reset_assessor',
             requested_action='route_assessor',
             location=AssessorLocation(region='Auckland'),
         ),

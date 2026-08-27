@@ -4,6 +4,16 @@ import { GitHubApiError } from "./github";
 import type { GitHubClient } from "./github";
 import type { PullRequestEvent } from "./types";
 
+const REMOTE_CI_PROVIDERS = new Set(["none", "github", "circleci"]);
+
+export function requiresLocalQualityEvidence(remoteCiProvider: string): boolean {
+  const provider = remoteCiProvider.trim().toLowerCase();
+  if (!REMOTE_CI_PROVIDERS.has(provider)) {
+    throw new Error("REMOTE_CI_PROVIDER must be none, github, or circleci.");
+  }
+  return provider === "none";
+}
+
 function splitRepository(repository: string): { owner: string; repo: string } {
   const [owner, repo, ...extra] = repository.split("/");
   if (!owner || !repo || extra.length > 0) throw new Error(`Invalid repository name: ${repository}`);
@@ -19,6 +29,7 @@ function statusDescription(errors: readonly string[]): string {
 export async function evaluatePullRequestPolicy(
   event: PullRequestEvent,
   client: GitHubClient,
+  remoteCiProvider = "none",
 ): Promise<{ errors: string[]; references: number[] }> {
   const { owner, repo } = splitRepository(event.repository.fullName);
   const result = validatePullRequestBody({
@@ -26,6 +37,7 @@ export async function evaluatePullRequestPolicy(
     isDraft: event.pullRequest.draft,
     owner,
     repo,
+    requireLocalQualityEvidence: requiresLocalQualityEvidence(remoteCiProvider),
   });
 
   for (const issueNumber of result.references) {

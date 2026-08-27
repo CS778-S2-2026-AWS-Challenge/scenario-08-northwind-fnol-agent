@@ -36,6 +36,11 @@ Kanban collaboration details within that boundary.
   ./scripts/check.ps1
   ```
 
+- The installed pre-push hook uses `scripts/pre-push-quality-gate.ps1`. In `auto` mode it skips
+  the additional local run only after a configured GitHub Actions or verified CircleCI provider is
+  available; otherwise it runs the local gate. `NORTHWIND_QUALITY_GATE_MODE=local` forces the
+  local gate, while `NORTHWIND_QUALITY_GATE_MODE=off` is reserved for authorised maintenance.
+
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
@@ -174,6 +179,10 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 - Read API endpoints from environment configuration.
 - Keep server state, domain state, and visual component state distinct.
+- Scope consent controls, pending operation keys, and action errors to the active record identity;
+  switching or resuming another claim must clear the previous claim's interaction state.
+- After an ambiguous side-effect failure, reload authoritative server state before telling the
+  user that the action did not happen.
 - Prevent empty or duplicate submissions and expose loading, retry, and error states accessibly.
 - Do not expose internal-only tags or review signals in claimant code or UI.
 - Verify keyboard operation, visible focus, semantic labels, responsive layouts, and error announcements.
@@ -190,7 +199,13 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 ## Quality Gate
 
-Before merge, the relevant format, lint, type, unit, contract, build, and end-to-end checks must pass. `main` requires `Backend quality`, `Customer quality`, and `PR policy` for the final pull-request head. The pull request must also record the exact local checks run and their results. A successful build alone does not demonstrate product correctness.
+Before merge, the active quality profile must pass its relevant format, lint, type, unit, contract,
+build, and end-to-end checks. The `github` profile uses the GitHub Actions `Backend quality`,
+`Customer quality`, and `Northwind PR policy` checks; the `circleci` profile uses their CircleCI
+equivalents; the `none` profile uses `Northwind PR policy` with recorded local gate evidence. A ready pull request must
+identify its quality source in `Local validation`: record the exact `./scripts/check.ps1` command
+and `Result: PASS` for `none`, or name the active remote provider for `github` or `circleci`.
+A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 

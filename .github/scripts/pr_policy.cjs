@@ -54,7 +54,24 @@ function issueReferences(content, owner, repo) {
   return [...new Set(references)];
 }
 
-function validatePullRequestBody({ body, isDraft, owner, repo }) {
+/**
+ * @typedef {Object} PullRequestPolicyInput
+ * @property {string} body
+ * @property {boolean} isDraft
+ * @property {string} owner
+ * @property {string} repo
+ * @property {boolean} [requireLocalQualityEvidence]
+ */
+
+/** @param {PullRequestPolicyInput} input */
+function validatePullRequestBody(input) {
+  const {
+    body,
+    isDraft,
+    owner,
+    repo,
+    requireLocalQualityEvidence = true,
+  } = input;
   const errors = [];
   const linkedIssue = sectionContent(body, 'Linked issue');
   const references = issueReferences(linkedIssue, owner, repo);
@@ -80,12 +97,14 @@ function validatePullRequestBody({ body, isDraft, owner, repo }) {
       }
     }
 
-    const validation = sectionContent(body, 'Local validation') || '';
-    if (!/[.\\/]scripts[\\/]check\.ps1(?:\s|`|$)/i.test(validation)) {
-      errors.push('Record `./scripts/check.ps1` in `Local validation`.');
-    }
-    if (!/Result:\s*PASS\b/i.test(validation)) {
-      errors.push('Record `Result: PASS` only after the complete local quality gate passes.');
+    if (requireLocalQualityEvidence) {
+      const validation = sectionContent(body, 'Local validation') || '';
+      if (!/[.\\/]scripts[\\/]check\.ps1(?:\s|`|$)/i.test(validation)) {
+        errors.push('Record `./scripts/check.ps1` in `Local validation`.');
+      }
+      if (!/Result:\s*PASS\b/i.test(validation)) {
+        errors.push('Record `Result: PASS` only after the complete local quality gate passes.');
+      }
     }
 
     const contractImpact = sectionContent(body, 'Contract and data impact') || '';
@@ -111,7 +130,7 @@ function validatePullRequestBody({ body, isDraft, owner, repo }) {
   return { errors, references };
 }
 
-async function run({ github, context, core }) {
+async function run({ github, context, core, requireLocalQualityEvidence = true }) {
   const pullRequest = context.payload.pull_request;
   const { owner, repo } = context.repo;
   const { errors, references } = validatePullRequestBody({
@@ -119,6 +138,7 @@ async function run({ github, context, core }) {
     isDraft: pullRequest.draft,
     owner,
     repo,
+    requireLocalQualityEvidence,
   });
 
   for (const issueNumber of references) {

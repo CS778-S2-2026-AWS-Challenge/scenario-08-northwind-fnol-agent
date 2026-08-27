@@ -225,3 +225,60 @@ def test_scenario_rejects_a_policy_fact_that_does_not_match_retrieval(
 
     with pytest.raises(ValueError, match='policy fact must reference'):
         load_scenario(invalid)
+
+
+def test_scenario_rejects_policy_provenance_without_a_source_ref(tmp_path: Path) -> None:
+    source = CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json'
+    payload = json.loads(source.read_text(encoding='utf-8'))
+    payload['claim']['form']['policy.policy_number']['source_refs'] = []
+    invalid = tmp_path / source.name
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='declares policy provenance without a source_ref'):
+        load_scenario(invalid)
+
+
+def test_scenario_rejects_policy_provenance_that_cites_a_non_policy_retrieval(
+    tmp_path: Path,
+) -> None:
+    source = CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json'
+    payload = json.loads(source.read_text(encoding='utf-8'))
+    payload['claim']['form']['policy.policy_number']['source_refs'] = ['ret_fixture_at02_history']
+    invalid = tmp_path / source.name
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='must reference a scenario policy retrieval record'):
+        load_scenario(invalid)
+
+
+def test_canonical_policy_fields_cite_a_policy_retrieval_record() -> None:
+    scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
+    policy_retrieval_ids = {
+        record.retrieval_id for record in scenario.retrievals if record.kind.value == 'policy'
+    }
+
+    policy_fields = {
+        code: fact for code, fact in scenario.claim.form.items() if fact.source.value == 'policy'
+    }
+    assert policy_fields
+    for fact in policy_fields.values():
+        assert fact.source_refs
+        assert set(fact.source_refs) <= policy_retrieval_ids
+
+
+def test_scenario_rejects_a_reply_that_crosses_the_interaction_session(tmp_path: Path) -> None:
+    source = CANONICAL_SCENARIO_DIRECTORY / 'AT-08-resume.json'
+    payload = json.loads(source.read_text(encoding='utf-8'))
+    replying = next(
+        message for message in payload['messages'] if message['message_id'] == 'msg_at08_agent'
+    )
+    assert replying['in_reply_to'] == 'msg_at08_claimant'
+    replying['session_id'] = 'ses_fixture_at08_resume'
+    invalid = tmp_path / source.name
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(
+        ValueError,
+        match='in_reply_to must reference a message in the same claim and session',
+    ):
+        load_scenario(invalid)

@@ -1,0 +1,204 @@
+{
+  "schema_version": "1.0",
+  "scenario_id": "AT-10-claimant-authorised-assessor",
+  "implementation_status": "fixture_implemented",
+  "existing_boundary": "POST /internal/v1/assessors/route",
+  "requirement_references": [
+    {
+      "reference": "GitHub issue #242",
+      "status": "confirmed",
+      "note": "Requires one claimant-facing external-service scenario with participant, consent, input, output, status, and failure boundaries."
+    },
+    {
+      "reference": "SPEC/08-acceptance-scenarios.md AT-10",
+      "status": "confirmed",
+      "note": "Requires revision and authority checks, idempotent retries, and an honest claimant state and next step."
+    },
+    {
+      "reference": "Challenge Key Feature 2",
+      "status": "unverified_external_brief",
+      "note": "The exact Key Feature 2 wording is not present in the repository and must be confirmed before this scenario is presented as challenge-feature coverage."
+    }
+  ],
+  "participant": {
+    "participant_role": "approved vehicle damage assessor",
+    "service_identity": "vehicle_damage_assessment_routing",
+    "provider_identity": "unverified",
+    "purpose": "Request an assessor assignment for a created motor claim without granting access to the complete claim or making a coverage, liability, repair-authorisation, or fraud decision."
+  },
+  "consent": {
+    "required": true,
+    "authorised_actor": "claimant linked to the Working Claim",
+    "consent_record_field": "claimant_consent_ref",
+    "claimant_prompt": "With your permission, Northwind can share the minimum claim and location details needed to request a vehicle damage assessment. This does not decide coverage or approve repairs. Do you want us to continue?",
+    "withdrawal_boundary": {
+      "before_provider_acceptance": "Withdrawal prevents the external request from being submitted.",
+      "after_provider_acceptance": "Northwind records the withdrawal, but this contract does not promise provider cancellation or recall after acceptance.",
+      "provider_cancellation_status": "requires_separately_approved_capability"
+    }
+  },
+  "minimum_input": [
+    {
+      "name": "claim_id",
+      "purpose": "Scope the request to one Working Claim.",
+      "source": "persisted Claim State",
+      "current_boundary_support": "supported"
+    },
+    {
+      "name": "external_claim_id",
+      "purpose": "Link the task to the matching created external claim.",
+      "source": "authorised claim-creation result",
+      "current_boundary_support": "supported"
+    },
+    {
+      "name": "authorisation_ref",
+      "purpose": "Prove that a controlled rule or authorised staff decision permits routing.",
+      "source": "persisted Agent or staff decision",
+      "current_boundary_support": "supported"
+    },
+    {
+      "name": "claimant_consent_ref",
+      "purpose": "Prove that the claimant linked to the Working Claim permitted the task-specific disclosure.",
+      "source": "persisted consent record",
+      "current_boundary_support": "supported"
+    },
+    {
+      "name": "requested_action",
+      "purpose": "Limit the participant to vehicle damage assessment routing.",
+      "source": "controlled service catalogue",
+      "current_boundary_support": "supported"
+    },
+    {
+      "name": "location.region",
+      "purpose": "Select an eligible regional queue without sharing a full address at the routing stage.",
+      "source": "confirmed claim information",
+      "current_boundary_support": "supported"
+    }
+  ],
+  "provider_neutral_output": [
+    "routing_status",
+    "assessor_reference",
+    "queue_reference",
+    "next_step",
+    "expected_by",
+    "limitations"
+  ],
+  "excluded_input": [
+    "provider SDK or transport payload",
+    "complete claim transcript",
+    "raw evidence bytes or unrestricted evidence access",
+    "staff-only notes or internal signals",
+    "coverage, liability, fraud, approval, rejection, or repair-authorisation decision"
+  ],
+  "status_lifecycle": [
+    {
+      "status": "consent_required",
+      "terminal": false,
+      "claimant_meaning": "Nothing has been shared; Northwind is waiting for the claimant's permission."
+    },
+    {
+      "status": "authorised",
+      "terminal": false,
+      "claimant_meaning": "Consent and Northwind routing authority are recorded, but no external request is yet confirmed."
+    },
+    {
+      "status": "submitting",
+      "terminal": false,
+      "claimant_meaning": "Northwind is attempting the provider-neutral request and must not report an assignment yet."
+    },
+    {
+      "status": "queued",
+      "terminal": false,
+      "claimant_meaning": "The service accepted the request into a queue; an individual assessor may not yet be assigned."
+    },
+    {
+      "status": "assigned",
+      "terminal": true,
+      "claimant_meaning": "The service confirmed an assessor assignment and returned the next step."
+    },
+    {
+      "status": "retryable_failure",
+      "terminal": false,
+      "claimant_meaning": "No success is claimed; the current claim is preserved and the same unchanged operation may be retried explicitly."
+    },
+    {
+      "status": "terminal_failure",
+      "terminal": true,
+      "claimant_meaning": "No success is claimed; the current claim is preserved and Northwind must review the request before another attempt."
+    }
+  ],
+  "failure_outcomes": [
+    {
+      "code": "timeout",
+      "retryable": true,
+      "lifecycle_status": "retryable_failure",
+      "claimant_wording": "The assessment request did not complete. Your claim is saved; Northwind can safely retry the same request.",
+      "claim_state_effect": "preserve_current_claim",
+      "retry_expectation": "Retry only with the same idempotency identity and unchanged input under a controlled retry policy."
+    },
+    {
+      "code": "unavailable",
+      "retryable": true,
+      "lifecycle_status": "retryable_failure",
+      "claimant_wording": "The assessment service is unavailable right now. Your claim is saved, and no assessor has been assigned.",
+      "claim_state_effect": "preserve_current_claim",
+      "retry_expectation": "A controlled retry may occur later; do not fall through to a different provider or fixture."
+    },
+    {
+      "code": "access_denied",
+      "retryable": false,
+      "lifecycle_status": "terminal_failure",
+      "claimant_wording": "We could not send the assessment request because its authorisation was not accepted. Northwind must review the request before trying again.",
+      "claim_state_effect": "preserve_current_claim",
+      "retry_expectation": "Do not retry automatically; obtain corrected authority or access configuration first."
+    },
+    {
+      "code": "malformed",
+      "retryable": false,
+      "lifecycle_status": "terminal_failure",
+      "claimant_wording": "The assessment service returned an unusable response. Your claim is saved; Northwind must review the integration response.",
+      "claim_state_effect": "preserve_current_claim",
+      "retry_expectation": "Do not repair or reinterpret the provider response into success; review the adapter mapping before retrying."
+    }
+  ],
+  "idempotency": {
+    "identity_fields": [
+      "claim_id",
+      "external_claim_id",
+      "authorisation_ref",
+      "claimant_consent_ref",
+      "requested_action"
+    ],
+    "identical_retry": "Return the previously accepted provider-neutral result without creating a second task.",
+    "changed_payload": "Reject reuse of the same operation identity with an idempotency conflict.",
+    "automatic_retry_limit": "not_yet_approved"
+  },
+  "claimant_success_wording": "Your vehicle damage assessment request has been accepted. We will show the assigned assessor or queue and the next step once confirmed; this does not decide coverage or approve repairs.",
+  "claim_state_effects": {
+    "success_may_change": [
+      "assessor_routing",
+      "assessor_routing_fingerprint",
+      "customer_next_step",
+      "revision",
+      "updated_at"
+    ],
+    "failure_may_change": [],
+    "must_not_change": [
+      "confirmed claim facts",
+      "evidence provenance or confirmation state",
+      "coverage",
+      "liability",
+      "fraud signal",
+      "claim approval or rejection",
+      "repair authorisation"
+    ]
+  },
+  "known_limitations": [
+    "This is a controlled scenario contract, not evidence that a production assessor provider is connected.",
+    "The claimant-facing flow uses only the controlled fixture and does not prove a production consent, identity, or assessor-provider integration.",
+    "Authorised-representative consent is not modelled; the fixture accepts only the claimant linked to the Working Claim.",
+    "The fixture implements deterministic success and failure outcomes; it is not evidence that a production assessor provider is connected.",
+    "The exact Challenge Key Feature 2 wording remains outside the repository and must be verified before claiming complete challenge coverage.",
+    "Northwind production retry counts, timeouts, cancellation behaviour, participant access, and service-level timings remain unapproved."
+  ]
+}

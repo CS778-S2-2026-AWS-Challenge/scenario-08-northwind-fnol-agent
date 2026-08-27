@@ -3,11 +3,15 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
     AuthorityOutcome,
     CustomerNextStep,
+    ExternalServiceConsent,
+    ExternalServiceConsentStatus,
     FraudSignal,
     MessageRecord,
     MessageVisibility,
@@ -15,6 +19,7 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.services.support import now_utc
 
 
 def _create_claim_with_context(
@@ -461,6 +466,35 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
 
     created_claim = repository.get_claim_internal(claim_id)
     assert created_claim is not None
+    consent_ref = 'cns_workbench_assessor'
+    consent_time = now_utc()
+    consent = ExternalServiceConsent(
+        consent_ref=consent_ref,
+        service_identity='vehicle_damage_assessment_routing',
+        requested_action='vehicle_damage_assessment',
+        permitted_fields=[
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'location.region',
+        ],
+        status=ExternalServiceConsentStatus.GRANTED,
+        granted_by=ActorReference(
+            actor_type=ActorType.CLAIMANT,
+            actor_id=created_claim.customer_id,
+        ),
+        granted_at=consent_time,
+    )
+    consented_claim = created_claim.model_copy(
+        update={
+            'external_service_consents': [consent],
+            'revision': created_claim.revision + 1,
+            'updated_at': consent_time,
+        }
+    )
+    repository.save_claim(consented_claim, expected_revision=created_claim.revision)
     route_decision = AgentDecisionRecord(
         decision_id='dec_workbench_assessor',
         claim_id=claim_id,
@@ -470,16 +504,16 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         reason_codes=['ASSESSOR_RULE_AUTHORISED'],
         customer_reason='A controlled fixture authorised assessor routing.',
         customer_response='The controlled fixture can request assessor routing.',
-        customer_next_step=created_claim.customer_next_step,
+        customer_next_step=consented_claim.customer_next_step,
         authority=AgentAuthority(
             proposed_by='fixture_rule',
             validated_by='deterministic_rule_engine',
             outcome=AuthorityOutcome.AUTHORISED,
         ),
-        resulting_revision=created_claim.revision,
-        created_at=created_claim.updated_at,
+        resulting_revision=consented_claim.revision,
+        created_at=consented_claim.updated_at,
     )
-    repository.save_agent_decision(route_decision, created_claim.customer_id)
+    repository.save_agent_decision(route_decision, consented_claim.customer_id)
     routing_response = client.post(
         '/internal/v1/assessors/route',
         headers={'Authorization': 'Bearer synthetic-integration'},
@@ -487,6 +521,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
             'claim_id': claim_id,
             'external_claim_id': creation['external_claim_id'],
             'authorisation_ref': route_decision.decision_id,
+            'claimant_consent_ref': consent_ref,
             'requested_action': 'vehicle_damage_assessment',
             'location': {'region': 'Auckland'},
         },
@@ -498,7 +533,13 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         f'/api/v1/workbench/claims/{claim_id}',
         headers=staff_auth_headers,
     )
+    claimant_response = client.get(
+        f'/api/v1/claims/{claim_id}',
+        headers=auth_headers,
+    )
     assert response.status_code == 200
+    assert claimant_response.status_code == 200
+    assert 'external_service_consents' not in claimant_response.json()
     detail = response.json()
     final_claim = repository.get_claim_internal(claim_id)
     assert final_claim is not None
@@ -509,6 +550,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['external_claim']['creation_status'] == 'created'
     assert detail['external_claim']['next_step'] == 'Claims intake review'
     assert detail['external_claim']['expected_by'] is not None
+    assert detail['external_service_consents'] == [consent.model_dump(mode='json')]
     assert detail['assessor_routing'] == routing
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
@@ -521,3 +563,8 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         'msg_workbench_assessor',
     }
     assert detail['messages'] == []
+    queue_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+    queue_item = next(
+        item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
+    )
+    assert queue_item['assignee_id'] == 'stf_demo'

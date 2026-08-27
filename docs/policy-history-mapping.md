@@ -11,6 +11,27 @@ policy and claim-history domain records. It is separate from knowledge-document 
 
 Neither path independently authorises coverage, fraud, liability, approval, or rejection.
 
+## Tool Registry Mapping
+
+The target Tool Registry uses these provider-neutral names rather than provider SDK
+methods or private adapter names:
+
+| Tool | Purpose | Result boundary |
+| --- | --- | --- |
+| `knowledge.search` | Retrieve approved wording, legislation, guidance, or procedures after authority and applicability filtering | Returns exact source version, section citations, limitations, and relevance evidence; it does not identify the claimant's policy |
+| `policy.lookup` | Query the authorised structured policy record associated with the current claimant or Claim | Returns only allow-listed policy facts and matching limitations; it does not make a coverage decision |
+| `claim_history.lookup` | Query authorised historical Claim facts for the current customer and permitted purpose | Returns only allow-listed history facts and limitations; it does not determine fraud or lower service priority |
+
+Each request retains tool version, purpose, actor and Claim scope, source references,
+required permission, bounded arguments, and result identity. The Model may request a
+tool, but Runtime validates and executes it. A successful call proves only the mapped
+result returned at that time.
+
+The current API routes and adapters retain their existing compatibility names until the
+Tool Registry, Runtime requests, persistence, fixtures, and contract tests migrate
+together. This mapping does not introduce a new HTTP route or claim current runtime
+support for the target tool identifiers.
+
 ## Provider Boundary
 
 `ProviderLookupEnvelope` is an internal adapter input. It may contain provider-specific

@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime
+from hashlib import sha256
 from typing import Any, cast
 
 import pytest
@@ -13,6 +14,18 @@ from backend.adapters.evidence_storage import (
 )
 from backend.domain.models import EvidenceFileStatus
 from backend.repositories.fixture import FixtureRepository
+
+
+def put_fixture_upload(
+    client: TestClient,
+    claim_id: str,
+    evidence_id: str,
+    size_bytes: int,
+) -> str:
+    content = b'e' * size_bytes
+    storage = cast(MockEvidenceStorage, cast(FastAPI, client.app).state.evidence_storage)
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
+    return f'sha256:{sha256(content).hexdigest()}'
 
 
 def create_claim(client: TestClient, auth_headers: dict[str, str], key: str) -> dict[str, object]:
@@ -185,6 +198,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert stored_before is not None
     assert stored_before.file_status.value == 'awaiting_upload'
     assert 'url' not in stored_before.provenance
+    checksum = put_fixture_upload(client, claim_id, evidence_id, size_bytes)
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -193,7 +207,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
             'Idempotency-Key': f'complete-{fixture_key}',
             'If-Match': '2',
         },
-        json={'upload_checksum': f'sha256:{"a" * 64}'},
+        json={'upload_checksum': checksum},
     )
     completion_replay = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -202,7 +216,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
             'Idempotency-Key': f'complete-{fixture_key}',
             'If-Match': '2',
         },
-        json={'upload_checksum': f'sha256:{"a" * 64}'},
+        json={'upload_checksum': checksum},
     )
     completion_conflict = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -317,6 +331,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
     )
     assert requested.status_code == 201
     evidence_id = requested.json()['evidence_id']
+    checksum = put_fixture_upload(client, claim_id, evidence_id, 512)
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -325,7 +340,7 @@ def test_processed_evidence_facts_stay_proposed_until_the_claimant_decides(
             'Idempotency-Key': f'{case}-evidence-complete',
             'If-Match': '2',
         },
-        json={'upload_checksum': f'sha256:{"e" * 64}'},
+        json={'upload_checksum': checksum},
     )
     assert completed.status_code == 202
 
@@ -505,7 +520,9 @@ def upload_evidence(
         },
     )
     assert requested.status_code == 201
-    return cast(str, requested.json()['evidence_id'])
+    evidence_id = cast(str, requested.json()['evidence_id'])
+    put_fixture_upload(client, claim_id, evidence_id, 512)
+    return evidence_id
 
 
 def complete_upload(
@@ -516,6 +533,7 @@ def complete_upload(
     case: str,
     revision: int,
 ) -> None:
+    checksum = f'sha256:{sha256(b"e" * 512).hexdigest()}'
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
         headers={
@@ -523,7 +541,7 @@ def complete_upload(
             'Idempotency-Key': f'{case}-complete',
             'If-Match': str(revision),
         },
-        json={'upload_checksum': f'sha256:{"e" * 64}'},
+        json={'upload_checksum': checksum},
     )
     assert completed.status_code == 202
 
@@ -951,10 +969,12 @@ def test_mock_storage_validates_pending_object_identity() -> None:
             size_bytes=101,
         )
 
+    content = b'd' * 100
+    storage.put_upload(claim_id='clm_fixture', evidence_id='evd_fixture', content=content)
     completed = storage.complete_upload(
         claim_id='clm_fixture',
         evidence_id='evd_fixture',
-        checksum=f'sha256:{"d" * 64}',
+        checksum=f'sha256:{sha256(content).hexdigest()}',
         media_type='application/pdf',
         size_bytes=100,
     )
