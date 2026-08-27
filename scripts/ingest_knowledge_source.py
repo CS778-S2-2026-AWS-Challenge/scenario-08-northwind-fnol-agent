@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.adapters.knowledge_object_store import S3CompatibleKnowledgeObjectStore
 from backend.domain.knowledge import KnowledgeSource
 from backend.services.knowledge_ingestion import KnowledgeIngestionService
-from backend.services.knowledge_manifest import load_approved_sources
+from backend.services.knowledge_manifest import load_approved_sources as load_approved_sources
 
 
 @dataclass(frozen=True, slots=True)
