@@ -338,6 +338,9 @@ test('accepts declared overlap for independent human review', async () => {
   const body = readyBody().replace(
     'Overlapping issues or PRs: None',
     'Overlapping issues or PRs: #350 shares docs/api.md; this PR owns policy wording only.',
+  ).replace(
+    'Owner agreement: Not required',
+    'Owner agreement: @bdfa123 confirmed the documented split on #350.',
   );
   const result = await run({
     github: fakeGithub({
@@ -354,6 +357,29 @@ test('accepts declared overlap for independent human review', async () => {
     core,
   });
   assert.deepEqual(result.errors, []);
+});
+
+test('rejects Pending owner agreement for cross-author overlap at Ready', async () => {
+  const core = fakeCore();
+  const body = readyBody().replace(
+    'Overlapping issues or PRs: None',
+    'Overlapping issues or PRs: #350 shares docs/api.md.',
+  ).replace('Owner agreement: Not required', 'Owner agreement: Pending');
+  const result = await run({
+    github: fakeGithub({
+      openPulls: [
+        { number: 341, user: { login: 'jxu316-arch' } },
+        { number: 350, user: { login: 'bdfa123' } },
+      ],
+      files: {
+        341: [{ filename: 'docs/api.md' }],
+        350: [{ filename: 'docs/api.md' }],
+      },
+    }),
+    context: policyContext(pullRequest(body)),
+    core,
+  });
+  assert.ok(result.errors.some((error) => error.includes('completed `Owner agreement`')));
 });
 
 test('rejects an undeclared stacked base', async () => {

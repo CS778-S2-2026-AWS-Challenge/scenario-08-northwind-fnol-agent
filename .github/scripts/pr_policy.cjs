@@ -40,6 +40,10 @@ function isNoneValue(value) {
   return /^(?:none|not applicable|n\/a)(?:\s*[-:].*)?\.?$/i.test((value || '').trim());
 }
 
+function isPendingValue(value) {
+  return /^(?:pending|tbd|to be determined)(?:\s*[-:].*)?\.?$/i.test((value || '').trim());
+}
+
 function fieldContent(body, label) {
   const escapedLabel = escapeRegExp(label);
   const match = (body || '').match(
@@ -317,7 +321,8 @@ async function run({ github, context, core, requireLocalQualityEvidence = true }
       loginIsDeclared(issueOwner, author);
     if (!authorOwnsIssue) {
       const declaration = crossOwnerDeclaration(pullRequest.body || '');
-      if (isNoneValue(declaration.impact) || isNoneValue(declaration.agreement) || !declaration.agreement) {
+      if (isNoneValue(declaration.impact) || isNoneValue(declaration.agreement) ||
+          isPendingValue(declaration.agreement) || !declaration.agreement) {
         const message = `PR author @${author || 'unknown'} is not a declared owner of primary issue #${primaryIssueNumber}; record cross-owner impact and owner agreement.`;
         (pullRequest.draft ? warnings : errors).push(message);
       }
@@ -339,13 +344,29 @@ async function run({ github, context, core, requireLocalQualityEvidence = true }
         owner, repo, pull_number: other.number, per_page: 100,
       });
       const shared = changedPathOverlap(currentPaths, otherFiles.map((file) => file.filename));
-      if (shared.length > 0) overlaps.push({ number: other.number, paths: shared });
+      if (shared.length > 0) {
+        overlaps.push({
+          number: other.number,
+          author: other.user?.login || '',
+          paths: shared,
+        });
+      }
     }
     const declaredOverlap = overlapDeclaration(pullRequest.body || '');
     if (overlaps.length > 0 && (!declaredOverlap || isNoneValue(declaredOverlap))) {
       const detail = overlaps.map(({ number, paths }) => `#${number} (${paths.slice(0, 3).join(', ')})`).join('; ');
       const message = `Declare or resolve changed-file overlap with another open PR: ${detail}.`;
       (pullRequest.draft ? warnings : errors).push(message);
+    }
+    const crossAuthorOverlap = overlaps.some(
+      ({ author }) => author.toLowerCase() !== (pullRequest.user?.login || '').toLowerCase(),
+    );
+    if (crossAuthorOverlap && declaredOverlap && !isNoneValue(declaredOverlap)) {
+      const agreement = crossOwnerDeclaration(pullRequest.body || '').agreement;
+      if (!agreement || isPendingValue(agreement) || /^not required\.?$/i.test(agreement)) {
+        const message = 'Cross-author PR overlap requires a completed `Owner agreement`, not Pending or an unexplained Not required.';
+        (pullRequest.draft ? warnings : errors).push(message);
+      }
     }
 
     const topology = baseDeclarations(pullRequest.body || '');
@@ -387,6 +408,7 @@ module.exports = {
   fieldContent,
   issueReferences,
   isNoneValue,
+  isPendingValue,
   labelledValue,
   loginIsDeclared,
   overlapDeclaration,
