@@ -101,12 +101,17 @@ FastAPI evidence flow against local MinIO, start the packaged service and config
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
-To run the bounded pre-Agent MVP persistence path, start the local MongoDB replica set and MinIO
+To run the bounded local MVP persistence path, start the local MongoDB replica set and MinIO
 initialisers, then use `deploy/runtime/local-mvp.env.example`. The repeatable
 `py -3.12 scripts/run_local_mvp_smoke.py` check verifies MongoDB-backed claimant/staff recovery,
 revision and idempotency behaviour, protected MinIO evidence bytes, and governed knowledge
-retrieval. Policy/history remain synthetic and the real Agent turn stays out of this profile until
-its separately owned contract is delivered.
+retrieval. Policy/history remain synthetic. After those checks pass,
+`py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
+against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
+accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
+and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
+transport is repeatable contract evidence, not a live-provider claim; a live run additionally
+requires an approved endpoint and secret supplied through the documented model environment.
 
 In another terminal, start the claimant client:
 

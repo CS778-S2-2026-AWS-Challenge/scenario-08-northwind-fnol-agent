@@ -60,6 +60,7 @@ Start or verify the transaction-capable local services, then run the real runtim
 docker compose up -d mongodb mongo-init minio minio-init
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/local-mvp.env.example --expect ready
 py -3.12 scripts/run_local_mvp_smoke.py
+py -3.12 scripts/run_local_model_mvp_smoke.py
 ```
 
 The smoke constructs the application twice. The first instance creates a synthetic Claim, stores a
@@ -71,6 +72,16 @@ Claim/session/message/Evidence and retrieval/review-signal recovery, claimant/st
 protected byte download, stale-revision refusal, and transaction rollback when a retrieval bundle
 conflicts with an existing review signal. It writes only a unique synthetic Claim, Evidence, and
 retrieval prefix; it never clears a database, collection, bucket, or knowledge object.
+
+The model smoke selects `AGENT_RUNTIME_PROFILE=model_gateway` in process and exercises the real
+OpenAI-compatible adapter, Gateway Agent, Runtime authority, Message service, and MongoDB
+repository through a deterministic `MockTransport`. It proves one accepted turn persists model
+provenance and recovers after application reconstruction; an identical idempotent replay does not
+call the model again; stale revision is rejected before model execution; and timeout, malformed,
+incomplete, and model-controlled fact metadata attempts leave no Claim revision, message, Agent
+decision, or idempotency write. The transport is controlled provider-shape evidence and must not be
+reported as a live endpoint result. Policy/history remain typed fixtures, and automatic model tool
+orchestration remains outside this validation.
 
 ## Local MinIO Contract Check
 
