@@ -70,7 +70,11 @@ function EnglishDatePicker({ value, onChange }) {
 export default function GuidedMotorClaim({ initialDescription = '', onExit }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch { return null } })()
   const [step, setStep] = useState(saved?.step || 1)
-  const [draft, setDraft] = useState(saved?.draft || { ...EMPTY, description: initialDescription })
+  const [draft, setDraft] = useState({
+    ...EMPTY,
+    ...saved?.draft,
+    description: initialDescription.trim() ? initialDescription : saved?.draft?.description || '',
+  })
   const [claimRef, setClaimRef] = useState(saved?.claimRef || null)
   const [files, setFiles] = useState({})
   const [uploaded, setUploaded] = useState(saved?.uploaded || [])

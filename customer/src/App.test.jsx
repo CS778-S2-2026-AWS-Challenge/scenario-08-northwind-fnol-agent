@@ -299,6 +299,29 @@ describe('claimant intake', () => {
     expect(screen.getByLabelText('Incident description')).toHaveValue('Another vehicle hit my parked car.')
   })
 
+  it('keeps a new homepage description when restoring an older guided Motor draft', async () => {
+    localStorage.setItem('northwind-guided-motor-draft', JSON.stringify({
+      step: 1,
+      draft: {
+        policyNumber: 'NW-123456',
+        description: 'An older saved incident description.',
+      },
+      claimRef: null,
+      uploaded: [],
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A cyclist hit my parked car today.')
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+
+    expect(screen.getByLabelText('Client Number')).toHaveValue('NW-123456')
+    expect(screen.getByLabelText('What happened')).toHaveValue('A cyclist hit my parked car today.')
+
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('A cyclist hit my parked car today.')
+  })
+
   it('returns to guided details and continues without overwriting confirmed fields', async () => {
     const today = new Date()
     const selectedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-12`
