@@ -335,6 +335,9 @@ class MongoDBRepository:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),

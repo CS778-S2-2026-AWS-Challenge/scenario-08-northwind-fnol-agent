@@ -95,11 +95,7 @@ class FixtureRepository(PersistenceRepository):
         return deepcopy(claim) if claim is not None else None
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        self._validate_claim_mutation(claim, expected_revision)
         self._claims[claim.claim_id] = deepcopy(claim)
 
     def _validate_claim_mutation(

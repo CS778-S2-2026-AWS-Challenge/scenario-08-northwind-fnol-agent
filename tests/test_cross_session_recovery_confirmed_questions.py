@@ -94,15 +94,14 @@ def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None
                 }
             )
         )
-        repository.save_claim(
-            claim.model_copy(
-                update={
-                    'active_session_id': None,
-                    'revision': claim.revision + 1,
-                    'updated_at': paused_at,
-                }
-            ),
-            expected_revision=claim.revision,
+        # Fixture seeding: pausing clears the active-session pointer, which
+        # save_claim() correctly rejects under the transaction boundary.
+        repository._claims[claim.claim_id] = claim.model_copy(
+            update={
+                'active_session_id': None,
+                'revision': claim.revision + 1,
+                'updated_at': paused_at,
+            }
         )
 
         resumed = client.post(
