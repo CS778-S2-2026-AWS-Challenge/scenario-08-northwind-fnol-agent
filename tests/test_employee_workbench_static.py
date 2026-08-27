@@ -97,6 +97,25 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert "['Outstanding materials', outstandingEvidence.length]" in page
 
 
+def test_employee_workbench_loads_linked_records_from_the_claim_api() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'fetchClaims(view)' in page
+    assert 'fetchClaimDetail(claimId)' in page
+    assert 'detail.retrievals || []' in page
+    assert 'detail.messages || []' in page
+    assert 'detail.evidence || []' in page
+    assert 'detail.handoffs || []' in page
+    for fixture_identifier in (
+        'clm_fixture_at02',
+        'ret_fixture_at02_policy',
+        'ret_fixture_at02_history',
+        'POL-MVP-HOME-2048',
+        'HIST-MVP-2024-017',
+    ):
+        assert fixture_identifier not in page
+
+
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
@@ -301,3 +320,25 @@ def test_employee_messaging_defines_delivery_retry_and_template_states() -> None
     assert 'Copied for staff review; not sent' in page
     assert '>Reply template<' in page
     assert '>Agent reply suggestion<' not in page
+
+
+def test_employee_workbench_ships_no_embedded_staff_credential() -> None:
+    """The page must not carry a working credential.
+
+    Issue #247 deliverable 10 and the identity contract's migration rules require
+    browser synthetic-token access to be an explicit local opt-in, not a default
+    baked into the static asset.
+    """
+
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    for synthetic_token in (
+        'synthetic-staff',
+        'synthetic-claimant',
+        'synthetic-admin',
+        'synthetic-integration',
+    ):
+        assert synthetic_token not in page
+
+    assert "localStorage.getItem('northwind.staffToken')" in page
+    assert "const STAFF_TOKEN = '" not in page

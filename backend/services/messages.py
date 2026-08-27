@@ -27,12 +27,10 @@ from backend.domain.models import (
     FormStatus,
     HandoffRecord,
     HandoffType,
-    MessageListResponse,
     MessageRecord,
     MessageTurnResponse,
     MessageVisibility,
     NeededFor,
-    PageInfo,
     ProposedFormChange,
     ResponsibleParty,
     StructuredFormField,
@@ -65,8 +63,6 @@ from backend.services.handoffs import (
 from backend.services.professional_reviews import build_policy_review_handoff
 from backend.services.retrieval import search_policy
 from backend.services.support import (
-    decode_cursor,
-    encode_cursor,
     now_utc,
     parse_if_match,
     request_fingerprint,
@@ -954,52 +950,3 @@ def submit_message(
             message='The message turn was already accepted with different retry data.',
         ) from conflict
     return _message_turn_response(repository, principal, claim_id, claimant_message, decision)
-
-
-def list_claim_messages(
-    repository: PersistenceRepository,
-    principal: Principal,
-    claim_id: str,
-    session_id: str,
-    *,
-    limit: int,
-    cursor: str | None,
-    before: datetime | None,
-    after: datetime | None,
-) -> MessageListResponse:
-    if repository.get_session(claim_id, session_id, principal.subject) is None:
-        raise _session_not_found()
-    for field_name, timestamp in {'before': before, 'after': after}.items():
-        if timestamp is not None and timestamp.utcoffset() is None:
-            raise ApiError(
-                status_code=422,
-                code='VALIDATION_ERROR',
-                message=f'The {field_name} filter must include a timezone offset.',
-                details=[
-                    ErrorDetail(
-                        field=field_name,
-                        reason='Use an ISO 8601 timestamp with a timezone offset.',
-                    )
-                ],
-            )
-    visible_messages = [
-        message
-        for message in repository.list_messages(
-            claim_id,
-            session_id,
-            principal.subject,
-        )
-        if message.visibility is not MessageVisibility.INTERNAL_ONLY
-    ]
-    if before is not None:
-        visible_messages = [message for message in visible_messages if message.created_at < before]
-    if after is not None:
-        visible_messages = [message for message in visible_messages if message.created_at > after]
-    offset = decode_cursor(cursor)
-    page_messages = visible_messages[offset : offset + limit]
-    next_offset = offset + len(page_messages)
-    next_cursor = encode_cursor(next_offset) if next_offset < len(visible_messages) else None
-    return MessageListResponse(
-        items=[_claimant_message(message) for message in page_messages],
-        page=PageInfo(next_cursor=next_cursor),
-    )
