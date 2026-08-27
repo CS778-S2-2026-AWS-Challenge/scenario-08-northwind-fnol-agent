@@ -87,6 +87,15 @@ Start the backend:
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+To run a configured model profile from the ignored project `.env`, load it explicitly:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+```
+
+Deployment environments inject the same variable names through their secret and configuration
+mechanisms; they must not package the local `.env` file.
+
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
