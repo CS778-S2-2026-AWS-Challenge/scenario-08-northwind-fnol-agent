@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
@@ -20,7 +20,8 @@ def test_claimant_evidence_projection_excludes_internal_records_and_aggregate_co
     scenario = load_scenario(SCENARIO_PATH)
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
-    client = TestClient(create_app(Settings(), repository))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    client = TestClient(create_app(settings, repository))
     claimant_auth = {'Authorization': 'Bearer synthetic-claimant'}
 
     claimant_evidence = client.get(

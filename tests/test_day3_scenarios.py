@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     CustomerNextStep,
@@ -32,7 +32,8 @@ def scenario(name: str) -> tuple[FixtureRepository, str, str]:
 
 
 def client_for(repository: FixtureRepository) -> TestClient:
-    return TestClient(create_app(Settings(), repository))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    return TestClient(create_app(settings, repository))
 
 
 @pytest.mark.parametrize(
