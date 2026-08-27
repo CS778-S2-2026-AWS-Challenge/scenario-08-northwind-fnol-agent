@@ -8,7 +8,7 @@ during FNOL, how that information is classified, and how a controlled branch sel
 dynamic subset for one claim.
 
 The model is derived from the
-[FNOL As-Is Process and Reporting Fields research](User_Research_and_Pain_Points/FNOL_As-Is_Process_and_Reporting_Fields_Concise_Research_Report_EN.md).
+[FNOL As-Is Process and Reporting Fields research](research/fnol-as-is-process-and-reporting-fields.md).
 Research provenance explains why a field group is considered; this document defines its
 architectural position. Neither source is an approved Northwind production form.
 
