@@ -97,6 +97,25 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert "['Outstanding materials', outstandingEvidence.length]" in page
 
 
+def test_employee_workbench_loads_linked_records_from_the_claim_api() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'fetchClaims(view)' in page
+    assert 'fetchClaimDetail(claimId)' in page
+    assert 'detail.retrievals || []' in page
+    assert 'detail.messages || []' in page
+    assert 'detail.evidence || []' in page
+    assert 'detail.handoffs || []' in page
+    for fixture_identifier in (
+        'clm_fixture_at02',
+        'ret_fixture_at02_policy',
+        'ret_fixture_at02_history',
+        'POL-MVP-HOME-2048',
+        'HIST-MVP-2024-017',
+    ):
+        assert fixture_identifier not in page
+
+
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
