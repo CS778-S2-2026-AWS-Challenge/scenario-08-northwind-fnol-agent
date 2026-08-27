@@ -1,3 +1,4 @@
+import json
 from hashlib import sha256
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from botocore.exceptions import ClientError
 
 from backend.domain.knowledge import KnowledgePublicationStatus, KnowledgeSource
 from scripts.upload_knowledge_sources import approved_source_files, ensure_bucket
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def source(checksum: str) -> KnowledgeSource:
@@ -43,6 +46,21 @@ def test_approved_source_files_reject_checksum_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match='checksum does not match'):
         approved_source_files(tmp_path, [source('0' * 64)])
+
+
+def test_repository_corpus_matches_governed_manifest() -> None:
+    manifest = json.loads(
+        (REPOSITORY_ROOT / 'config' / 'knowledge-sources.json').read_text(encoding='utf-8')
+    )
+
+    for document in manifest['documents']:
+        source_path = (
+            REPOSITORY_ROOT
+            / 'config'
+            / 'knowledge-source-corpus'
+            / Path(document['source_key']).name
+        )
+        assert sha256(source_path.read_bytes()).hexdigest() == document['checksum_sha256']
 
 
 class BucketClient:

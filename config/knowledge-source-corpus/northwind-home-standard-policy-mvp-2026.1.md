@@ -150,5 +150,3 @@ payment prohibited by sanctions.
 The Agent may explain this wording, collect FNOL facts, identify missing schedule or evidence data,
 and cite exact sections. It must transfer coverage applicability, natural-hazard allocation, claim
 approval or rejection, disputed excess, and settlement or payment decisions to authorised staff.
-
-

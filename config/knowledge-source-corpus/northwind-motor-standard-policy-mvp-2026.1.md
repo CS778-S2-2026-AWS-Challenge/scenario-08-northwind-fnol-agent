@@ -149,5 +149,3 @@ penalties, punitive damages, nuclear risk, war, terrorism, or a payment prohibit
 The Agent may explain this wording, collect FNOL facts, identify missing schedule or evidence data,
 and cite exact sections. It must transfer coverage applicability, liability, claim approval or
 rejection, disputed excess, and payment decisions to authorised staff.
-
-

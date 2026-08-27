@@ -63,7 +63,11 @@ Run citation and empty-result checks:
 py -3.12 scripts/verify_local_rag.py config/rag-evaluation-cases.json
 ```
 
-All cases must pass. The schedule-boundary cases intentionally retrieve relevant wording while
+All cases must pass. Each case declares a `retrieval_limit`; every `expected_citations` entry must
+appear and every additional top-N result must be explicitly listed in `allowed_citations`. The
+verifier rejects undeclared extras, duplicate required/allowed entries, and malformed lists, while
+refusal cases require the declared top five to remain empty. The schedule-boundary cases
+intentionally retrieve relevant wording while
 validating and reporting the structured fields required before an exact customer-specific answer
 is possible. This proves that the evaluation metadata records the RAG/Policy Schedule boundary; it
 does not perform a Policy Schedule lookup. The untrusted-query case proves that an instruction-like
@@ -72,15 +76,24 @@ document content.
 
 ## Provider failure
 
-Stop only the local MinIO service and issue an otherwise valid motor knowledge search. The
-retrieval boundary must raise `KnowledgeRetrievalUnavailable` with the stable message
-`The knowledge service is unavailable.` It must not return invented evidence or expose provider
-exception details. Restart MinIO immediately after this check.
+Run the bounded failure verifier after the successful ingestion and citation checks:
+
+```powershell
+py -3.12 scripts/verify_minio_rag_provider_failure.py
+```
+
+The verifier refuses non-local or non-default endpoints, runs `docker compose stop minio`, issues
+a fixed valid motor search directly through `S3CompatibleKnowledgeRetriever`, and asserts that it
+returns no evidence and raises `KnowledgeRetrievalUnavailable` with the stable message
+`The knowledge service is unavailable.` A `finally` block runs
+`docker compose up -d --wait minio`, including when the assertion fails. The process exits zero
+only when the safe failure is observed and MinIO restarts successfully.
 
 ## Recorded result
 
 Validated on 2026-08-27 against MinIO
-`RELEASE.2025-07-23T15-54-02Z` and manifest version `1.0`:
+`RELEASE.2025-07-23T15-54-02Z`, manifest version `1.0`, and corpus checksums
+`a7e4d478...`, `12406124...`, and `041fd8fb...`:
 
 - 3 governed sources uploaded with manifest-matching SHA-256 checksums;
 - 50 chunks indexed (motor 17, home 16, contents 17);

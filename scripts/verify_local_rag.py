@@ -22,13 +22,30 @@ ALLOWED_STRUCTURED_DATA = {
 }
 
 
+def retrieval_limit(case: dict[str, Any]) -> int:
+    value = case.get('retrieval_limit')
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 5:
+        raise ValueError(f'{case["case_id"]} retrieval_limit must be an integer from 1 to 5')
+    return value
+
+
 def evaluate_case(case: dict[str, Any], actual_citations: set[str]) -> list[str]:
     case_id = case['case_id']
     expected_citations = set(case['expected_citations'])
     failures: list[str] = []
 
+    allowed_values = case.get('allowed_citations', [])
+    if not isinstance(allowed_values, list) or any(
+        not isinstance(citation, str) or not citation for citation in allowed_values
+    ):
+        return [f'{case_id} allowed_citations must be a list of non-empty strings']
+    allowed_citations = set(allowed_values)
+    overlap = expected_citations & allowed_citations
+    if overlap:
+        failures.append(f'{case_id} duplicates required citations as allowed {sorted(overlap)}')
+
     missing = expected_citations - actual_citations
-    unexpected = actual_citations - expected_citations
+    unexpected = actual_citations - expected_citations - allowed_citations
     if missing:
         failures.append(f'{case_id} missing {sorted(missing)}')
     if unexpected:
@@ -80,7 +97,7 @@ def main() -> None:
                 insurer=filters['insurer'],
                 product=filters['product'],
                 effective_at=datetime.fromisoformat(filters['effective_at'].replace('Z', '+00:00')),
-                limit=5,
+                limit=retrieval_limit(case),
             )
         )
         actual = {result.chunk_id for result in results}

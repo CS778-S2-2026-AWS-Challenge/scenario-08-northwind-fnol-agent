@@ -18,7 +18,7 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "e1ce6161b65bac765dfe73189257ef2bec88ce35b88b902e8ba906b1a5eb8530"
+      "checksum_sha256": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989"
     },
     {
       "document_id": "nw-policy-home-standard-mvp-2026-1",
@@ -35,7 +35,7 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "94eea5420c7916463113808e135fc1c31537baa130a89a34e75c28914061077e"
+      "checksum_sha256": "1240612470e1ea03800e87fe6f48b24aa895559f9498daaeffd3d3be13c4eea7"
     },
     {
       "document_id": "nw-policy-contents-standard-mvp-2026-1",
@@ -52,7 +52,7 @@
       "authority": "northwind_synthetic_demo",
       "visibility": "customer_and_staff",
       "publication_status": "approved",
-      "checksum_sha256": "e1b8150b996d60207aea6253509d354cf04834eb44d6752b2c7873b8e4254d3e"
+      "checksum_sha256": "041fd8fbf9eafaa2cd1ff13e2998c57ee725f5e32bf61c429abfe4272b87cf40"
     }
   ]
 }

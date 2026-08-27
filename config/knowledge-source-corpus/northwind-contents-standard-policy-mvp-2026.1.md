@@ -155,5 +155,3 @@ The Agent may explain this wording, collect FNOL facts, identify missing schedul
 and cite exact sections. It must transfer coverage applicability, item classification disputes,
 claim approval or rejection, liability, disputed excess, and settlement or payment decisions to
 authorised staff.
-
-

@@ -15,7 +15,8 @@
         "product": "motor",
         "effective_at": "2026-08-27T00:00:00Z"
       },
-      "expected_citations": ["nw-policy-motor-standard-mvp-2026-1#MTR-COV-01"]
+      "expected_citations": ["nw-policy-motor-standard-mvp-2026-1#MTR-COV-01"],
+      "retrieval_limit": 1
     },
     {
       "case_id": "RAG-E2E-02-SCHEDULE-BOUNDARY",
@@ -30,6 +31,7 @@
         "effective_at": "2026-08-27T00:00:00Z"
       },
       "expected_citations": ["nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01"],
+      "retrieval_limit": 1,
       "required_structured_data": ["policy_schedule.excesses"]
     },
     {
@@ -48,6 +50,12 @@
         "nw-policy-home-standard-mvp-2026-1#HOM-BEN-03",
         "nw-policy-home-standard-mvp-2026-1#HOM-EXC-02"
       ],
+      "retrieval_limit": 5,
+      "allowed_citations": [
+        "nw-policy-home-standard-mvp-2026-1#HOM-BEN-01",
+        "nw-policy-home-standard-mvp-2026-1#HOM-BEN-02",
+        "nw-policy-home-standard-mvp-2026-1#HOM-CLM-01"
+      ],
       "required_structured_data": ["policy_schedule.endorsements.hidden_water_damage"]
     },
     {
@@ -62,7 +70,8 @@
         "product": "contents",
         "effective_at": "2026-08-27T00:00:00Z"
       },
-      "expected_citations": ["nw-policy-contents-standard-mvp-2026-1#CON-CLM-01"]
+      "expected_citations": ["nw-policy-contents-standard-mvp-2026-1#CON-CLM-01"],
+      "retrieval_limit": 1
     },
     {
       "case_id": "RAG-E2E-05-WRONG-INSURER",
@@ -76,7 +85,8 @@
         "product": "motor",
         "effective_at": "2026-08-27T00:00:00Z"
       },
-      "expected_citations": []
+      "expected_citations": [],
+      "retrieval_limit": 5
     },
     {
       "case_id": "RAG-E2E-06-UNTRUSTED-QUERY-INSTRUCTION",
@@ -90,7 +100,8 @@
         "product": "motor",
         "effective_at": "2026-08-27T00:00:00Z"
       },
-      "expected_citations": []
+      "expected_citations": [],
+      "retrieval_limit": 5
     }
   ]
 }
