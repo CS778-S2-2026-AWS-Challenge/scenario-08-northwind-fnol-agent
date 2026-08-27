@@ -139,6 +139,10 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
             client.close()
 
 
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+"""Child records whose identity may never be rebound or rewritten once persisted."""
+
+
 class MongoDBRepository:
     """MongoDB implementation of the core Claim/Session/Message boundary.
 
@@ -1091,6 +1095,7 @@ class MongoDBRepository:
             if existing is not None and (
                 existing.get('claim_id') != claim.claim_id
                 or existing.get('customer_id') != claim.customer_id
+                or kind in IMMUTABLE_CHILD_RECORD_KINDS
             ):
                 raise IdempotencyConflict(identifier)
             self._reject_client_message_conflict(document, session=mongo_session)
