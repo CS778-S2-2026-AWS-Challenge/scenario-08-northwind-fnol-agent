@@ -16,11 +16,20 @@ FIXTURE_PATH = REPOSITORY_ROOT / 'tests' / 'fixtures' / 'evidence' / 'path-entry
 if __name__ == '__main__':
     fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
     for entry in fixture_set.entries:
+        handoff = entry.entry_baseline.handoff
+        handoff_summary = (
+            'none'
+            if handoff is None
+            else f'{handoff.type.value}:{handoff.priority.value}:{handoff.queue}'
+        )
         print(
             f'PASS {entry.scenario_id}: path={entry.business_path.value} '
+            f'workflow={entry.claim_state.workflow_state.value} '
+            f'action={entry.claim_state.next_action.value} '
             f'evidence={len(entry.evidence)} state={entry.claim_state.evidence.value} '
             f'received={entry.evidence_summary.received} '
             f'pending={entry.evidence_summary.pending} '
             f'attention={entry.evidence_summary.needs_attention} '
-            f'claimant={len(claimant_evidence_for(entry))}'
+            f'claimant={len(claimant_evidence_for(entry))} '
+            f'handoff={handoff_summary}'
         )
