@@ -19,23 +19,15 @@ def test_exact_expected_citations_pass() -> None:
 
 
 def test_expected_and_unexpected_citation_fails() -> None:
-    failures = evaluate_case(
-        evaluation_case(), {'document#expected', 'document#unexpected'}
-    )
+    failures = evaluate_case(evaluation_case(), {'document#expected', 'document#unexpected'})
 
-    assert failures == [
-        "RAG-E2E-TEST returned unexpected evidence ['document#unexpected']"
-    ]
+    assert failures == ["RAG-E2E-TEST returned unexpected evidence ['document#unexpected']"]
 
 
 def test_empty_expected_citations_reject_any_result() -> None:
-    failures = evaluate_case(
-        evaluation_case(expected_citations=[]), {'document#unexpected'}
-    )
+    failures = evaluate_case(evaluation_case(expected_citations=[]), {'document#unexpected'})
 
-    assert failures == [
-        "RAG-E2E-TEST returned unexpected evidence ['document#unexpected']"
-    ]
+    assert failures == ["RAG-E2E-TEST returned unexpected evidence ['document#unexpected']"]
 
 
 @pytest.mark.parametrize(
