@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.adapters.policy_history import MockPolicyHistoryAdapter, RetrievalUnavailable
 from backend.app import create_app
+from backend.repositories.protocols import IdempotencyConflict
 from scripts.check_runtime_profile import isolated_environment, load_environment_example
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,9 +32,10 @@ def _expect(response: httpx.Response, status_code: int, step: str) -> dict[str, 
     return cast(dict[str, Any], response.json())
 
 
-def _first_process(run_id: str) -> tuple[str, str, str, int]:
+def _first_process(run_id: str) -> tuple[str, str, str, int, list[str], str]:
     evidence_bytes = b'northwind-local-mvp-evidence'
-    with TestClient(create_app()) as client:
+    app = create_app()
+    with TestClient(app) as client:
         created = _expect(
             client.post(
                 '/api/v1/claims',
@@ -131,7 +134,107 @@ def _first_process(run_id: str) -> tuple[str, str, str, int]:
         )
         if knowledge['status'] != 'evidence_found':
             raise RuntimeError('The governed MinIO knowledge query returned no evidence.')
-        return claim_id, session_id, evidence_id, int(completed['revision'])
+
+        policy = _expect(
+            client.post(
+                '/internal/v1/policy/search',
+                headers=INTEGRATION_AUTH,
+                json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+            ),
+            200,
+            'policy evidence lookup',
+        )
+        ambiguous_policy = _expect(
+            client.post(
+                '/internal/v1/policy/search',
+                headers=INTEGRATION_AUTH,
+                json={
+                    'claim_id': claim_id,
+                    'policy_reference': 'synthetic-policy-ambiguous',
+                },
+            ),
+            200,
+            'ambiguous policy lookup',
+        )
+        history = _expect(
+            client.post(
+                '/internal/v1/claim-history/search',
+                headers=INTEGRATION_AUTH,
+                json={
+                    'claim_id': claim_id,
+                    'history_reference': 'synthetic-history-204',
+                    'purpose': 'relevant_history_review',
+                },
+            ),
+            200,
+            'claim history lookup',
+        )
+        no_evidence = _expect(
+            client.post(
+                '/internal/v1/policy/search',
+                headers=INTEGRATION_AUTH,
+                json={'claim_id': claim_id, 'policy_reference': f'{run_id}-missing'},
+            ),
+            200,
+            'policy no-evidence lookup',
+        )
+        if (
+            policy['status'] != 'evidence_found'
+            or ambiguous_policy['status'] != 'ambiguous'
+            or history['status'] != 'evidence_found'
+            or no_evidence['status'] != 'no_evidence'
+        ):
+            raise RuntimeError('Policy or history lookup statuses crossed their typed boundaries.')
+        provider_safe_payload = json.dumps([policy, ambiguous_policy, history])
+        if any(
+            banned in provider_safe_payload
+            for banned in ('fraud_label', 'risk_score', 'policy_conclusion', 'internal_note')
+        ):
+            raise RuntimeError(
+                'A provider-only policy or history field crossed the mapper boundary.'
+            )
+
+        adapter = app.state.policy_history_adapter
+        if not isinstance(adapter, MockPolicyHistoryAdapter):
+            raise RuntimeError('The local MVP policy/history fixture was not selected explicitly.')
+        adapter.set_outage(
+            RetrievalUnavailable(
+                code='PROVIDER_UNAVAILABLE',
+                detail='Synthetic local MVP provider outage.',
+            )
+        )
+        try:
+            unavailable = _expect(
+                client.post(
+                    '/internal/v1/claim-history/search',
+                    headers=INTEGRATION_AUTH,
+                    json={
+                        'claim_id': claim_id,
+                        'history_reference': 'synthetic-history-204',
+                        'purpose': 'relevant_history_review',
+                    },
+                ),
+                200,
+                'claim history unavailable lookup',
+            )
+        finally:
+            adapter.set_outage(None)
+        if unavailable['status'] != 'unavailable' or unavailable['facts'] is not None:
+            raise RuntimeError('Provider unavailability was not kept distinct from no evidence.')
+
+        retrieval_ids = [
+            str(policy['result_id']),
+            str(ambiguous_policy['result_id']),
+            str(history['result_id']),
+        ]
+        return (
+            claim_id,
+            session_id,
+            evidence_id,
+            int(completed['revision']),
+            retrieval_ids,
+            str(ambiguous_policy['result_id']),
+        )
 
 
 def _second_process(
@@ -140,8 +243,11 @@ def _second_process(
     session_id: str,
     evidence_id: str,
     expected_revision: int,
+    retrieval_ids: list[str],
+    ambiguous_retrieval_id: str,
 ) -> dict[str, object]:
-    with TestClient(create_app()) as client:
+    app = create_app()
+    with TestClient(app) as client:
         replayed_claim = _expect(
             client.post(
                 '/api/v1/claims',
@@ -202,6 +308,49 @@ def _second_process(
             200,
             'staff projection recovery',
         )
+        if 'retrievals' in claim or 'signals' in claim:
+            raise RuntimeError('Staff-only retrieval evidence leaked into the claimant projection.')
+        recovered_retrievals = cast(list[dict[str, Any]], staff['retrievals'])
+        if {str(item['retrieval_id']) for item in recovered_retrievals} != set(retrieval_ids):
+            raise RuntimeError(
+                'Policy and history retrieval records did not recover after restart.'
+            )
+        repository = app.state.data_runtime_bundle.repository
+        recovered_signals = repository.list_review_signals(claim_id, 'cus_demo')
+        expected_signal_id = f'sig_{ambiguous_retrieval_id}'
+        if [signal.signal_id for signal in recovered_signals] != [expected_signal_id]:
+            raise RuntimeError('The retrieval review signal did not recover after restart.')
+
+        ambiguous_record = next(
+            item
+            for item in repository.list_retrieval_records(claim_id, 'cus_demo')
+            if item.retrieval_id == ambiguous_retrieval_id
+        )
+        rollback_retrieval_id = f'ret_{run_id}_rollback'
+        rollback_record = ambiguous_record.model_copy(
+            update={'retrieval_id': rollback_retrieval_id}
+        )
+        conflicting_signal = recovered_signals[0].model_copy(
+            update={
+                'source_refs': [rollback_retrieval_id, ambiguous_record.source.reference],
+                'summary': 'This conflicting replay must roll back atomically.',
+            }
+        )
+        try:
+            repository.save_retrieval_bundle(
+                rollback_record,
+                [conflicting_signal],
+                'cus_demo',
+            )
+        except IdempotencyConflict:
+            pass
+        else:
+            raise RuntimeError('A conflicting retrieval bundle was not rejected.')
+        if any(
+            item.retrieval_id == rollback_retrieval_id
+            for item in repository.list_retrieval_records(claim_id, 'cus_demo')
+        ):
+            raise RuntimeError('A rejected retrieval bundle left a partial MongoDB record.')
         downloaded = client.get(
             f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
             headers=STAFF_AUTH,
@@ -233,6 +382,9 @@ def _second_process(
         'revision': expected_revision,
         'messages': 2,
         'evidence_records': 1,
+        'retrieval_records': len(retrieval_ids),
+        'review_signals': 1,
+        'retrieval_rollback': 'verified',
         'persistence': checks['persistence'],
         'evidence_storage': checks['evidence_storage'],
         'knowledge_retrieval': checks['knowledge_retrieval'],
@@ -252,8 +404,18 @@ def main() -> None:
         raise SystemExit('The smoke requires DATA_RUNTIME_PROFILE=local_mvp.')
     run_id = f'local-mvp-{uuid4().hex[:12]}'
     with isolated_environment(values):
-        claim_id, session_id, evidence_id, revision = _first_process(run_id)
-        result = _second_process(run_id, claim_id, session_id, evidence_id, revision)
+        claim_id, session_id, evidence_id, revision, retrieval_ids, ambiguous_id = _first_process(
+            run_id
+        )
+        result = _second_process(
+            run_id,
+            claim_id,
+            session_id,
+            evidence_id,
+            revision,
+            retrieval_ids,
+            ambiguous_id,
+        )
     print(json.dumps({'status': 'PASS', 'run_id': run_id, **result}, indent=2, sort_keys=True))
 
 
