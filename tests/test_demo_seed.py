@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import (
     CANONICAL_SCENARIO_DIRECTORY,
@@ -24,6 +24,7 @@ PATH_FIXTURE = (
     / 'evidence'
     / 'path-entry-visibility.json'
 )
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> None:
@@ -31,7 +32,7 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
     linked = scenario.linked_records
     assert linked is not None
 
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
         body = seeded.json()
@@ -136,7 +137,7 @@ def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None
         entry.scenario_id: entry for entry in load_evidence_path_fixtures(PATH_FIXTURE).entries
     }
 
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
 
@@ -169,14 +170,14 @@ def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None
 
 
 def test_seed_scenarios_rejects_non_staff_credentials() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         response = client.post('/api/v1/workbench/demo/seed-scenarios', headers=CLAIMANT_AUTH)
 
     assert response.status_code == 403
 
 
 def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         assert (
             client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH).status_code
             == 200
@@ -198,7 +199,7 @@ def test_at02_next_step_matches_the_runtime_professional_review_contract() -> No
 
 
 def test_claimant_reads_seeded_professional_review_without_an_internal_handoff() -> None:
-    with TestClient(create_app(Settings(), FixtureRepository())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
 

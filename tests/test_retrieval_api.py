@@ -8,7 +8,7 @@ from backend.adapters.policy_history import (
     RetrievalUnavailable,
 )
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
@@ -32,7 +32,7 @@ def retrieval_client(
     retrieval_adapter: MockPolicyHistoryAdapter,
 ) -> TestClient:
     app = create_app(
-        Settings(),
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         retrieval_repository,
         policy_history_adapter=retrieval_adapter,
     )
@@ -133,13 +133,10 @@ def test_unavailable_provider_reports_the_limitation_and_stores_nothing(
     body = response.json()
     assert body['status'] == 'unavailable'
     assert body['limitations'] == ['The policy provider did not respond within the request budget.']
-
-    # An absent answer must not be reported or stored as a finding.
     assert body['facts'] is None
     assert body['source'] is None
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
     assert retrieval_repository.list_review_signals(claim_id, 'cus_demo') == []
-
     assert readiness.json()['checks']['policy'] == 'unavailable'
     assert readiness.json()['checks']['claim_history'] == 'unavailable'
 
@@ -196,10 +193,7 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
     assert body['facts']['outcome'] == 'settled'
     for banned in ('fraud_finding', 'internal_note', 'Provider-only commentary'):
         assert banned not in allowed.text
-
-    # A caller cannot widen the reason for reading claimant history.
     assert widened.status_code == 422
-
     stored = retrieval_repository.list_retrieval_records(claim_id, 'cus_demo')
     assert [record.kind.value for record in stored] == ['claim_history']
 
@@ -283,5 +277,4 @@ def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
 
     assert reset.status_code == 200
     assert 'mock_retrieval_lookups' in reset.json()['cleared']
-    # A simulated outage is demo state too, so a reset returns a clean provider.
     assert readiness.json()['checks']['policy'] == 'using_fixture'

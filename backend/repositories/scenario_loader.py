@@ -624,7 +624,19 @@ def seed_scenario(
         for session in scenario.sessions
         if session.session_id == scenario.claim.active_session_id
     )
-    repository.create_claim(scenario.claim, active_session)
+    staff_history_count = len(scenario.staff_actions) + len(scenario.customer_updates)
+    starting_revision = scenario.claim.revision - staff_history_count
+    if starting_revision < 1:
+        raise ValueError(
+            f'{scenario.scenario_id}: final claim revision {scenario.claim.revision} cannot replay '
+            f'{staff_history_count} material staff history records.'
+        )
+
+    seed_claim = scenario.claim.model_copy(update={'revision': starting_revision})
+    seed_active_session = active_session.model_copy(
+        update={'context_revision': min(active_session.context_revision, starting_revision)}
+    )
+    repository.create_claim(seed_claim, seed_active_session)
     for session in scenario.sessions:
         if session.session_id != active_session.session_id:
             repository.save_session(session)
@@ -636,34 +648,57 @@ def seed_scenario(
         repository.save_message(message, scenario.claim.customer_id)
     for handoff in scenario.handoffs:
         repository.save_handoff(handoff, scenario.claim.customer_id)
-    # Scenario records represent already-audited staff history.  They are seeded
-    # without changing the fixture claim revision, while retaining ordinary
-    # repository ownership and idempotency checks.
+
+    current_revision = starting_revision
+    # Canonical scenarios store a final-state claim plus already-audited staff history.
+    # Replay each material history record through the same N -> N+1 boundary so fixture
+    # hydration does not require a special repository bypass.
     for action in scenario.staff_actions:
+        next_revision = current_revision + 1
+        updated_claim = scenario.claim.model_copy(
+            update={
+                'revision': next_revision,
+                'updated_at': action.completed_at or action.created_at,
+            }
+        )
         repository.save_staff_mutation(
-            scenario.claim,
-            scenario.claim.revision,
+            updated_claim,
+            current_revision,
             IdempotencyRecord(
                 actor_id=action.completed_by or action.assigned_to,
                 route='fixture://staff-actions',
                 key=action.action_id,
                 request_fingerprint=f'fixture-staff-action:{action.action_id}',
                 claim_id=scenario.claim.claim_id,
-                session_id=scenario.claim.active_session_id or '',
+                session_id='',
             ),
             staff_action=action,
         )
+        current_revision = next_revision
+
     for update in scenario.customer_updates:
+        next_revision = current_revision + 1
+        updated_claim = scenario.claim.model_copy(
+            update={'revision': next_revision, 'updated_at': update.created_at}
+        )
         repository.save_staff_mutation(
-            scenario.claim,
-            scenario.claim.revision,
+            updated_claim,
+            current_revision,
             IdempotencyRecord(
                 actor_id=update.created_by,
                 route='fixture://customer-updates',
                 key=update.update_id,
                 request_fingerprint=f'fixture-customer-update:{update.update_id}',
                 claim_id=scenario.claim.claim_id,
-                session_id=scenario.claim.active_session_id or '',
+                session_id='',
             ),
             customer_update=update,
         )
+        current_revision = next_revision
+
+    if current_revision != scenario.claim.revision:
+        raise ValueError(
+            f'{scenario.scenario_id}: seeded revision {current_revision} does not match '
+            f'final fixture revision {scenario.claim.revision}.'
+        )
+    repository.save_session(active_session)

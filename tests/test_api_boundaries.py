@@ -45,9 +45,10 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         assert expected in dependency_calls, f'Route {route.path} is missing {expected.__name__}.'
 
 
-def test_claimant_routes_reject_staff_and_integration_credentials(client: TestClient) -> None:
+def test_claimant_routes_reject_other_registered_actor_credentials(client: TestClient) -> None:
     allowed = client.get('/api/v1/claims/clm_missing', headers=_bearer('synthetic-claimant'))
     staff = client.get('/api/v1/claims/clm_missing', headers=_bearer('synthetic-staff'))
+    administrator = client.get('/api/v1/claims/clm_missing', headers=_bearer('synthetic-admin'))
     integration = client.get(
         '/api/v1/claims/clm_missing',
         headers=_bearer('synthetic-integration'),
@@ -55,16 +56,20 @@ def test_claimant_routes_reject_staff_and_integration_credentials(client: TestCl
     unknown = client.get('/api/v1/claims/clm_missing', headers=_bearer('unknown'))
 
     assert allowed.status_code == 404
-    _assert_error(staff.status_code, staff.json(), 'ACCESS_DENIED')
-    _assert_error(integration.status_code, integration.json(), 'ACCESS_DENIED')
+    for response in (staff, administrator, integration):
+        _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
     _assert_error(unknown.status_code, unknown.json(), 'AUTHENTICATION_REQUIRED')
 
 
-def test_staff_routes_reject_claimant_and_integration_credentials(client: TestClient) -> None:
+def test_staff_routes_reject_other_registered_actor_credentials(client: TestClient) -> None:
     allowed = client.get('/api/v1/workbench/claims/clm_missing', headers=_bearer('synthetic-staff'))
     claimant = client.get(
         '/api/v1/workbench/claims/clm_missing',
         headers=_bearer('synthetic-claimant'),
+    )
+    administrator = client.get(
+        '/api/v1/workbench/claims/clm_missing',
+        headers=_bearer('synthetic-admin'),
     )
     integration = client.get(
         '/api/v1/workbench/claims/clm_missing',
@@ -73,12 +78,12 @@ def test_staff_routes_reject_claimant_and_integration_credentials(client: TestCl
     unknown = client.get('/api/v1/workbench/claims/clm_missing', headers=_bearer('unknown'))
 
     assert allowed.status_code == 404
-    _assert_error(claimant.status_code, claimant.json(), 'ACCESS_DENIED')
-    _assert_error(integration.status_code, integration.json(), 'ACCESS_DENIED')
+    for response in (claimant, administrator, integration):
+        _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
     _assert_error(unknown.status_code, unknown.json(), 'AUTHENTICATION_REQUIRED')
 
 
-def test_integration_routes_reject_claimant_and_staff_credentials(client: TestClient) -> None:
+def test_integration_routes_reject_other_registered_actor_credentials(client: TestClient) -> None:
     payload = {
         'working_claim_id': 'clm_missing',
         'claim_revision': 1,
@@ -103,6 +108,11 @@ def test_integration_routes_reject_claimant_and_staff_credentials(client: TestCl
         headers=_bearer('synthetic-staff'),
         json=payload,
     )
+    administrator = client.post(
+        '/internal/v1/claims/create',
+        headers=_bearer('synthetic-admin'),
+        json=payload,
+    )
     unknown = client.post(
         '/internal/v1/claims/create',
         headers=_bearer('unknown'),
@@ -110,8 +120,8 @@ def test_integration_routes_reject_claimant_and_staff_credentials(client: TestCl
     )
 
     assert allowed.status_code == 404
-    _assert_error(claimant.status_code, claimant.json(), 'ACCESS_DENIED')
-    _assert_error(staff.status_code, staff.json(), 'ACCESS_DENIED')
+    for response in (claimant, staff, administrator):
+        _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
     _assert_error(unknown.status_code, unknown.json(), 'AUTHENTICATION_REQUIRED')
 
 
@@ -128,6 +138,11 @@ def test_deprecated_claimant_route_is_not_an_authentication_bypass(client: TestC
         headers=_bearer('synthetic-staff'),
         json=payload,
     )
+    administrator = client.post(
+        '/api/claims/message',
+        headers=_bearer('synthetic-admin'),
+        json=payload,
+    )
     integration = client.post(
         '/api/claims/message',
         headers=_bearer('synthetic-integration'),
@@ -136,11 +151,42 @@ def test_deprecated_claimant_route_is_not_an_authentication_bypass(client: TestC
 
     assert allowed.status_code == 200
     _assert_error(missing.status_code, missing.json(), 'AUTHENTICATION_REQUIRED')
-    _assert_error(staff.status_code, staff.json(), 'ACCESS_DENIED')
-    _assert_error(integration.status_code, integration.json(), 'ACCESS_DENIED')
+    for response in (staff, administrator, integration):
+        _assert_error(response.status_code, response.json(), 'ACCESS_DENIED')
 
 
-def test_synthetic_credentials_are_disabled_outside_fixture_environments() -> None:
+def test_normal_mode_rejects_synthetic_credentials_even_in_development() -> None:
+    app = create_app(Settings(environment='development'))
+    integration_payload = {
+        'working_claim_id': 'clm_missing',
+        'claim_revision': 1,
+        'authorised_decision_id': 'dec_missing',
+        'confirmed_form': {},
+        'evidence_refs': [],
+        'pending_evidence': [],
+        'route': 'standard_motor_intake',
+    }
+
+    with TestClient(app) as client:
+        claimant = client.get(
+            '/api/v1/claims/clm_missing',
+            headers=_bearer('synthetic-claimant'),
+        )
+        staff = client.get(
+            '/api/v1/workbench/claims/clm_missing',
+            headers=_bearer('synthetic-staff'),
+        )
+        integration = client.post(
+            '/internal/v1/claims/create',
+            headers=_bearer('synthetic-integration'),
+            json=integration_payload,
+        )
+
+    for response in (claimant, staff, integration):
+        _assert_error(response.status_code, response.json(), 'AUTHENTICATION_REQUIRED')
+
+
+def test_synthetic_credentials_are_disabled_in_production_normal_mode() -> None:
     app = create_app(Settings(environment='production'))
     integration_payload = {
         'working_claim_id': 'clm_missing',
