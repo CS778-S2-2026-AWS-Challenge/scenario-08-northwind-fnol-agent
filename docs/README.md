@@ -32,6 +32,7 @@ workflows depend on them:
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
+- [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)

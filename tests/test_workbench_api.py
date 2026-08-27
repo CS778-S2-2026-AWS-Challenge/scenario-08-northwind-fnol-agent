@@ -232,16 +232,15 @@ def test_created_claim_route_does_not_override_workbench_queue(
     claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
     stored_claim = repository.get_claim_internal(claim_id)
     assert stored_claim is not None
-    repository.save_claim(
-        stored_claim.model_copy(
-            update={
-                'route': 'standard_motor_intake',
-                'claim_state': stored_claim.claim_state.model_copy(
-                    update={'workflow_state': WorkflowState.CREATED}
-                ),
-            }
-        ),
-        expected_revision=stored_claim.revision,
+    # Fixture seeding: this precondition is outside the save_claim() transaction
+    # boundary (pointer change or revision-neutral write), so it is stored directly.
+    repository._claims[stored_claim.claim_id] = stored_claim.model_copy(
+        update={
+            'route': 'standard_motor_intake',
+            'claim_state': stored_claim.claim_state.model_copy(
+                update={'workflow_state': WorkflowState.CREATED}
+            ),
+        }
     )
 
     response = client.get(
