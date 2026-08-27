@@ -11,7 +11,7 @@ from backend.adapters.evidence_storage import (
     S3CompatibleObjectStorageConfig,
 )
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
+from backend.core.config import Settings
 from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import PersistenceRepository
@@ -19,7 +19,6 @@ from scripts import reset_demo as reset_command
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
-DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def _populate_demo(
@@ -97,6 +96,7 @@ def _populate_demo(
             claim_id='clm_reset_adapter',
             external_claim_id=claim_outcome.result.external_claim_id,
             authorisation_ref='dec_reset_assessor',
+            claimant_consent_ref='cns_reset_assessor',
             requested_action='route_assessor',
             location=AssessorLocation(region='Auckland'),
         ),
@@ -112,7 +112,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
     assessor_adapter = MockAssessorServiceAdapter()
     storage = MockEvidenceStorage()
     app = create_app(
-        DEVELOPER_SETTINGS,
+        Settings(),
         repository,
         claims_service_adapter=claims_adapter,
         assessor_service_adapter=assessor_adapter,
@@ -146,7 +146,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
     [('synthetic-claimant', 403), ('synthetic-integration', 403), ('unknown', 401)],
 )
 def test_reset_rejects_non_staff_credentials(token: str, expected_status: int) -> None:
-    with TestClient(create_app(DEVELOPER_SETTINGS)) as client:
+    with TestClient(create_app(Settings())) as client:
         response = client.post(
             '/api/v1/workbench/demo/reset',
             headers={'Authorization': f'Bearer {token}'},
@@ -174,7 +174,7 @@ def test_reset_refuses_unknown_persistence_without_touching_mock_results() -> No
     )
     claims_adapter.create_claim(command, 'out-of-scope-fingerprint')
     app = create_app(
-        DEVELOPER_SETTINGS,
+        Settings(),
         repository=cast(PersistenceRepository, object()),
         claims_service_adapter=claims_adapter,
     )
@@ -199,7 +199,7 @@ def test_reset_fails_closed_for_minio_without_clearing_repository() -> None:
         ),
         client=object(),
     )
-    app = create_app(DEVELOPER_SETTINGS, repository=repository, evidence_storage=storage)
+    app = create_app(Settings(), repository=repository, evidence_storage=storage)
 
     with TestClient(app) as client:
         created = client.post(

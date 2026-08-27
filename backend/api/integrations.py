@@ -5,6 +5,11 @@ from fastapi import APIRouter, Depends, Header, Request, Response, status
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_integration_service
+from backend.domain.knowledge import (
+    KnowledgeRetriever,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+)
 from backend.domain.models import (
     AssessorRoutingResult,
     CompleteEvidenceProcessingRequest,
@@ -22,6 +27,7 @@ from backend.domain.retrieval import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import complete_evidence_processing
 from backend.services.integrations import create_external_claim, route_assessor
+from backend.services.knowledge_search import search_knowledge
 from backend.services.retrieval import search_claim_history, search_policy
 
 router = APIRouter(prefix='/internal/v1', tags=['internal-integrations'])
@@ -41,6 +47,19 @@ def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
     return cast(PolicyHistoryAdapter, request.app.state.policy_history_adapter)
+
+
+def knowledge_retriever_for(request: Request) -> KnowledgeRetriever:
+    return cast(KnowledgeRetriever, request.app.state.knowledge_retriever)
+
+
+@router.post('/knowledge/search', response_model=KnowledgeSearchResponse)
+def search_knowledge_integration(
+    payload: KnowledgeSearchRequest,
+    request: Request,
+    _principal: Principal = Depends(require_integration_service),
+) -> KnowledgeSearchResponse:
+    return search_knowledge(knowledge_retriever_for(request), payload)
 
 
 @router.post('/policy/search', response_model=PolicySearchResponse)

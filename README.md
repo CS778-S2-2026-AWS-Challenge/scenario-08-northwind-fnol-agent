@@ -81,39 +81,37 @@ py -3.12 -m pip install -r backend/requirements-dev.txt
 npm ci --prefix customer
 ```
 
-Protected APIs are fail-closed by default. The repository synthetic identities are available only
-when local/test developer identity mode is selected explicitly. For the local demo backend:
+Start the backend:
 
 ```powershell
-$env:NORTHWIND_ENVIRONMENT='development'
-$env:NORTHWIND_IDENTITY_MODE='developer'
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+To run a configured model profile from the ignored project `.env`, load it explicitly:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+```
+
+Deployment environments inject the same variable names through their secret and configuration
+mechanisms; they must not package the local `.env` file.
 
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
-In another terminal, start the claimant client with its explicit local synthetic credential:
+In another terminal, start the claimant client:
 
 ```powershell
-$env:VITE_NORTHWIND_CLAIMANT_TOKEN='synthetic-claimant'
 npm run dev --prefix customer
 ```
-
-The browser credential does not enable developer mode; the backend must already be running with
-`NORTHWIND_IDENTITY_MODE=developer`. In normal mode the same repository synthetic credential is
-rejected. This is a local fixture identity path, not production authentication.
 
 The Vite development server proxies `/api` requests to the local backend. To run the employee
 workbench, serve `employee/` on port 8002 as documented in `employee/README.md`; it reads and
 updates the same backend claim state.
 
-`.env.example` records the complete non-secret local-demo settings, including the explicit identity
-mode and synthetic profiles. The application does not silently enable developer identity merely
-because `NORTHWIND_ENVIRONMENT=development` or `test`. Local development permits any CORS origin by
-default and does not enable credentialed cross-origin requests.
+Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
 ## Verification
 
@@ -149,8 +147,7 @@ Every invocation creates a fresh in-memory repository, so rerunning the command
 is a clean reset for that isolated fixture verifier. It does not reset a running
 FastAPI demo process.
 
-To reset the running local demo backend, start the backend in explicit developer identity mode and
-run:
+To reset the running local demo backend, start the backend and run:
 
 ```powershell
 py -3.12 scripts/reset_demo.py
@@ -160,7 +157,8 @@ The command clears only the in-memory fixture repository and mock adapter state,
 prints a record count for every cleared store, and exits non-zero when the backend
 cannot confirm the reset. It refuses to run against components that have not
 explicitly opted into the synthetic reset boundary. The concrete API and logical
-DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
+DynamoDB mapping is preserved as a historical Sprint 1
+[fixture example](docs/archive/sprint-1/validation/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 

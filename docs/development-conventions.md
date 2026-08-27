@@ -15,6 +15,10 @@ Kanban collaboration details within that boundary.
   ```
 
 - Use a short-lived `feature/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>` branch. Use one branch and pull request for one coherent outcome.
+- Do not reuse a branch from a merged or closed pull request. Before the first push and before
+  requesting review, fetch `origin` and inspect changes on the intended base. Update the branch when
+  main changed an overlapping path, shared contract, schema, migration, dependency, or build input;
+  unrelated main movement does not require a mechanical merge commit.
 - Before requesting review, push the branch and open a pull request against `main`:
 
   ```powershell
@@ -44,6 +48,9 @@ Kanban collaboration details within that boundary.
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
+- Reviewing or discovering adjacent work does not transfer its implementation ownership. Leave a
+  bounded review finding or create a follow-up issue, then coordinate with the active owner before
+  changing their behaviour, branch, pull request, or metadata.
 
 ## Repository Issues
 
@@ -179,6 +186,10 @@ Before moving a card to `In review`, add a `Delivery evidence` section to the ca
 
 - Read API endpoints from environment configuration.
 - Keep server state, domain state, and visual component state distinct.
+- Scope consent controls, pending operation keys, and action errors to the active record identity;
+  switching or resuming another claim must clear the previous claim's interaction state.
+- After an ambiguous side-effect failure, reload authoritative server state before telling the
+  user that the action did not happen.
 - Prevent empty or duplicate submissions and expose loading, retry, and error states accessibly.
 - Do not expose internal-only tags or review signals in claimant code or UI.
 - Verify keyboard operation, visible focus, semantic labels, responsive layouts, and error announcements.
@@ -205,6 +216,11 @@ A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 
-- Root documentation introduces the project; product requirements belong in the specification; sprint commitments belong in sprint plans; engineering details belong here.
+- Root documentation introduces the project; product requirements belong in the specification;
+  sprint commitments belong in sprint plans; current engineering details belong in `docs/`.
+- Separate target design, current status, research evidence, and historical delivery records under
+  `docs/design/`, `docs/status/`, `docs/research/`, and `docs/archive/` respectively.
+- Archive Sprint-day plans, task-specific validation reports, demonstration runbooks, screenshots,
+  and exact-commit evidence instead of adding them to the `docs/` root.
 - Prefer short, topic-specific documents and maintain directory indexes.
 - State facts, decisions, hypotheses, prototype rules, and open questions separately.

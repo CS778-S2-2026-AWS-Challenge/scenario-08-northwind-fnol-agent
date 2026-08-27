@@ -1,4 +1,4 @@
-const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
+const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
 
 export class ApiRequestError extends Error {
   constructor(message, { code, status, retryable = false, currentRevision = null } = {}) {
@@ -133,6 +133,35 @@ export function createExternalClaim({
   idempotencyKey = requestId('claim-creation'),
 }) {
   return apiRequest(`/api/v1/claims/${claimId}/creation`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
+export function grantAssessorConsent({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-consent'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing/consent`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ consent: true }),
+  })
+}
+
+export function requestAssessorRouting({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-routing'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing`, {
     method: 'POST',
     headers: {
       'Idempotency-Key': idempotencyKey,

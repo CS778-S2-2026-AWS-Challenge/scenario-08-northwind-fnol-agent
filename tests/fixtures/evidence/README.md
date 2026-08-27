@@ -22,30 +22,45 @@ fixture work.
 
 ## Path entry and visibility fixtures
 
-`path-entry-visibility.json` classifies the complete canonical evidence set for
-the fast, professional-review, urgent, human-request, and pending-evidence
-paths. It does **not** own a second copy of any `EvidenceRecord`.
+`path-entry-visibility.json` records the current clear, pending, urgent,
+professional-review, and handoff entry baselines, and classifies the complete
+canonical evidence set for each path. It does **not** own a second copy of any
+`EvidenceRecord` or `HandoffRecord`.
 
-Each entry names a canonical scenario in `backend/demo_data/scenarios` and each
-visibility item stores only:
+Each entry names a canonical scenario in `backend/demo_data/scenarios`. Its
+entry baseline records the expected workflow, Agent action, evidence state,
+claimant status and responsibility, plus the bounded handoff shape when one is
+required. Each visibility item stores only:
 
 - a fixture/classification id;
 - one visibility value (`claimant_visible`, `shared`, or `internal_only`);
 - the canonical `evidence_id` it classifies.
 
-`load_evidence_path_fixtures()` resolves the actual evidence payload from the
-canonical scenario. The loader rejects embedded evidence payloads, unknown
-references, duplicate references, and incomplete classifications. Claim id,
-Claim State, Evidence Summary, and customer next step are also projected from
-the canonical scenario.
+`load_evidence_path_fixtures()` resolves the actual evidence and handoff payloads
+from the canonical scenario. The loader rejects embedded evidence payloads,
+unknown references, duplicate references, incomplete classifications, and a
+scenario that drifts from its recorded entry baseline. Claim id, Claim State,
+Evidence Summary, customer next step, and handoffs are projected from the
+canonical scenario.
 
-This gives the path fixture one job only: classify visibility. Evidence value,
-source, lifecycle state, provenance, timing, and relationship data remain owned
-by the canonical scenario.
+The fixture owns only entry expectations and visibility classifications.
+Evidence and handoff values, source, lifecycle state, provenance, timing, and
+relationship data remain owned by the canonical scenario.
+
+### Current workflow-state limitation
+
+AT-04 urgent support and AT-05 claimant-requested human support currently use
+`workflow_state=professional_review` as a coarse implementation state. They are
+not the same business path as professional coverage review: urgency,
+customer-support state, handoff type, priority, queue, and trigger preserve the
+separate semantics. The entry baseline records that current implementation
+limitation; a future workflow-registry change must update the scenarios and
+baselines deliberately rather than keeping the old value only to satisfy tests.
 
 The claimant fixture projection includes `claimant_visible` and `shared`, strips
 internal provenance, and excludes `internal_only` evidence. Validate all five
-path entries with:
+path entries and print their workflow, action, evidence, and handoff baselines
+with:
 
 ```powershell
 py -3.12 scripts/run_evidence_visibility_fixtures.py

@@ -1,85 +1,130 @@
 # Documentation
 
-This directory contains current engineering contracts, development guidance, user
-research, and dated delivery evidence. Product requirements belong in `SPEC/`, and
+This directory separates current engineering documentation, target design, current status,
+research evidence, and historical delivery records. Product requirements belong in `SPEC/`, and
 time-bound commitments belong in `sprint/`.
 
-## Current Engineering Contracts
+## Authority
+
+- `SPEC/` defines product behaviour and acceptance.
+- Current engineering documents define implemented or governed boundaries only where they say so.
+- `design/` records target architecture and rationale; it does not prove implementation.
+- `status/` records evidence observed at a named point in time; it does not create a contract.
+- `research/` informs product decisions within the limitations stated by each source.
+- `archive/` preserves dated planning, validation, and demonstration evidence; it is not current
+  product or engineering authority.
+
+Historical records must not override the current specification, API, data contracts, authority
+rules, or sprint commitments.
+
+## Stable Entry Points
+
+These paths remain at the documentation root because repository instructions and contributor
+workflows depend on them:
 
 - [Repository Operation Rules](repo_rule.md)
 - [Current API Contract](api.md)
-- [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Development Conventions](development-conventions.md)
+- [Documentation Index](README.md)
+
+## Current Engineering Documents
+
 - [Agent Runtime Policy](agent-runtime-policy.md)
-- [Provider-Neutral Model Gateway](model-gateway.md)
-- [Data Architecture, Runtime Profiles, and Knowledge Retrieval](data-architecture.md)
-- [RAG Knowledge Ingestion](rag-ingestion.md)
+- [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
+- [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
+- [Data Architecture](data-architecture.md)
+- [Fixtures and Test Conventions](fixtures_convention.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
-- [Registry and Dynamic FNOL Form Design](registry_design.md)
+- [MinIO Object-Storage Boundary](minio-object-storage.md)
+- [Provider-Neutral Model Gateway](model-gateway.md)
 - [Persistence Contract](persistence-schema.md)
 - [Policy and Claim-History Retrieval Contract](policy-history-mapping.md)
-- [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
-- [MinIO Object-Storage Boundary](minio-object-storage.md)
+- [RAG Knowledge Ingestion](rag-ingestion.md)
+- [Filtered RAG Retrieval](rag-retrieval.md)
 - [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
-- [Fixtures and Test Conventions](fixtures_convention.md)
+- [Registry and Dynamic FNOL Form Design](registry_design.md)
+- [Runtime Deployment Profiles](runtime-deployment-profiles.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
-These documents are normative only for the boundaries they explicitly own. A contract
-change must update affected implementation, consumers, fixtures, and tests in the same
-pull request when the changed behaviour is implemented.
+These documents are normative only for the boundaries they explicitly own. An implemented
+contract change must update the implementation, consumers, fixtures, and tests in the same pull
+request.
 
-## Documentation Layers
+## Target Design
 
-`SPEC/` defines product behaviour and acceptance. Current engineering contracts define
-implemented boundaries. The Agent Runtime Target defines the future engineering direction
-without claiming implementation. The Migration document isolates the deprecated fallback,
-and the Progress document records exact-head evidence. These layers must not be treated as
-interchangeable proof.
+The Agent Runtime design is deliberately separated from current transport and implementation
+evidence:
 
-- [Agent Runtime Target](agent-runtime-target.md) - future engineering direction
-- [Agent Runtime Migration](agent-runtime-migration.md) - deprecated compatibility path
-- [Agent Runtime Progress](agent-runtime-progress.md) - current evidence ledger
+- [Agent Runtime Target](design/agent-runtime/agent-runtime-target.md)
+- [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md)
+- [Agent Behaviour and Model Gateway Design](design/agent-runtime/agent-behaviour-and-model-gateway-design.md)
 
-## Non-Normative Design Rationale
+The target defines future engineering direction, the migration document isolates the temporary
+compatibility path, and the design study records research and rationale. Current API and runtime
+documents remain authoritative for implemented behaviour.
 
-- [Agent Behaviour and Model Gateway Design](agent-behaviour-and-model-gateway-design.md)
+## Current Status Records
 
-This research and decision draft supports issues #233 and #234. It records sources,
-alternatives, and rationale, but it does not replace the target document, current API, or
-runtime policy.
+- [Agent Runtime Progress](status/agent-runtime-progress.md)
+- [Runtime Profile Validation Record](status/runtime-profile-validation.md)
 
-## User Research
+Status records must name repeatable evidence and their limitations. They should be updated or
+superseded when the implementation state changes.
 
-- [Research directory](User_Research_and_Pain_Points/)
+## Research Evidence
 
-Research evidence informs product decisions but does not override `SPEC/` or establish
-Northwind-specific prevalence without Northwind evidence.
+- [Research-to-Product Traceability](research/research-to-prototype-traceability.md)
+- [FNOL Evidence Sheet](research/fnol-evidence-sheet.md)
+- [Pain Point Analysis](research/pain-point-analysis.md)
+- [User Personas](research/user-personas.md)
+- [FNOL As-Is Process and Reporting Fields](research/fnol-as-is-process-and-reporting-fields.md)
+- [Existing Claims Fraud Controls and Verification](research/existing-claims-fraud-controls-and-verification.md)
+- [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
+- [Participant Information and Consent](research/participant-information-and-consent.md)
+- [Claimant Survey Response Export](research/claimant-survey-final-responses.csv)
+- [Claimant Survey Form Export](research/insurance-claim-customer-experience-survey.pdf)
 
-## Sprint 1 Historical Evidence
+Research evidence informs product decisions but does not establish Northwind-specific prevalence,
+policy, or production authority unless the source explicitly supports that claim.
 
-The following records preserve dated planning, implementation, test, and demonstration
-evidence. They do not describe the current product or engineering contract unless a
-current document explicitly adopts the same rule.
+## Historical Delivery Archive
 
-- [Day 3 implementation map](day3-implementation-map.md)
-- [Day 3 evidence and scenario integration results](day3-bdfa-integration-results.md)
-- [Day 4 assembled prototype integration results](day4-assembled-prototype-integration-results.md)
-- [Day 4 API and data-boundary verification](day4-api-data-boundary-verification.md)
-- [Day 4 routing and workbench write-back verification](day4-routing-workbench-writeback-verification.md)
-- [Day 4 urgent and human-support verification](day4-urgent-human-support-verification.md)
-- [Day 4 evidence-state and visibility defects](day4-evidence-visibility-defects.md)
-- [Day 4 responsive and accessibility verification](day4-responsive-accessibility-verification.md)
-- [Day 4 journey test records](d4-t02-test-records.md)
-- [Day 4 technical demonstration runbook](day4-technical-demo-runbook.md)
-- [Day 4 demonstration screenshots](demo-evidence/README.md)
-- [Day 5 claim-persistence validation](day5-claim-persistence-validation.md)
-- [Day 5 policy-review validation](day5-policy-review-validation.md)
-- [Day 5 session and evidence validation](day5-session-evidence-validation.md)
-- [Day 5 staff revision validation](day5-staff-revision-validation.md)
-- [Day 5 clear-claim validation](day5-clear-claim-validation.md)
-- [Day 5 fact-source and confirmation validation](day5-fact-source-and-confirmation.md)
-- [DynamoDB fixture examples](api-dynamodb-fixture-examples.md)
+The archive keeps records needed for issue, test, and presentation traceability while removing
+them from the current-document layer. Original `day*` and `d4-*` names are retained inside the
+archive because they identify the Sprint task that produced the evidence.
 
-Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also
-historical evidence. They must not silently override current requirements, API schemas,
-data architecture, authority rules, or sprint commitments.
+### Sprint 1
+
+Planning:
+
+- [Day 3 Implementation Map](archive/sprint-1/planning/day3-implementation-map.md)
+
+Validation:
+
+- [Day 3 Evidence and Scenario Integration Results](archive/sprint-1/validation/day3-bdfa-integration-results.md)
+- [Day 4 Assembled Prototype Integration Results](archive/sprint-1/validation/day4-assembled-prototype-integration-results.md)
+- [Day 4 API and Data-Boundary Verification](archive/sprint-1/validation/day4-api-data-boundary-verification.md)
+- [Day 4 Routing and Workbench Write-Back Verification](archive/sprint-1/validation/day4-routing-workbench-writeback-verification.md)
+- [Day 4 Urgent and Human-Support Verification](archive/sprint-1/validation/day4-urgent-human-support-verification.md)
+- [Day 4 Evidence-State and Visibility Defects](archive/sprint-1/validation/day4-evidence-visibility-defects.md)
+- [Day 4 Responsive and Accessibility Verification](archive/sprint-1/validation/day4-responsive-accessibility-verification.md)
+- [Day 4 Journey Test Records](archive/sprint-1/validation/d4-t02-test-records.md)
+- [Day 5 Claim-Persistence Validation](archive/sprint-1/validation/day5-claim-persistence-validation.md)
+- [Day 5 Policy-Review Validation](archive/sprint-1/validation/day5-policy-review-validation.md)
+- [Day 5 Session and Evidence Validation](archive/sprint-1/validation/day5-session-evidence-validation.md)
+- [Day 5 Staff Revision Validation](archive/sprint-1/validation/day5-staff-revision-validation.md)
+- [Day 5 Clear-Claim Validation](archive/sprint-1/validation/day5-clear-claim-validation.md)
+- [Day 5 Fact-Source and Confirmation Validation](archive/sprint-1/validation/day5-fact-source-and-confirmation.md)
+- [DynamoDB Fixture Examples](archive/sprint-1/validation/api-dynamodb-fixture-examples.md)
+
+Demonstration:
+
+- [Day 4 Technical Demonstration Runbook](archive/sprint-1/demo/day4-technical-demo-runbook.md)
+- [Day 4 Demonstration Screenshots](archive/sprint-1/demo/visual-evidence/README.md)
+
+### Sprint 2
+
+- [External-Service Validation](archive/sprint-2/validation/day4-external-service-validation.md)
+
+Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
+evidence. They must not silently override current requirements or contracts.

@@ -164,7 +164,9 @@ Customer
         |-- Staff Action
         |-- Claimant Update
         |-- Claim Event
-        \-- External Claim Reference
+        |-- External Claim Reference
+        |-- External-service Consent
+        \-- Assessor Routing Result
 ```
 
 A `Working Claim` is the authoritative FNOL record owned by this product. An `External Claim Reference` exists only after the configured claims service accepts claim creation. A session is a period of interaction with the working claim; ending a session does not end or duplicate the claim.
@@ -255,6 +257,8 @@ The canonical backend record has these fields. API projections omit fields the c
 | `route` | string | No | Configured processing route, not a decision outcome |
 | `active_session_id` | string | No | Current active session when one exists |
 | `external_claim` | object | No | Claim service result after creation begins |
+| `external_service_consents` | array | Yes | Internal task-specific consent records; omitted from claimant projections |
+| `assessor_routing` | object | No | Provider-neutral assessor result after an authorised request succeeds |
 | `customer_next_step` | object | Yes | Claimant-safe status, responsibility, and expected timing |
 | `created_at` | timestamp | Yes | Server-generated creation time |
 | `updated_at` | timestamp | Yes | Server-generated last material update time |
@@ -623,6 +627,8 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
+| `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
+| `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -704,6 +710,7 @@ Response `200`:
     "needs_attention": 0
   },
   "external_claim": null,
+  "external_service_action": null,
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
@@ -713,6 +720,14 @@ Response `200`:
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
 The `form` contains claimant-visible structured field records. `external_claim`, when present, contains `claim_number`, `creation_status`, `route`, `created_at`, and claimant-visible expected timing.
+
+`external_service_action` is omitted as `null` until an external participant action is a
+relevant next step. The controlled assessor action appears only after a motor claim has been
+created on the fixture route, its location is confirmed, and no open handoff or professional
+review blocks the action. It contains the service and provider labels, purpose, claimant-safe
+summary of the minimum data to be shared, consent state, progress/result state, and the
+provider-neutral routing result when accepted. It never exposes the raw consent record,
+authorisation decision, internal signals, or complete claim context.
 
 ### `POST /api/v1/claims/{claim_id}/sessions`
 
@@ -772,11 +787,12 @@ Request:
 
 When the explicitly configured Agent runtime uses a model gateway, a timeout, rate limit,
 or retryable provider failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
-Authentication, configuration, unsupported-capability, malformed-response, and other
-non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. Both
-outcomes use provider-neutral messages, preserve the current Claim revision, and do not
-write the claimant message, Agent decision, or idempotency result. Provider response bodies,
-credentials, prompts, and internal model context are never returned.
+Authentication, configuration, unsupported-capability, incomplete, refused, malformed-response,
+and other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`.
+Both outcomes use provider-neutral messages, preserve the current Claim revision, and do not write
+the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
+discarded unless the adapter normalises the provider termination state as complete. Provider
+response bodies, credentials, prompts, and internal model context are never returned.
 
 Response `200`:
 
@@ -941,6 +957,22 @@ Response `201`:
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
+  "external_service_action": {
+    "service_identity": "vehicle_damage_assessment_routing",
+    "service_name": "Vehicle damage assessment",
+    "provider": "Controlled assessment fixture",
+    "purpose": "Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.",
+    "shared_data_summary": [
+      "Your Northwind claim and external claim references",
+      "Northwind routing authority and your permission reference",
+      "The vehicle damage assessment request",
+      "Your confirmed incident region"
+    ],
+    "status": "consent_required",
+    "consent_status": null,
+    "routing": null,
+    "can_request": true
+  },
   "customer_next_step": {
     "status": "claim_created",
     "summary": "Claims intake review",
@@ -951,6 +983,61 @@ Response `201`:
 
 An idempotent replay restores the same response. The mock adapter supplies synthetic values only;
 this contract does not assert a Northwind provider schema or AWS implementation.
+
+### `POST /api/v1/claims/{claim_id}/assessor-routing/consent`
+
+Records claimant permission for the exact controlled vehicle-assessment scope. The request
+requires `Idempotency-Key` and `If-Match`:
+
+```json
+{
+  "consent": true
+}
+```
+
+The client cannot widen the participant, action, or fields. The server records permission only
+for the claim and external-claim references, Northwind routing authority, consent reference,
+vehicle-damage assessment action, and confirmed incident region. Permission and Northwind
+routing authority remain separate requirements.
+
+Response `201`, or `200` for an identical replay, returns the new revision,
+`customer_next_step`, and the claimant-safe `external_service_action` with status
+`ready_to_request`. Raw consent references and the internal consent list are not returned.
+The consent, single Claim revision advance, and idempotency response are one repository
+mutation: a failed transaction leaves all three unchanged.
+
+This endpoint is available only when the external service action is a relevant next step. A
+draft, non-motor, pending or failed claim-creation result, open handoff, professional review, or
+already accepted assessor request is rejected without recording consent.
+
+### `POST /api/v1/claims/{claim_id}/assessor-routing`
+
+Sends the controlled provider-neutral assessor request after active claimant permission has been
+recorded. The request has no body and requires `Idempotency-Key` and `If-Match`. The server derives
+the external claim reference, current Northwind authority, active consent, requested action, and
+confirmed region from the shared Working Claim; the claimant cannot supply provider or routing
+payload fields.
+
+Response `201`, or `200` for an identical replay, returns the resulting claim revision,
+`customer_next_step`, and the claimant-safe action. Status is `assigned` only when an individual
+assessor reference was returned and `queued` when only a queue accepted the request.
+
+Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
+Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
+four leave the consented Working Claim revision unchanged, do not report assignment, and retain
+the same operation identity for an unchanged permitted retry. Automatic retry counts remain
+unapproved; the claimant client offers only an explicit retry for retryable failures.
+
+The authorised decision and prepared operation identity are persisted together before the
+provider call. A timeout retry reuses that durable authority record rather than replacing it
+with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
+idempotency response fails, the same request restores the authoritative assigned or queued state;
+the claimant client also reloads that state before presenting a failure message.
+If provider acceptance is durable but a concurrent Claim mutation wins the following
+compare-and-set, the first request returns the bounded revision conflict. Only the identical
+claimant request with the original idempotency key, revision, consent, authority, and operation
+identity may reconcile that accepted result without another provider call. An unrelated stale
+request remains a revision or idempotency conflict.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 
@@ -1493,6 +1580,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 |---|---|---|
 | `POST` | `/internal/v1/agent/turns` | Produce the current compatibility Agent Decision proposal |
 | `POST` | `/internal/v1/policy/search` | Retrieve cited policy evidence |
+| `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
@@ -1535,8 +1623,8 @@ reply by repeating the next-step summary. For a model-backed proposal, these
 claimant-visible fields and `customer_reason` are server-rendered from the
 validated action and authority outcome; untrusted model prose is not persisted
 as the claimant response. The internal decision records `proposal_source` and
-bounded model provenance when applicable. Provider model and request identifiers
-must not appear in claimant projections.
+bounded model provenance when applicable. The executable prompt identifier, provider model, and
+provider request identifiers must not appear in claimant projections.
 
 Routine model context is task-minimal. It includes the current claimant text and
 only explicitly allow-listed, current-action form values. Policy numbers, contact
@@ -1569,6 +1657,40 @@ enter a versioned HTTP contract only when backend models, Model Gateway,
 persistence, claimant and Workbench consumers, fixtures, generated OpenAPI, and contract
 tests are updated in the same pull request. Until then, `/internal/v1/agent/turns`
 continues to use the compatibility request and `AgentDecision` response above.
+
+### `POST /internal/v1/knowledge/search`
+
+Retrieves approved knowledge chunks after exact applicability filtering. Requires an integration
+principal. This route searches policy wording and guidance; it does not retrieve a customer's
+structured policy schedule or make a coverage decision.
+
+Request:
+
+```json
+{
+  "question": "How much excess do I have to pay?",
+  "jurisdiction": "NZ",
+  "visibility": "customer_and_staff",
+  "document_id": "nw-policy-motor-standard-mvp-2026-1",
+  "authority": "northwind_synthetic_demo",
+  "version": "MVP-2026.1",
+  "insurer": "Northwind Insurance",
+  "product": "motor",
+  "effective_at": "2026-08-25T00:00:00Z",
+  "limit": 3
+}
+```
+
+An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
+version, checksum, and source text for every result. `no_evidence` returns no results and an honest
+scope limitation. `unavailable` returns no results and a claimant-safe dependency limitation.
+Provider errors and object-store identifiers are not exposed. Missing applicability fields fail
+request validation rather than broadening the search.
+When a structured Policy Schedule supplies a wording document identifier, the caller includes
+`document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
+The approved document catalogue comes from the controlled publication manifest. Applicability is
+filtered before indexed objects are read, and a chunk whose governed identity, source metadata,
+or checksum differs from that manifest is treated as unavailable rather than returned as evidence.
 
 ### `POST /internal/v1/policy/search`
 
@@ -1805,6 +1927,7 @@ Request requires an authorised rule or staff decision:
   "claim_id": "clm_01J4Y7Q2AW",
   "external_claim_id": "ext_fixture_1042",
   "authorisation_ref": "dec_01J4YEBP6X",
+  "claimant_consent_ref": "cns_01J4YECONSENT",
   "requested_action": "vehicle_damage_assessment",
   "location": {
     "region": "Auckland"
@@ -1830,7 +1953,27 @@ Response `201`, or `200` for an idempotent replay:
 ```
 
 The authorisation reference must resolve to an authorised decision containing
-`ASSESSOR_RULE_AUTHORISED`. A severity value by itself is not routing authority.
+`ASSESSOR_RULE_AUTHORISED` for the current claim revision. The claimant-consent reference
+must resolve from the shared Working Claim to a granted record for
+`vehicle_damage_assessment_routing`, the requested action, and the minimum request fields.
+The consent actor must be the claimant linked to that Working Claim. Authorised-representative
+consent is not accepted until representative identity and authority are explicitly modelled.
+Northwind authority and claimant consent are separate requirements; a severity value by itself
+is not routing authority.
+
+The controlled fixture can return assigned or queued success. Timeout and unavailable
+return `DEPENDENCY_UNAVAILABLE` with `retryable: true`; access-denied or malformed fixture
+outcomes return `DEPENDENCY_FAILED` with `retryable: false`. All four preserve the current
+claim and include a bounded `assessor_service` reason. An identical retry after a transient
+failure uses the same operation identity, and an identical retry after success returns the
+accepted result without creating another task.
+
+The first authorised attempt durably reserves the operation identity and complete request
+fingerprint before invoking the provider. Reusing that identity with changed input is an
+idempotency conflict even when the first attempt timed out or the provider was unavailable.
+Provider acceptance is recorded before the Claim State compare-and-set. If a concurrent claim
+mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
+the latest claim revision without creating a second provider task.
 
 ## Reason Codes
 
@@ -1954,6 +2097,10 @@ Model transport is an internal dependency and does not add a public API route. A
 orchestration consumes the provider-neutral `ModelRequest` and `ModelResponse` contracts,
 then converts structured output to the existing `AgentProposal`. Existing deterministic
 authority and state validation still controls execution.
+
+`ModelResponse` distinguishes complete, incomplete, refused, and unknown provider termination.
+Only a complete response can become an `AgentProposal`; all other outcomes fail before the Message
+API writes Claim State, messages, decisions, or idempotency results.
 
 The implemented `openai_compatible` adapter supports official, relay, and local
 compatible chat-completions endpoints through configuration. Non-compatible protocols

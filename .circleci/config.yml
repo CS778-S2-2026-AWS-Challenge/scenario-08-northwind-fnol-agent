@@ -3,7 +3,7 @@ version: 2.1
 jobs:
   backend-quality:
     docker:
-      - image: cimg/python:3.12
+      - image: cimg/python:3.12-node
     resource_class: small
     steps:
       - checkout
@@ -98,6 +98,8 @@ jobs:
             node --test
             .github/scripts/pr_policy.test.cjs
             .github/scripts/issue_policy.test.cjs
+            .github/scripts/review_policy.test.cjs
+            .github/scripts/governance_audit.test.cjs
             .circleci/run-pr-policy.test.cjs
       - run:
           name: Validate pull request
