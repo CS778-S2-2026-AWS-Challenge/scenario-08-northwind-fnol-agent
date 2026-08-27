@@ -144,12 +144,14 @@ it('opens and closes the mobile employee drawer accessibly', async () => {
   const mobileHeader = dom.window.document.querySelector('#mobileWorkbenchHeader')
   const content = dom.window.document.querySelector('#workbenchContent')
   const chatWidget = dom.window.document.querySelector('#chatWidget')
+  const backdrop = dom.window.document.querySelector('#sidebarBackdrop')
 
   expect(page).not.toHaveClass('mobile-sidebar-open')
   expect(openButton).toHaveAttribute('aria-expanded', 'false')
   expect(sidebar).toHaveAttribute('aria-hidden', 'true')
   expect(sidebar.inert).toBe(true)
   expect(content.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
 
   openButton.click()
   expect(page).toHaveClass('mobile-sidebar-open')
@@ -159,6 +161,7 @@ it('opens and closes the mobile employee drawer accessibly', async () => {
   expect(mobileHeader.inert).toBe(true)
   expect(content.inert).toBe(true)
   expect(chatWidget.inert).toBe(true)
+  expect(backdrop.hidden).toBe(false)
   expect(closeButton).toHaveAttribute('aria-label', 'Close workbench menu')
   expect(dom.window.document.activeElement).toBe(closeButton)
 
@@ -173,11 +176,14 @@ it('opens and closes the mobile employee drawer accessibly', async () => {
   expect(mobileHeader.inert).toBe(false)
   expect(content.inert).toBe(false)
   expect(chatWidget.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
   expect(dom.window.document.activeElement).toBe(openButton)
 
   openButton.click()
-  dom.window.document.querySelector('#sidebarBackdrop').click()
+  expect(backdrop.hidden).toBe(false)
+  backdrop.click()
   expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(backdrop.hidden).toBe(true)
   expect(dom.window.document.activeElement).toBe(openButton)
   await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
   dom.window.close()

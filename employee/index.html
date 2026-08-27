@@ -532,7 +532,7 @@
         </div>
       </div>
     </aside>
-    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" tabindex="-1" aria-label="Close workbench menu"></button>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" tabindex="-1" aria-label="Close workbench menu" hidden></button>
 
     <main id="workbenchContent" class="content">
       <section id="workbenchView" aria-busy="false">
@@ -756,6 +756,7 @@
       byId('mobileWorkbenchHeader').inert = shouldOpen;
       byId('workbenchContent').inert = shouldOpen;
       byId('chatWidget').inert = shouldOpen;
+      byId('sidebarBackdrop').hidden = !shouldOpen;
       if (shouldOpen) byId('sidebarToggle').focus();
       if (!shouldOpen && returnFocus) byId('mobileSidebarOpen').focus();
     }
