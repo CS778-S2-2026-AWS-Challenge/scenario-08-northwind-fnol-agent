@@ -10,9 +10,12 @@ from backend.core.errors import ApiError
 class Principal:
     subject: str
     actor_type: str
-    scopes: frozenset[str]
-    auth_source: str
-    synthetic: bool
+    # Internal service/unit-test construction may omit verified metadata, but the defaults
+    # deliberately carry no scope authority and are never synthetic. Authentication
+    # boundaries below always return fully populated server-verified principals.
+    scopes: frozenset[str] = frozenset()
+    auth_source: str = 'internal:unverified'
+    synthetic: bool = False
 
 
 @dataclass(frozen=True, slots=True)
