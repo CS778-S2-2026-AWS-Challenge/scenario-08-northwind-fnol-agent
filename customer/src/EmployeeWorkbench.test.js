@@ -76,6 +76,113 @@ function queueDetail(item) {
   }
 }
 
+it('persists the collapsed employee sidebar across same-origin page loads', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const toggle = dom.window.document.querySelector('#sidebarToggle')
+
+  expect(page).not.toHaveClass('sidebar-collapsed')
+  toggle.click()
+  expect(page).toHaveClass('sidebar-collapsed')
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(toggle).toHaveAttribute('aria-label', 'Expand sidebar')
+  expect(dom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('true')
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+
+  const restoredDom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.localStorage.setItem('northwind-workbench-sidebar-collapsed', 'true')
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const restoredPage = restoredDom.window.document.querySelector('#workbenchPage')
+  const restoredToggle = restoredDom.window.document.querySelector('#sidebarToggle')
+
+  expect(restoredPage).toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'false')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Expand sidebar')
+
+  restoredToggle.click()
+  expect(restoredPage).not.toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'true')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+  expect(restoredDom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('false')
+  await waitFor(() => expect(restoredDom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  restoredDom.window.close()
+})
+
+it('defines a responsive off-canvas employee menu without shrinking the main content', () => {
+  expect(employeeHtml).toContain('@media(max-width:1024px)')
+  expect(employeeHtml).toContain('width:min(82vw,320px);')
+  expect(employeeHtml).toContain('transform:translateX(-105%);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar { transform:translateX(0);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }')
+  expect(employeeHtml).toContain('.content { width:100%; min-width:0;')
+  expect(employeeHtml).toContain("document.addEventListener('touchstart'")
+  expect(employeeHtml).toContain("document.addEventListener('touchend'")
+})
+
+it('opens and closes the mobile employee drawer accessibly', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn() }))
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const openButton = dom.window.document.querySelector('#mobileSidebarOpen')
+  const closeButton = dom.window.document.querySelector('#sidebarToggle')
+  const sidebar = dom.window.document.querySelector('#employeeSidebar')
+  const mobileHeader = dom.window.document.querySelector('#mobileWorkbenchHeader')
+  const content = dom.window.document.querySelector('#workbenchContent')
+  const chatWidget = dom.window.document.querySelector('#chatWidget')
+
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'true')
+  expect(sidebar.inert).toBe(true)
+  expect(content.inert).toBe(false)
+
+  openButton.click()
+  expect(page).toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'true')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'false')
+  expect(sidebar.inert).toBe(false)
+  expect(mobileHeader.inert).toBe(true)
+  expect(content.inert).toBe(true)
+  expect(chatWidget.inert).toBe(true)
+  expect(closeButton).toHaveAttribute('aria-label', 'Close workbench menu')
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  const lastDrawerControl = dom.window.document.querySelector('#loadDemoQueue')
+  lastDrawerControl.focus()
+  lastDrawerControl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(mobileHeader.inert).toBe(false)
+  expect(content.inert).toBe(false)
+  expect(chatWidget.inert).toBe(false)
+  expect(dom.window.document.activeElement).toBe(openButton)
+
+  openButton.click()
+  dom.window.document.querySelector('#sidebarBackdrop').click()
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(dom.window.document.activeElement).toBe(openButton)
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+})
+
 it('toggles professional review controls without navigating away from the claim', async () => {
   const item = queueItem(90)
   const fetchMock = vi.fn((url) => {
