@@ -216,6 +216,11 @@ A successful build alone does not demonstrate product correctness.
 
 ## Documentation
 
-- Root documentation introduces the project; product requirements belong in the specification; sprint commitments belong in sprint plans; engineering details belong here.
+- Root documentation introduces the project; product requirements belong in the specification;
+  sprint commitments belong in sprint plans; current engineering details belong in `docs/`.
+- Separate target design, current status, research evidence, and historical delivery records under
+  `docs/design/`, `docs/status/`, `docs/research/`, and `docs/archive/` respectively.
+- Archive Sprint-day plans, task-specific validation reports, demonstration runbooks, screenshots,
+  and exact-commit evidence instead of adding them to the `docs/` root.
 - Prefer short, topic-specific documents and maintain directory indexes.
 - State facts, decisions, hypotheses, prototype rules, and open questions separately.

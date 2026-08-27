@@ -1,7 +1,8 @@
 # Day 3 Runtime Demo Scenarios
 
 These canonical runtime demo-data records contain synthetic data only and
-exercise the stable scenario identifiers from `docs/day3-implementation-map.md`.
+exercise the stable scenario identifiers from
+`docs/archive/sprint-1/planning/day3-implementation-map.md`.
 They are the source used by the development/test demo seeding workflow.
 
 | Scenario | Coverage |
