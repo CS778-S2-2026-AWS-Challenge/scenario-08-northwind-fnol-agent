@@ -787,11 +787,12 @@ Request:
 
 When the explicitly configured Agent runtime uses a model gateway, a timeout, rate limit,
 or retryable provider failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
-Authentication, configuration, unsupported-capability, malformed-response, and other
-non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. Both
-outcomes use provider-neutral messages, preserve the current Claim revision, and do not
-write the claimant message, Agent decision, or idempotency result. Provider response bodies,
-credentials, prompts, and internal model context are never returned.
+Authentication, configuration, unsupported-capability, incomplete, refused, malformed-response,
+and other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`.
+Both outcomes use provider-neutral messages, preserve the current Claim revision, and do not write
+the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
+discarded unless the adapter normalises the provider termination state as complete. Provider
+response bodies, credentials, prompts, and internal model context are never returned.
 
 Response `200`:
 
@@ -1630,8 +1631,8 @@ reply by repeating the next-step summary. For a model-backed proposal, these
 claimant-visible fields and `customer_reason` are server-rendered from the
 validated action and authority outcome; untrusted model prose is not persisted
 as the claimant response. The internal decision records `proposal_source` and
-bounded model provenance when applicable. Provider model and request identifiers
-must not appear in claimant projections.
+bounded model provenance when applicable. The executable prompt identifier, provider model, and
+provider request identifiers must not appear in claimant projections.
 
 Routine model context is task-minimal. It includes the current claimant text and
 only explicitly allow-listed, current-action form values. Policy numbers, contact
@@ -2104,6 +2105,10 @@ Model transport is an internal dependency and does not add a public API route. A
 orchestration consumes the provider-neutral `ModelRequest` and `ModelResponse` contracts,
 then converts structured output to the existing `AgentProposal`. Existing deterministic
 authority and state validation still controls execution.
+
+`ModelResponse` distinguishes complete, incomplete, refused, and unknown provider termination.
+Only a complete response can become an `AgentProposal`; all other outcomes fail before the Message
+API writes Claim State, messages, decisions, or idempotency results.
 
 The implemented `openai_compatible` adapter supports official, relay, and local
 compatible chat-completions endpoints through configuration. Non-compatible protocols

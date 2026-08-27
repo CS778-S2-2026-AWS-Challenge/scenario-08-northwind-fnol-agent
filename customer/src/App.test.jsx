@@ -255,7 +255,13 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    const description = screen.getByLabelText('Incident description')
+    const guidedStart = screen.getByRole('button', { name: /Start guided Motor claim/ })
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(description.compareDocumentPosition(guidedStart)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getByText(/These items are useful, not required/)).toBeVisible()
+
+    await user.click(guidedStart)
 
     expect(screen.getByText('1 Details')).toBeVisible()
     expect(screen.getByText('2 Materials')).toBeVisible()
@@ -273,6 +279,47 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Incident date' })).toHaveFocus()
     expect(screen.getByLabelText('Vehicle registration plate number')).toHaveAttribute('placeholder', 'For example, ABC123')
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
+  })
+
+  it('shows optional preparation by claim type and preserves the description through guided Motor', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const description = screen.getByLabelText('Incident description')
+    await user.type(description, 'Another vehicle hit my parked car.')
+    await user.click(screen.getByRole('tab', { name: 'Home' }))
+    expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
+    expect(screen.getByText('Emergency work records')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('Another vehicle hit my parked car.')
+  })
+
+  it('keeps a new homepage description when restoring an older guided Motor draft', async () => {
+    localStorage.setItem('northwind-guided-motor-draft', JSON.stringify({
+      step: 1,
+      draft: {
+        policyNumber: 'NW-123456',
+        description: 'An older saved incident description.',
+      },
+      claimRef: null,
+      uploaded: [],
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A cyclist hit my parked car today.')
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+
+    expect(screen.getByLabelText('Client Number')).toHaveValue('NW-123456')
+    expect(screen.getByLabelText('What happened')).toHaveValue('A cyclist hit my parked car today.')
+
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('A cyclist hit my parked car today.')
   })
 
   it('returns to guided details and continues without overwriting confirmed fields', async () => {
@@ -329,7 +376,7 @@ describe('claimant intake', () => {
     expect(screen.getByText(/Sender: Northwind · Audience: Shared claim conversation · Delivered/)).toBeVisible()
     expect(screen.getByText('Check this')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Confirm details' })).toBeEnabled()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
     expect(fetch).toHaveBeenNthCalledWith(
       2,
       '/api/v1/claims/clm_test/sessions/ses_test/messages',
@@ -494,10 +541,6 @@ describe('claimant intake', () => {
     await user.tab() // Claims navigation
     await user.tab() // How it works navigation
     await user.tab() // Log in
-    await user.tab() // Motor
-    await user.tab() // Home
-    await user.tab() // Contents
-    await user.tab() // Guided Motor claim
     await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()

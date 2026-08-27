@@ -30,6 +30,27 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const CLAIM_MATERIALS = {
+  motor: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'The date, time, location and a short account of what happened.'],
+    ['Vehicle and driver details', 'Registration plates and contact details, if available.'],
+    ['Photos or video', 'Damage and the wider scene, when it is safe to take them.'],
+  ],
+  home: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'When it happened, what caused it and the affected areas.'],
+    ['Photos or video', 'Clear views of the damage and likely source, when safe.'],
+    ['Emergency work records', 'Invoices or reports for urgent work already completed.'],
+  ],
+  contents: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Affected items', 'The brand, model, age and what happened to each item.'],
+    ['Proof of ownership', 'Receipts, photos or account statements, if available.'],
+    ['Photos of damage', 'Clear images of affected items and the surrounding area.'],
+  ],
+}
+
 const HANDOFF_STATUS_LABELS = {
   queued: 'Queued',
   accepted: 'Accepted by Northwind support',
@@ -217,7 +238,7 @@ function App() {
   async function sendMessage(event) {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || isBusy || proposedFields.length > 0) return
+    if (!text || isBusy) return
 
     setError('')
     setFailedMessage(null)
@@ -579,7 +600,13 @@ function App() {
       </header>
 
       {!hasStarted && page === 'guided-motor' ? (
-        <GuidedMotorClaim onExit={() => setPage('home')} />
+        <GuidedMotorClaim
+          initialDescription={draft}
+          onExit={(description) => {
+            setDraft(description)
+            setPage('home')
+          }}
+        />
       ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
@@ -614,7 +641,28 @@ function App() {
                 Start your claim online in a few minutes. No account or insurance jargon needed.
               </p>
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
-                <h2 id="claim-starter-title">What would you like to claim for?</h2>
+                <h2 id="claim-starter-title">Tell us what happened</h2>
+                <MessageComposer
+                  draft={draft}
+                  setDraft={setDraft}
+                  onSubmit={sendMessage}
+                  inputLabel="Incident description"
+                  busy={isBusy}
+                  buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
+                  error={error}
+                  placeholder={claimTypePrompts[claimType]}
+                />
+                {failedMessage && (
+                  <article className="message message-claimant is-failed">
+                    <p className="message-author">{failedMessage.sender}</p>
+                    <p>{failedMessage.text}</p>
+                    <p className="message-state">
+                      Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                    </p>
+                  </article>
+                )}
+                <div className="choice-divider"><span>Optional guided claim</span></div>
+                <h3>Choose a claim type for guided help</h3>
                 <div className="claim-tabs" role="tablist" aria-label="Claim type">
                   {['motor', 'home', 'contents'].map((type) => (
                     <button
@@ -630,6 +678,18 @@ function App() {
                     </button>
                   ))}
                 </div>
+              <div className="preparation-list">
+                <h3>Helpful to have ready for your {claimType} claim</h3>
+                <p>These items are useful, not required. You can start above without them and add missing information later.</p>
+                <ul>
+                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                    <li key={title}>
+                      <span className="material-check" aria-hidden="true">✓</span>
+                      <span><strong>{title}</strong><small>{description}</small></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               {claimType === 'motor' && (
                 <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
                   Start guided Motor claim
@@ -637,27 +697,7 @@ function App() {
                 </button>
               )}
               {claimType !== 'motor' && (
-                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. Start with the conversational claim service below.</p>
-              )}
-              <div className="choice-divider"><span>or describe what happened</span></div>
-              <MessageComposer
-                draft={draft}
-                setDraft={setDraft}
-                onSubmit={sendMessage}
-                inputLabel="Incident description"
-                busy={isBusy}
-                buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
-                error={error}
-                placeholder={claimTypePrompts[claimType]}
-              />
-              {failedMessage && (
-                <article className="message message-claimant is-failed">
-                  <p className="message-author">{failedMessage.sender}</p>
-                  <p>{failedMessage.text}</p>
-                  <p className="message-state">
-                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
-                  </p>
-                </article>
+                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened above.</p>
               )}
               </section>
               <div className="resume-entry">
@@ -848,12 +888,6 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0 && !handoff}
-              disabledNote={
-                handoff
-                  ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
-                  : 'Confirm or correct the details before continuing.'
-              }
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
