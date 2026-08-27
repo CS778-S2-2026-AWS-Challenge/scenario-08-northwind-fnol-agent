@@ -71,10 +71,12 @@ def test_staff_message_fails_closed_without_authoritative_active_session(
         for session in repository.list_sessions_for_claim(claim_id, stored.customer_id)
     )
     before_handoffs = repository.list_handoffs(claim_id, stored.customer_id)
-    repository.save_claim(
-        stored.model_copy(update={'active_session_id': None}),
-        expected_revision=stored.revision,
-    )
+    # Fixture seeding, deliberately outside the save_claim() transaction boundary.
+    # This test needs a claim with no authoritative active session and an unchanged
+    # revision, but docs/claim-state-transaction-boundary.md reserves active_session_id
+    # changes for the session mutation and requires material writes to be N -> N+1, so
+    # save_claim() correctly refuses to construct it.
+    repository._claims[claim_id] = stored.model_copy(update={'active_session_id': None})
 
     response = client.post(
         f'/api/v1/workbench/claims/{claim_id}/messages',
