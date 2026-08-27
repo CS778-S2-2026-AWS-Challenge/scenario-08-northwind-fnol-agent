@@ -24,6 +24,7 @@ from backend.domain.models import (
     EvidenceState,
     EvidenceStatus,
     EvidenceSummary,
+    FormSource,
     HandoffPriority,
     HandoffRecord,
     HandoffStatus,
@@ -38,7 +39,7 @@ from backend.domain.models import (
     WorkflowState,
     WorkingClaim,
 )
-from backend.domain.retrieval import RetrievalRecord
+from backend.domain.retrieval import PolicyRetrievalRecord, RetrievalKind, RetrievalRecord
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.retrieval_review import persist_retrieval_record
 
@@ -46,6 +47,26 @@ CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
     {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary', 'handoffs'}
 )
+
+
+class LinkedMvpRecordBaseline(ContractModel):
+    """Stable identifiers for one complete, API-served synthetic record graph."""
+
+    customer_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    policy_retrieval_id: str = Field(min_length=1, max_length=100)
+    claim_history_retrieval_id: str = Field(min_length=1, max_length=100)
+    evidence_ids: list[str] = Field(min_length=1)
+    handoff_id: str = Field(min_length=1, max_length=100)
+    message_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_unique_record_identifiers(self) -> 'LinkedMvpRecordBaseline':
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError('Linked MVP evidence identifiers must be unique.')
+        if len(self.message_ids) != len(set(self.message_ids)):
+            raise ValueError('Linked MVP message identifiers must be unique.')
+        return self
 
 
 class ScenarioFixture(ContractModel):
@@ -59,6 +80,7 @@ class ScenarioFixture(ContractModel):
     handoffs: list[HandoffRecord] = Field(default_factory=list)
     staff_actions: list[StaffActionRecord] = Field(default_factory=list)
     customer_updates: list[CustomerUpdateRecord] = Field(default_factory=list)
+    linked_records: LinkedMvpRecordBaseline | None = None
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -84,6 +106,9 @@ class ScenarioFixture(ContractModel):
         if any(session.context_revision > self.claim.revision for session in self.sessions):
             raise ValueError('Session context_revision cannot exceed the claim revision.')
 
+        evidence_ids = {record.evidence_id for record in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError('Scenario evidence identifiers must be unique.')
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
         if self.claim.claim_state.evidence is not evidence_state_for(self.evidence):
@@ -115,6 +140,25 @@ class ScenarioFixture(ContractModel):
             )
 
         message_ids = {message.message_id for message in self.messages}
+        if len(message_ids) != len(self.messages):
+            raise ValueError('Scenario message identifiers must be unique.')
+        if any(not set(message.evidence_refs).issubset(evidence_ids) for message in self.messages):
+            raise ValueError('Every message evidence_ref must reference scenario evidence.')
+        message_conversations = {
+            message.message_id: (message.claim_id, message.session_id) for message in self.messages
+        }
+        for message in self.messages:
+            if message.in_reply_to is None:
+                continue
+            if message.in_reply_to not in message_ids:
+                raise ValueError('Every message in_reply_to must reference a scenario message.')
+            if message_conversations[message.in_reply_to] != (
+                message.claim_id,
+                message.session_id,
+            ):
+                raise ValueError(
+                    'A message in_reply_to must reference a message in the same claim and session.'
+                )
         handoff_ids = {handoff.handoff_id for handoff in self.handoffs}
         if len(handoff_ids) != len(self.handoffs):
             raise ValueError('Scenario handoff identifiers must be unique.')
@@ -125,6 +169,35 @@ class ScenarioFixture(ContractModel):
             for handoff in self.handoffs
         ):
             raise ValueError('A handoff source_message_id must reference a scenario message.')
+        if any(
+            not set(handoff.packet.evidence_refs).issubset(evidence_ids)
+            for handoff in self.handoffs
+        ):
+            raise ValueError('Every handoff evidence_ref must reference scenario evidence.')
+
+        policy_retrieval_ids = {
+            record.retrieval_id for record in self.retrievals if record.kind is RetrievalKind.POLICY
+        }
+        history_retrieval_ids = {
+            record.retrieval_id
+            for record in self.retrievals
+            if record.kind is RetrievalKind.CLAIM_HISTORY
+        }
+        for field_code, fact in self.claim.form.items():
+            if fact.source is not FormSource.POLICY:
+                continue
+            if not fact.source_refs:
+                raise ValueError(f'{field_code} declares policy provenance without a source_ref.')
+            if not set(fact.source_refs).issubset(policy_retrieval_ids):
+                raise ValueError(f'{field_code} must reference a scenario policy retrieval record.')
+
+        if any(
+            not set(handoff.packet.history_evidence_refs).issubset(history_retrieval_ids)
+            for handoff in self.handoffs
+        ):
+            raise ValueError(
+                'Every handoff history_evidence_ref must reference a scenario history retrieval.'
+            )
 
         action_ids = {action.action_id for action in self.staff_actions}
         if len(action_ids) != len(self.staff_actions):
@@ -159,6 +232,65 @@ class ScenarioFixture(ContractModel):
                 f'{sorted(unregistered_packet_fields)}. '
                 'Add them to backend/domain/field_registry.py.'
             )
+
+        linked = self.linked_records
+        if linked is not None:
+            expected_retrieval_ids = {
+                linked.policy_retrieval_id,
+                linked.claim_history_retrieval_id,
+            }
+            if (
+                linked.customer_id != self.claim.customer_id
+                or linked.claim_id != self.claim.claim_id
+            ):
+                raise ValueError(
+                    'Linked MVP customer and claim identifiers must match Claim State.'
+                )
+            if expected_retrieval_ids != retrieval_ids:
+                raise ValueError('Linked MVP policy and history identifiers must be complete.')
+            if linked.policy_retrieval_id not in policy_retrieval_ids:
+                raise ValueError('Linked MVP policy identifier must reference a policy retrieval.')
+            if linked.claim_history_retrieval_id not in history_retrieval_ids:
+                raise ValueError(
+                    'Linked MVP history identifier must reference a claim-history retrieval.'
+                )
+            if set(linked.evidence_ids) != evidence_ids:
+                raise ValueError('Linked MVP evidence identifiers must be complete.')
+            if {linked.handoff_id} != handoff_ids:
+                raise ValueError('Linked MVP handoff identifier must select the scenario handoff.')
+            if set(linked.message_ids) != message_ids:
+                raise ValueError('Linked MVP message identifiers must be complete.')
+
+            linked_handoff = next(
+                handoff for handoff in self.handoffs if handoff.handoff_id == linked.handoff_id
+            )
+            if linked.policy_retrieval_id not in linked_handoff.packet.source_refs:
+                raise ValueError('Linked MVP handoff sources must reference the policy retrieval.')
+            if linked.claim_history_retrieval_id not in linked_handoff.packet.history_evidence_refs:
+                raise ValueError(
+                    'Linked MVP handoff history must reference the claim-history retrieval.'
+                )
+
+            policy_record = next(
+                record
+                for record in self.retrievals
+                if isinstance(record, PolicyRetrievalRecord)
+                and record.retrieval_id == linked.policy_retrieval_id
+            )
+            policy_field = self.claim.form.get('policy.policy_number')
+            if (
+                policy_field is None
+                or policy_field.value != policy_record.facts.policy_reference
+                or policy_field.source.value != 'policy'
+            ):
+                raise ValueError(
+                    'Linked MVP policy fact must reference the structured policy retrieval.'
+                )
+            if not any(
+                policy_record.facts.policy_reference in citation
+                for citation in linked_handoff.packet.policy_citation_refs
+            ):
+                raise ValueError('Linked MVP policy citation must identify the structured policy.')
         return self
 
 

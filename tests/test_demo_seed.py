@@ -14,6 +14,10 @@ CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
 
 def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> None:
+    scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
+    linked = scenario.linked_records
+    assert linked is not None
+
     with TestClient(create_app(Settings(), FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
@@ -47,7 +51,8 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
 
         review_detail = client.get('/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH)
         assert review_detail.status_code == 200
-        evidence = review_detail.json()['evidence']
+        detail = review_detail.json()
+        evidence = detail['evidence']
         assert [item['original_filename'] for item in evidence] == [
             'synthetic-ground-floor-water-damage.jpg',
             'synthetic-plumber-site-note.pdf',
@@ -58,7 +63,52 @@ def test_seed_scenarios_populates_handoff_review_and_created_routed_queues() -> 
             'received',
             'inconsistent',
         ]
-        signals = review_detail.json()['signals']
+        retrievals = {item['retrieval_id']: item for item in detail['retrievals']}
+        assert set(retrievals) == {
+            linked.policy_retrieval_id,
+            linked.claim_history_retrieval_id,
+        }
+        assert retrievals[linked.policy_retrieval_id]['kind'] == 'policy'
+        assert retrievals[linked.claim_history_retrieval_id]['kind'] == 'claim_history'
+        assert detail['customer_reference'] == linked.customer_id
+        assert detail['claim_id'] == linked.claim_id
+        assert {item['evidence_id'] for item in evidence} == set(linked.evidence_ids)
+        assert {item['message_id'] for item in detail['messages']} == set(linked.message_ids)
+        assert [item['handoff_id'] for item in detail['handoffs']] == [linked.handoff_id]
+        packet = detail['handoffs'][0]['packet']
+        assert linked.policy_retrieval_id in packet['source_refs']
+        assert (
+            retrievals[linked.policy_retrieval_id]['facts']['policy_reference']
+            in (packet['policy_citation_refs'][0])
+        )
+        assert packet['history_evidence_refs'] == [linked.claim_history_retrieval_id]
+        assert set(packet['evidence_refs']) == set(linked.evidence_ids)
+
+        claimant_claim = client.get(f'/api/v1/claims/{linked.claim_id}', headers=CLAIMANT_AUTH)
+        claimant_messages = client.get(
+            f'/api/v1/claims/{linked.claim_id}/sessions/{scenario.claim.active_session_id}/messages',
+            headers=CLAIMANT_AUTH,
+        )
+        assert claimant_claim.status_code == 200
+        assert claimant_messages.status_code == 200
+        claimant_text = claimant_claim.text + claimant_messages.text
+        assert linked.policy_retrieval_id not in claimant_text
+        assert linked.claim_history_retrieval_id not in claimant_text
+        assert retrievals[linked.claim_history_retrieval_id]['facts']['history_reference'] not in (
+            claimant_text
+        )
+
+        # The policy fact keeps staff-side provenance without leaking the retrieval identifier
+        # into the claimant projection.
+        staff_policy_field = detail['form']['policy.policy_number']
+        assert staff_policy_field['source'] == 'policy'
+        assert staff_policy_field['source_refs'] == [linked.policy_retrieval_id]
+        claimant_policy_field = claimant_claim.json()['form']['policy.policy_number']
+        assert claimant_policy_field['source'] == 'policy'
+        assert claimant_policy_field['value'] == staff_policy_field['value']
+        assert claimant_policy_field['source_refs'] == []
+
+        signals = detail['signals']
         assert [item['signal_id'] for item in signals] == [
             'sig_at02_policy_cause',
             'sig_at02_weather_date',
