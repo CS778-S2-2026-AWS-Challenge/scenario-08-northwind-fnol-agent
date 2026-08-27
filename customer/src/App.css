@@ -179,6 +179,15 @@
 .guided-unavailable { margin: 10px 0; padding: 10px 12px; border-radius: 7px; color: #665b3d; background: #fff8e7; font-size: 12px; }
 .choice-divider { display: flex; align-items: center; gap: 12px; margin: 13px 0; color: #778981; font-size: 11px; }
 .choice-divider::before,.choice-divider::after { content: ''; height: 1px; flex: 1; background: #dce9e4; }
+.preparation-list { margin: 14px 0; padding: 15px; border: 1px solid #d9e6e1; border-radius: 10px; background: #f8fcfa; }
+.preparation-list h3 { margin: 0; color: #20312d; font-size: 17px; }
+.preparation-list > p { color: #566b64; font-size: 12px; line-height: 1.55; }
+.preparation-list ul { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.preparation-list li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 10px 0; border-top: 1px solid #d9e9e3; }
+.preparation-list li > span:last-child { display: grid; gap: 3px; }
+.preparation-list strong { color: #334a42; font-size: 13px; }
+.preparation-list small { color: #6a7d76; font-size: 11px; line-height: 1.45; }
+.material-check { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; color: #236c59; background: #e4f4ee; font-size: 11px; font-weight: 900; }
 
 .guided-page { min-height: calc(100svh - 66px); padding: 42px 20px; background: #edf8f3; }
 .guided-card { width: min(100%, 820px); margin: 0 auto; padding: 34px; border: 1px solid #d4e3de; border-radius: 14px; background: #fff; box-shadow: 0 18px 50px rgba(35,82,68,.09); }
