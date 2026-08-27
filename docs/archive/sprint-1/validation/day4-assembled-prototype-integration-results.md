@@ -20,7 +20,7 @@ the live journey blockers found during subsequent verification.
 
 ## Integrated path
 
-The documented local start path in the repository [README](../README.md#local-development)
+The documented local start path in the repository [README](../../../../README.md#local-development)
 starts the backend, claimant client, and employee workbench against the same
 backend process. No source file, fixture, or hidden record needs to be edited
 between roles.
