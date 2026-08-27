@@ -16,12 +16,13 @@ means contractual coverage evidence.
 The predefined information areas, dynamic form, and branch-selection boundary are
 defined in the [FNOL Information Model and Field Taxonomy](fnol-field-model.md).
 The target object catalogue, FNOL problem mapping, and delivery levels are recorded in
-[Agent Runtime Target](agent-runtime-target.md). The compatibility path is recorded in
-[Agent Runtime Migration](agent-runtime-migration.md). Current implementation evidence is
-tracked in [Agent Runtime Progress](agent-runtime-progress.md).
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md). The compatibility path is
+recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
+implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
 The current repository has a legacy static eight-action registry and deterministic
-proposal validation. The target contract in [Agent Runtime Target](agent-runtime-target.md)
+proposal validation. The target contract in
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md)
 replaces that flat enum with multidimensional turn plans and namespaced actions, but the
 compatibility migration is not yet implemented. A first provider-neutral Model Gateway is implemented with a
 minimal `ModelRequest` and `ModelResponse`, an OpenAI-compatible adapter, structured

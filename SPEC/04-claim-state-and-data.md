@@ -9,7 +9,7 @@ maintain a competing private claim record.
 Target turn plans, proposals, execution plans, WorkItems, and UI projections are bounded
 records around this state. They may plan, propose, track, or display work, but they cannot
 become a second Claim State authority. Their implementation status and migration evidence
-are maintained in [Agent Runtime Progress](../docs/agent-runtime-progress.md).
+are maintained in [Agent Runtime Progress](../docs/status/agent-runtime-progress.md).
 
 Claim content and Claim lifecycle are separate models. Content branches answer what
 information and rules apply to the incident. Lifecycle answers where the work is now,

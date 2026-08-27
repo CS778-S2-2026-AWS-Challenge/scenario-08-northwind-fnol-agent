@@ -199,11 +199,11 @@ suite.
 PR #178 supplies three approved PRES-01 captures from tested candidate
 `c8b4c3427f3e53eb53b58f6616400f6ffe97e18`:
 
-- [claimant handoff queued](demo-evidence/PRES-01-claimant-handoff-queued.png);
-- [staff handoff accepted](demo-evidence/PRES-01-staff-handoff-accepted.png);
-- [claimant staff-assisting state](demo-evidence/PRES-01-claimant-staff-assisting.png).
+- [claimant handoff queued](visual-evidence/PRES-01-claimant-handoff-queued.png);
+- [staff handoff accepted](visual-evidence/PRES-01-staff-handoff-accepted.png);
+- [claimant staff-assisting state](visual-evidence/PRES-01-claimant-staff-assisting.png).
 
-The [evidence index](demo-evidence/README.md) records the fixture, expected results,
+The [evidence index](visual-evidence/README.md) records the fixture, expected results,
 SHA-256 values, and synthetic-data boundary. These static captures demonstrate that
 named tested candidate; they are fallback evidence, not a claim that they were
 recaptured from the final implementation SHA above.
