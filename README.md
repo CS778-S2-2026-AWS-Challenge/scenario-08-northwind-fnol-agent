@@ -155,7 +155,8 @@ The command clears only the in-memory fixture repository and mock adapter state,
 prints a record count for every cleared store, and exits non-zero when the backend
 cannot confirm the reset. It refuses to run against components that have not
 explicitly opted into the synthetic reset boundary. The concrete API and logical
-DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
+DynamoDB mapping is preserved as a historical Sprint 1
+[fixture example](docs/archive/sprint-1/validation/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 
