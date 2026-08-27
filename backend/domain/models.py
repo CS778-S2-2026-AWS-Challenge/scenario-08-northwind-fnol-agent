@@ -181,6 +181,32 @@ class AssessorRoutingStatus(str, Enum):
     FAILED = 'failed'
 
 
+class AssessorRoutingFailureCode(str, Enum):
+    TIMEOUT = 'timeout'
+    UNAVAILABLE = 'unavailable'
+    ACCESS_DENIED = 'access_denied'
+    MALFORMED = 'malformed'
+
+
+class AssessorRoutingOperationStatus(str, Enum):
+    PREPARED = 'prepared'
+    RETRYABLE_FAILURE = 'retryable_failure'
+    TERMINAL_FAILURE = 'terminal_failure'
+    ACCEPTED = 'accepted'
+
+
+class ExternalServiceConsentStatus(str, Enum):
+    GRANTED = 'granted'
+    WITHDRAWN = 'withdrawn'
+
+
+class ClaimantExternalServiceStatus(str, Enum):
+    CONSENT_REQUIRED = 'consent_required'
+    READY_TO_REQUEST = 'ready_to_request'
+    QUEUED = 'queued'
+    ASSIGNED = 'assigned'
+
+
 class SupportNeed(str, Enum):
     """Claimant-requested support need, used only by claimant support APIs."""
 
@@ -291,6 +317,74 @@ class AssessorRoutingResult(ContractModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class ClaimantExternalServiceAction(ContractModel):
+    service_identity: str
+    service_name: str
+    provider: str
+    purpose: str
+    shared_data_summary: list[str]
+    status: ClaimantExternalServiceStatus
+    consent_status: ExternalServiceConsentStatus | None = None
+    routing: AssessorRoutingResult | None = None
+    can_request: bool
+
+
+class AssessorRoutingOperation(ContractModel):
+    operation_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    external_claim_id: str = Field(min_length=1, max_length=100)
+    authorisation_ref: str = Field(min_length=1, max_length=100)
+    claimant_consent_ref: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    authorised_revision: int = Field(ge=1)
+    request_fingerprint: str = Field(min_length=1)
+    status: AssessorRoutingOperationStatus
+    result: AssessorRoutingResult | None = None
+    failure_code: AssessorRoutingFailureCode | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode='after')
+    def validate_operation_state(self) -> 'AssessorRoutingOperation':
+        if self.updated_at < self.created_at:
+            raise ValueError('Assessor operation update cannot precede creation.')
+        if self.status is AssessorRoutingOperationStatus.ACCEPTED:
+            if self.result is None or self.failure_code is not None:
+                raise ValueError('Accepted assessor operation requires only a result.')
+            return self
+        if self.status in {
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+        }:
+            if self.failure_code is None or self.result is not None:
+                raise ValueError('Failed assessor operation requires only a failure code.')
+            return self
+        if self.result is not None or self.failure_code is not None:
+            raise ValueError('Prepared assessor operation cannot contain an outcome.')
+        return self
+
+
+class ExternalServiceConsent(ContractModel):
+    consent_ref: str = Field(min_length=1, max_length=100)
+    service_identity: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    permitted_fields: list[str] = Field(min_length=1, max_length=20)
+    status: ExternalServiceConsentStatus
+    granted_by: ActorReference
+    granted_at: datetime
+    withdrawn_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_consent_state(self) -> 'ExternalServiceConsent':
+        if len(self.permitted_fields) != len(set(self.permitted_fields)):
+            raise ValueError('External-service consent fields must be unique.')
+        if self.status is ExternalServiceConsentStatus.GRANTED and self.withdrawn_at is not None:
+            raise ValueError('Granted consent cannot have a withdrawal time.')
+        if self.status is ExternalServiceConsentStatus.WITHDRAWN and self.withdrawn_at is None:
+            raise ValueError('Withdrawn consent requires a withdrawal time.')
+        return self
+
+
 class WorkingClaim(ContractModel):
     claim_id: str
     customer_id: str
@@ -302,15 +396,24 @@ class WorkingClaim(ContractModel):
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
+    assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
     active_session_id: str | None = None
     external_claim: ExternalClaimResult | None = None
     external_claim_source_revision: int | None = Field(default=None, ge=1)
     external_claim_fingerprint: str | None = None
+    external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)
     assessor_routing: AssessorRoutingResult | None = None
     assessor_routing_fingerprint: str | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode='after')
+    def require_unique_external_service_consents(self) -> 'WorkingClaim':
+        consent_refs = [record.consent_ref for record in self.external_service_consents]
+        if len(consent_refs) != len(set(consent_refs)):
+            raise ValueError('External-service consent references must be unique.')
+        return self
 
 
 class ResumePackage(ContractModel):
@@ -664,6 +767,7 @@ class WorkbenchClaimDetail(ContractModel):
     staff_actions: list[dict[str, Any]]
     customer_updates: list[dict[str, Any]]
     external_claim: ExternalClaimResult | None = None
+    external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)
     assessor_routing: AssessorRoutingResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
@@ -733,8 +837,20 @@ class RouteAssessorRequest(ContractModel):
     claim_id: str = Field(min_length=1, max_length=100)
     external_claim_id: str = Field(min_length=1, max_length=100)
     authorisation_ref: str = Field(min_length=1, max_length=100)
+    claimant_consent_ref: str = Field(min_length=1, max_length=100)
     requested_action: str = Field(min_length=1, max_length=100)
     location: AssessorLocation
+
+
+class GrantAssessorConsentRequest(ContractModel):
+    consent: Literal[True]
+
+
+class ClaimantExternalServiceResponse(ContractModel):
+    claim_id: str
+    revision: int = Field(ge=1)
+    action: ClaimantExternalServiceAction
+    customer_next_step: CustomerNextStep
 
 
 class ClaimantEvidence(ContractModel):
@@ -934,6 +1050,7 @@ class ClaimantClaim(ContractModel):
     form: dict[str, StructuredFormField]
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
+    external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
     handoff: ClaimantHandoff | None = None
     created_at: datetime
@@ -1037,6 +1154,7 @@ class ClaimCreationResponse(ContractModel):
     revision: int = Field(ge=1)
     decision: ClaimantDecision
     external_claim: ExternalClaimResult
+    external_service_action: ClaimantExternalServiceAction | None = None
     customer_next_step: CustomerNextStep
 
 

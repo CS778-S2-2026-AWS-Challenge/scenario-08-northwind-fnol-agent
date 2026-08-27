@@ -1,14 +1,14 @@
 # GitHub Automation Worker
 
-This Cloudflare Worker provides an external runtime for repository automation when GitHub Actions
-is unavailable at organisation level. It does not replace or remove `.github/workflows/`; those
-files remain the reviewed GitHub-native fallback and the source for the existing rules.
+This Cloudflare Worker provides an external runtime for repository automation alongside the
+configured repository quality provider. It does not replace or remove `.github/workflows/`; those
+files remain the reviewed GitHub-native implementation of the `github` quality profile.
 
 ## Responsibilities
 
 - receive signed GitHub `pull_request` webhooks and enqueue them for asynchronous processing;
-- run the shared `.github/scripts/pr_policy.cjs` validator and write the `PR policy` commit status
-  to the exact pull-request head SHA;
+- run the shared `.github/scripts/pr_policy.cjs` validator and write the `Northwind PR policy`
+  commit status to the exact pull-request head SHA using the configured remote/local quality profile;
 - synchronize Project 12 only for GitHub closing references (`Closes`, `Fixes`, or `Resolves`);
 - treat a Draft pull request as the explicit start signal and set its linked card to `In progress`;
 - set a ready-for-review pull request to `In review`, an unmerged closed pull request to
@@ -46,8 +46,11 @@ delivery, or Queue operation as separate capabilities.
 
 ## Runtime Configuration
 
-Non-secret Project and repository identifiers are versioned in `wrangler.jsonc`. Set these Worker
-secrets interactively only after the Cloudflare resources and deployment are authorised:
+Non-secret Project, repository, and quality-profile identifiers are versioned in `wrangler.jsonc`.
+`REMOTE_CI_PROVIDER` accepts `none`, `github`, or `circleci`. Keep it aligned with the active
+quality profile: `none` requires local gate evidence in a ready pull request, while `github` and
+`circleci` accept the corresponding remote checks as the quality source. Set these Worker secrets
+interactively only after the Cloudflare resources and deployment are authorised:
 
 ```powershell
 npx wrangler secret put GITHUB_TOKEN
