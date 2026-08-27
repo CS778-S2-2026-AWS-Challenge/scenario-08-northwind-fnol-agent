@@ -38,6 +38,16 @@
         "confidence": 0.55,
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "policy.policy_number": {
+        "value": "POL-MVP-HOME-2048",
+        "source": "policy",
+        "source_refs": ["ret_fixture_at02_policy"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:04:20Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_policy_adapter"}
       }
     },
     "evidence_summary": {"received": 2, "pending": 0, "needs_attention": 1},
@@ -121,6 +131,51 @@
       "claimant_note": "The date displayed in this capture does not match the reported incident period.",
       "created_at": "2026-08-13T11:04:30Z",
       "updated_at": "2026-08-13T11:04:30Z"
+    }
+  ],
+  "retrievals": [
+    {
+      "retrieval_id": "ret_fixture_at02_policy",
+      "claim_id": "clm_fixture_at02",
+      "kind": "policy",
+      "source": {
+        "system": "synthetic-policy-service",
+        "reference": "POL-MVP-HOME-2048",
+        "retrieved_at": "2026-08-13T11:04:15Z"
+      },
+      "facts": {
+        "policy_reference": "POL-MVP-HOME-2048",
+        "product": "Home Plus",
+        "status": "active",
+        "effective_from": "2026-02-01T00:00:00Z",
+        "effective_to": "2027-02-01T00:00:00Z",
+        "excess_amount": 750.0,
+        "currency": "NZD",
+        "coverage_sections": [
+          "sudden water damage",
+          "storm damage",
+          "gradual damage exclusion"
+        ]
+      },
+      "uncertainty": []
+    },
+    {
+      "retrieval_id": "ret_fixture_at02_history",
+      "claim_id": "clm_fixture_at02",
+      "kind": "claim_history",
+      "source": {
+        "system": "synthetic-claim-history-service",
+        "reference": "HIST-MVP-2024-017",
+        "retrieved_at": "2026-08-13T11:04:25Z"
+      },
+      "facts": {
+        "history_reference": "HIST-MVP-2024-017",
+        "incident_type": "property",
+        "occurred_at": "2024-07-18T09:30:00Z",
+        "status": "closed",
+        "outcome": "Claim paid after burst-pipe evidence was confirmed."
+      },
+      "uncertainty": []
     }
   ],
   "messages": [
@@ -228,6 +283,16 @@
             "confidence": 0.55,
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+          },
+          "policy.policy_number": {
+            "value": "POL-MVP-HOME-2048",
+            "source": "policy",
+            "source_refs": ["ret_fixture_at02_policy"],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:04:20Z",
+            "updated_by": {"actor_type": "system", "actor_id": "sys_policy_adapter"}
           }
         },
         "evidence_refs": [
@@ -239,9 +304,13 @@
         "pending_items": [],
         "conflicts": ["incident.cause"],
         "low_confidence_items": ["incident.cause"],
-        "policy_citation_refs": ["pol_fixture_at02_gradual_damage_exclusion"],
-        "history_evidence_refs": [],
-        "source_refs": ["msg_at02_claimant_1"],
+        "policy_citation_refs": ["POL-MVP-HOME-2048: gradual damage exclusion"],
+        "history_evidence_refs": ["ret_fixture_at02_history"],
+        "source_refs": [
+          "msg_at02_claimant_1",
+          "ret_fixture_at02_policy",
+          "ret_fixture_at02_history"
+        ],
         "prior_customer_updates": [],
         "promised_next_step": "A claims professional is reviewing the relevant information and policy wording before the claim can proceed."
       },
@@ -252,6 +321,23 @@
       "resolved_at": null
     }
   ],
+  "linked_records": {
+    "customer_id": "cus_demo",
+    "claim_id": "clm_fixture_at02",
+    "policy_retrieval_id": "ret_fixture_at02_policy",
+    "claim_history_retrieval_id": "ret_fixture_at02_history",
+    "evidence_ids": [
+      "evd_fixture_at02_damage_photos",
+      "evd_fixture_at02_plumber_note",
+      "evd_fixture_at02_weather_capture"
+    ],
+    "handoff_id": "hnd_fixture_at02",
+    "message_ids": [
+      "msg_at02_claimant_1",
+      "msg_at02_policy_signal",
+      "msg_at02_weather_signal"
+    ]
+  },
   "expected": {
     "workflow_state": "professional_review",
     "customer_status": "professional_review_queued",
