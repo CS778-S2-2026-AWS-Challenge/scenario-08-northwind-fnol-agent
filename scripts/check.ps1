@@ -49,7 +49,7 @@ try {
     Invoke-ProjectPython -m pytest --cov=backend --cov-report=term-missing
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    node --test ".github/scripts/pr_policy.test.cjs" ".github/scripts/issue_policy.test.cjs" ".circleci/run-pr-policy.test.cjs"
+    node --test ".github/scripts/pr_policy.test.cjs" ".github/scripts/issue_policy.test.cjs" ".github/scripts/review_policy.test.cjs" ".github/scripts/governance_audit.test.cjs" ".circleci/run-pr-policy.test.cjs"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     Push-Location "automation/github-automation"

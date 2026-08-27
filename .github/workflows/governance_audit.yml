@@ -1,0 +1,42 @@
+name: Governance Audit
+
+on:
+  pull_request_target:
+    types:
+      - closed
+      - ready_for_review
+      - converted_to_draft
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: governance-audit-${{ github.event.pull_request.number }}-${{ github.event.action }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Audit protected PR action
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Test governance audit
+        run: node --test .github/scripts/governance_audit.test.cjs
+
+      - name: Audit account action
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const audit = require('./.github/scripts/governance_audit.cjs');
+            await audit.run({github, context, core});
