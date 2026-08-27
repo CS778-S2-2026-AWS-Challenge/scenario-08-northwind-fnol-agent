@@ -70,15 +70,14 @@ def test_resume_drops_resolved_evidence_pending_context() -> None:
     repository.save_session(
         session.model_copy(update={'status': SessionStatus.PAUSED, 'last_active_at': paused_at})
     )
-    repository.save_claim(
-        claim.model_copy(
-            update={
-                'active_session_id': None,
-                'revision': claim.revision + 1,
-                'updated_at': paused_at,
-            }
-        ),
-        expected_revision=claim.revision,
+    # Fixture seeding: pausing clears the active-session pointer, which
+    # save_claim() correctly rejects under the transaction boundary.
+    repository._claims[claim.claim_id] = claim.model_copy(
+        update={
+            'active_session_id': None,
+            'revision': claim.revision + 1,
+            'updated_at': paused_at,
+        }
     )
     for evidence in evidence_records:
         repository.save_evidence(
