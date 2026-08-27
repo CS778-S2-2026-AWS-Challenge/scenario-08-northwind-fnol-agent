@@ -223,6 +223,8 @@ function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.custo
 describe('claimant intake', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('scrollTo', vi.fn())
+    window.history.replaceState(null, '', '/')
     localStorage.clear()
   })
 
@@ -234,8 +236,16 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Home' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Contents' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.queryByText(/Helpful to have ready for/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+    expect(screen.getByText('Claim conversations')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Collapse conversation history' }))
+    expect(screen.queryByText('Claim conversations')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Expand conversation history' }))
+    expect(screen.getByText(/Claim conversations will appear here/)).toBeVisible()
     expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Log in' }))
@@ -245,23 +255,60 @@ describe('claimant intake', () => {
       'href',
       'http://127.0.0.1:8002/',
     )
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Log in to prototype' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('opens a prototype customer account and saves profile preferences locally', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'alex@example.com')
+    await user.type(screen.getByLabelText('Password'), 'prototype-password')
+    await user.click(screen.getByRole('button', { name: 'Log in to prototype' }))
+
+    expect(screen.getByRole('heading', { name: /When the unexpected happens/ })).toBeVisible()
+    const accountMenu = screen.getByRole('button', { name: 'Customer account menu' })
+    expect(accountMenu).toBeVisible()
+    await user.hover(accountMenu)
+    await user.click(screen.getByRole('button', { name: 'Account overview' }))
+
+    expect(screen.getByRole('heading', { name: 'Good morning, Alex' })).toBeVisible()
+    const accountDisclosure = screen.getByRole('note')
+    expect(accountDisclosure).toHaveTextContent('profile, claim, and message data shown here is synthetic')
+    expect(accountDisclosure).toHaveTextContent('stored only in this browser')
+    expect(accountDisclosure).toHaveTextContent('Authentication is not connected')
+    expect(screen.getByText(/Claim detail navigation is not connected/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'View claim details' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Profile and preferences' }))
+    const lastName = screen.getByLabelText('Last name')
+    await user.clear(lastName)
+    await user.type(lastName, 'Taylor')
+    await user.selectOptions(screen.getByLabelText('Preferred contact method'), 'sms')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('Changes saved')
+    expect(JSON.parse(localStorage.getItem('northwind-customer-profile-prototype'))).toMatchObject({
+      lastName: 'Taylor',
+      contactPreference: 'sms',
+    })
   })
 
   it('offers a three-step guided Motor claim without replacing conversational intake', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const description = screen.getByLabelText('Incident description')
-    const guidedStart = screen.getByRole('button', { name: /Start guided Motor claim/ })
     expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
-    expect(description.compareDocumentPosition(guidedStart)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-    expect(screen.getByText(/These items are useful, not required/)).toBeVisible()
-
-    await user.click(guidedStart)
+    expect(screen.getByLabelText('Incident description')).toBeVisible()
+    expect(screen.queryByText('Other ways to claim')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Prepare by claim type' })).toBeVisible()
+    expect(screen.queryByText('Vehicle and driver details')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
 
     expect(screen.getByText('1 Details')).toBeVisible()
     expect(screen.getByText('2 Materials')).toBeVisible()
@@ -281,45 +328,48 @@ describe('claimant intake', () => {
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
   })
 
-  it('shows optional preparation by claim type and preserves the description through guided Motor', async () => {
+  it('keeps claim-type preparation separate from the conversational claim path', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const description = screen.getByLabelText('Incident description')
-    await user.type(description, 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('tab', { name: 'Home' }))
-    expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
-    expect(screen.getByText('Emergency work records')).toBeVisible()
-    expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Vehicle and driver details')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+
+    expect(screen.getByText('Helpful to have ready for your motor claim')).toBeVisible()
+    expect(screen.getByText('Vehicle and driver details')).toBeVisible()
+    expect(screen.getByRole('button', { name: /Start guided Motor claim/ })).toBeEnabled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('continues from Motor preparation into the three-step form with the description preserved', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A van reversed into my parked car.')
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+
+    expect(screen.getByText('1 Details')).toBeVisible()
+    expect(screen.getByLabelText('What happened')).toHaveValue('A van reversed into my parked car.')
+
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(screen.getByLabelText('Incident description')).toHaveValue('A van reversed into my parked car.')
+    expect(screen.getByRole('heading', { name: 'Prepare by claim type' })).toBeVisible()
+  })
+
+  it('returns to the homepage when browser history goes back from the claim page', async () => {
+    const user = userEvent.setup()
+    render(<App />)
 
     await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
-    expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
-    expect(screen.getByLabelText('Incident description')).toHaveValue('Another vehicle hit my parked car.')
-  })
+    expect(screen.getByRole('heading', { name: 'Your details and incident' })).toBeVisible()
 
-  it('keeps a new homepage description when restoring an older guided Motor draft', async () => {
-    localStorage.setItem('northwind-guided-motor-draft', JSON.stringify({
-      step: 1,
-      draft: {
-        policyNumber: 'NW-123456',
-        description: 'An older saved incident description.',
-      },
-      claimRef: null,
-      uploaded: [],
-    }))
-    const user = userEvent.setup()
-    render(<App />)
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
 
-    await user.type(screen.getByLabelText('Incident description'), 'A cyclist hit my parked car today.')
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
-
-    expect(screen.getByLabelText('Client Number')).toHaveValue('NW-123456')
-    expect(screen.getByLabelText('What happened')).toHaveValue('A cyclist hit my parked car today.')
-
-    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
-    expect(screen.getByLabelText('Incident description')).toHaveValue('A cyclist hit my parked car today.')
+    expect(await screen.findByRole('heading', { name: /When the unexpected happens/ })).toBeVisible()
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0 })
   })
 
   it('returns to guided details and continues without overwriting confirmed fields', async () => {
@@ -342,6 +392,7 @@ describe('claimant intake', () => {
       .mockImplementationOnce(() => jsonResponse({ ...createdClaim().claim, revision: 3, incident_type: 'motor', form: savedForm }))
     const user = userEvent.setup()
     render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
     await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
     await user.type(screen.getByLabelText('Client Number'), 'NW-123456')
     await user.click(screen.getByRole('button', { name: 'Incident date' }))
@@ -368,7 +419,7 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
 
     expect(await screen.findByText('Please check the incident description.')).toBeVisible()
     expect(screen.getAllByText('Another vehicle hit my parked car.')).toHaveLength(2)
@@ -382,6 +433,32 @@ describe('claimant intake', () => {
       '/api/v1/claims/clm_test/sessions/ses_test/messages',
       expect.objectContaining({ method: 'POST' }),
     )
+
+    await user.click(screen.getByRole('link', { name: 'Northwind home' }))
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(screen.getByRole('button', { name: /Another vehicle hit my parked car.*clm_test.*2 messages/ })).toBeVisible()
+
+    const secondClaim = createdClaim()
+    secondClaim.claim.claim_id = 'clm_second'
+    secondClaim.session.claim_id = 'clm_second'
+    secondClaim.session.session_id = 'ses_second'
+    fetch.mockImplementationOnce(() => jsonResponse(secondClaim, 201))
+    fetch.mockImplementationOnce(() => jsonResponse({
+      ...firstTurn(),
+      claim_id: 'clm_second',
+      session_id: 'ses_second',
+      claim_revision: 3,
+      claimant_message: { ...firstTurn().claimant_message, message_id: 'msg_claimant_2', content: { type: 'text', text: 'The rear bumper is damaged.' } },
+      agent_message: { ...firstTurn().agent_message, message_id: 'msg_agent_2' },
+    }))
+    await user.type(screen.getByLabelText('Incident description'), 'The rear bumper is damaged.')
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
+    expect(await screen.findByRole('heading', { name: /build the details together/ })).toBeVisible()
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/claims', expect.objectContaining({ method: 'POST' }))
+
+    await user.click(screen.getByRole('link', { name: 'Northwind home' }))
+    expect(screen.getByRole('button', { name: /The rear bumper is damaged.*clm_second/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: /Another vehicle hit my parked car.*clm_test/ })).toBeVisible()
   })
 
   it('confirms the proposed field and moves to the next unanswered question', async () => {
@@ -413,7 +490,7 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
 
     await waitFor(() => {
@@ -474,7 +551,7 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Edit' }))
 
     const correction = screen.getByRole('textbox', { name: 'Correct What happened' })
@@ -506,7 +583,7 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
 
     expect(await screen.findByText('Suggested from your description')).toBeVisible()
     expect(screen.queryByText('Source: inference')).not.toBeInTheDocument()
@@ -518,7 +595,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A synthetic incident.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -541,12 +618,16 @@ describe('claimant intake', () => {
     await user.tab() // Claims navigation
     await user.tab() // How it works navigation
     await user.tab() // Log in
-    await user.tab()
+    await user.tab() // Start a claim hero action
+    expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveFocus()
+    expect(screen.getByRole('link', { name: 'Start a claim' })).toHaveAttribute('href', '#claims')
+    await user.tab() // Claim online hero shortcut
+    await user.tab() // Directly visible incident description
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
     await user.type(description, 'Another vehicle hit my parked car.')
-    await user.tab()
-    expect(screen.getByRole('button', { name: 'Continue claim' })).toHaveFocus()
+    await user.tab() // Direct conversational claim action
+    expect(screen.getByRole('button', { name: 'Continue with claim assistant' })).toHaveFocus()
     await user.keyboard('{Enter}')
 
     expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
@@ -674,7 +755,7 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
     expect(screen.getByText(/Delivery outcome unknown/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
@@ -717,7 +798,7 @@ describe('claimant intake', () => {
       screen.getByLabelText('Incident description'),
       'Another vehicle hit my parked car.',
     )
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
 
     expect(await screen.findByText('Your support request is queued')).toBeVisible()
@@ -770,7 +851,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
     await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
 
@@ -825,7 +906,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
     await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
 
@@ -852,7 +933,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'Police report is due next week.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
 
     expect(await screen.findByText('Pending')).toBeVisible()
     expect(screen.getByText('Expected later')).toBeVisible()
@@ -924,7 +1005,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1009,7 +1090,7 @@ describe('claimant intake', () => {
     expect(screen.queryByRole('heading', { name: 'Request a vehicle damage assessment' }))
       .not.toBeInTheDocument()
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1061,7 +1142,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
 
@@ -1149,7 +1230,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
     await user.click(await screen.findByRole('checkbox', { name: /I give Northwind permission/ }))
@@ -1219,7 +1300,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A complete motor report.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm details' }))
     await user.click(await screen.findByRole('button', { name: 'Create claim' }))
     await user.click(await screen.findByRole('checkbox', { name: /I give Northwind permission/ }))
@@ -1358,7 +1439,7 @@ describe('claimant intake', () => {
     render(<App />)
 
     await user.type(screen.getByLabelText('Incident description'), 'A passenger is injured.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with claim assistant' }))
 
     expect(await screen.findByText('Normal intake has paused')).toBeVisible()
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)

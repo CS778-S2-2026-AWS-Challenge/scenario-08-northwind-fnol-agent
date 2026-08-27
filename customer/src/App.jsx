@@ -16,6 +16,7 @@ import {
   updateClaimField,
 } from './api.js'
 import './App.css'
+import CustomerAccount from './CustomerAccount.jsx'
 import GuidedMotorClaim from './GuidedMotorClaim.jsx'
 
 const FIELD_LABELS = {
@@ -32,22 +33,25 @@ const INPUT_LABELS = {
 
 const CLAIM_MATERIALS = {
   motor: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
     ['Incident details', 'The date, time, location and a short account of what happened.'],
-    ['Vehicle and driver details', 'Registration plates and contact details, if available.'],
-    ['Photos or video', 'Damage and the wider scene, when it is safe to take them.'],
+    ['Vehicle and driver details', 'Registration plates, names, contact details and insurer information.'],
+    ['Photos or video', 'The damage, vehicles involved and the wider incident scene, when safe.'],
+    ['Police or witness information', 'A report number or witness contact details, if available.'],
   ],
   home: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
-    ['Incident details', 'When it happened, what caused it and the affected areas.'],
-    ['Photos or video', 'Clear views of the damage and likely source, when safe.'],
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'When it happened, what caused it and which parts of the home are affected.'],
+    ['Photos or video', 'Clear views of the damage and its likely source, when safe.'],
     ['Emergency work records', 'Invoices or reports for urgent work already completed.'],
+    ['Quotes or reports', 'Repair estimates, tradesperson notes or official reports, if available.'],
   ],
   contents: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
-    ['Affected items', 'The brand, model, age and what happened to each item.'],
-    ['Proof of ownership', 'Receipts, photos or account statements, if available.'],
-    ['Photos of damage', 'Clear images of affected items and the surrounding area.'],
+    ['Your policy or client number', 'Helpful for finding your cover quickly.'],
+    ['A list of affected items', 'Include the brand, model, age and what happened to each item.'],
+    ['Proof of ownership', 'Receipts, order confirmations, photos or account statements, if available.'],
+    ['Photos of damage', 'Clear images of each damaged item and the surrounding area.'],
+    ['Police report details', 'For theft or malicious damage, include a report number if available.'],
   ],
 }
 
@@ -104,11 +108,15 @@ function mergeFields(current, changes) {
 
 function App() {
   const [page, setPage] = useState('home')
-  const [claimType, setClaimType] = useState('motor')
+  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('northwind-prototype-auth') === 'true')
+  const [accountSection, setAccountSection] = useState('overview')
+  const [historyOpen, setHistoryOpen] = useState(() => window.innerWidth > 900)
+  const [claimType, setClaimType] = useState('')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
+  const [claimHistory, setClaimHistory] = useState([])
   const [form, setForm] = useState({})
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -177,17 +185,44 @@ function App() {
     }))
   }
 
-  const claimTypePrompts = {
-    motor: 'For example: Another car reversed into mine while it was parked.',
-    home: 'For example: A pipe burst overnight and damaged the kitchen floor.',
-    contents: 'For example: My laptop and camera were stolen from my apartment.',
-  }
-
   useEffect(() => {
     if (claim?.revision) {
       latestRevision.current = Math.max(latestRevision.current, claim.revision)
     }
   }, [claim?.revision])
+
+  useEffect(() => {
+    function handleHistoryNavigation(event) {
+      setPage(event.state?.page || 'home')
+      if (!event.state?.page) window.scrollTo({ top: 0 })
+    }
+
+    window.addEventListener('popstate', handleHistoryNavigation)
+    return () => window.removeEventListener('popstate', handleHistoryNavigation)
+  }, [])
+
+  function openPage(nextPage) {
+    window.history.pushState({ page: nextPage }, '', window.location.href)
+    setPage(nextPage)
+  }
+
+  function signIn() {
+    localStorage.setItem('northwind-prototype-auth', 'true')
+    setIsLoggedIn(true)
+    setPage('home')
+    window.scrollTo({ top: 0 })
+  }
+
+  function signOut() {
+    localStorage.removeItem('northwind-prototype-auth')
+    setIsLoggedIn(false)
+    setPage('home')
+  }
+
+  function openAccount(section) {
+    setAccountSection(section)
+    openPage('account')
+  }
 
   async function refreshAfterConflict() {
     if (!claim) return
@@ -236,9 +271,23 @@ function App() {
   }
 
   async function sendMessage(event) {
-    event.preventDefault()
+    event?.preventDefault()
     const text = draft.trim()
     if (!text || isBusy) return
+    const isStartingFreshClaim = !hasStarted || page === 'home'
+    const shouldOpenConversation = page !== 'conversation'
+
+    if (hasStarted && page === 'home') {
+      const firstClaimantMessage = messages.find((message) => message.actor === 'claimant')
+      setClaimHistory((current) => current.some((item) => item.claimId === claim.claim_id) ? current : [
+        {
+          claimId: claim.claim_id,
+          title: firstClaimantMessage ? messageText(firstClaimantMessage).slice(0, 62) : 'Claim conversation',
+          messageCount: messages.length,
+        },
+        ...current,
+      ])
+    }
 
     setError('')
     setFailedMessage(null)
@@ -254,8 +303,8 @@ function App() {
       }
       const operation = pendingSubmission.current
       setPendingMessage({ text, audience: 'Northwind claim team' })
-      let activeClaim = claim
-      let activeSessionId = sessionId
+      let activeClaim = isStartingFreshClaim ? null : claim
+      let activeSessionId = isStartingFreshClaim ? null : sessionId
       if (!activeClaim) {
         const created = await createClaim({ idempotencyKey: operation.claimKey })
         activeClaim = created.claim
@@ -275,7 +324,7 @@ function App() {
         clientMessageId: operation.clientMessageId,
       })
       setMessages((current) => [
-        ...current,
+        ...(isStartingFreshClaim ? [] : current),
         turn.claimant_message,
         ...(turn.agent_message ? [turn.agent_message] : []),
       ])
@@ -288,6 +337,7 @@ function App() {
       setPendingMessage(null)
       setFailedMessage(null)
       setStatus('idle')
+      if (shouldOpenConversation) openPage('conversation')
     } catch (requestError) {
       setPendingMessage(null)
       const knownRejection = requestError instanceof ApiRequestError
@@ -302,6 +352,10 @@ function App() {
       })
       showError(requestError)
     }
+  }
+
+  function exitGuidedClaim() {
+    setPage('home')
   }
 
   async function confirmProposedFields() {
@@ -565,10 +619,19 @@ function App() {
       setResumeContext(session.resume)
       setSavedReports(null)
       setStatus('idle')
+      openPage('conversation')
     } catch (requestError) {
       showError(requestError)
     }
   }
+
+  let accountProfile = { firstName: 'Alex', lastName: 'Morgan', email: 'alex.morgan@example.com' }
+  try {
+    accountProfile = { ...accountProfile, ...JSON.parse(localStorage.getItem('northwind-customer-profile-prototype') || '{}') }
+  } catch {
+    // Keep the synthetic prototype defaults if local profile data is invalid.
+  }
+  const accountInitials = `${accountProfile.firstName[0] || ''}${accountProfile.lastName[0] || ''}`.toUpperCase()
 
   return (
     <div className="customer-app">
@@ -577,14 +640,25 @@ function App() {
           <span className="brand-mark">N</span>
           <span>Northwind Insurance</span>
         </a>
-        {!hasStarted && page === 'home' && (
+        {page === 'home' && (
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => setPage('login')}>Log in</button>
+            {isLoggedIn ? (
+              <div className="header-account-menu">
+                <button className="header-avatar" type="button" aria-label="Customer account menu">{accountInitials}<span className="header-message-badge">2</span></button>
+                <div className="header-account-dropdown">
+                  <div className="header-account-summary"><strong>{accountProfile.firstName} {accountProfile.lastName}</strong><small>{accountProfile.email}</small></div>
+                  <button type="button" onClick={() => openAccount('overview')}>Account overview</button>
+                  <button type="button" onClick={() => openAccount('messages')}>Messages <span>2 unread</span></button>
+                  <button type="button" onClick={() => openAccount('profile')}>Profile and preferences</button>
+                  <button className="header-signout" type="button" onClick={signOut}>Sign out</button>
+                </div>
+              </div>
+            ) : <button className="login-button" type="button" onClick={() => openPage('login')}>Log in</button>}
           </nav>
         )}
-        {hasStarted && (
+        {hasStarted && page === 'conversation' && (
           <div className="header-actions">
             <span className="draft-label">Draft report</span>
             <button
@@ -599,28 +673,24 @@ function App() {
         )}
       </header>
 
-      {!hasStarted && page === 'guided-motor' ? (
-        <GuidedMotorClaim
-          initialDescription={draft}
-          onExit={(description) => {
-            setDraft(description)
-            setPage('home')
-          }}
-        />
-      ) : !hasStarted && page === 'login' ? (
+      {page === 'guided-motor' ? (
+        <GuidedMotorClaim initialDescription={draft} onExit={exitGuidedClaim} />
+      ) : page === 'account' ? (
+        <CustomerAccount initialSection={accountSection} onSignOut={signOut} onStartClaim={() => setPage('home')} />
+      ) : page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
             <p className="eyebrow">Your Northwind account</p>
             <h1 id="login-title">Welcome back</h1>
             <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
-            <form className="login-form" onSubmit={(event) => event.preventDefault()}>
+            <form className="login-form" onSubmit={(event) => { event.preventDefault(); signIn() }}>
               <label htmlFor="customer-email">Email address</label>
-              <input id="customer-email" name="email" type="email" autoComplete="email" />
+              <input id="customer-email" name="email" type="email" autoComplete="email" required />
               <label htmlFor="customer-password">Password</label>
-              <input id="customer-password" name="password" type="password" autoComplete="current-password" />
-              <button className="primary-button login-submit" type="submit" disabled>Log in</button>
-              <p className="prototype-note" role="note">Customer account authentication is not connected in this prototype. You can still start a claim without logging in.</p>
+              <input id="customer-password" name="password" type="password" autoComplete="current-password" required />
+              <button className="primary-button login-submit" type="submit">Log in to prototype</button>
+              <p className="prototype-note" role="note">Prototype only: authentication is not connected. Use any email and password to preview the account experience.</p>
             </form>
             <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
               Start a claim without logging in
@@ -631,8 +701,27 @@ function App() {
             </div>
           </section>
         </main>
-      ) : !hasStarted ? (
-        <main className="entry-page">
+      ) : page === 'home' || !hasStarted ? (
+        <main>
+          <section className="home-hero" aria-labelledby="home-hero-title">
+            <div className="home-hero-shade" aria-hidden="true" />
+            <div className="home-hero-content">
+              <p className="home-hero-eyebrow">Northwind Insurance</p>
+              <h1 id="home-hero-title">When the unexpected happens, we&apos;re here.</h1>
+              <p>
+                Tell us what happened and we&apos;ll guide you through your claim, one clear step at a time.
+              </p>
+              <a className="home-hero-action" href="#claims">
+                Start a claim
+                <span aria-hidden="true">&#8594;</span>
+              </a>
+            </div>
+            <a className="home-hero-scroll" href="#claims" aria-label="Go to claim application">
+              <span>Claim online</span>
+              <span aria-hidden="true">&#8595;</span>
+            </a>
+          </section>
+          <div className={`entry-page${historyOpen ? '' : ' history-is-collapsed'}`}>
           <section className="entry-main">
             <div className="entry-content">
               <p className="eyebrow">Claims, made a little easier</p>
@@ -641,102 +730,105 @@ function App() {
                 Start your claim online in a few minutes. No account or insurance jargon needed.
               </p>
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
-                <h2 id="claim-starter-title">Tell us what happened</h2>
-                <MessageComposer
-                  draft={draft}
-                  setDraft={setDraft}
-                  onSubmit={sendMessage}
-                  inputLabel="Incident description"
-                  busy={isBusy}
-                  buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
-                  error={error}
-                  placeholder={claimTypePrompts[claimType]}
-                />
-                {failedMessage && (
-                  <article className="message message-claimant is-failed">
-                    <p className="message-author">{failedMessage.sender}</p>
-                    <p>{failedMessage.text}</p>
-                    <p className="message-state">
-                      Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
-                    </p>
-                  </article>
-                )}
-                <div className="choice-divider"><span>Optional guided claim</span></div>
-                <h3>Choose a claim type for guided help</h3>
-                <div className="claim-tabs" role="tablist" aria-label="Claim type">
-                  {['motor', 'home', 'contents'].map((type) => (
+                <div className="claim-primary-entry">
+                  <p className="eyebrow">AI-assisted claim</p>
+                  <h2 id="claim-starter-title">Tell us what happened</h2>
+                  <p className="claim-primary-note">
+                    Describe the incident in your own words. The conversational claim assistant will preserve known facts and ask only for information still needed.
+                  </p>
+                  <MessageComposer
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSubmit={sendMessage}
+                    inputLabel="Incident description"
+                    busy={isBusy}
+                    buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue with claim assistant'}
+                    error={error}
+                    placeholder="Briefly tell us what happened. You can add more details in the conversation."
+                  />
+                  {failedMessage && (
+                    <article className="message message-claimant is-failed">
+                      <p className="message-author">{failedMessage.sender}</p>
+                      <p>{failedMessage.text}</p>
+                      <p className="message-state">
+                        Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
+                      </p>
+                    </article>
+                  )}
+                  <div className="claim-start-actions">
                     <button
-                      key={type}
+                      className="secondary-button"
                       type="button"
-                      role="tab"
-                      aria-selected={claimType === type}
-                      className={claimType === type ? 'is-selected' : ''}
-                      onClick={() => setClaimType(type)}
+                      onClick={loadSavedReports}
+                      disabled={isBusy}
                     >
-                      <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
-                      {type[0].toUpperCase() + type.slice(1)}
+                      {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
                     </button>
-                  ))}
+                  </div>
+                  <div className="resume-entry">
+                    {savedReports !== null && (
+                      <section className="saved-reports" aria-labelledby="saved-reports-title">
+                        <h2 id="saved-reports-title">Saved reports</h2>
+                        {savedReports.length === 0 ? (
+                          <p>No saved reports are available to resume.</p>
+                        ) : (
+                          <ul>
+                            {savedReports.map((report) => (
+                              <li key={report.claim_id}>
+                                <div>
+                                  <strong>{report.incident_type || 'Incident report'}</strong>
+                                  <span>{report.customer_next_step.summary}</span>
+                                </div>
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => resumeSavedReport(report.claim_id)}
+                                  disabled={isBusy}
+                                >
+                                  {status === 'resuming' ? 'Resuming...' : 'Resume report'}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                  </div>
                 </div>
-              <div className="preparation-list">
-                <h3>Helpful to have ready for your {claimType} claim</h3>
-                <p>These items are useful, not required. You can start above without them and add missing information later.</p>
-                <ul>
-                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
-                    <li key={title}>
-                      <span className="material-check" aria-hidden="true">✓</span>
-                      <span><strong>{title}</strong><small>{description}</small></span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {claimType === 'motor' && (
-                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
-                  Start guided Motor claim
-                  <span>Three clear steps with draft saving</span>
-                </button>
-              )}
-              {claimType !== 'motor' && (
-                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened above.</p>
-              )}
-              </section>
-              <div className="resume-entry">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={loadSavedReports}
-                  disabled={isBusy}
-                >
-                  {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
-                </button>
-                {savedReports !== null && (
-                  <section className="saved-reports" aria-labelledby="saved-reports-title">
-                    <h2 id="saved-reports-title">Saved reports</h2>
-                    {savedReports.length === 0 ? (
-                      <p>No saved reports are available to resume.</p>
-                    ) : (
+                <section className="guided-entry" aria-labelledby="claim-guidance-title">
+                  <p className="eyebrow">Fixed form option</p>
+                  <h2 id="claim-guidance-title">Prepare by claim type</h2>
+                  <p className="claim-guidance-note">Choose a claim type to review a helpful preparation list and use an available guided form.</p>
+                  <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                    {['motor', 'home', 'contents'].map((type) => (
+                      <button key={type} type="button" role="tab" aria-selected={claimType === type} className={claimType === type ? 'is-selected' : ''} onClick={() => setClaimType(type)}>
+                        <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
+                        {type[0].toUpperCase() + type.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  {!claimType ? (
+                    <p className="claim-type-note">Select a type to see its helpful preparation list.</p>
+                  ) : (
+                    <div className="preparation-list">
+                      <h3>Helpful to have ready for your {claimType} claim</h3>
+                      <p>These items are useful, not required. You can start without them and add missing information later.</p>
                       <ul>
-                        {savedReports.map((report) => (
-                          <li key={report.claim_id}>
-                            <div>
-                              <strong>{report.incident_type || 'Incident report'}</strong>
-                              <span>{report.customer_next_step.summary}</span>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => resumeSavedReport(report.claim_id)}
-                              disabled={isBusy}
-                            >
-                              {status === 'resuming' ? 'Resuming...' : 'Resume report'}
-                            </button>
-                          </li>
+                        {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                          <li key={title}><span className="material-check" aria-hidden="true">✓</span><span><strong>{title}</strong><small>{description}</small></span></li>
                         ))}
                       </ul>
-                    )}
-                  </section>
-                )}
-              </div>
+                    </div>
+                  )}
+                  {claimType === 'motor' && (
+                    <button className="guided-start-button" type="button" onClick={() => openPage('guided-motor')}>
+                      Start guided Motor claim
+                      <span>Three-step form with draft saving</span>
+                    </button>
+                  )}
+                  {claimType && claimType !== 'motor' && <p className="guided-unavailable">A guided form is not configured for this claim type yet.</p>}
+                </section>
+              </section>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>
                 <span>Pause anytime</span>
@@ -744,7 +836,16 @@ function App() {
               </div>
             </div>
           </section>
-          <HelpfulDetails />
+          <ClaimHistorySidebar
+            claim={claim}
+            messages={messages}
+            history={claimHistory}
+            open={historyOpen}
+            onToggle={() => setHistoryOpen((current) => !current)}
+            onOpenConversation={() => openPage('conversation')}
+            onOpenHistory={resumeSavedReport}
+          />
+          </div>
         </main>
       ) : (
         <main className="intake-page">
@@ -888,6 +989,11 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
+              disabledNote={
+                handoff
+                  ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
+                  : 'Confirm or correct the details before continuing.'
+              }
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
@@ -1127,6 +1233,7 @@ function MessageComposer({
   disabledNote = 'Confirm or correct the details before continuing.',
   buttonLabel,
   error,
+  hideActions = false,
   placeholder = 'Write the details you know...',
 }) {
   return (
@@ -1148,7 +1255,7 @@ function MessageComposer({
           <span>{error}</span>
         </div>
       )}
-      <div className="report-actions">
+      {!hideActions && <div className="report-actions">
         <button
           className="primary-button"
           type="submit"
@@ -1156,22 +1263,55 @@ function MessageComposer({
         >
           {buttonLabel}
         </button>
-      </div>
+      </div>}
     </form>
   )
 }
 
-function HelpfulDetails() {
+function ClaimHistorySidebar({ claim, messages, history, open, onToggle, onOpenConversation, onOpenHistory }) {
+  const firstClaimantMessage = messages.find((message) => message.actor === 'claimant')
+  const conversationTitle = firstClaimantMessage
+    ? messageText(firstClaimantMessage).slice(0, 62)
+    : 'Current claim conversation'
+
   return (
-    <aside className="entry-side" aria-labelledby="helpful-details-title">
+    <aside className={`entry-side history-sidebar${open ? ' is-open' : ' is-collapsed'}`} aria-label="Conversation and claim history">
       <div className="side-content">
-        <p className="side-label">When available</p>
-        <h2 id="helpful-details-title">Helpful details to include</h2>
-        <ul className="detail-list">
-          <li>When and where the incident happened</li>
-          <li>Who or what was involved</li>
-          <li>Any damage, injuries, or immediate safety concerns</li>
-        </ul>
+        <button
+          className="history-toggle"
+          type="button"
+          aria-expanded={open}
+          onClick={onToggle}
+          aria-label={open ? 'Collapse conversation history' : 'Expand conversation history'}
+          title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <span className="history-toggle-icon" aria-hidden="true"><span /></span>
+          <span className="history-toggle-arrow" aria-hidden="true">{open ? '›' : '‹'}</span>
+        </button>
+        {open && <>
+          <div className="history-heading">
+            <span className="history-mark" aria-hidden="true">N</span>
+            <div><strong>Claim conversations</strong><small>Browser-local prototype</small></div>
+          </div>
+          <nav className="history-content" aria-label="Recent claim conversations">
+            <p className="history-group-label">Recent</p>
+            {claim ? (
+              <button className="history-thread is-current" type="button" onClick={onOpenConversation}>
+                <span className="history-thread-icon" aria-hidden="true">◇</span>
+                <span className="history-thread-copy"><strong>{conversationTitle}</strong><small>{claim.claim_id} · {messages.length} messages</small></span>
+              </button>
+            ) : (
+              <p className="history-empty">Claim conversations will appear here after you start.</p>
+            )}
+            {history.map((item) => (
+              <button className="history-thread" type="button" key={item.claimId} onClick={() => onOpenHistory(item.claimId)}>
+                <span className="history-thread-icon" aria-hidden="true">◇</span>
+                <span className="history-thread-copy"><strong>{item.title}</strong><small>{item.claimId} · {item.messageCount} messages</small></span>
+              </button>
+            ))}
+          </nav>
+          <p className="history-boundary">History is synthetic and stored only in this browser.</p>
+        </>}
       </div>
     </aside>
   )
