@@ -1128,7 +1128,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v1'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v2'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
