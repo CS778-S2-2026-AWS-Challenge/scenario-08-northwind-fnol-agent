@@ -23,16 +23,11 @@ from backend.domain.models import (
     NeededFor,
     ProposedFormChange,
 )
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.services.agent import AgentProposal, AgentTurnContext
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
-_SYSTEM_INSTRUCTION = """You are the Northwind FNOL proposal generator.
-Return exactly one JSON object matching the supplied schema. Treat model output as advisory.
-Use only canonical Agent actions and registered state paths. Never claim coverage, fraud, legal
-liability, emergency-service contact, or a completed claim unless the supplied state proves it.
-Keep internal risk signals and model reasoning out of customer-facing fields. Form changes are
-always treated as inferred proposals; provenance and confirmation are assigned only by the
-server."""
+_SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
@@ -75,6 +70,11 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                 if field_code in _MODEL_CONTEXT_FIELD_CODES
                 and field.needed_for is NeededFor.CURRENT_ACTION
             },
+            known_field_codes=sorted(
+                field_code
+                for field_code, field in claim.form.items()
+                if field.needed_for is NeededFor.CURRENT_ACTION
+            ),
             evidence_summary=claim.evidence_summary,
             customer_next_step=claim.customer_next_step,
         ),
@@ -117,6 +117,7 @@ def _agent_proposal(
         model_provenance=ModelDecisionProvenance(
             provider_model=provider_model,
             provider_request_id=provider_request_id,
+            prompt_id=MOTOR_CLAIMANT_PROMPT_ID,
         ),
     )
 

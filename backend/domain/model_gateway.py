@@ -96,6 +96,7 @@ class ModelClaimContext(ModelContract):
     incident_type: str | None = None
     claim_state: ModelClaimStateContext
     form: dict[str, ModelFormFieldContext] = Field(default_factory=dict)
+    known_field_codes: list[str] = Field(default_factory=list)
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
 

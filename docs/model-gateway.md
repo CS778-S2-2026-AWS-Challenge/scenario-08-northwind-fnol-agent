@@ -38,6 +38,9 @@ unregistered field remain outside routine model context.
 The projection also excludes Claim, Customer, Session, Message, and Evidence identifiers;
 source references and actor identities; internal fraud, coverage, and severity signals;
 provider fingerprints; routes; timestamps; and external Claim or assessor results.
+For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
+model that the field already exists without disclosing its value. This supports non-repetition
+without widening the routine model-data projection.
 
 The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
 but it cannot set fact provenance or confirmation state. The server converts every accepted
@@ -57,9 +60,10 @@ authorised low-impact actions use action-specific server responses. This prevent
 presenting approval, rejection, liability, fraud, or emergency-service claims to a claimant.
 
 Each persisted model-backed decision records `proposal_source: model_gateway` and bounded audit
-provenance containing the runtime profile, provider-reported model identifier, and provider request
-identifier when supplied. These provider references are internal-only and are absent from claimant
-messages and decision projections. Token usage persistence remains a current limitation.
+provenance containing the runtime profile, executable prompt identifier, provider-reported model
+identifier, and provider request identifier when supplied. These references are internal-only and
+are absent from claimant messages and decision projections. Token usage persistence remains a
+current limitation.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. Because the current Agent request
@@ -71,11 +75,20 @@ The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
 configured model failure does not silently fall back to the controlled fixture.
 
-## OpenAI-Compatible Adapter
+## Implemented Adapters
+
+### OpenAI-Compatible
 
 The `openai_compatible` adapter calls `POST {MODEL_BASE_URL}/chat/completions`. Official
 APIs, relay services, and local servers that implement this protocol use the same code;
 only configuration changes.
+
+When an endpoint implements OpenAI strict structured outputs, the adapter translates the
+provider-neutral Pydantic schema into that protocol's accepted JSON Schema subset. Every object
+property becomes required, optional values remain nullable, object shapes reject undeclared
+properties, defaults are removed, and unconstrained scalar values are represented explicitly.
+This is a transport transformation only: the returned object must still pass the original domain
+model and Runtime authority validation before it can affect Claim State.
 
 | Variable | Meaning |
 |---|---|
@@ -97,6 +110,30 @@ Capability declarations are startup configuration, not provider discovery. Struc
 output and tool requests are rejected before transport when the selected adapter does
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
+
+### Amazon Bedrock Converse
+
+The `bedrock_converse` adapter calls
+`POST {MODEL_BASE_URL}/model/{MODEL_IDENTIFIER}/converse`. It authenticates with the bearer token
+stored in the environment variable named by `MODEL_API_KEY_ENV`; for Bedrock API keys this should
+name `AWS_BEARER_TOKEN_BEDROCK`. The adapter never reads a credential from a source-controlled
+profile.
+
+Bedrock Converse does not use the OpenAI request or response shape. The adapter maps system and
+conversation messages to Converse content blocks, requests the supplied proposal schema through
+the system instruction, strictly parses the returned JSON, and normalises text, stop reason,
+usage, configured model identity, and AWS request identity into `ModelResponse`. HTTP authentication,
+rate-limit, provider, timeout, and malformed-output failures use the same provider-neutral errors
+as other adapters.
+
+The executable claimant prompt is `northwind-fnol-motor-claimant-v1`, stored under
+`backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
+current minimum Claim projection and response schema; the adapter does not own FNOL behaviour.
+Changing the prompt requires a new prompt identifier and regression evidence.
+
+The repository includes configuration and transport tests, but a deployment is live only after an
+authorised model invocation succeeds in its selected AWS account and region. Model listing or
+successful local composition is not proof of Runtime access.
 
 ## Custom Protocols
 
@@ -133,8 +170,8 @@ unchanged.
 
 ## Current Limitations
 
-- The included transport implements synchronous OpenAI-compatible chat completions;
-  streaming and provider-specific response APIs are not implemented.
+- The included transports implement synchronous OpenAI-compatible chat completions and Bedrock
+  Converse; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
 - The gateway normalises tool calls, but the current `GatewayAgent` requests only a

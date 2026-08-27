@@ -1622,8 +1622,8 @@ reply by repeating the next-step summary. For a model-backed proposal, these
 claimant-visible fields and `customer_reason` are server-rendered from the
 validated action and authority outcome; untrusted model prose is not persisted
 as the claimant response. The internal decision records `proposal_source` and
-bounded model provenance when applicable. Provider model and request identifiers
-must not appear in claimant projections.
+bounded model provenance when applicable. The executable prompt identifier, provider model, and
+provider request identifiers must not appear in claimant projections.
 
 Routine model context is task-minimal. It includes the current claimant text and
 only explicitly allow-listed, current-action form values. Policy numbers, contact
