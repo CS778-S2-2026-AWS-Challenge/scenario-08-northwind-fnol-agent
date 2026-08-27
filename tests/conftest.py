@@ -10,6 +10,18 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent
 
 
+@pytest.fixture(autouse=True)
+def explicit_direct_app_developer_identity(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep legacy direct-app test suites explicit about synthetic identity mode."""
+    filename = request.node.nodeid.split('::', 1)[0].rsplit('/', 1)[-1]
+    if filename in {'test_integrations.py', 'test_claimant_external_service.py'}:
+        monkeypatch.setenv('NORTHWIND_ENVIRONMENT', 'test')
+        monkeypatch.setenv('NORTHWIND_IDENTITY_MODE', 'developer')
+
+
 @pytest.fixture
 def repository() -> FixtureRepository:
     return FixtureRepository()
