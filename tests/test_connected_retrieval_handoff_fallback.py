@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
@@ -53,6 +54,13 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
         assert context.status_code == 200, context.text
         assert context.json()['revision'] == 2
 
+        before_lookup = repository.get_claim(claim_id, 'cus_demo')
+        assert before_lookup is not None
+        before_lookup_revision = before_lookup.revision
+        before_lookup_form = deepcopy(before_lookup.form)
+        before_lookup_claim_state = deepcopy(before_lookup.claim_state)
+        before_lookup_next_step = deepcopy(before_lookup.customer_next_step)
+
         retrieval.set_outage(
             RetrievalUnavailable(
                 code='PROVIDER_TIMEOUT',
@@ -64,6 +72,13 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
             headers=INTEGRATION_AUTH,
             json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
         )
+
+        after_lookup = repository.get_claim(claim_id, 'cus_demo')
+        assert after_lookup is not None
+        assert after_lookup.revision == before_lookup_revision
+        assert after_lookup.form == before_lookup_form
+        assert after_lookup.claim_state == before_lookup_claim_state
+        assert after_lookup.customer_next_step == before_lookup_next_step
 
         dispatch.set_outage(
             HandoffDispatchUnavailable(
