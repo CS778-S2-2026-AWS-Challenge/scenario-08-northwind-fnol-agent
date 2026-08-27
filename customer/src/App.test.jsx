@@ -245,10 +245,115 @@ describe('claimant intake', () => {
       'href',
       'http://127.0.0.1:8002/',
     )
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/anonymous and synthetic/i)
 
     await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('uses an in-memory authenticated session for account updates and logout', async () => {
+    const user = userEvent.setup()
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', access_token: 'opaque-session-token',
+        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', development_identity: true,
+        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
+        preferences: { email: true, sms: false },
+      }))
+      .mockResolvedValueOnce({ ok: true, status: 204, json: async () => null })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('heading', { name: 'Your account' })).toBeVisible()
+    expect(screen.getByRole('note')).toHaveTextContent(/not a production Northwind identity/i)
+    expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer opaque-session-token')
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    expect(await screen.findByRole('heading', { name: /get back on track/i })).toBeVisible()
+    expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer opaque-session-token')
+  })
+
+  it('loads an authenticated claimant saved claim and its shared conversation', async () => {
+    const user = userEvent.setup()
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', access_token: 'opaque-session-token',
+        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', development_identity: true,
+        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
+        preferences: { email: true, sms: false },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{
+          claim_id: 'clm_saved', revision: 6, incident_type: 'motor',
+          workflow_state: 'collecting', external_claim: null,
+          customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
+          updated_at: '2026-08-27T02:00:00Z', can_resume: true,
+        }],
+        page: { next_cursor: null },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        session_id: 'ses_saved', claim_id: 'clm_saved', status: 'active',
+        resume: { summary: 'Rear-end Motor report.', pending_items: [], prior_commitments: [], customer_next_step: nextStep },
+        started_at: '2026-08-27T01:00:00Z', last_active_at: '2026-08-27T02:00:00Z', closed_at: null,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ...createdClaim().claim, claim_id: 'clm_saved', revision: 6, incident_type: 'motor',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{
+          message_id: 'msg_saved_staff', actor: 'staff',
+          content: { type: 'text', text: 'I have your earlier report and can continue from here.' },
+          evidence_refs: [], in_reply_to: null, created_at: '2026-08-27T02:00:00Z',
+        }],
+        page: { next_cursor: null },
+      }))
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(await screen.findByRole('button', { name: 'View saved claims' }))
+    await user.click(await screen.findByRole('button', { name: 'Resume report' }))
+
+    expect(await screen.findByText('I have your earlier report and can continue from here.')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Continue where you left off' })).toBeVisible()
+    expect(fetch.mock.calls[5][1].headers.Authorization).toBe('Bearer opaque-session-token')
+  })
+
+  it('keeps entered login details available after an authentication failure', async () => {
+    const user = userEvent.setup()
+    fetch.mockResolvedValueOnce(jsonResponse({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'The email or password was not recognised.',
+        request_id: 'req-login-failure',
+      },
+    }, 401))
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    const email = screen.getByLabelText('Email address')
+    const password = screen.getByLabelText('Password')
+    await user.type(email, 'claimant.one@example.invalid')
+    await user.type(password, 'incorrect-password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not recognised/i)
+    expect(email).toHaveValue('claimant.one@example.invalid')
+    expect(password).toHaveValue('incorrect-password')
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
   })
 
   it('offers a three-step guided Motor claim without replacing conversational intake', async () => {
@@ -772,7 +877,7 @@ describe('claimant intake', () => {
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
-    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh conversation' }))
 
     expect(await screen.findByText('Your support request has been reviewed')).toBeVisible()
     expect(screen.getAllByText('A staff member reviewed your report and will contact you.')).toHaveLength(2)
@@ -827,11 +932,65 @@ describe('claimant intake', () => {
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
-    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh conversation' }))
 
     expect(await screen.findByText('A Northwind staff member is now assisting you.')).toBeVisible()
     expect(screen.queryByText('Human support')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeEnabled()
+  })
+
+  it('refreshes the shared conversation when the claimant returns to the window', async () => {
+    const staffMessage = {
+      message_id: 'msg_staff_reply',
+      actor: 'staff',
+      content: { type: 'text', text: 'I have reviewed the saved details and can help from here.' },
+      evidence_refs: [],
+      in_reply_to: null,
+      created_at: '2026-08-12T00:03:00Z',
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test', status: 'queued', priority: 'standard',
+          support_need: 'human_requested', summary: 'Support is queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: { ...nextStep, status: 'human_support_queued' },
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        revision: 5,
+        handoff: {
+          handoff_id: 'hnd_test', status: 'in_progress', priority: 'standard',
+          support_need: 'human_requested', summary: 'Support is in progress.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_in_progress',
+          summary: 'A Northwind staff member is now assisting you.',
+          responsible_party: 'northwind',
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({ items: [staffMessage], page: { next_cursor: null } }),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
+    expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
   })
 
   it('labels pending evidence fields without asking the claimant to confirm them', async () => {
