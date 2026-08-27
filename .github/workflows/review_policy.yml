@@ -1,0 +1,31 @@
+name: Review Policy
+
+on:
+  pull_request_review:
+    types:
+      - submitted
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate blocking review evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Test review policy validator
+        run: node --test .github/scripts/review_policy.test.cjs
+
+      - name: Validate review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const policy = require('./.github/scripts/review_policy.cjs');
+            await policy.run({context, core});
