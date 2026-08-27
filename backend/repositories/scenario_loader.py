@@ -24,6 +24,7 @@ from backend.domain.models import (
     EvidenceState,
     EvidenceStatus,
     EvidenceSummary,
+    FormSource,
     HandoffPriority,
     HandoffRecord,
     HandoffStatus,
@@ -143,11 +144,21 @@ class ScenarioFixture(ContractModel):
             raise ValueError('Scenario message identifiers must be unique.')
         if any(not set(message.evidence_refs).issubset(evidence_ids) for message in self.messages):
             raise ValueError('Every message evidence_ref must reference scenario evidence.')
-        if any(
-            message.in_reply_to is not None and message.in_reply_to not in message_ids
-            for message in self.messages
-        ):
-            raise ValueError('Every message in_reply_to must reference a scenario message.')
+        message_conversations = {
+            message.message_id: (message.claim_id, message.session_id) for message in self.messages
+        }
+        for message in self.messages:
+            if message.in_reply_to is None:
+                continue
+            if message.in_reply_to not in message_ids:
+                raise ValueError('Every message in_reply_to must reference a scenario message.')
+            if message_conversations[message.in_reply_to] != (
+                message.claim_id,
+                message.session_id,
+            ):
+                raise ValueError(
+                    'A message in_reply_to must reference a message in the same claim and session.'
+                )
         handoff_ids = {handoff.handoff_id for handoff in self.handoffs}
         if len(handoff_ids) != len(self.handoffs):
             raise ValueError('Scenario handoff identifiers must be unique.')
@@ -172,6 +183,14 @@ class ScenarioFixture(ContractModel):
             for record in self.retrievals
             if record.kind is RetrievalKind.CLAIM_HISTORY
         }
+        for field_code, fact in self.claim.form.items():
+            if fact.source is not FormSource.POLICY:
+                continue
+            if not fact.source_refs:
+                raise ValueError(f'{field_code} declares policy provenance without a source_ref.')
+            if not set(fact.source_refs).issubset(policy_retrieval_ids):
+                raise ValueError(f'{field_code} must reference a scenario policy retrieval record.')
+
         if any(
             not set(handoff.packet.history_evidence_refs).issubset(history_retrieval_ids)
             for handoff in self.handoffs
