@@ -1,8 +1,7 @@
-const FIXTURE_CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
-let claimantToken = FIXTURE_CLAIMANT_TOKEN
+let claimantToken = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
 
 export function setClaimantAccessToken(token) {
-  claimantToken = token || FIXTURE_CLAIMANT_TOKEN
+  claimantToken = token || ''
 }
 
 export class ApiRequestError extends Error {

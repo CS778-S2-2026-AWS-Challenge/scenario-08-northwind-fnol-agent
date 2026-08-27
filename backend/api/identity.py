@@ -33,11 +33,11 @@ def identity_repository_for(request: Request) -> IdentityRepository:
     '/auth/sessions', response_model=AuthenticatedSession, status_code=status.HTTP_201_CREATED
 )
 def create_auth_session(request: Request, payload: LoginRequest) -> AuthenticatedSession:
-    if request.app.state.settings.environment not in {'development', 'test'}:
+    if not request.app.state.settings.developer_mode:
         raise ApiError(
             status_code=503,
             code='DEPENDENCY_UNAVAILABLE',
-            message='A production claimant identity provider is not configured.',
+            message='The development claimant identity provider is not enabled.',
         )
     return login(
         identity_repository_for(request),

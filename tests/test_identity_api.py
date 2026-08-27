@@ -109,3 +109,14 @@ def test_synthetic_login_fails_closed_outside_development_and_test() -> None:
 
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+
+
+def test_synthetic_login_requires_explicit_developer_identity_mode() -> None:
+    with TestClient(create_app(Settings(environment='development'))) as normal_mode_client:
+        response = normal_mode_client.post(
+            '/api/v1/auth/sessions',
+            json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
+        )
+
+    assert response.status_code == 503
+    assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'

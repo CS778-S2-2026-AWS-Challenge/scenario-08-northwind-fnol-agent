@@ -58,7 +58,8 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
 The MVP development/test identity adapter provides two explicitly synthetic claimant accounts.
-`POST /api/v1/auth/sessions` validates the synthetic credential server-side and returns a
+With `NORTHWIND_IDENTITY_MODE=developer` enabled, `POST /api/v1/auth/sessions` validates the
+synthetic credential server-side and returns a
 short-lived opaque bearer token. Only its hash, authenticated `customer_id`, expiry, and
 revocation state are retained by the server. Claimant clients keep this token in memory only.
 The adapter is unavailable outside development and test; it is not a production identity
