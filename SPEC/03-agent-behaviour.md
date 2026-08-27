@@ -1,9 +1,11 @@
 # Agent Behaviour
 
 This specification defines product-level Agent behaviour and target outcomes. The target
-engineering objects are defined in [Agent Runtime Target](../docs/agent-runtime-target.md);
+engineering objects are defined in
+[Agent Runtime Target](../docs/design/agent-runtime/agent-runtime-target.md);
 the current transport remains authoritative in [the API contract](../docs/api.md), and its
-compatibility removal path is defined in [Agent Runtime Migration](../docs/agent-runtime-migration.md).
+compatibility removal path is defined in
+[Agent Runtime Migration](../docs/design/agent-runtime/agent-runtime-migration.md).
 The target behaviour is intentionally ahead of the current transport, but it must not be
 read as evidence that every target object is already implemented.
 

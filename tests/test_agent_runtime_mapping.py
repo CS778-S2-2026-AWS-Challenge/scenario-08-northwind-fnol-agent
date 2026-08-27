@@ -4,7 +4,7 @@ import pytest
 
 from scripts.check_agent_runtime_mapping import MappingError, validate_mapping
 
-MIGRATION_PATH = Path('docs/agent-runtime-migration.md')
+MIGRATION_PATH = Path('docs/design/agent-runtime/agent-runtime-migration.md')
 
 
 def _mapping_copy(tmp_path: Path, text: str) -> Path:

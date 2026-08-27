@@ -21,8 +21,8 @@ Evidence status indicates traceability, not universal validity. Official evidenc
 
 ## 3. Quality-Control Summary
 
-- Survey source: [`Claimant_Survey_Final_Responses.csv`](./Claimant_Survey_Final_Responses.csv), exported from the final Google Forms response set and checked 13 August 2026. The owner-controlled [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912) remains the collection record.
-- Questionnaire wording source: [`Insurance Claim Customer Experience Survey.pdf`](./Insurance%20Claim%20Customer%20Experience%20Survey.pdf), an eight-page export of the Google Form stored in this research folder.
+- Survey source: [`claimant-survey-final-responses.csv`](./claimant-survey-final-responses.csv), exported from the final Google Forms response set and checked 13 August 2026. The owner-controlled [Google Sheets response source](https://docs.google.com/spreadsheets/d/1QVGBnV9EiZ_2JnnEHMKe2xCEuP7JLrA4KS1Vwr2KYBE/edit?gid=1673612912#gid=1673612912) remains the collection record.
+- Questionnaire wording source: [`insurance-claim-customer-experience-survey.pdf`](./insurance-claim-customer-experience-survey.pdf), an eight-page export of the Google Form stored in this research folder.
 - The final export contains **156 submissions**. One respondent selected “No, I do not wish to participate” and was excluded before analysis, leaving **155 consented respondents**.
 - Blank answers are retained as missing data, not classified as incorrect responses. Each result uses the number who answered that question: overall questions `n=155`, previous-claim questions `n=48`, priority and human-support questions `n=60`, hypothetical-incident questions `n=12`, and the open-text improvement question `n=144`.
 - All reported survey percentages were recalculated from their stated counts and question-specific denominators. For multi-select questions, one respondent contributes at most once to each option or combined concept even if the export repeats a label.
@@ -30,7 +30,7 @@ Evidence status indicates traceability, not universal validity. Official evidenc
 - Multi-select results are not expected to total 100%.
 - Counts were recalculated directly from the linked response sheet. Each metric below retains its numerator, denominator and question context.
 - The response sheet remains access-controlled by its owner even though link-view access is currently enabled. Do not copy free-text responses into public research artifacts without an additional privacy review.
-- Interview and observation source: [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md), recorded 11 August 2026. The notes document consent, participant role, method, evidence IDs and research limitations without including the participant's name, employer or customer data.
+- Interview and observation source: [`Insurance Industry Interview and Supporting User Observation`](./insurance-industry-interview-and-user-observation.md), recorded 11 August 2026. The notes document consent, participant role, method, evidence IDs and research limitations without including the participant's name, employer or customer data.
 
 ## 4. Claimant Evidence
 
@@ -111,7 +111,7 @@ The current AI-comfort distribution is rating 1 = 9, rating 2 = 11, rating 3 = 5
 | OBS-04 | 2/5 participants would consider calling, while 3/5 did not want to call. | A telephone-only escalation route may not suit every user. | Direct exploratory task observation. | Preference in one exercise; no demographic or channel-preference study was conducted. | Observation documented |
 | OBS-05 | Some participants appeared uncomfortable with phone communication. | Text-based support may be useful for some users. | Informal researcher observation. | Not formally measured; remains provisional. | Observation documented |
 
-**Original source:** [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md), sections 6–10. The source records consent and keeps the website observation separate from the industry interview.
+**Original source:** [`Insurance Industry Interview and Supporting User Observation`](./insurance-industry-interview-and-user-observation.md), sections 6–10. The source records consent and keeps the website observation separate from the industry interview.
 
 ### 4.5 Claimant Findings Requiring Further Validation
 
@@ -152,7 +152,7 @@ The sources establish information complexity, surge conditions, third-party coor
 | INT-02 | The participant stated that customers may continue asking staff to handle tasks the customer must complete themselves. | Repeated procedural explanation may create avoidable staff workload. | Direct statement from a consented insurance-industry participant. | No frequency, duration or handling-time measurement was collected. | Interview documented |
 | INT-03 | The participant stated that repeated customer explanation consumes employee time. | Better pre-intake guidance may reduce procedural workload while preserving staff support. | Direct statement from a consented insurance-industry participant. | Causal impact of any proposed design was not tested. | Interview documented |
 
-**Original source:** [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md), sections 2–5 and 9–12. Handoff was not discussed, so no handoff finding is inferred from this interview.
+**Original source:** [`Insurance Industry Interview and Supporting User Observation`](./insurance-industry-interview-and-user-observation.md), sections 2–5 and 9–12. Handoff was not discussed, so no handoff finding is inferred from this interview.
 
 ### 5.4 Evidence-Based Employee Pain Points
 
@@ -232,4 +232,4 @@ For each new item, record:
 - verification status and checked date; and
 - the next validation action.
 
-The final anonymous survey export is stored as [`Claimant_Survey_Final_Responses.csv`](./Claimant_Survey_Final_Responses.csv), with the collection record retained in the linked owner-controlled Google Sheet. The consented, anonymised interview and observation record is stored in this repository as [`D2-R02 - Insurance Industry Interview and Supporting User Observation`](./D2-R02_Insurance_Industry_Interview_and_User_Observation.md). Any future raw notes or internal workflow evidence should be stored with suitable consent, privacy and access controls. Derived percentages must retain their numerator, question-specific denominator and question wording.
+The final anonymous survey export is stored as [`claimant-survey-final-responses.csv`](./claimant-survey-final-responses.csv), with the collection record retained in the linked owner-controlled Google Sheet. The consented, anonymised interview and observation record is stored in this repository as [`Insurance Industry Interview and Supporting User Observation`](./insurance-industry-interview-and-user-observation.md). Any future raw notes or internal workflow evidence should be stored with suitable consent, privacy and access controls. Derived percentages must retain their numerator, question-specific denominator and question wording.

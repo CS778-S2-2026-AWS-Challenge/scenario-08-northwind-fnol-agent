@@ -246,7 +246,13 @@ authorise an agent to make the same state change manually.
   separate ownership and must not be presented as interchangeable proof.
 - A product-scope change belongs in `SPEC/`. A time-bound commitment change belongs in `sprint/`.
   Engineering documentation must not silently redefine either.
-- Update `docs/README.md` when adding or replacing an authoritative engineering document.
+- Keep current engineering documents at the `docs/` root, target architecture and rationale under
+  `docs/design/`, current evidence ledgers under `docs/status/`, and research inputs under
+  `docs/research/`.
+- Put Sprint-day plans, task-specific validation reports, demonstration runbooks, screenshots, and
+  exact-commit evidence under `docs/archive/sprint-N/`. Do not add `day*`, `d4-*`, task-code, or
+  presentation evidence files to the `docs/` root.
+- Update `docs/README.md` when adding, replacing, moving, or archiving a documented source.
 
 ## Provider, Data, Security, and Visibility Boundaries
 
