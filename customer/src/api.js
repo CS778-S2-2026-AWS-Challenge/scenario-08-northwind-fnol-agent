@@ -4,6 +4,10 @@ export function setClaimantAccessToken(token) {
   claimantToken = token || ''
 }
 
+export function hasClaimantAccessToken() {
+  return Boolean(claimantToken)
+}
+
 export class ApiRequestError extends Error {
   constructor(message, { code, status, retryable = false, currentRevision = null } = {}) {
     super(message)
