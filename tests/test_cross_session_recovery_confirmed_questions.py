@@ -3,17 +3,18 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import SessionStatus
 from backend.repositories.fixture import FixtureRepository
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def test_resume_drops_confirmation_question_after_fields_are_confirmed() -> None:
     repository = FixtureRepository()
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         created = client.post(
             '/api/v1/claims',
             headers={**AUTH, 'Idempotency-Key': 'resume-confirm-question-claim'},

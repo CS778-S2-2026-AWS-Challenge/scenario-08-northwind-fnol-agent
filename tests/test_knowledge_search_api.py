@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.core.runtime_profiles import DataRuntimeBundle, build_data_runtime_bundle
 from backend.domain.knowledge import (
     KnowledgeChunk,
@@ -59,7 +59,7 @@ def citation_chunk() -> KnowledgeChunk:
 
 
 def client_for(retriever: ControlledRetriever) -> TestClient:
-    settings = Settings()
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
     fixture = build_data_runtime_bundle(settings)
     bundle = DataRuntimeBundle(
         profile=fixture.profile,

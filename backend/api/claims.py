@@ -37,7 +37,8 @@ from backend.services.claims import (
     update_form,
 )
 from backend.services.external_services import grant_assessor_consent, request_assessor_routing
-from backend.services.messages import list_claim_messages, submit_message
+from backend.services.message_history import list_claim_messages
+from backend.services.messages import submit_message
 from backend.services.resume import start_session_with_recovery
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])

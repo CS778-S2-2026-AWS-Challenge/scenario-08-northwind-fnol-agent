@@ -736,7 +736,17 @@
 
   <script>
     const API_BASE = 'http://127.0.0.1:8000/api/v1/workbench/claims';
-    const STAFF_TOKEN = 'synthetic-staff';
+    // Explicit local developer opt-in. This page ships no credential; a synthetic
+    // token only works against a backend started in explicit developer identity mode.
+    // Set one for local use with:
+    //   localStorage.setItem('northwind.staffToken', '<configured staff token>')
+    const STAFF_TOKEN = (() => {
+      try {
+        return window.localStorage.getItem('northwind.staffToken') || '';
+      } catch {
+        return '';
+      }
+    })();
 
     const byId = id => document.getElementById(id);
     const SIDEBAR_STORAGE_KEY = 'northwind-workbench-sidebar-collapsed';
