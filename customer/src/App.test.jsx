@@ -259,6 +259,7 @@ describe('claimant intake', () => {
     const guidedStart = screen.getByRole('button', { name: /Start guided Motor claim/ })
     expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
     expect(description.compareDocumentPosition(guidedStart)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getByText(/These items are useful, not required/)).toBeVisible()
 
     await user.click(guidedStart)
 
@@ -278,6 +279,24 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Incident date' })).toHaveFocus()
     expect(screen.getByLabelText('Vehicle registration plate number')).toHaveAttribute('placeholder', 'For example, ABC123')
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
+  })
+
+  it('shows optional preparation by claim type and preserves the description through guided Motor', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const description = screen.getByLabelText('Incident description')
+    await user.type(description, 'Another vehicle hit my parked car.')
+    await user.click(screen.getByRole('tab', { name: 'Home' }))
+    expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
+    expect(screen.getByText('Emergency work records')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('Another vehicle hit my parked car.')
   })
 
   it('returns to guided details and continues without overwriting confirmed fields', async () => {

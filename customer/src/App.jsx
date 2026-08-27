@@ -30,6 +30,27 @@ const INPUT_LABELS = {
   describe_loss: 'Damage or loss',
 }
 
+const CLAIM_MATERIALS = {
+  motor: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'The date, time, location and a short account of what happened.'],
+    ['Vehicle and driver details', 'Registration plates and contact details, if available.'],
+    ['Photos or video', 'Damage and the wider scene, when it is safe to take them.'],
+  ],
+  home: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Incident details', 'When it happened, what caused it and the affected areas.'],
+    ['Photos or video', 'Clear views of the damage and likely source, when safe.'],
+    ['Emergency work records', 'Invoices or reports for urgent work already completed.'],
+  ],
+  contents: [
+    ['Policy or client number', 'Helpful for finding your cover quickly.'],
+    ['Affected items', 'The brand, model, age and what happened to each item.'],
+    ['Proof of ownership', 'Receipts, photos or account statements, if available.'],
+    ['Photos of damage', 'Clear images of affected items and the surrounding area.'],
+  ],
+}
+
 const HANDOFF_STATUS_LABELS = {
   queued: 'Queued',
   accepted: 'Accepted by Northwind support',
@@ -579,7 +600,13 @@ function App() {
       </header>
 
       {!hasStarted && page === 'guided-motor' ? (
-        <GuidedMotorClaim onExit={() => setPage('home')} />
+        <GuidedMotorClaim
+          initialDescription={draft}
+          onExit={(description) => {
+            setDraft(description)
+            setPage('home')
+          }}
+        />
       ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
@@ -651,6 +678,18 @@ function App() {
                     </button>
                   ))}
                 </div>
+              <div className="preparation-list">
+                <h3>Helpful to have ready for your {claimType} claim</h3>
+                <p>These items are useful, not required. You can start above without them and add missing information later.</p>
+                <ul>
+                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
+                    <li key={title}>
+                      <span className="material-check" aria-hidden="true">✓</span>
+                      <span><strong>{title}</strong><small>{description}</small></span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
               {claimType === 'motor' && (
                 <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
                   Start guided Motor claim

@@ -67,10 +67,10 @@ function EnglishDatePicker({ value, onChange }) {
   </div>
 }
 
-export default function GuidedMotorClaim({ onExit }) {
+export default function GuidedMotorClaim({ initialDescription = '', onExit }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch { return null } })()
   const [step, setStep] = useState(saved?.step || 1)
-  const [draft, setDraft] = useState(saved?.draft || EMPTY)
+  const [draft, setDraft] = useState(saved?.draft || { ...EMPTY, description: initialDescription })
   const [claimRef, setClaimRef] = useState(saved?.claimRef || null)
   const [files, setFiles] = useState({})
   const [uploaded, setUploaded] = useState(saved?.uploaded || [])
@@ -187,10 +187,10 @@ export default function GuidedMotorClaim({ onExit }) {
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
 
-  if (result) return <main className="guided-page"><section className="guided-card success-card"><p className="eyebrow">Claim submitted</p><h1>{result.claim_number}</h1><p>Your completed Motor claim is now available to Northwind staff.</p><button className="primary-button" onClick={onExit}>Return home</button></section></main>
+  if (result) return <main className="guided-page"><section className="guided-card success-card"><p className="eyebrow">Claim submitted</p><h1>{result.claim_number}</h1><p>Your completed Motor claim is now available to Northwind staff.</p><button className="primary-button" onClick={() => onExit(draft.description)}>Return home</button></section></main>
 
   return <main className="guided-page"><section className="guided-card">
-    <button className="back-link" type="button" onClick={onExit}>← Back to claim options</button>
+    <button className="back-link" type="button" onClick={() => onExit(draft.description)}>← Back to claim options</button>
     <div className="step-track" aria-label={`Step ${step} of 3`}><span className={step >= 1 ? 'active' : ''}>1 Details</span><span className={step >= 2 ? 'active' : ''}>2 Materials</span><span className={step >= 3 ? 'active' : ''}>3 Declaration</span></div>
     {step === 1 && <form onSubmit={saveDetails}><p className="eyebrow">Motor claim · Step 1</p><h1>Your details and incident</h1><div className="guided-grid">
       <label>Client Number<input required autoComplete="off" placeholder="For example, NW-123456" {...field('policyNumber')} /></label>
