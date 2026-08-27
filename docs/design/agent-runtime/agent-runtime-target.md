@@ -11,8 +11,8 @@ implemented today.
 - Runtime safety and authority rules remain in `docs/agent-runtime-policy.md` and
   `SPEC/06-safety-and-governance.md`.
 - Compatibility and removal of the current transport are defined in
-  `docs/agent-runtime-migration.md`.
-- Repeatable implementation evidence is maintained in `docs/agent-runtime-progress.md`.
+  `docs/design/agent-runtime/agent-runtime-migration.md`.
+- Repeatable implementation evidence is maintained in `docs/status/agent-runtime-progress.md`.
 
 The target runtime must be read as a product-guided design. An object earns a place by
 solving a concrete FNOL problem and by having an authority boundary, failure behaviour,

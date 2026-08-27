@@ -4,8 +4,9 @@ The model gateway is the internal provider-neutral boundary between Agent orches
 and model transports. It does not add a public model endpoint or grant model output any
 new authority.
 
-The target turn and FNOL problem mapping are defined in [Agent Runtime Target](agent-runtime-target.md),
-and the compatibility path is isolated in [Agent Runtime Migration](agent-runtime-migration.md).
+The target turn and FNOL problem mapping are defined in
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md), and the compatibility path is
+isolated in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md).
 This document remains authoritative for what the current Gateway implementation actually
 supports.
 
