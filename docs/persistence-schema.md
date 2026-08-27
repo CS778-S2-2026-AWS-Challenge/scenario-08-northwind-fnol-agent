@@ -214,7 +214,8 @@ and checksums rather than embedding those bytes.
   motivated the review.
 - An Agent decision identifies whether its proposal came from `controlled_agent` or
   `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
-  profile, provider-reported model identifier, and provider request identifier when supplied.
+  profile, executable prompt identifier, provider-reported model identifier, and provider request
+  identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
