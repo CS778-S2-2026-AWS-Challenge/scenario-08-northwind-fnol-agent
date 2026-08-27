@@ -16,3 +16,6 @@
 *.toml text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+
+# Governed corpus bytes are immutable and retain their published checksums byte for byte.
+config/knowledge-source-corpus/*.md -text
