@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import (
+    BedrockConverseModelGateway,
     ModelGatewayConfig,
     ModelGatewayRegistry,
     OpenAICompatibleModelGateway,
@@ -16,6 +17,8 @@ from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
 from backend.domain.model_gateway import (
     ModelCapabilities,
+    ModelCompletionStatus,
+    ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
     ModelMessage,
@@ -123,6 +126,440 @@ def test_openai_compatible_endpoints_switch_through_configuration_only(
     assert response.structured_output == {'answer': 'ok'}
     assert response.provider_request_id == 'provider-request-1'
     assert response.usage is not None and response.usage.total_tokens == 14
+
+
+def test_openai_compatible_translates_optional_fields_to_strict_schema() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                'choices': [
+                    {
+                        'finish_reason': 'stop',
+                        'message': {
+                            'role': 'assistant',
+                            'content': '{"answer":"ok","can_resume":null,"next":{"status":"done"}}',
+                        },
+                    }
+                ]
+            },
+        )
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(),
+        transport=httpx.MockTransport(handler),
+    )
+    gateway.complete(
+        ModelRequest(
+            messages=[ModelMessage(role=ModelRole.USER, content='Return a test object.')],
+            response_schema={
+                'type': 'object',
+                'properties': {
+                    'answer': {'type': 'string'},
+                    'can_resume': {
+                        'anyOf': [{'type': 'boolean'}, {'type': 'null'}],
+                        'default': None,
+                    },
+                    'next': {
+                        'type': 'object',
+                        'properties': {'status': {'type': 'string'}},
+                    },
+                    'value': {'title': 'Value'},
+                    'forbidden_items': {
+                        'type': 'array',
+                        'items': {'type': 'object'},
+                        'maxItems': 0,
+                    },
+                },
+                'required': ['answer'],
+            },
+        )
+    )
+
+    payload = cast(dict[str, object], observed['payload'])
+    response_format = cast(dict[str, object], payload['response_format'])
+    json_schema = cast(dict[str, object], response_format['json_schema'])
+    schema = cast(dict[str, object], json_schema['schema'])
+    assert schema['required'] == [
+        'answer',
+        'can_resume',
+        'next',
+        'value',
+        'forbidden_items',
+    ]
+    assert schema['additionalProperties'] is False
+    properties = cast(dict[str, dict[str, object]], schema['properties'])
+    assert 'default' not in properties['can_resume']
+    assert properties['next']['required'] == ['status']
+    assert properties['next']['additionalProperties'] is False
+    assert properties['value']['anyOf'] == [
+        {'type': 'string'},
+        {'type': 'number'},
+        {'type': 'boolean'},
+        {'type': 'null'},
+    ]
+    forbidden_items = cast(dict[str, object], properties['forbidden_items']['items'])
+    assert forbidden_items['properties'] == {}
+    assert forbidden_items['required'] == []
+    assert forbidden_items['additionalProperties'] is False
+
+
+def test_bedrock_converse_normalises_structured_response_and_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed['url'] = str(request.url)
+        observed['authorization'] = request.headers['Authorization']
+        observed['payload'] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={'x-amzn-requestid': 'bedrock-request-1'},
+            json={
+                'output': {
+                    'message': {
+                        'role': 'assistant',
+                        'content': [
+                            {
+                                'toolUse': {
+                                    'toolUseId': 'structured-output-1',
+                                    'name': 'northwind_agent_proposal',
+                                    'input': {'answer': 'ok'},
+                                }
+                            }
+                        ],
+                    }
+                },
+                'stopReason': 'tool_use',
+                'usage': {'inputTokens': 15, 'outputTokens': 5, 'totalTokens': 20},
+            },
+        )
+
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            base_url='https://bedrock-runtime.us-east-1.amazonaws.com',
+            model='amazon.nova-2-lite-v1:0',
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    response = gateway.complete(
+        ModelRequest(
+            messages=[
+                ModelMessage(role=ModelRole.SYSTEM, content='System instruction.'),
+                ModelMessage(role=ModelRole.USER, content='Return a test object.'),
+            ],
+            response_schema={
+                'type': 'object',
+                'properties': {'answer': {'type': 'string'}},
+                'required': ['answer'],
+            },
+        )
+    )
+
+    assert observed['url'] == (
+        'https://bedrock-runtime.us-east-1.amazonaws.com/model/amazon.nova-2-lite-v1%3A0/converse'
+    )
+    assert observed['authorization'] == 'Bearer synthetic-bedrock-token'
+    payload = cast(dict[str, object], observed['payload'])
+    assert payload['messages'] == [{'role': 'user', 'content': [{'text': 'Return a test object.'}]}]
+    system = cast(list[dict[str, str]], payload['system'])[0]['text']
+    assert system == 'System instruction.'
+    tool_config = cast(dict[str, object], payload['toolConfig'])
+    assert tool_config['toolChoice'] == {'tool': {'name': 'northwind_agent_proposal'}}
+    tool_spec = cast(
+        dict[str, object],
+        cast(list[dict[str, object]], tool_config['tools'])[0]['toolSpec'],
+    )
+    assert tool_spec['inputSchema'] == {
+        'json': {
+            'type': 'object',
+            'properties': {'answer': {'type': 'string'}},
+            'required': ['answer'],
+        }
+    }
+    assert response.structured_output == {'answer': 'ok'}
+    assert response.completion_status is ModelCompletionStatus.COMPLETE
+    assert response.provider_model == 'amazon.nova-2-lite-v1:0'
+    assert response.provider_request_id == 'bedrock-request-1'
+    assert response.finish_reason == 'tool_use'
+    assert response.usage is not None and response.usage.total_tokens == 20
+
+
+@pytest.mark.parametrize(
+    ('status_code', 'code', 'retryable'),
+    [
+        (401, ModelGatewayErrorCode.AUTHENTICATION, False),
+        (403, ModelGatewayErrorCode.AUTHENTICATION, False),
+        (429, ModelGatewayErrorCode.RATE_LIMIT, True),
+        (500, ModelGatewayErrorCode.PROVIDER, True),
+    ],
+)
+def test_bedrock_converse_maps_provider_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    code: ModelGatewayErrorCode,
+    retryable: bool,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            base_url='https://bedrock-runtime.us-east-1.amazonaws.com',
+            model='amazon.nova-2-lite-v1:0',
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(status_code)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is retryable
+
+
+@pytest.mark.parametrize(
+    ('credential_name', 'environment_value'),
+    [
+        (None, None),
+        ('MISSING_BEDROCK_TOKEN', None),
+    ],
+    ids=['missing-reference', 'missing-environment-value'],
+)
+def test_bedrock_converse_requires_configured_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    credential_name: str | None,
+    environment_value: str | None,
+) -> None:
+    if credential_name and environment_value is None:
+        monkeypatch.delenv(credential_name, raising=False)
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable=credential_name,
+            tools=False,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    if credential_name:
+        assert credential_name not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ('structured_output', 'tools', 'model_request'),
+    [
+        (
+            False,
+            False,
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Return JSON.')],
+                response_schema={'type': 'object'},
+            ),
+        ),
+        (
+            True,
+            False,
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Use a tool.')],
+                tools=[
+                    ModelTool(
+                        name='synthetic_tool',
+                        description='A synthetic tool.',
+                        input_schema={'type': 'object'},
+                    )
+                ],
+            ),
+        ),
+    ],
+    ids=['structured-output', 'tools'],
+)
+def test_bedrock_converse_rejects_unsupported_declared_capabilities(
+    structured_output: bool,
+    tools: bool,
+    model_request: ModelRequest,
+) -> None:
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable='UNUSED_BEDROCK_TOKEN',
+            structured_output=structured_output,
+            tools=tools,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(model_request)
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+
+
+@pytest.mark.parametrize(
+    'model_request',
+    [
+        ModelRequest(messages=[]),
+        ModelRequest(messages=[ModelMessage(role=ModelRole.TOOL, content='Synthetic result.')]),
+    ],
+    ids=['empty-messages', 'tool-role'],
+)
+def test_bedrock_converse_rejects_unrepresentable_messages(
+    monkeypatch: pytest.MonkeyPatch,
+    model_request: ModelRequest,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        )
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(model_request)
+
+    expected = (
+        ModelGatewayErrorCode.CONFIGURATION
+        if not model_request.messages
+        else ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    )
+    assert captured.value.code is expected
+
+
+@pytest.mark.parametrize(
+    ('transport_error', 'code'),
+    [
+        (httpx.ReadTimeout('Synthetic timeout.'), ModelGatewayErrorCode.TIMEOUT),
+        (httpx.ConnectError('Synthetic connection failure.'), ModelGatewayErrorCode.PROVIDER),
+    ],
+    ids=['timeout', 'request-error'],
+)
+def test_bedrock_converse_maps_transport_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    transport_error: httpx.RequestError,
+    code: ModelGatewayErrorCode,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        transport_error.request = request
+        raise transport_error
+
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+        )
+
+    assert captured.value.code is code
+    assert captured.value.retryable is True
+
+
+def test_bedrock_converse_normalises_plain_text_and_metadata_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    'output': {
+                        'message': {
+                            'role': 'assistant',
+                            'content': [{'text': 'Synthetic '}, {'text': 'answer.'}],
+                        }
+                    },
+                    '$metadata': {'requestId': 'bedrock-metadata-request'},
+                },
+            )
+        ),
+    )
+
+    response = gateway.complete(
+        ModelRequest(messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')])
+    )
+
+    assert response.text == 'Synthetic answer.'
+    assert response.structured_output is None
+    assert response.usage is None
+    assert response.finish_reason is None
+    assert response.provider_request_id == 'bedrock-metadata-request'
+
+
+@pytest.mark.parametrize(
+    'payload',
+    [
+        [],
+        {'output': []},
+        {'output': {'message': {'content': {}}}},
+        {'output': {'message': {'content': [{}]}}},
+        {
+            'output': {'message': {'content': [{'text': '[]'}]}},
+            'stopReason': 'tool_use',
+        },
+        {'output': {'message': {'content': [{'text': '{}'}]}}, 'usage': []},
+        {
+            'output': {'message': {'content': [{'text': '{}'}]}},
+            '$metadata': {'requestId': 123},
+        },
+        {'output': {'message': {'content': [{'text': '{}'}]}}, 'stopReason': 123},
+    ],
+    ids=[
+        'non-object',
+        'invalid-output',
+        'invalid-content',
+        'invalid-content-block',
+        'non-object-structured-output',
+        'invalid-usage',
+        'invalid-request-id',
+        'invalid-stop-reason',
+    ],
+)
+def test_bedrock_converse_rejects_malformed_provider_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    monkeypatch.setenv('TEST_BEDROCK_BEARER_TOKEN', 'synthetic-bedrock-token')
+    gateway = BedrockConverseModelGateway(
+        gateway_config(
+            credential_environment_variable='TEST_BEDROCK_BEARER_TOKEN',
+            tools=False,
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(
+            ModelRequest(
+                messages=[ModelMessage(role=ModelRole.USER, content='Synthetic input.')],
+                response_schema={'type': 'object'},
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
 
 
 def test_openai_compatible_gateway_normalises_tool_calls() -> None:
@@ -296,7 +733,12 @@ def test_timeout_and_malformed_responses_are_normalised() -> None:
 
 class StaticGateway:
     def __init__(self, response: ModelResponse) -> None:
-        self.response = response
+        self.response = (
+            response.model_copy(update={'completion_status': ModelCompletionStatus.COMPLETE})
+            if response.completion_status is ModelCompletionStatus.UNKNOWN
+            and response.structured_output is not None
+            else response
+        )
         self.last_request: ModelRequest | None = None
 
     @property
@@ -331,7 +773,7 @@ def model_gateway_settings(protocol: str) -> Settings:
 
 
 def submit_model_message(
-    gateway: StaticGateway | FailingGateway,
+    gateway: ModelGateway,
     *,
     protocol: str,
 ) -> tuple[httpx.Response, FixtureRepository, WorkingClaim, str, str]:
@@ -385,6 +827,104 @@ def assert_model_message_failure_is_atomic(
     assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages'
     assert repository.find_idempotency('cus_demo', route, f'{protocol}-message') is None
+
+
+@pytest.mark.parametrize(
+    ('adapter', 'provider_reason', 'expected_status'),
+    [
+        ('openai', 'length', ModelCompletionStatus.INCOMPLETE),
+        ('openai', 'refusal', ModelCompletionStatus.REFUSED),
+        ('bedrock', 'max_tokens', ModelCompletionStatus.INCOMPLETE),
+        ('bedrock', 'guardrail_intervened', ModelCompletionStatus.REFUSED),
+    ],
+)
+def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: str,
+    provider_reason: str,
+    expected_status: ModelCompletionStatus,
+) -> None:
+    proposal = _model_proposal_output(
+        form_changes=[
+            {
+                'field_code': 'incident.description',
+                'value': 'A provider result that must not be persisted.',
+            }
+        ]
+    )
+    observed_status: list[ModelCompletionStatus] = []
+
+    if adapter == 'openai':
+        finish_reason = 'stop' if provider_reason == 'refusal' else provider_reason
+        message: dict[str, object] = {
+            'role': 'assistant',
+            'content': json.dumps(proposal),
+        }
+        if provider_reason == 'refusal':
+            message['refusal'] = 'The provider refused this synthetic request.'
+
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'choices': [{'finish_reason': finish_reason, 'message': message}],
+                },
+            )
+        )
+        inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
+            gateway_config(tools=False),
+            transport=transport,
+        )
+    else:
+        monkeypatch.setenv('TEST_BEDROCK_COMPLETION_TOKEN', 'synthetic-bedrock-token')
+        transport = httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    'output': {
+                        'message': {
+                            'role': 'assistant',
+                            'content': [{'text': json.dumps(proposal)[:80]}],
+                        }
+                    },
+                    'stopReason': provider_reason,
+                },
+            )
+        )
+        inner_gateway = BedrockConverseModelGateway(
+            gateway_config(
+                credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
+                tools=False,
+            ),
+            transport=transport,
+        )
+
+    class ObservedGateway:
+        @property
+        def capabilities(self) -> ModelCapabilities:
+            return inner_gateway.capabilities
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            result = inner_gateway.complete(request)
+            observed_status.append(result.completion_status)
+            return result
+
+    protocol = f'{adapter}_{provider_reason}'
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
+        ObservedGateway(),
+        protocol=protocol,
+    )
+
+    assert observed_status == [expected_status]
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
 
 
 def _working_claim() -> WorkingClaim:
@@ -544,11 +1084,16 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'incident_type',
         'claim_state',
         'form',
+        'known_field_codes',
         'evidence_summary',
         'customer_next_step',
     }
     assert 'fraud_signal' not in model_context['claim']['claim_state']
     assert set(model_context['claim']['form']) == {'incident.description'}
+    assert set(model_context['claim']['known_field_codes']) == {
+        'incident.description',
+        'incident.location',
+    }
     assert set(model_context['claim']['form']['incident.description']) == {
         'value',
         'source',
@@ -578,6 +1123,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v1'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
