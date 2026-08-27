@@ -76,8 +76,9 @@ def _idempotency(claim: WorkingClaim, session_id: str, message_id: str) -> Idemp
     )
 
 
-def test_claimant_message_cannot_switch_authoritative_active_session_without_partial_write(
-) -> None:
+def test_claimant_message_cannot_switch_authoritative_active_session_without_partial_write() -> (
+    None
+):
     repository, claim, authoritative_session = _repository()
     alternate_session = SessionRecord(
         session_id='ses_alternate',
@@ -125,11 +126,14 @@ def test_claimant_message_cannot_switch_authoritative_active_session_without_par
         )
         == alternate_session
     )
-    assert repository.list_messages(
-        claim.claim_id,
-        alternate_session.session_id,
-        claim.customer_id,
-    ) == []
+    assert (
+        repository.list_messages(
+            claim.claim_id,
+            alternate_session.session_id,
+            claim.customer_id,
+        )
+        == []
+    )
     assert (
         repository.find_idempotency(
             idempotency.actor_id,

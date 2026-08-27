@@ -115,17 +115,23 @@ def test_mongodb_claimant_message_cannot_switch_authoritative_active_session() -
         )
         == alternate_session
     )
-    assert repository.get_message(
-        claim.claim_id,
-        alternate_session.session_id,
-        message.message_id,
-        claim.customer_id,
-    ) is None
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.get_message(
+            claim.claim_id,
+            alternate_session.session_id,
+            message.message_id,
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
 
 
 def test_mongodb_evidence_mutation_cannot_switch_authoritative_active_session() -> None:
@@ -161,13 +167,19 @@ def test_mongodb_evidence_mutation_cannot_switch_authoritative_active_session() 
         )
 
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
-    assert repository.get_evidence(
-        claim.claim_id,
-        evidence.evidence_id,
-        claim.customer_id,
-    ) is None
-    assert repository.find_idempotency(
-        idempotency.actor_id,
-        idempotency.route,
-        idempotency.key,
-    ) is None
+    assert (
+        repository.get_evidence(
+            claim.claim_id,
+            evidence.evidence_id,
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        is None
+    )
