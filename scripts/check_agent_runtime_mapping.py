@@ -6,7 +6,13 @@ import re
 import sys
 from pathlib import Path
 
-MIGRATION_PATH = Path(__file__).resolve().parents[1] / 'docs' / 'agent-runtime-migration.md'
+MIGRATION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / 'docs'
+    / 'design'
+    / 'agent-runtime'
+    / 'agent-runtime-migration.md'
+)
 
 EXPECTED_NAMESPACE_RULES = {
     'ASK': ({'conversation', 'runtime'}, {'conversation', 'runtime'}),
