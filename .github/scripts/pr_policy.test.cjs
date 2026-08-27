@@ -314,7 +314,7 @@ test('rejects a Ready PR whose author does not own the primary issue', async () 
   assert.equal(core.failures.length, 1);
 });
 
-test('rejects undeclared changed-file overlap with another author', async () => {
+test('reports undeclared changed-file overlap as advisory only', async () => {
   const core = fakeCore();
   const result = await run({
     github: fakeGithub({
@@ -330,7 +330,8 @@ test('rejects undeclared changed-file overlap with another author', async () => 
     context: policyContext(),
     core,
   });
-  assert.ok(result.errors.some((error) => error.includes('#350 (docs/api.md)')));
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.warnings.some((warning) => warning.includes('#350 (docs/api.md)')));
 });
 
 test('accepts declared overlap for independent human review', async () => {
@@ -359,7 +360,7 @@ test('accepts declared overlap for independent human review', async () => {
   assert.deepEqual(result.errors, []);
 });
 
-test('rejects Pending owner agreement for cross-author overlap at Ready', async () => {
+test('does not turn cross-author path overlap into an ownership blocker', async () => {
   const core = fakeCore();
   const body = readyBody().replace(
     'Overlapping issues or PRs: None',
@@ -379,7 +380,8 @@ test('rejects Pending owner agreement for cross-author overlap at Ready', async 
     context: policyContext(pullRequest(body)),
     core,
   });
-  assert.ok(result.errors.some((error) => error.includes('completed `Owner agreement`')));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
 });
 
 test('rejects an undeclared stacked base', async () => {

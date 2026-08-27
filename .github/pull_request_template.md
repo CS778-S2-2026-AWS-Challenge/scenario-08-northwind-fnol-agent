@@ -43,8 +43,8 @@
 - Overlapping issues or PRs: None
 - Owner agreement: Not required
 
-<!-- A file overlap is not automatically a scope violation. Explain the behavioural boundary,
-dependency, or recorded handoff before requesting review. -->
+<!-- File overlap is advisory topology evidence, not proof of shared ownership. Stacked or stale
+bases may contain inherited history. Declare only semantic overlap in owned behaviour. -->
 
 ## Base and delivery topology
 

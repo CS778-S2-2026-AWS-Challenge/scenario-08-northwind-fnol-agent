@@ -355,18 +355,9 @@ async function run({ github, context, core, requireLocalQualityEvidence = true }
     const declaredOverlap = overlapDeclaration(pullRequest.body || '');
     if (overlaps.length > 0 && (!declaredOverlap || isNoneValue(declaredOverlap))) {
       const detail = overlaps.map(({ number, paths }) => `#${number} (${paths.slice(0, 3).join(', ')})`).join('; ');
-      const message = `Declare or resolve changed-file overlap with another open PR: ${detail}.`;
-      (pullRequest.draft ? warnings : errors).push(message);
-    }
-    const crossAuthorOverlap = overlaps.some(
-      ({ author }) => author.toLowerCase() !== (pullRequest.user?.login || '').toLowerCase(),
-    );
-    if (crossAuthorOverlap && declaredOverlap && !isNoneValue(declaredOverlap)) {
-      const agreement = crossOwnerDeclaration(pullRequest.body || '').agreement;
-      if (!agreement || isPendingValue(agreement) || /^not required\.?$/i.test(agreement)) {
-        const message = 'Cross-author PR overlap requires a completed `Owner agreement`, not Pending or an unexplained Not required.';
-        (pullRequest.draft ? warnings : errors).push(message);
-      }
+      warnings.push(
+        `Changed-file overlap is advisory topology evidence, not an ownership blocker: ${detail}.`,
+      );
     }
 
     const topology = baseDeclarations(pullRequest.body || '');

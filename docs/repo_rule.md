@@ -209,9 +209,11 @@ authorise an agent to make the same state change manually.
   by the pull request.
 - Declare deliberate stacks with their parent pull request and merge order. Undeclared non-main
   bases and accidental branch chains are not acceptable substitutes for current-main validation.
-- The policy workflow may report active pull requests whose changed files overlap. The author must
-  declare a dependency, coordinate a handoff, or explain why the overlap does not enter the other
-  issue's owned behaviour before requesting review.
+- The policy workflow may report active pull requests whose changed files overlap. This is advisory
+  topology evidence only: a stacked or stale base can make inherited history appear in the diff.
+  File overlap alone must not block Draft/Ready state or imply shared ownership. A blocker requires
+  issue scope, acceptance, contract, or current-head evidence that both pull requests change the
+  same owned behaviour.
 
 ## Governance Exceptions
 
