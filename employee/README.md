@@ -60,7 +60,8 @@ It is not a production staff authentication path.
 - The queue is never populated automatically. For a local walkthrough, staff must explicitly use
   **Load workbench demo queue** while the queue is empty. The action is available only when the
   backend is both in a development/test environment and explicitly configured for developer
-  identity mode; it loads the bounded AT-02, AT-04, AT-05, AT-06, and AT-10 demo set.
+  identity mode; it loads the five canonical MVP paths (AT-01, AT-06, AT-04, AT-02, and AT-05)
+  plus the bounded AT-10 external-service demonstration.
   If local claims already exist, the page offers an explicit, confirmed **Reset and load demo queue**
   action because resetting clears the current local demo state.
 - It does not expose claimant-only private data.

@@ -1,6 +1,7 @@
 {
   "scenario_id": "AT-01-clear-motor",
   "description": "Synthetic clear minor motor claim ready for the next safe action.",
+  "business_path": "clear",
   "claim": {
     "claim_id": "clm_fixture_at01",
     "customer_id": "cus_demo",

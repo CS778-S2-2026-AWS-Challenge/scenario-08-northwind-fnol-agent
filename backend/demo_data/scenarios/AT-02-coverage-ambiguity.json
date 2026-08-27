@@ -1,6 +1,7 @@
 {
   "scenario_id": "AT-02-coverage-ambiguity",
   "description": "Synthetic ambiguous-coverage claim routed to professional review instead of an automatic decision.",
+  "business_path": "professional_review",
   "claim": {
     "claim_id": "clm_fixture_at02",
     "customer_id": "cus_demo",

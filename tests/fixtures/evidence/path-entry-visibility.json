@@ -4,7 +4,6 @@
   "entries": [
     {
       "scenario_id": "AT-01-clear-motor",
-      "business_path": "clear",
       "description": "A clear lower-risk claim with received claimant evidence, ready for controlled creation.",
       "entry_baseline": {
         "workflow_state": "ready_for_next",
@@ -24,7 +23,6 @@
     },
     {
       "scenario_id": "AT-02-coverage-ambiguity",
-      "business_path": "professional_review",
       "description": "A coverage ambiguity whose canonical claimant evidence remains available for professional review.",
       "entry_baseline": {
         "workflow_state": "professional_review",
@@ -60,7 +58,6 @@
     },
     {
       "scenario_id": "AT-04-urgent",
-      "business_path": "urgent",
       "description": "An explicit injury signal that requires urgent handoff regardless of later evidence work.",
       "entry_baseline": {
         "workflow_state": "professional_review",
@@ -86,7 +83,6 @@
     },
     {
       "scenario_id": "AT-05-human-request",
-      "business_path": "handoff",
       "description": "A claimant has requested a person and the known shared evidence travels with the handoff.",
       "entry_baseline": {
         "workflow_state": "professional_review",
@@ -112,7 +108,6 @@
     },
     {
       "scenario_id": "AT-06-pending-evidence",
-      "business_path": "pending",
       "description": "A police report does not exist yet, while unrelated safe reporting work can continue and internal pending work remains staff-only.",
       "entry_baseline": {
         "workflow_state": "ready_for_next",

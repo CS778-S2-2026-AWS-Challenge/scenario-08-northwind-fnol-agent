@@ -27,6 +27,19 @@ The loader rejects broken claim/session links. Claimant API tests also verify
 that storage provenance and internal-only messages do not cross the claimant
 visibility boundary.
 
+## Connected MVP Journey
+
+The canonical `business_path` field assigns exactly one scenario to each current
+MVP path: clear, pending, urgent, professional review, and handoff.
+`load_mvp_journey_scenarios()` rejects a missing or duplicate path and is the
+shared loading boundary used by the Workbench demo queue and the live evidence
+visibility check. The Workbench queue also loads AT-10 as an additional bounded
+external-service demonstration; it does not replace any of the five MVP paths.
+
+Path entry fixtures retain only expected entry baselines and visibility
+classifications. They derive business path, Claim State, evidence, customer next
+step, and handoffs from these canonical records.
+
 ## Linked MVP Record Graph
 
 AT-02 is the bounded structured-data example for issue #251. Its synthetic
