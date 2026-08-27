@@ -57,6 +57,16 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
   identity design and is disabled outside development and test environments.
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
+The MVP development/test identity adapter provides two explicitly synthetic claimant accounts.
+With `NORTHWIND_IDENTITY_MODE=developer` enabled, `POST /api/v1/auth/sessions` validates the
+synthetic credential server-side and returns a
+short-lived opaque bearer token. Only its hash, authenticated `customer_id`, expiry, and
+revocation state are retained by the server. Claimant clients keep this token in memory only.
+The adapter is unavailable outside development and test; it is not a production identity
+provider or a production-readiness claim. The legacy fixed claimant token remains a bounded
+fixture compatibility credential while existing scenario clients migrate, and is likewise
+disabled outside development and test.
+
 Current scopes:
 
 | Scope | Purpose |
@@ -146,6 +156,30 @@ Collection response:
 | `500` | Unexpected server error |
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
+
+## Claimant Identity and Account API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/auth/sessions` | Authenticate a development/test synthetic claimant and create an opaque session |
+| `GET` | `/auth/session` | Read the current authenticated claimant session |
+| `DELETE` | `/auth/session` | Revoke the current claimant session |
+| `GET` | `/account` | Read the authenticated claimant's profile and communication preferences |
+| `PATCH` | `/account/profile` | Update the authenticated claimant's approved profile fields |
+| `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
+
+`POST /api/v1/auth/sessions` is the only development/test authentication exception to the
+general bearer requirement. It accepts `email` and `password`, returns `201` with
+`customer_id`, `access_token`, `token_type`, `expires_at`, and `development_identity: true`,
+and returns the same bounded `401 AUTHENTICATION_REQUIRED` response for unknown email and bad
+password. The request cannot supply `customer_id`, role, scopes, or claim ownership.
+
+All other routes above require the issued bearer token. Expired, invalid, and revoked tokens
+return `401`. Logout revokes the server-side session and returns `204`. Account responses are
+derived from the authenticated principal and never accept a customer identifier in their path
+or payload. Profile updates accept `display_name` and `phone`; preference updates accept the
+boolean `email` and `sms` fields. These fixture records contain anonymous `.invalid` addresses
+only and must not be represented as real Northwind customer data.
 
 ## Shared Types
 
