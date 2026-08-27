@@ -15,6 +15,10 @@ Kanban collaboration details within that boundary.
   ```
 
 - Use a short-lived `feature/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>` branch. Use one branch and pull request for one coherent outcome.
+- Do not reuse a branch from a merged or closed pull request. Before the first push and before
+  requesting review, fetch `origin` and inspect changes on the intended base. Update the branch when
+  main changed an overlapping path, shared contract, schema, migration, dependency, or build input;
+  unrelated main movement does not require a mechanical merge commit.
 - Before requesting review, push the branch and open a pull request against `main`:
 
   ```powershell
@@ -44,6 +48,9 @@ Kanban collaboration details within that boundary.
 - Choose a reviewer when the work is ready. Select someone who can check the affected behaviour or a consuming module and is available at that time. Do not assign permanent reviewer pairs.
 - Request review with GitHub or `gh pr edit <number> --add-reviewer <login>`. The current `main` rules require one approval from someone other than the last person to push. New commits dismiss earlier approvals, so request approval again after pushing changes.
 - Resolve review conversations before merge. Do not mark a card `Done` merely because its estimated hours have been used.
+- Reviewing or discovering adjacent work does not transfer its implementation ownership. Leave a
+  bounded review finding or create a follow-up issue, then coordinate with the active owner before
+  changing their behaviour, branch, pull request, or metadata.
 
 ## Repository Issues
 

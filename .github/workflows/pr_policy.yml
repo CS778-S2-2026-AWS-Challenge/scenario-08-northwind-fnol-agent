@@ -35,7 +35,12 @@ jobs:
           node-version: "22"
 
       - name: Test repository policy validators
-        run: node --test .github/scripts/pr_policy.test.cjs .github/scripts/issue_policy.test.cjs
+        run: >-
+          node --test
+          .github/scripts/pr_policy.test.cjs
+          .github/scripts/issue_policy.test.cjs
+          .github/scripts/review_policy.test.cjs
+          .github/scripts/governance_audit.test.cjs
 
       - name: Validate pull request
         uses: actions/github-script@v7

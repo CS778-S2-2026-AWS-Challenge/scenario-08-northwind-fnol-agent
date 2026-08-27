@@ -21,6 +21,21 @@ Refs #134
 ### Dependencies
 None
 
+### Owned behavior
+Fallback response regression evidence.
+
+### Expected impact area
+Backend API tests.
+
+### Non-goals
+No route or UI changes.
+
+### Shared contracts
+None
+
+### Risk class
+Standard
+
 ### Owner or responsible contributor
 @jxu316-arch`;
 
@@ -80,6 +95,15 @@ waiting
 test('rejects an unsupported issue type', () => {
   const result = validateIssueBody({ body: validBody.replace('Regression validation', 'Question') });
   assert.ok(result.errors.some((error) => error.includes('Choose one of')));
+});
+
+test('rejects missing ownership boundaries and an unsupported risk class', () => {
+  const body = validBody
+    .replace('Fallback response regression evidence.', '')
+    .replace('Standard\n\n### Owner', 'Unbounded\n\n### Owner');
+  const errors = validateIssueBody({ body }).errors;
+  assert.ok(errors.some((error) => error.includes('Owned behavior')));
+  assert.ok(errors.some((error) => error.includes('risk class')));
 });
 
 test('extracts a field without HTML comments', () => {
