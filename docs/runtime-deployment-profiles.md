@@ -14,6 +14,7 @@ adapter.
 | --- | --- | --- |
 | `deploy/runtime/fixture.env.example` | Ready | Complete deterministic fixture bundle |
 | `deploy/runtime/local-minio.env.example` | Ready when packaged MinIO is healthy | Fixture data with the explicit verified MinIO evidence adapter |
+| `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence, MinIO evidence/knowledge, and explicitly synthetic policy/history |
 | `deploy/runtime/mongodb.env.example` | Refused | Connection primitives exist, but the complete MongoDB bundle is not verified |
 | `deploy/runtime/cloudflare.env.example` | Refused | Provider services and bindings remain unconfirmed |
 | `deploy/runtime/aws.env.example` | Refused | AWS services, permissions, and credentials remain unconfirmed |
@@ -28,15 +29,19 @@ Inspect one example before serving requests:
 
 ```powershell
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/fixture.env.example --expect ready
+docker compose up -d mongodb mongo-init minio minio-init
+py -3.12 scripts/check_runtime_profile.py deploy/runtime/local-mvp.env.example --expect ready
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/mongodb.env.example --expect refused
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/cloudflare.env.example --expect refused
 py -3.12 scripts/check_runtime_profile.py deploy/runtime/aws.env.example --expect refused
 ```
 
-For local MinIO, start `docker compose up -d minio`, use a process-accessible endpoint when the
-backend runs outside Docker, and run the preflight without `--expect` to require a real successful
-connection. A refused result exits non-zero and names only the bounded missing capability or
-configuration condition.
+The local MVP command initialises a transaction-capable single-node MongoDB replica set and creates
+the two MinIO buckets without clearing either volume. The governed source and index objects must
+already exist in `northwind-knowledge`; missing or invalid ingestion state refuses startup. Run
+`py -3.12 scripts/run_local_mvp_smoke.py` to verify API writes, revision conflicts, protected
+evidence bytes, staff projection, knowledge retrieval, and recovery through a newly constructed
+application instance.
 
 ## Container image
 
@@ -54,7 +59,7 @@ No candidate profile falls through to fixture services.
 
 ## Verification boundary
 
-This issue supplies repeatable examples and startup checks. Actual connectivity and temporary
-deployment evidence belongs to #266. MongoDB/MinIO composition is not promoted until the complete
-bundle passes the shared persistence, visibility, idempotency, evidence, policy/history, and RAG
-contracts. AWS and Cloudflare remain unavailable rather than speculative.
+The `local_mvp` profile is a bounded development composition, not promotion of the provider-specific
+`mongodb` profile. Policy and claim-history lookups remain labelled `using_fixture`, and the Agent
+remains controlled until its separately owned model proposal contract is delivered. AWS,
+Cloudflare, and the complete MongoDB provider profile remain unavailable rather than speculative.

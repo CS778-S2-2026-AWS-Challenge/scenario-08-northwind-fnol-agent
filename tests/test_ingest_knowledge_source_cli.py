@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from backend.services.knowledge_ingestion import KnowledgeManifestError
+from backend.services.knowledge_manifest import load_approved_sources
 from scripts.ingest_knowledge_source import (
     IngestionRequest,
-    load_approved_sources,
     load_request,
     resolve_source,
 )
