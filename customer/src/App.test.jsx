@@ -430,7 +430,7 @@ describe('claimant intake', () => {
     expect(screen.getByText(/Sender: Northwind · Audience: Shared claim conversation · Delivered/)).toBeVisible()
     expect(screen.getByText('Check this')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Confirm details' })).toBeEnabled()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
     expect(fetch).toHaveBeenNthCalledWith(
       2,
       '/api/v1/claims/clm_test/sessions/ses_test/messages',

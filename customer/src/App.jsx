@@ -247,7 +247,7 @@ function App() {
   async function sendMessage(event) {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || isBusy || proposedFields.length > 0) return
+    if (!text || isBusy) return
 
     setError('')
     setFailedMessage(null)
@@ -974,12 +974,6 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              disabled={proposedFields.length > 0 && !handoff}
-              disabledNote={
-                handoff
-                  ? 'Your message will be saved for Northwind support. Start with @agent when you need an Agent response.'
-                  : 'Confirm or correct the details before continuing.'
-              }
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
