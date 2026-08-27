@@ -237,8 +237,21 @@ _MODEL_FIELD_QUESTIONS: dict[str, tuple[str, str, str]] = {
 }
 
 
-def _validated_model_question(proposal: AgentProposal) -> tuple[str, CustomerNextStep] | None:
+def _validated_model_question(
+    proposal: AgentProposal,
+    current_form: dict[str, StructuredFormField],
+) -> tuple[str, CustomerNextStep] | None:
+    available_fields = {
+        field_code
+        for field_code, field in current_form.items()
+        if field.status is not FormStatus.MISSING
+    }
+    available_fields.update(change.field_code for change in proposal.form_changes)
+    if 'vehicle.damage_description' in available_fields:
+        available_fields.add('loss.description')
     for field_code in proposal.customer_next_step.required_items:
+        if field_code in available_fields:
+            continue
         question = _MODEL_FIELD_QUESTIONS.get(field_code)
         if question is None:
             continue
@@ -259,6 +272,7 @@ def _safe_model_customer_content(
     proposal: AgentProposal,
     outcome: AuthorityOutcome,
     current_next_step: CustomerNextStep,
+    current_form: dict[str, StructuredFormField],
 ) -> tuple[str, str, CustomerNextStep]:
     if outcome is AuthorityOutcome.REVIEW_REQUIRED:
         return (
@@ -275,7 +289,7 @@ def _safe_model_customer_content(
             _effective_next_step(proposal.customer_next_step, outcome),
         )
 
-    validated_question = _validated_model_question(proposal)
+    validated_question = _validated_model_question(proposal, current_form)
     if proposal.action is AgentAction.ASK and validated_question is not None:
         question, next_step = validated_question
         return (
@@ -336,7 +350,26 @@ def _build_form_changes(
     proposal_source: AgentProposalSource,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
-    for proposal in proposals:
+    normalised_proposals = list(proposals)
+    proposed_codes = {proposal.field_code for proposal in proposals}
+    if (
+        'vehicle.damage_description' in proposed_codes
+        and 'loss.description' not in proposed_codes
+        and (
+            'loss.description' not in existing_form
+            or existing_form['loss.description'].status is not FormStatus.CONFIRMED
+        )
+    ):
+        vehicle_damage = next(
+            proposal
+            for proposal in proposals
+            if proposal.field_code == 'vehicle.damage_description'
+        )
+        normalised_proposals.append(
+            vehicle_damage.model_copy(update={'field_code': 'loss.description'})
+        )
+
+    for proposal in normalised_proposals:
         if proposal.field_code not in REGISTERED_FIELD_CODES:
             raise ApiError(
                 status_code=500,
@@ -717,6 +750,7 @@ def submit_message(
             proposal,
             authority.outcome,
             claim.customer_next_step,
+            claim.form,
         )
     form_changes = _build_form_changes(
         claim.form,

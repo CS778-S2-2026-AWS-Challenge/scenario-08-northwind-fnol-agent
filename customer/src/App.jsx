@@ -222,7 +222,7 @@ function App() {
       setHandoff(current.handoff || null)
       if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
       if (sessionId) {
-      const latest = await getClaimMessages(claim.claim_id, sessionId)
+        const latest = await getClaimMessages(claim.claim_id, sessionId)
         setMessages(latest.items)
       }
       if (!silent) setStatus('idle')
@@ -233,6 +233,21 @@ function App() {
       }
     }
   }, [claim, sessionId])
+
+  useEffect(() => {
+    if (!claim || !sessionId) return undefined
+    const refreshVisibleConversation = () => {
+      if (document.visibilityState === 'visible') {
+        refreshClaimStatus({ silent: true })
+      }
+    }
+    window.addEventListener('focus', refreshVisibleConversation)
+    document.addEventListener('visibilitychange', refreshVisibleConversation)
+    return () => {
+      window.removeEventListener('focus', refreshVisibleConversation)
+      document.removeEventListener('visibilitychange', refreshVisibleConversation)
+    }
+  }, [claim, sessionId, refreshClaimStatus])
 
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -604,6 +619,11 @@ function App() {
     setAccount(null); setPage('home'); setAuthStatus('idle')
   }
 
+  async function openSavedClaims() {
+    setPage('home')
+    await loadSavedReports()
+  }
+
   async function saveProfile(event) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -689,6 +709,9 @@ function App() {
               <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
             </form>
             {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+            <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
+              View saved claims
+            </button>
             <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
           </section>
         </main>
@@ -917,14 +940,6 @@ function App() {
                   </div>
                 </dl>
                 <p>Your message will be saved for Northwind support. Start with @agent when you need an Agent response.</p>
-                <button
-                  className="secondary-button refresh-button"
-                  type="button"
-                  onClick={() => refreshClaimStatus()}
-                  disabled={isBusy}
-                >
-                  {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}
-                </button>
               </section>
             )}
 
@@ -977,6 +992,14 @@ function App() {
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
+            <button
+              className="secondary-button refresh-button"
+              type="button"
+              onClick={() => refreshClaimStatus()}
+              disabled={isBusy}
+            >
+              {status === 'refreshing' ? 'Refreshing conversation...' : 'Refresh conversation'}
+            </button>
           </section>
 
           <aside className="claim-panel" aria-labelledby="claim-details-title">

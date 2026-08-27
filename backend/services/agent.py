@@ -105,11 +105,15 @@ HUMAN_REQUEST_PATTERNS = (
 )
 PENDING_POLICE_REPORT_PATTERNS = (
     re.compile(
-        r'\bpolice\s+(?:report|reference)\b.*\b(?:later|next\s+week|pending|not\s+ready)\b',
+        r'\bpolice\b[^.!?]{0,100}\b(?:report|reference)\b[^.!?]{0,100}'
+        r'\b(?:later|next\s+week|pending|not\s+(?:ready|available|issued|generated)|'
+        r'has\s+not\s+been\s+(?:issued|generated)|hasn\x27t\s+been\s+(?:issued|generated))\b',
         re.IGNORECASE,
     ),
     re.compile(
-        r'\b(?:later|next\s+week|pending|not\s+ready)\b.*\bpolice\s+(?:report|reference)\b',
+        r'\b(?:later|next\s+week|pending|not\s+(?:ready|available|issued|generated)|'
+        r'has\s+not\s+been\s+(?:issued|generated)|hasn\x27t\s+been\s+(?:issued|generated))\b'
+        r'[^.!?]{0,100}\bpolice\b[^.!?]{0,60}\b(?:report|reference)\b',
         re.IGNORECASE,
     ),
 )
@@ -481,6 +485,75 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='standard',
             controlled_rule_authorised=True,
         )
+    if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
+        if context.professional_review_required:
+            return AgentProposal(
+                action=AgentAction.UPDATE,
+                reason_codes=['EVIDENCE_PENDING_GENERATION', 'PROFESSIONAL_REVIEW_REQUIRED'],
+                customer_reason=(
+                    'The police report is not available yet, but it is not needed for the current '
+                    'policy review.'
+                ),
+                customer_response=(
+                    'That is okay. I have recorded that the police report is expected later and '
+                    'sent the relevant facts and policy wording to a claims specialist. They can '
+                    'review it now, and you can add the report when it becomes available.'
+                ),
+                customer_next_step=CustomerNextStep(
+                    status='professional_review_queued',
+                    summary=(
+                        'A claims specialist is checking one policy point. Add the police report '
+                        'when it becomes available.'
+                    ),
+                    responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
+                ),
+                form_changes=[],
+                state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
+                proposed_signals=[],
+                required_tools=[
+                    {
+                        'tool': 'evidence_registry',
+                        'operation': 'record_pending_generation',
+                        'kind': 'police_report',
+                    },
+                    {
+                        'tool': 'professional_review',
+                        'operation': 'create_policy_review',
+                    },
+                ],
+                next_action_requirements=[],
+                controlled_rule_authorised=True,
+            )
+        pending_field = context.claim.form.get('authorities.police_report_reference')
+        already_pending = (
+            pending_field is not None and pending_field.status is FormStatus.PENDING_GENERATION
+        )
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['EVIDENCE_PENDING_GENERATION'],
+            customer_reason='The police report has not been issued and is needed only later.',
+            customer_response=(
+                'That is okay. I have recorded that the police report is expected later. '
+                'It will not block the parts of your report that can safely continue now.'
+            ),
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=(
+                []
+                if already_pending
+                else [
+                    {
+                        'tool': 'evidence_registry',
+                        'operation': 'record_pending_generation',
+                        'kind': 'police_report',
+                    }
+                ]
+            ),
+            next_action_requirements=[],
+            controlled_rule_authorised=True,
+        )
     return None
 
 
@@ -522,46 +595,6 @@ class ControlledAgent:
                 required_tools=[],
                 next_action_requirements=[],
             )
-        if context.professional_review_required and any(
-            pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS
-        ):
-            return AgentProposal(
-                action=AgentAction.UPDATE,
-                reason_codes=['EVIDENCE_PENDING_GENERATION', 'PROFESSIONAL_REVIEW_REQUIRED'],
-                customer_reason=(
-                    'The police report is not available yet, but it is not needed for the current '
-                    'policy review.'
-                ),
-                customer_response=(
-                    'That is okay. I have recorded that the police report is expected later and '
-                    'sent the relevant facts and policy wording to a claims specialist. They can '
-                    'review it now, and you can add the report when it becomes available.'
-                ),
-                customer_next_step=CustomerNextStep(
-                    status='professional_review_queued',
-                    summary=(
-                        'A claims specialist is checking one policy point. Add the police report '
-                        'when it becomes available.'
-                    ),
-                    responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
-                ),
-                form_changes=[],
-                state_changes=[StateChange(path='claim_state.next_action', to='UPDATE')],
-                proposed_signals=[],
-                required_tools=[
-                    {
-                        'tool': 'evidence_registry',
-                        'operation': 'record_pending_generation',
-                        'kind': 'police_report',
-                    },
-                    {
-                        'tool': 'professional_review',
-                        'operation': 'create_policy_review',
-                    },
-                ],
-                next_action_requirements=[],
-            )
-
         if context.message_text is not None:
             guided = _guided_proposal(context, message_text)
             if guided is not None:

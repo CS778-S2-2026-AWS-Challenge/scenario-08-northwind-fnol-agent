@@ -1569,6 +1569,200 @@ def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) 
     assert authorised_state_changes(candidate, authority) == []
 
 
+def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support() -> None:
+    protocol = 'motor_mvp_journey'
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output={
+                'action': 'CONFIRM',
+                'reason_codes': ['MOTOR_FACTS_PROPOSED'],
+                'customer_reason': 'The incident facts need claimant confirmation.',
+                'customer_response': 'Please review the incident facts.',
+                'customer_next_step': {
+                    'status': 'confirmation_required',
+                    'summary': 'Review the proposed incident facts.',
+                    'responsible_party': 'claimant',
+                    'required_items': ['loss.description'],
+                },
+                'form_changes': [
+                    {'field_code': 'incident.type', 'value': 'motor'},
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'Another car hit the rear of mine on Queen Street.',
+                    },
+                    {'field_code': 'incident.occurred_at', 'value': 'around 10 this morning'},
+                    {'field_code': 'incident.location', 'value': 'Queen Street'},
+                    {'field_code': 'incident.injury_or_danger', 'value': False},
+                    {
+                        'field_code': 'vehicle.damage_description',
+                        'value': 'The rear bumper is damaged.',
+                    },
+                    {'field_code': 'vehicle.drivable', 'value': True},
+                ],
+                'state_changes': [{'path': 'claim_state.next_action', 'to': 'CONFIRM'}],
+                'proposed_signals': [],
+                'required_tools': [],
+                'next_action_requirements': [],
+                'handoff_priority': None,
+            }
+        )
+    )
+    registry = ModelGatewayRegistry()
+    registry.register(protocol, lambda _config: gateway)
+    repository = FixtureRepository()
+    claimant = {'Authorization': 'Bearer synthetic-claimant'}
+    staff = {'Authorization': 'Bearer synthetic-staff'}
+
+    with TestClient(
+        create_app(
+            model_gateway_settings(protocol),
+            repository=repository,
+            model_gateway_registry=registry,
+        )
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**claimant, 'Idempotency-Key': 'motor-mvp-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': None},
+        ).json()
+        claim_id = created['claim']['claim_id']
+        session_id = created['session']['session_id']
+
+        intake = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'motor-mvp-intake',
+                'If-Match': str(created['claim']['revision']),
+            },
+            json={
+                'client_message_id': 'motor-mvp-intake-message',
+                'content': {
+                    'type': 'text',
+                    'text': (
+                        'Another car hit the rear of mine on Queen Street at around 10 this '
+                        'morning. The rear bumper is damaged, nobody was injured, the scene is '
+                        'safe, and the car is still drivable.'
+                    ),
+                },
+                'evidence_refs': [],
+            },
+        )
+        assert intake.status_code == 200, intake.text
+        intake_body = intake.json()
+        field_codes = {change['field_code'] for change in intake_body['form_changes']}
+        assert 'vehicle.damage_description' in field_codes
+        assert 'loss.description' in field_codes
+        assert 'What was damaged or lost?' not in intake_body['agent_message']['content']['text']
+
+        confirmed = client.post(
+            f'/api/v1/claims/{claim_id}/form/confirmations',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'motor-mvp-confirm',
+                'If-Match': str(intake_body['claim_revision']),
+            },
+            json={'field_codes': sorted(field_codes)},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        confirmed_body = confirmed.json()
+        assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
+
+        pending = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'motor-mvp-pending',
+                'If-Match': str(confirmed_body['revision']),
+            },
+            json={
+                'client_message_id': 'motor-mvp-pending-message',
+                'content': {
+                    'type': 'text',
+                    'text': (
+                        'I reported the accident to Police, but the formal report has not been '
+                        'issued yet. I can provide it later.'
+                    ),
+                },
+                'evidence_refs': [],
+            },
+        )
+        assert pending.status_code == 200, pending.text
+        pending_body = pending.json()
+        assert pending_body['decision']['customer_next_step']['status'] == 'ready_to_create'
+        evidence = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=claimant).json()[
+            'items'
+        ]
+        assert [(item['kind'], item['status']) for item in evidence] == [
+            ('police_report', 'pending_generation')
+        ]
+
+        external_claim = client.post(
+            f'/api/v1/claims/{claim_id}/creation',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'motor-mvp-create',
+                'If-Match': str(pending_body['claim_revision']),
+            },
+        )
+        assert external_claim.status_code == 201, external_claim.text
+        external_claim_body = external_claim.json()
+        assert external_claim_body['external_claim']['creation_status'] == 'created'
+
+        handoff_turn = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'motor-mvp-handoff',
+                'If-Match': str(external_claim_body['revision']),
+            },
+            json={
+                'client_message_id': 'motor-mvp-handoff-message',
+                'content': {
+                    'type': 'text',
+                    'text': (
+                        "I'm not comfortable continuing on my own. Could I speak with a person?"
+                    ),
+                },
+                'evidence_refs': [],
+            },
+        )
+        assert handoff_turn.status_code == 200, handoff_turn.text
+        handoff_body = handoff_turn.json()
+        assert handoff_body['handoff']['status'] == 'queued'
+        assert handoff_body['decision']['action'] == 'HANDOFF'
+        assert gateway.call_count == 1
+
+        detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff).json()
+        handoff_id = detail['handoffs'][0]['handoff_id']
+        accepted = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+            headers={
+                **staff,
+                'Idempotency-Key': 'motor-mvp-accept',
+                'If-Match': str(detail['revision']),
+            },
+            json={},
+        )
+        assert accepted.status_code == 200, accepted.text
+        accepted_body = accepted.json()
+        staff_reply = 'You can provide the Police report later. I have the incident details here.'
+        reply = client.post(
+            f'/api/v1/workbench/claims/{claim_id}/messages',
+            headers={
+                **staff,
+                'Idempotency-Key': 'motor-mvp-staff-reply',
+                'If-Match': str(accepted_body['revision']),
+            },
+            json={'content': {'type': 'text', 'text': staff_reply}},
+        )
+        assert reply.status_code == 200, reply.text
+        history = client.get(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages', headers=claimant
+        ).json()['items']
+        assert any(message['content'].get('text') == staff_reply for message in history)
+
+
 def test_gateway_agent_rejects_model_requested_server_tools() -> None:
     gateway = StaticGateway(
         ModelResponse(
