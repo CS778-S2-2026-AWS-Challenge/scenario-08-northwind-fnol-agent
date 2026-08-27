@@ -41,6 +41,7 @@ def test_visibility_entries_are_exact_projections_of_canonical_evidence() -> Non
         assert entry.claim_state == scenario.claim.claim_state
         assert entry.evidence_summary == scenario.claim.evidence_summary
         assert entry.customer_next_step == scenario.claim.customer_next_step
+        assert entry.handoffs == scenario.handoffs
         assert [fixture.evidence for fixture in entry.evidence] == scenario.evidence
 
 
@@ -48,9 +49,21 @@ def test_visibility_source_contains_only_canonical_references_and_classification
     payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
 
     for entry in payload['entries']:
-        assert {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}.isdisjoint(
-            entry
-        )
+        assert {
+            'claim_id',
+            'claim_state',
+            'customer_next_step',
+            'evidence_summary',
+            'handoffs',
+        }.isdisjoint(entry)
+        assert set(entry['entry_baseline']) == {
+            'workflow_state',
+            'next_action',
+            'evidence_state',
+            'customer_next_step_status',
+            'responsible_party',
+            'handoff',
+        }
         for fixture in entry['evidence']:
             assert set(fixture) == {'fixture_id', 'visibility', 'evidence_id'}
             assert fixture['evidence_id']
@@ -86,18 +99,103 @@ def test_visibility_catalogue_loads_repeatably_without_manual_edits() -> None:
     assert all(entry.evidence for entry in first.entries)
 
 
-def test_fast_path_uses_the_canonical_received_evidence_state() -> None:
+def test_clear_path_uses_the_canonical_received_evidence_state() -> None:
     scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-01-clear-motor.json')
     fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
-    fast_entry = next(
-        entry for entry in fixture_set.entries if entry.business_path is EvidenceBusinessPath.FAST
+    clear_entry = next(
+        entry for entry in fixture_set.entries if entry.business_path is EvidenceBusinessPath.CLEAR
     )
 
     assert scenario.claim.claim_state.evidence.value == 'received'
     assert scenario.claim.evidence_summary.received == 1
-    assert fast_entry.claim_state == scenario.claim.claim_state
-    assert fast_entry.evidence_summary == scenario.claim.evidence_summary
-    assert fast_entry.evidence[0].evidence == scenario.evidence[0]
+    assert clear_entry.claim_state == scenario.claim.claim_state
+    assert clear_entry.evidence_summary == scenario.claim.evidence_summary
+    assert clear_entry.evidence[0].evidence == scenario.evidence[0]
+
+
+def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> None:
+    fixture_set = load_evidence_path_fixtures(FIXTURE_PATH)
+
+    actual = {
+        entry.business_path.value: (
+            entry.scenario_id,
+            entry.entry_baseline.workflow_state.value,
+            entry.entry_baseline.next_action.value,
+            entry.entry_baseline.evidence_state.value,
+            entry.entry_baseline.customer_next_step_status,
+            entry.entry_baseline.responsible_party.value,
+            None
+            if entry.entry_baseline.handoff is None
+            else (
+                entry.entry_baseline.handoff.type.value,
+                entry.entry_baseline.handoff.status.value,
+                entry.entry_baseline.handoff.priority.value,
+                entry.entry_baseline.handoff.queue,
+                entry.entry_baseline.handoff.trigger.value,
+            ),
+        )
+        for entry in fixture_set.entries
+    }
+
+    assert actual == {
+        'clear': (
+            'AT-01-clear-motor',
+            'ready_for_next',
+            'CREATE_CLAIM',
+            'received',
+            'ready_to_create',
+            'northwind',
+            None,
+        ),
+        'pending': (
+            'AT-06-pending-evidence',
+            'ready_for_next',
+            'PROCEED',
+            'pending_generation',
+            'continue_current_report',
+            'claimant',
+            None,
+        ),
+        'urgent': (
+            'AT-04-urgent',
+            'professional_review',
+            'URGENT_HANDOFF',
+            'received',
+            'urgent_support_queued',
+            'northwind',
+            ('urgent_support', 'queued', 'urgent', 'urgent_support', 'urgent_safety_risk'),
+        ),
+        'professional_review': (
+            'AT-02-coverage-ambiguity',
+            'professional_review',
+            'HANDOFF',
+            'inconsistent',
+            'professional_review_queued',
+            'claims_professional',
+            (
+                'professional_review',
+                'queued',
+                'high',
+                'professional_review',
+                'professional_review_required',
+            ),
+        ),
+        'handoff': (
+            'AT-05-human-request',
+            'professional_review',
+            'HANDOFF',
+            'received',
+            'human_support_queued',
+            'northwind',
+            (
+                'human_support',
+                'queued',
+                'standard',
+                'claimant_support',
+                'claimant_support_request',
+            ),
+        ),
+    }
 
 
 def test_visibility_loader_rejects_internal_only_catalogue(tmp_path: Path) -> None:
@@ -119,6 +217,31 @@ def test_visibility_loader_rejects_duplicate_scenario_state(tmp_path: Path) -> N
     invalid.write_text(json.dumps(payload), encoding='utf-8')
 
     with pytest.raises(ValueError, match='derive canonical scenario fields: claim_id'):
+        load_evidence_path_fixtures(invalid)
+
+
+def test_visibility_loader_rejects_a_stale_entry_baseline(tmp_path: Path) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+    payload['entries'][0]['entry_baseline']['customer_next_step_status'] = 'stale_status'
+    invalid = tmp_path / 'path-entry-visibility.json'
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='does not match its customer-status baseline'):
+        load_evidence_path_fixtures(invalid)
+
+
+def test_visibility_loader_rejects_a_misclassified_professional_review_handoff(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
+    review = next(
+        entry for entry in payload['entries'] if entry['business_path'] == 'professional_review'
+    )
+    review['entry_baseline']['handoff']['type'] = 'human_support'
+    invalid = tmp_path / 'path-entry-visibility.json'
+    invalid.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(ValueError, match='does not match its handoff baseline'):
         load_evidence_path_fixtures(invalid)
 
 
@@ -176,4 +299,6 @@ def test_evidence_visibility_runner_is_directly_executable() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.count('PASS AT-') == 5
-    assert 'PASS AT-04-urgent' in completed.stdout
+    assert 'PASS AT-01-clear-motor: path=clear' in completed.stdout
+    assert 'action=CREATE_CLAIM' in completed.stdout
+    assert 'handoff=professional_review:high:professional_review' in completed.stdout

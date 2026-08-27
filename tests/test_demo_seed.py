@@ -3,6 +3,11 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import Settings
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.scenario_loader import CANONICAL_SCENARIO_DIRECTORY, load_scenario
+from backend.services.professional_reviews import (
+    PROFESSIONAL_REVIEW_NEXT_STEP_STATUS,
+    PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY,
+)
 
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -80,7 +85,17 @@ def test_seed_scenarios_does_not_change_a_nonempty_queue() -> None:
     assert response.json()['error']['code'] == 'DEMO_SEED_REQUIRES_EMPTY_QUEUE'
 
 
-def test_claimant_reads_seeded_coverage_review_without_an_internal_handoff() -> None:
+def test_at02_next_step_matches_the_runtime_professional_review_contract() -> None:
+    scenario = load_scenario(CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json')
+
+    assert scenario.claim.customer_next_step.status == PROFESSIONAL_REVIEW_NEXT_STEP_STATUS
+    assert (
+        scenario.claim.customer_next_step.responsible_party is PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY
+    )
+    assert scenario.expected['customer_status'] == PROFESSIONAL_REVIEW_NEXT_STEP_STATUS
+
+
+def test_claimant_reads_seeded_professional_review_without_an_internal_handoff() -> None:
     with TestClient(create_app(Settings(), FixtureRepository())) as client:
         seeded = client.post('/api/v1/workbench/demo/seed-scenarios', headers=STAFF_AUTH)
         assert seeded.status_code == 200
@@ -91,11 +106,11 @@ def test_claimant_reads_seeded_coverage_review_without_an_internal_handoff() -> 
     body = response.json()
     assert body['handoff'] is None
     next_step = body['customer_next_step']
-    assert next_step['status'] == 'coverage_under_review'
+    assert next_step['status'] == PROFESSIONAL_REVIEW_NEXT_STEP_STATUS
     assert next_step['summary'] == (
-        'Northwind is reviewing your policy coverage for this incident and will contact you '
-        'with a coverage decision.'
+        'A claims professional is reviewing the relevant information and policy wording before '
+        'the claim can proceed.'
     )
-    assert next_step['responsible_party'] == 'northwind'
+    assert next_step['responsible_party'] == PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY.value
     assert next_step['can_resume'] is True
     assert next_step['required_items'] == []
