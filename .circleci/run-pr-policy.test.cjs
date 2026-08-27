@@ -108,6 +108,51 @@ test('validates the pull request at the exact CircleCI commit', async () => {
   assert.equal(receivedQualityMode, false);
 });
 
+test('provides paginated read-only repository state to the policy', async () => {
+  let receivedGithub;
+  const pullRequest = {
+    number: 42,
+    body: 'body',
+    draft: true,
+    user: { login: 'author' },
+    base: { ref: 'main', sha: 'base123' },
+    head: { sha: 'abc123' },
+  };
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/pulls/42')) return response(pullRequest);
+    if (url.includes('/pulls?state=open')) return response([{ number: 42 }]);
+    if (url.includes('/pulls/42/files')) return response([{ filename: 'docs/repo_rule.md' }]);
+    if (url.includes('/compare/')) return response({ files: [] });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  await run({
+    env: {
+      CIRCLE_PROJECT_USERNAME: 'example',
+      CIRCLE_PROJECT_REPONAME: 'repo',
+      CIRCLE_PULL_REQUEST: 'https://github.com/example/repo/pull/42',
+      CIRCLE_SHA1: 'abc123',
+      GITHUB_TOKEN: 'test-token',
+    },
+    fetchImpl,
+    policyImpl: {
+      run: async ({ github }) => {
+        receivedGithub = github;
+        const pulls = await github.paginate(github.rest.pulls.list, {
+          owner: 'example', repo: 'repo', state: 'open', per_page: 100,
+        });
+        assert.deepEqual(pulls, [{ number: 42 }]);
+        const comparison = await github.rest.repos.compareCommitsWithBasehead({
+          owner: 'example', repo: 'repo', basehead: 'abc123...base123',
+        });
+        assert.deepEqual(comparison.data, { files: [] });
+      },
+    },
+  });
+
+  assert.ok(receivedGithub);
+});
+
 test('rejects a pull-request URL that does not point to the current commit', async () => {
   await assert.rejects(
     run({

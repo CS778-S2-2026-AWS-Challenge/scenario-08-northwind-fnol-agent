@@ -5,6 +5,11 @@ const REQUIRED_FIELDS = [
   'Acceptance criteria',
   'Related issue or PR',
   'Dependencies',
+  'Owned behavior',
+  'Expected impact area',
+  'Non-goals',
+  'Shared contracts',
+  'Risk class',
   'Owner or responsible contributor',
 ];
 
@@ -15,6 +20,15 @@ const ISSUE_TYPES = new Set([
   'Integration gap',
   'Security concern',
   'Maintenance or documentation',
+]);
+
+const RISK_CLASSES = new Set([
+  'Standard',
+  'Shared contract',
+  'Persistence or concurrency',
+  'External side effect',
+  'Identity, authority, security, or privacy',
+  'Repository governance or deployment',
 ]);
 
 function escapeRegExp(value) {
@@ -60,6 +74,10 @@ function validateIssueBody({ body }) {
 
   if (hasMeaningfulContent(fields['Issue type']) && !ISSUE_TYPES.has(fields['Issue type'])) {
     errors.push(`Choose one of: ${[...ISSUE_TYPES].join(', ')}.`);
+  }
+
+  if (hasMeaningfulContent(fields['Risk class']) && !RISK_CLASSES.has(fields['Risk class'])) {
+    errors.push(`Choose one risk class: ${[...RISK_CLASSES].join(', ')}.`);
   }
 
   if (hasMeaningfulContent(fields['Related issue or PR']) &&

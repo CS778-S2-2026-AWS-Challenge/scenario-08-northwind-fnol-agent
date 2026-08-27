@@ -77,6 +77,27 @@ or sprint plan.
 - Do not claim that an issue is complete when a dependency, acceptance criterion, integration
   result, or required consumer remains outstanding.
 
+## Work Ownership And Scope Boundaries
+
+- An issue's assignee and `Owner or responsible contributor` define who moves its implementation
+  forward. Multiple owners must state a lead and each contributor's bounded responsibility.
+- A pull request must name one primary issue and describe the behaviour it owns, its non-goals,
+  expected impact area, shared contracts, dependencies, and overlapping open work. File access is
+  not ownership of every behaviour implemented in that file.
+- Discovering a defect or reviewing a pull request grants reporting authority, not implementation
+  authority. Record a blocker on the current acceptance as a review finding. Record an independent
+  problem as a follow-up issue. Do not silently absorb either into another deliverable.
+- Do not push, rebase, force-push, retarget, close, reopen, change Draft state, edit metadata, or
+  resolve conversations on another contributor's issue, branch, or pull request without explicit
+  authorisation for that exact action from the current user and agreement from the affected owner.
+- A scope change that enters another active issue or pull request's owned behaviour must be recorded
+  in the primary issue and pull request. State the reason, affected owner, dependency or handoff,
+  and remaining ownership before implementation continues.
+- Shared-contract work may require several modules to change together. That contract obligation is
+  not permission to redesign unrelated consumers or take over their separately accepted work.
+- When ownership or scope is disputed, stop implementation and request a human decision. Coding or
+  reviewer agents must not settle the dispute by making more repository mutations.
+
 ## Issue Creation And Maintenance
 
 - Use the repository `Code work` Issue Form for feature, bug, regression-validation,
@@ -92,6 +113,9 @@ or sprint plan.
   their check, but they must not close, delete, or silently rewrite an issue.
 - Issue creation is open to contributors. The policy governs the issue's purpose, structure,
   traceability, and acceptance boundary, not which contributor is allowed to open it.
+- Each issue must state owned behaviour, expected impact area, non-goals, affected shared contracts,
+  dependencies, and risk class. These fields define a reviewable scope contract; they are not a
+  rigid file allowlist.
 
 ## Local Quality Gate
 
@@ -131,6 +155,12 @@ not:
   environments, or other access controls;
 - deploy, publish, rotate credentials, or mutate an external service or production-like dataset.
 
+Protected actions include equivalent `gh`, Git, API, browser, workflow-dispatch, and automation
+operations. Repository permission, an authenticated `gh` session, issue assignment, passing CI,
+approval, general project responsibility, or an earlier authorisation does not authorise the next
+protected action. Broad requests such as "finish this issue" or "get this PR through review" do not
+include merge, force-push, Draft/Ready, close/reopen, retarget, Project, or governance authority.
+
 When asked to review, an agent may inspect the current head and submit `Approve`, `Comment`, or
 `Changes requested`. Approval is the maximum normal review action; it is not permission to merge.
 General project responsibility, a previous approval, or an earlier instruction does not grant
@@ -154,6 +184,52 @@ authorise an agent to make the same state change manually.
   changed behaviour, and branch protection may dismiss the previous approval.
 - Resolve review conversations before merge. The person or authorised workflow performing a merge
   remains responsible for confirming that required checks and approvals apply to the final head.
+- A blocking review finding must identify the exact reviewed head, governing authority, observed
+  behaviour, expected behaviour, user or system impact, why it blocks the current acceptance, and
+  its risk family. A suggested implementation is optional and does not transfer implementation
+  ownership to the reviewer.
+- Main movement, a pending CI job, preference-only refactoring, optional evidence, or a separate
+  adjacent improvement is not by itself grounds for `Changes requested`.
+- Review the complete risk family in the first practical pass. A blocker first introduced after an
+  earlier review must be marked `late-discovered`; do not present repeated discovery by reviewer
+  agents as repeated author error.
+- A reviewer must account for an explicitly declared stacked parent. Do not require a child pull
+  request to reproduce the parent dependency merely to appear independent.
+- After two blocking review rounds with a remaining authority or scope disagreement, stop agent
+  escalation and request a human adjudication.
+
+## Base And Overlap Risk
+
+- Fetch `origin` before starting implementation, before the first push, and before requesting
+  review. Record the intended base or stacked parent and do not reuse a branch from a merged or
+  closed pull request.
+- Main being ahead is advisory when its intervening changes do not affect the pull request. It is a
+  blocker when main and the pull request overlap in changed paths, or when main changed a declared
+  dependency, shared contract, schema, migration, package dependency, or build configuration used
+  by the pull request.
+- Declare deliberate stacks with their parent pull request and merge order. Undeclared non-main
+  bases and accidental branch chains are not acceptable substitutes for current-main validation.
+- The policy workflow may report active pull requests whose changed files overlap. This is advisory
+  topology evidence only: a stacked or stale base can make inherited history appear in the diff.
+  File overlap alone must not block Draft/Ready state or imply shared ownership. A blocker requires
+  issue scope, acceptance, contract, or current-head evidence that both pull requests change the
+  same owned behaviour.
+
+## Governance Exceptions
+
+- Governance maintenance is not an implicit exception to the authority rules. Record a bounded
+  maintenance window in the governing issue or pull request before using a protected operation.
+- The record must identify the operator, reason, allowed pull requests, allowed protected actions,
+  start and expiry times, and required restoration evidence. It must not use open-ended phrases
+  such as "repository maintenance" as an operation allowlist.
+- Use the pull-request template's `Governance exception` fields as the machine-readable window
+  record. `Protected actions: None` means no exception. Otherwise use an `@operator`, exact `#PR`
+  allowlist, ISO-8601 UTC start and expiry timestamps, and a concrete restoration check.
+- A governance window does not authorise product-scope changes or protected actions outside its
+  exact allowlist. Expired, incomplete, or unmatched windows are ordinary policy incidents.
+- Repository audits must distinguish matched governance-window operations from ordinary self-merge,
+  force-push, Draft/Ready, retarget, Project, and ruleset mutations. They must not silently rewrite or
+  revert repository history.
 
 ## Shared Contract Changes
 
