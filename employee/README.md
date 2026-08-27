@@ -35,12 +35,18 @@ py -3.12 -m http.server 8002
 
 ## Staff credentials
 
-- Local fixture credential: `Authorization: Bearer synthetic-staff`
+The page ships no credential. Supply one explicitly for a local demo, in the browser console:
 
-The static page currently carries that fixed synthetic staff credential for the bounded local demo.
-It cannot switch the backend into developer mode. If the backend uses the default normal identity
-mode, the credential is rejected with `401 AUTHENTICATION_REQUIRED`. It is not a production staff
-authentication path.
+```js
+localStorage.setItem('northwind.staffToken', 'synthetic-staff')
+```
+
+Without that the page sends an empty bearer token and the backend answers
+`401 AUTHENTICATION_REQUIRED`.
+
+A supplied token cannot switch the backend into developer mode. Against the default normal
+identity mode the synthetic credential is rejected with `401 AUTHENTICATION_REQUIRED` regardless.
+It is not a production staff authentication path.
 
 ## Notes
 

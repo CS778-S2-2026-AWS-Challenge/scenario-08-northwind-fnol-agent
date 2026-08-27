@@ -320,3 +320,25 @@ def test_employee_messaging_defines_delivery_retry_and_template_states() -> None
     assert 'Copied for staff review; not sent' in page
     assert '>Reply template<' in page
     assert '>Agent reply suggestion<' not in page
+
+
+def test_employee_workbench_ships_no_embedded_staff_credential() -> None:
+    """The page must not carry a working credential.
+
+    Issue #247 deliverable 10 and the identity contract's migration rules require
+    browser synthetic-token access to be an explicit local opt-in, not a default
+    baked into the static asset.
+    """
+
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    for synthetic_token in (
+        'synthetic-staff',
+        'synthetic-claimant',
+        'synthetic-admin',
+        'synthetic-integration',
+    ):
+        assert synthetic_token not in page
+
+    assert "localStorage.getItem('northwind.staffToken')" in page
+    assert "const STAFF_TOKEN = '" not in page
