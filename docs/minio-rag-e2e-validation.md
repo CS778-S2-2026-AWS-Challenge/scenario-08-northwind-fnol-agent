@@ -15,7 +15,7 @@ structured stores. RAG supplies citable wording only.
 - Policy source identities, paths and SHA-256 checksums: `config/knowledge-sources.json`
 - Minimal ingestion requests: `config/knowledge-ingestion-requests/`
 - Anonymous synthetic evaluation: `config/rag-evaluation-cases.json`
-- Source Markdown files: the team-controlled synthetic corpus whose bytes match the manifest
+- Source Markdown files: `config/knowledge-source-corpus/`
 
 Never commit MinIO credentials or customer records. Before upload, compare every source file hash
 with the corresponding manifest checksum.
@@ -37,7 +37,7 @@ Upload the source directory. The CLI verifies every checksum before creating the
 anything, and resolves all object keys from the manifest:
 
 ```powershell
-py -3.12 scripts/upload_knowledge_sources.py path/to/approved-policy-markdown
+py -3.12 scripts/upload_knowledge_sources.py config/knowledge-source-corpus
 ```
 
 The source paths are controlled and may not be replaced by caller-provided metadata.
@@ -64,7 +64,11 @@ py -3.12 scripts/verify_local_rag.py config/rag-evaluation-cases.json
 ```
 
 All cases must pass. The schedule-boundary cases intentionally retrieve relevant wording while
-recording the structured fields required before an exact customer-specific answer is possible.
+validating and reporting the structured fields required before an exact customer-specific answer
+is possible. This proves that the evaluation metadata records the RAG/Policy Schedule boundary; it
+does not perform a Policy Schedule lookup. The untrusted-query case proves that an instruction-like
+query does not retrieve evidence; it does not claim to test instructions embedded in retrieved
+document content.
 
 ## Provider failure
 
