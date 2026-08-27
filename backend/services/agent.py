@@ -563,8 +563,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             reason_codes=['HANDOFF_ALREADY_QUEUED'],
             customer_reason='Your additional information has been kept with the report.',
             customer_response=(
-                'I have added that information to the report already waiting for Northwind '
-                'support.'
+                'I have added that information to the report already waiting for Northwind support.'
             ),
             customer_next_step=context.claim.customer_next_step,
             form_changes=[],
