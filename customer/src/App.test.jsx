@@ -245,10 +245,64 @@ describe('claimant intake', () => {
       'href',
       'http://127.0.0.1:8002/',
     )
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/anonymous and synthetic/i)
 
     await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('uses an in-memory authenticated session for account updates and logout', async () => {
+    const user = userEvent.setup()
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', access_token: 'opaque-session-token',
+        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', development_identity: true,
+        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
+        preferences: { email: true, sms: false },
+      }))
+      .mockResolvedValueOnce({ ok: true, status: 204, json: async () => null })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('heading', { name: 'Your account' })).toBeVisible()
+    expect(screen.getByRole('note')).toHaveTextContent(/not a production Northwind identity/i)
+    expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer opaque-session-token')
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    expect(await screen.findByRole('heading', { name: /get back on track/i })).toBeVisible()
+    expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer opaque-session-token')
+  })
+
+  it('keeps entered login details available after an authentication failure', async () => {
+    const user = userEvent.setup()
+    fetch.mockResolvedValueOnce(jsonResponse({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'The email or password was not recognised.',
+        request_id: 'req-login-failure',
+      },
+    }, 401))
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    const email = screen.getByLabelText('Email address')
+    const password = screen.getByLabelText('Password')
+    await user.type(email, 'claimant.one@example.invalid')
+    await user.type(password, 'incorrect-password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not recognised/i)
+    expect(email).toHaveValue('claimant.one@example.invalid')
+    expect(password).toHaveValue('incorrect-password')
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
   })
 
   it('offers a three-step guided Motor claim without replacing conversational intake', async () => {

@@ -1,4 +1,9 @@
-const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
+const FIXTURE_CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
+let claimantToken = FIXTURE_CLAIMANT_TOKEN
+
+export function setClaimantAccessToken(token) {
+  claimantToken = token || FIXTURE_CLAIMANT_TOKEN
+}
 
 export class ApiRequestError extends Error {
   constructor(message, { code, status, retryable = false, currentRevision = null } = {}) {
@@ -22,7 +27,7 @@ async function apiRequest(path, options = {}) {
     response = await fetch(path, {
       ...options,
       headers: {
-        Authorization: `Bearer ${CLAIMANT_TOKEN}`,
+        Authorization: `Bearer ${claimantToken}`,
         'Content-Type': 'application/json',
         ...options.headers,
       },
@@ -48,6 +53,40 @@ async function apiRequest(path, options = {}) {
     )
   }
   return payload
+}
+
+export function loginClaimant({ email, password }) {
+  return apiRequest('/api/v1/auth/sessions', {
+    method: 'POST',
+    headers: { Authorization: '' },
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export function getAuthenticatedAccount() {
+  return apiRequest('/api/v1/account')
+}
+
+export function updateAccountProfile(profile) {
+  return apiRequest('/api/v1/account/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(profile),
+  })
+}
+
+export function updateAccountPreferences(preferences) {
+  return apiRequest('/api/v1/account/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(preferences),
+  })
+}
+
+export async function logoutClaimant() {
+  try {
+    await apiRequest('/api/v1/auth/session', { method: 'DELETE' })
+  } finally {
+    setClaimantAccessToken(null)
+  }
 }
 
 export function createClaim({ idempotencyKey = requestId('claim'), incidentType = null } = {}) {

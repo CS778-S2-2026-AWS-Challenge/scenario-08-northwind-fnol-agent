@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import datetime
+from hashlib import sha256
 
 from fastapi import Header, Request
 
@@ -9,6 +11,7 @@ from backend.core.errors import ApiError
 class Principal:
     subject: str
     actor_type: str = 'claimant'
+    expires_at: datetime | None = None
 
 
 def require_claimant(
@@ -36,6 +39,9 @@ def require_claimant(
             code='ACCESS_DENIED',
             message='Staff and integration credentials cannot access claimant APIs.',
         )
+    session = request.app.state.identity_repository.get_session(sha256(token.encode()).hexdigest())
+    if session is not None:
+        return Principal(subject=session.customer_id, expires_at=session.expires_at)
     if token != settings.synthetic_claimant_token:
         raise ApiError(
             status_code=401,

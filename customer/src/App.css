@@ -306,6 +306,15 @@
   font: inherit;
 }
 
+.login-form input[type='checkbox'] {
+  width: auto;
+  margin-right: 8px;
+}
+
+.account-card .login-form + .login-form {
+  margin-top: 24px;
+}
+
 .login-submit,
 .start-without-login {
   width: 100%;

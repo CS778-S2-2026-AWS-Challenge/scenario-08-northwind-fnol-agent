@@ -48,6 +48,7 @@ fixtures, and transaction tests change together.
 | Group | Records | Primary ownership |
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
+| Claimant auth session | hash of an opaque development/test token, authenticated customer reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -96,6 +97,23 @@ and checksums rather than embedding those bytes.
     provider reference before any retry after an unknown outcome.
 20. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
+21. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+    browser-supplied customer identifier to alter the authenticated principal.
+22. Read and update the authenticated claimant's approved profile and communication
+    preferences by `customer_id` without exposing another Customer record.
+
+## Development/Test Identity Invariants
+
+- Raw claimant access tokens are returned once and are never persisted; repositories retain
+  only a one-way token hash.
+- A session binds exactly one server-selected `customer_id`, creation time, expiry time, and
+  optional revocation time.
+- Expired or revoked sessions cannot authenticate and logout is immediately effective.
+- Synthetic credential verification and session persistence are fixture capabilities only;
+  selecting a production environment fails closed until an approved identity provider and
+  durable identity adapter exist.
+- Profile and communication preferences are Customer records, not browser-local authority.
+- Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 
 ## Claim Revision and Idempotency
 

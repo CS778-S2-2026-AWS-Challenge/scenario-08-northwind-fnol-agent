@@ -25,15 +25,21 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         '/api/claims/message': require_claimant,
     }
     health_paths = {'/health', '/health/live', '/health/ready'}
+    public_paths = {'/api/v1/auth/sessions'}
 
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in health_paths:
             continue
 
+        dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+        if route.path in public_paths:
+            assert not dependency_calls, f'Public route {route.path} unexpectedly requires auth.'
+            continue
+
         expected: Callable[..., object] | None
         if route.path.startswith('/api/v1/workbench/'):
             expected = require_staff
-        elif route.path.startswith('/api/v1/claims'):
+        elif route.path.startswith(('/api/v1/claims', '/api/v1/auth/', '/api/v1/account')):
             expected = require_claimant
         elif route.path.startswith('/internal/v1/'):
             expected = require_integration_service
@@ -41,7 +47,6 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
             expected = expected_dependencies.get(route.path)
 
         assert expected is not None, f'Route {route.path} has no classified permission boundary.'
-        dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
         assert expected in dependency_calls, f'Route {route.path} is missing {expected.__name__}.'
 
 
