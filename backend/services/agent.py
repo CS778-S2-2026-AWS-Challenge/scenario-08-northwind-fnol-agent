@@ -423,6 +423,10 @@ class AgentTurnProvider(Protocol):
 
 def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal | None:
     message_text = context.message_text or ''
+    active_handoff = context.claim.claim_state.next_action in {
+        AgentAction.HANDOFF,
+        AgentAction.URGENT_HANDOFF,
+    }
     injury_signal = _contains_unnegated_signal(
         message_text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
     )
@@ -456,10 +460,9 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='urgent',
             controlled_rule_authorised=True,
         )
-    if context.claim.claim_state.next_action not in {
-        AgentAction.HANDOFF,
-        AgentAction.URGENT_HANDOFF,
-    } and any(pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS):
+    if not active_handoff and any(
+        pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS
+    ):
         return AgentProposal(
             action=AgentAction.HANDOFF,
             reason_codes=['HUMAN_SUPPORT_REQUESTED'],
@@ -486,7 +489,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             controlled_rule_authorised=True,
         )
     if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
-        if context.professional_review_required:
+        if context.professional_review_required and not active_handoff:
             return AgentProposal(
                 action=AgentAction.UPDATE,
                 reason_codes=['EVIDENCE_PENDING_GENERATION', 'PROFESSIONAL_REVIEW_REQUIRED'],
@@ -554,6 +557,22 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             next_action_requirements=[],
             controlled_rule_authorised=True,
         )
+    if active_handoff:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['HANDOFF_ALREADY_QUEUED'],
+            customer_reason='Your additional information has been kept with the report.',
+            customer_response=(
+                'I have added that information to the report already waiting for Northwind '
+                'support.'
+            ),
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=[],
+        )
     return None
 
 
@@ -576,25 +595,6 @@ class ControlledAgent:
         interrupt = deterministic_interrupt_proposal(context)
         if interrupt is not None:
             return interrupt
-        if context.claim.claim_state.next_action in {
-            AgentAction.HANDOFF,
-            AgentAction.URGENT_HANDOFF,
-        }:
-            return AgentProposal(
-                action=AgentAction.UPDATE,
-                reason_codes=['HANDOFF_ALREADY_QUEUED'],
-                customer_reason='Your additional information has been kept with the report.',
-                customer_response=(
-                    'I have added that information to the report already waiting for Northwind '
-                    'support.'
-                ),
-                customer_next_step=context.claim.customer_next_step,
-                form_changes=[],
-                state_changes=[],
-                proposed_signals=[],
-                required_tools=[],
-                next_action_requirements=[],
-            )
         if context.message_text is not None:
             guided = _guided_proposal(context, message_text)
             if guided is not None:

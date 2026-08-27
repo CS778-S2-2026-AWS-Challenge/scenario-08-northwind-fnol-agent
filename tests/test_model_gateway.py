@@ -44,7 +44,12 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.services.agent import AgentTurnContext, authorised_state_changes, validate_proposal
+from backend.services.agent import (
+    AgentTurnContext,
+    InvariantGuardedAgent,
+    authorised_state_changes,
+    validate_proposal,
+)
 from backend.services.model_agent import GatewayAgent
 from backend.services.workbench import get_workbench_claim_detail
 
@@ -998,6 +1003,42 @@ def _model_proposal_output(
         'next_action_requirements': [],
         'handoff_priority': None,
     }
+
+
+@pytest.mark.parametrize('active_action', [AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF])
+def test_active_handoff_cannot_be_replaced_by_model_provider(
+    active_action: AgentAction,
+) -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output=_model_proposal_output(
+                state_changes=[{'path': 'claim_state.next_action', 'to': 'UPDATE'}]
+            )
+        )
+    )
+    claim = _working_claim().model_copy(
+        update={
+            'claim_state': _working_claim().claim_state.model_copy(
+                update={'next_action': active_action}
+            )
+        }
+    )
+
+    proposal = InvariantGuardedAgent(GatewayAgent(gateway)).propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses-active-handoff',
+            trigger_message_id='msg-active-handoff',
+            message_text='I have one more detail to add.',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.action is AgentAction.UPDATE
+    assert proposal.reason_codes == ['HANDOFF_ALREADY_QUEUED']
+    assert proposal.state_changes == []
+    assert proposal.customer_next_step == claim.customer_next_step
+    assert gateway.call_count == 0
 
 
 def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> None:
