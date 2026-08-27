@@ -33,6 +33,21 @@ def test_identity_only_request_resolves_the_controlled_manifest(tmp_path: Path) 
     assert source.expected_checksum
 
 
+def test_repository_ingestion_requests_resolve_the_controlled_manifest() -> None:
+    manifest = load_approved_sources()
+    request_directory = Path('config/knowledge-ingestion-requests')
+    request_paths = sorted(request_directory.glob('*.json'))
+
+    assert [path.stem for path in request_paths] == ['contents', 'home', 'motor']
+    for path in request_paths:
+        request = load_request(path)
+        source = resolve_source(request, manifest)
+        assert (source.document_id, source.version) == (
+            request.document_id,
+            request.version,
+        )
+
+
 def test_request_cannot_supply_governed_metadata(tmp_path: Path) -> None:
     path = write_json(
         tmp_path / 'request.json',
