@@ -127,6 +127,7 @@ Demonstration:
 ### Sprint 2
 
 - [External-Service Validation](archive/sprint-2/validation/day4-external-service-validation.md)
+- [Regression Entry Points](archive/sprint-2/validation/day5-regression-entrypoints.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
