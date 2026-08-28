@@ -69,6 +69,7 @@ documents remain authoritative for implemented behaviour.
 
 - [Agent Runtime Progress](status/agent-runtime-progress.md)
 - [Runtime Profile Validation Record](status/runtime-profile-validation.md)
+- [MVP Capability Register](status/mvp-capability-register.md)
 
 Status records must name repeatable evidence and their limitations. They should be updated or
 superseded when the implementation state changes.
