@@ -7,7 +7,7 @@ actual connectivity and temporary-container results observed on 26-28 August 202
 another contributor can repeat. It does not promote an incomplete profile or claim production
 deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
-The validation branch was synchronized with `main@26d6d79` before the latest checks below. The temporary
+The validation branch was synchronized with `main@4c90e2a` before the latest checks below. The temporary
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the repository quality gate passes.
 
@@ -72,6 +72,12 @@ Claim/session/message/Evidence and retrieval/review-signal recovery, claimant/st
 protected byte download, stale-revision refusal, and transaction rollback when a retrieval bundle
 conflicts with an existing review signal. It writes only a unique synthetic Claim, Evidence, and
 retrieval prefix; it never clears a database, collection, bucket, or knowledge object.
+
+The final #350 acceptance run executed the complete local MVP smoke twice consecutively against the
+same MongoDB and MinIO services. Both runs passed with independent synthetic prefixes. The
+provider-failure check then stopped and restarted the isolated MinIO service, returned the bounded
+`The knowledge service is unavailable.` error without evidence, and the restored governed store
+subsequently passed all six RAG evaluation cases again.
 
 The model smoke selects `AGENT_RUNTIME_PROFILE=model_gateway` in process and exercises the real
 OpenAI-compatible adapter, Gateway Agent, Runtime authority, Message service, and MongoDB
