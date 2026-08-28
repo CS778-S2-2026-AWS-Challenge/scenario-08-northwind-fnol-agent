@@ -9,7 +9,7 @@ for every claim. It is a status record observed at a point in time, not a contra
 redefine `SPEC/`, the API contract, or any engineering document, and a capability listed here is
 only as good as the evidence in its row.
 
-Compiled against `main` at `dfd0b722`.
+Compiled against `main` at `26d6d790`, which carries the #271 canonical path validation and the #281 regression entry point. Every command in the re-derivation section below exists on that commit and was run there to produce the classifications recorded here.
 
 Status vocabulary is the one fixed by the Sprint 2 Week 4 baseline:
 
