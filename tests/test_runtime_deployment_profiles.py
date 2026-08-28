@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
+from backend.core.config import DataRuntimeProfile, IdentityMode, ObjectStorageAdapter, Settings
 from scripts.check_runtime_profile import (
     inspect_environment,
     inspect_runtime,
@@ -60,6 +60,16 @@ def test_fixture_example_passes_the_real_startup_preflight() -> None:
         'knowledge_documents': 'using_fixture',
         'knowledge_retrieval': 'using_fixture',
     }
+
+
+def test_fixture_example_enables_the_development_identity_boundary() -> None:
+    values = load_environment_example(EXAMPLES / 'fixture.env.example')
+
+    with isolated_environment(values):
+        settings = Settings.from_environment()
+
+    assert settings.environment == 'development'
+    assert settings.identity_mode is IdentityMode.DEVELOPER
 
 
 def test_parsed_environment_can_be_inspected_with_a_process_accessible_override() -> None:

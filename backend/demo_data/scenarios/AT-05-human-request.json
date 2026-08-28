@@ -1,6 +1,7 @@
 {
   "scenario_id": "AT-05-human-request",
   "description": "Synthetic explicit human-support request after the incident description is confirmed.",
+  "business_path": "handoff",
   "claim": {
     "claim_id": "clm_fixture_at05",
     "customer_id": "cus_demo",

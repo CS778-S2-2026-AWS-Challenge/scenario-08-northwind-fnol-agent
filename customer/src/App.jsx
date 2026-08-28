@@ -5,14 +5,20 @@ import {
   createClaim,
   createExternalClaim,
   grantAssessorConsent,
+  getAuthenticatedAccount,
   getClaim,
   getClaimMessages,
   listClaims,
+  loginClaimant,
+  logoutClaimant,
   requestId,
   requestHumanSupport,
   requestAssessorRouting,
   resumeClaimSession,
   submitClaimMessage,
+  setClaimantAccessToken,
+  updateAccountPreferences,
+  updateAccountProfile,
   updateClaimField,
 } from './api.js'
 import './App.css'
@@ -104,6 +110,9 @@ function mergeFields(current, changes) {
 
 function App() {
   const [page, setPage] = useState('home')
+  const [account, setAccount] = useState(null)
+  const [authStatus, setAuthStatus] = useState('idle')
+  const [authError, setAuthError] = useState('')
   const [claimType, setClaimType] = useState('motor')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
@@ -213,7 +222,7 @@ function App() {
       setHandoff(current.handoff || null)
       if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
       if (sessionId) {
-      const latest = await getClaimMessages(claim.claim_id, sessionId)
+        const latest = await getClaimMessages(claim.claim_id, sessionId)
         setMessages(latest.items)
       }
       if (!silent) setStatus('idle')
@@ -224,6 +233,21 @@ function App() {
       }
     }
   }, [claim, sessionId])
+
+  useEffect(() => {
+    if (!claim || !sessionId) return undefined
+    const refreshVisibleConversation = () => {
+      if (document.visibilityState === 'visible') {
+        refreshClaimStatus({ silent: true })
+      }
+    }
+    window.addEventListener('focus', refreshVisibleConversation)
+    document.addEventListener('visibilitychange', refreshVisibleConversation)
+    return () => {
+      window.removeEventListener('focus', refreshVisibleConversation)
+      document.removeEventListener('visibilitychange', refreshVisibleConversation)
+    }
+  }, [claim, sessionId, refreshClaimStatus])
 
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -570,6 +594,60 @@ function App() {
     }
   }
 
+  async function signIn(event) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    setAuthStatus('loading'); setAuthError('')
+    try {
+      const session = await loginClaimant({
+        email: formData.get('email'),
+        password: formData.get('password'),
+      })
+      setClaimantAccessToken(session.access_token)
+      setAccount(await getAuthenticatedAccount())
+      setPage('account'); setAuthStatus('idle')
+    } catch (requestError) {
+      setClaimantAccessToken(null)
+      setAuthError(requestError.message)
+      setAuthStatus('idle')
+    }
+  }
+
+  async function signOut() {
+    setAuthStatus('loading'); setAuthError('')
+    try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
+    setAccount(null); setPage('home'); setAuthStatus('idle')
+  }
+
+  async function openSavedClaims() {
+    setPage('home')
+    await loadSavedReports()
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    setAuthStatus('saving'); setAuthError('')
+    try {
+      setAccount(await updateAccountProfile({
+        display_name: formData.get('display_name'), phone: formData.get('phone'),
+      }))
+    } catch (requestError) { setAuthError(requestError.message) }
+    finally { setAuthStatus('idle') }
+  }
+
+  async function savePreferences(event) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    setAuthStatus('saving'); setAuthError('')
+    try {
+      setAccount(await updateAccountPreferences({
+        email: formData.get('email') === 'on', sms: formData.get('sms') === 'on',
+      }))
+    } catch (requestError) { setAuthError(requestError.message) }
+    finally { setAuthStatus('idle') }
+  }
+
   return (
     <div className="customer-app">
       <header className="product-header">
@@ -581,7 +659,9 @@ function App() {
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => setPage('login')}>Log in</button>
+            <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
+              {account ? 'My account' : 'Log in'}
+            </button>
           </nav>
         )}
         {hasStarted && (
@@ -607,6 +687,34 @@ function App() {
             setPage('home')
           }}
         />
+      ) : !hasStarted && page === 'account' && account ? (
+        <main className="login-page">
+          <section className="login-card account-card" aria-labelledby="account-title">
+            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
+            <p className="eyebrow">Development account</p>
+            <h1 id="account-title">Your account</h1>
+            <p className="prototype-note" role="note">This authenticated account uses anonymous synthetic development data. It is not a production Northwind identity.</p>
+            <form className="login-form" onSubmit={saveProfile}>
+              <label htmlFor="account-name">Display name</label>
+              <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
+              <label htmlFor="account-email">Email address</label>
+              <input id="account-email" value={account.profile.email} readOnly />
+              <label htmlFor="account-phone">Phone</label>
+              <input id="account-phone" name="phone" defaultValue={account.profile.phone} />
+              <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
+            </form>
+            <form className="login-form" onSubmit={savePreferences}>
+              <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
+              <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
+              <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
+            </form>
+            {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+            <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
+              View saved claims
+            </button>
+            <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
+          </section>
+        </main>
       ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
@@ -614,13 +722,14 @@ function App() {
             <p className="eyebrow">Your Northwind account</p>
             <h1 id="login-title">Welcome back</h1>
             <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
-            <form className="login-form" onSubmit={(event) => event.preventDefault()}>
+            <form className="login-form" onSubmit={signIn}>
               <label htmlFor="customer-email">Email address</label>
               <input id="customer-email" name="email" type="email" autoComplete="email" />
               <label htmlFor="customer-password">Password</label>
               <input id="customer-password" name="password" type="password" autoComplete="current-password" />
-              <button className="primary-button login-submit" type="submit" disabled>Log in</button>
-              <p className="prototype-note" role="note">Customer account authentication is not connected in this prototype. You can still start a claim without logging in.</p>
+              <button className="primary-button login-submit" type="submit" disabled={authStatus !== 'idle'}>{authStatus === 'loading' ? 'Logging in…' : 'Log in'}</button>
+              <p className="prototype-note" role="note">Development/test login only. Accounts and displayed data are anonymous and synthetic; no production identity provider is connected.</p>
+              {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
             </form>
             <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
               Start a claim without logging in
@@ -831,14 +940,6 @@ function App() {
                   </div>
                 </dl>
                 <p>Your message will be saved for Northwind support. Start with @agent when you need an Agent response.</p>
-                <button
-                  className="secondary-button refresh-button"
-                  type="button"
-                  onClick={() => refreshClaimStatus()}
-                  disabled={isBusy}
-                >
-                  {status === 'refreshing' ? 'Refreshing...' : 'Refresh status'}
-                </button>
               </section>
             )}
 
@@ -891,6 +992,14 @@ function App() {
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
+            <button
+              className="secondary-button refresh-button"
+              type="button"
+              onClick={() => refreshClaimStatus()}
+              disabled={isBusy}
+            >
+              {status === 'refreshing' ? 'Refreshing conversation...' : 'Refresh conversation'}
+            </button>
           </section>
 
           <aside className="claim-panel" aria-labelledby="claim-details-title">

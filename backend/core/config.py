@@ -69,6 +69,7 @@ class Settings:
     synthetic_staff_token: str = 'synthetic-staff'
     synthetic_admin_token: str = 'synthetic-admin'
     synthetic_integration_token: str = 'synthetic-integration'
+    claimant_session_ttl_minutes: int = 30
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
@@ -109,6 +110,8 @@ class Settings:
                 'Synthetic claimant, staff, administrator, and integration tokens '
                 'must be pairwise distinct.'
             )
+        if self.claimant_session_ttl_minutes <= 0:
+            raise ValueError('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES must be greater than zero.')
         if self.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
             if not self.model_protocol_adapter.strip():
                 raise ValueError('MODEL_PROTOCOL_ADAPTER must not be empty.')
@@ -185,6 +188,9 @@ class Settings:
             synthetic_integration_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',
                 'synthetic-integration',
+            ),
+            claimant_session_ttl_minutes=int(
+                os.getenv('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES', '30')
             ),
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,

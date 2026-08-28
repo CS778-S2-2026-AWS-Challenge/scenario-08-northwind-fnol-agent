@@ -26,7 +26,7 @@
       "expected_action": "UPDATE",
       "expected_evidence_status": "pending_generation",
       "response_contains": ["expected later", "not block"],
-      "next_step_status": "continue_current_report"
+      "next_step_status": "ready_to_create"
     },
     {
       "input": "I want to speak with a person now.",
