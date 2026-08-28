@@ -72,6 +72,16 @@ def test_fixture_example_enables_the_development_identity_boundary() -> None:
     assert settings.identity_mode is IdentityMode.DEVELOPER
 
 
+def test_local_mvp_example_enables_the_development_identity_boundary() -> None:
+    values = load_environment_example(EXAMPLES / 'local-mvp.env.example')
+
+    with isolated_environment(values):
+        settings = Settings.from_environment()
+
+    assert settings.environment == 'development'
+    assert settings.identity_mode is IdentityMode.DEVELOPER
+
+
 def test_parsed_environment_can_be_inspected_with_a_process_accessible_override() -> None:
     values = load_environment_example(EXAMPLES / 'fixture.env.example')
     values['NORTHWIND_CORS_ALLOW_ORIGINS'] = 'http://localhost:5173'

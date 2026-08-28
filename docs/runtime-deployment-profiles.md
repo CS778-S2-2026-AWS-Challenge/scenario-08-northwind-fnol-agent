@@ -14,7 +14,7 @@ adapter.
 | --- | --- | --- |
 | `deploy/runtime/fixture.env.example` | Ready | Complete deterministic fixture bundle |
 | `deploy/runtime/local-minio.env.example` | Ready when packaged MinIO is healthy | Fixture data with the explicit verified MinIO evidence adapter |
-| `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence, MinIO evidence/knowledge, and explicitly synthetic policy/history |
+| `deploy/runtime/local-mvp.env.example` | Ready when local MongoDB, MinIO, and the governed indexes are healthy | MongoDB persistence, MinIO evidence/knowledge, explicitly synthetic policy/history, and developer-only synthetic identity |
 | `deploy/runtime/mongodb.env.example` | Refused | Connection primitives exist, but the complete MongoDB bundle is not verified |
 | `deploy/runtime/cloudflare.env.example` | Refused | Provider services and bindings remain unconfirmed |
 | `deploy/runtime/aws.env.example` | Refused | AWS services, permissions, and credentials remain unconfirmed |
@@ -41,7 +41,9 @@ the two MinIO buckets without clearing either volume. The governed source and in
 already exist in `northwind-knowledge`; missing or invalid ingestion state refuses startup. Run
 `py -3.12 scripts/run_local_mvp_smoke.py` to verify API writes, revision conflicts, protected
 evidence bytes, staff projection, knowledge retrieval, and recovery through a newly constructed
-application instance.
+application instance. The example explicitly selects `NORTHWIND_IDENTITY_MODE=developer`; this
+enables only the synthetic local claimant, staff, and integration identities and cannot start in a
+non-development environment.
 
 ## Container image
 

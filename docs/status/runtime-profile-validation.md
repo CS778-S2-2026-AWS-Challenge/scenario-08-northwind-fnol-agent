@@ -3,11 +3,11 @@
 ## Scope
 
 This record verifies the provider-neutral runtime profiles required by issue #266. It records
-actual connectivity and temporary-container results observed on 26-27 August 2026, plus commands
+actual connectivity and temporary-container results observed on 26-28 August 2026, plus commands
 another contributor can repeat. It does not promote an incomplete profile or claim production
 deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
-The validation branch was synchronized with `main@61e24b6` before the checks below. The temporary
+The validation branch was synchronized with `main@26d6d79` before the latest checks below. The temporary
 containers use one image built from the final reviewed branch head; the pull-request evidence names
 that exact head after the repository quality gate passes.
 
@@ -17,7 +17,7 @@ that exact head after the repository quality gate passes.
 | --- | --- | --- | --- |
 | `fixture` | `verified` | Preflight ready; temporary container became healthy as non-root user `northwind`; liveness and readiness returned HTTP 200 | Deterministic synthetic data only; readiness remains degraded while the Agent is not configured |
 | `local-minio` | `verified` | Preflight ready against the packaged healthy MinIO service; temporary container became healthy; FastAPI upload, checksum verification, claimant-safe metadata read, readiness, and bounded object cleanup passed | Fixture data bundle with explicit S3-compatible evidence storage, not a complete independent data profile |
-| `local_mvp` | `verified` | Local MongoDB 8.0 replica set became primary; runtime preflight was ready; claimant and controlled-Agent messages, Claim revision, idempotency records, Evidence metadata, typed Policy/History retrievals, and one staff-only review signal survived application reconstruction; a conflicting retrieval bundle rolled back without a partial record; protected Evidence bytes and governed Motor citations were read from MinIO | Development-only composition; policy/history remain synthetic, Agent remains controlled, and PR #288 transaction-boundary hardening is still a merge dependency |
+| `local_mvp` | `verified` | Local MongoDB 8.0 replica set became primary; runtime preflight was ready; developer-only synthetic identity authenticated claimant, staff, and integration requests; claimant and controlled-Agent messages, Claim revision, idempotency records, Evidence metadata, typed Policy/History retrievals, and one staff-only review signal survived application reconstruction; a conflicting retrieval bundle rolled back without a partial record; protected Evidence bytes and governed Motor citations were read from MinIO | Development-only composition; identity, policy, and history remain synthetic, and the Agent remains controlled |
 | `mongodb` | `partial` | MongoDB connection primitives and bounded probe exist; the configured Atlas probe was unavailable during this run; container exited before serving because the complete bundle is unverified | Persistence alone cannot provide evidence, policy/history, or knowledge capabilities and is not selected at runtime |
 | `cloudflare` | `unavailable` | Preflight refused and the temporary container exited before serving | Provider services, bindings, schema, and credentials are unconfirmed |
 | `aws` | `unavailable` | Preflight refused and the temporary container exited before serving | Services, permissions, schema, region, credentials, and deployment target are unconfirmed |
