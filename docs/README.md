@@ -69,6 +69,7 @@ documents remain authoritative for implemented behaviour.
 
 - [Agent Runtime Progress](status/agent-runtime-progress.md)
 - [Runtime Profile Validation Record](status/runtime-profile-validation.md)
+- [MVP Capability Register](status/mvp-capability-register.md)
 
 Status records must name repeatable evidence and their limitations. They should be updated or
 superseded when the implementation state changes.
@@ -127,6 +128,7 @@ Demonstration:
 ### Sprint 2
 
 - [External-Service Validation](archive/sprint-2/validation/day4-external-service-validation.md)
+- [Canonical Scenario Validation](archive/sprint-2/validation/day4-canonical-scenario-validation.md)
 - [Regression Entry Points](archive/sprint-2/validation/day5-regression-entrypoints.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
