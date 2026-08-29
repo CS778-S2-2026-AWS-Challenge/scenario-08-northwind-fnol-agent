@@ -399,6 +399,25 @@ describe('claimant intake', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/claims?limit=25', expect.any(Object))
   })
 
+  it('loads conversation history immediately for an existing authenticated session', async () => {
+    setClaimantAccessToken('existing-session-token', { presentAtStartup: true })
+    fetch.mockResolvedValueOnce(jsonResponse({
+      items: [{
+        claim_id: 'clm_existing', revision: 3, incident_type: 'home',
+        workflow_state: 'collecting', external_claim: null,
+        customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
+        updated_at: '2026-08-27T02:00:00Z', can_resume: true,
+      }],
+      page: { next_cursor: null },
+    }))
+
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: /^Resume Home incident/ })).toBeVisible()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/claims?limit=25', expect.any(Object))
+  })
+
   it('refreshes Recent automatically after a newly saved conversation', async () => {
     const user = userEvent.setup()
     setClaimantAccessToken(null)

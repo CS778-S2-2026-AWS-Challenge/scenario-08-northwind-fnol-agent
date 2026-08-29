@@ -9,6 +9,7 @@ import {
   getClaim,
   getClaimMessages,
   hasClaimantAccessToken,
+  hasStartupClaimantAccessToken,
   listClaims,
   loginClaimant,
   logoutClaimant,
@@ -665,7 +666,7 @@ function App() {
   useEffect(() => {
     if (
       page !== 'home'
-      || !account
+      || (!account && !hasStartupClaimantAccessToken())
       || savedReports !== null
       || historyAutoLoadAttempted.current
     ) return
