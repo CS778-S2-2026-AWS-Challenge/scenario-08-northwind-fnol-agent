@@ -62,6 +62,15 @@ body:
       required: true
 
   - type: textarea
+    id: discussion-approval
+    attributes:
+      label: Discussion approval
+      description: Issues created by anyone other than the maintainer require prior approval in the `Issue requests` Discussions category. Paste the URL of the approved thread. The maintainer may write None.
+      placeholder: "https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/123, or None - maintainer-created issue."
+    validations:
+      required: true
+
+  - type: textarea
     id: dependencies
     attributes:
       label: Dependencies

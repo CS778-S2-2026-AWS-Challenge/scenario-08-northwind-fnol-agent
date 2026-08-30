@@ -44,6 +44,12 @@ function isPendingValue(value) {
   return /^(?:pending|tbd|to be determined)(?:\s*[-:].*)?\.?$/i.test((value || '').trim());
 }
 
+function checkedBoxes(content) {
+  if (!content) return [];
+  const matches = content.matchAll(/^[ \t]*[-*][ \t]*\[[xX]\][ \t]+\S.*$/gm);
+  return [...matches].map((match) => match[0].trim());
+}
+
 function fieldContent(body, label) {
   const escapedLabel = escapeRegExp(label);
   const match = (body || '').match(
@@ -125,6 +131,31 @@ function validatePullRequestBody(input) {
       const message = `Complete \`${label}:\` in \`Summary\`.`;
       (isDraft ? warnings : errors).push(message);
     }
+  }
+
+  const governanceConfirmation = sectionContent(body, 'Governance confirmation');
+  if (checkedBoxes(governanceConfirmation).length === 0) {
+    (isDraft ? warnings : errors).push(
+      'Check the box in `Governance confirmation` after reading AGENT.md and the governance skill in full.',
+    );
+  } else if (!/\bv\d+\.\d+\b/.test(governanceConfirmation)) {
+    (isDraft ? warnings : errors).push(
+      'State the governance skill version read (vX.Y) in `Governance confirmation`.',
+    );
+  }
+
+  const documentationSync = sectionContent(body, 'Documentation sync check');
+  if (checkedBoxes(documentationSync).length === 0) {
+    (isDraft ? warnings : errors).push(
+      'Check at least one box in `Documentation sync check`.',
+    );
+  }
+
+  const impactStatement = sectionContent(body, 'Impact statement');
+  if (checkedBoxes(impactStatement).length === 0) {
+    (isDraft ? warnings : errors).push(
+      'Check the box in `Impact statement` after confirming unrelated code is unaffected.',
+    );
   }
 
   if (!isDraft) {
@@ -395,6 +426,7 @@ async function run({ github, context, core, requireLocalQualityEvidence = true }
 module.exports = {
   baseDeclarations,
   changedPathOverlap,
+  checkedBoxes,
   crossOwnerDeclaration,
   fieldContent,
   issueReferences,

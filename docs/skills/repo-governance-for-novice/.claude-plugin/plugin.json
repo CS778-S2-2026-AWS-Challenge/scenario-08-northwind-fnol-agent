@@ -1,0 +1,9 @@
+{
+  "name": "repo-governance-for-novice",
+  "description": "Repository governance for the Northwind FNOL repository (scenario-08). Required before any repository operation: authority boundaries, required reading, task entry, branching, commit and PR rules, review and merge, documentation sync, CI checks, and frontend and backend design standards.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ysoseri1224",
+    "url": "https://github.com/Ysoseri1224"
+  }
+}

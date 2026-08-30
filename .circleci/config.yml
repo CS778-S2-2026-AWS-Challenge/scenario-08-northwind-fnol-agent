@@ -29,6 +29,9 @@ jobs:
       - run:
           name: Test backend
           command: python -m pytest --cov=backend --cov-report=term-missing
+      - run:
+          name: Check OpenAPI snapshot drift
+          command: python scripts/export_openapi.py --check
 
   customer-quality:
     docker:
@@ -102,8 +105,48 @@ jobs:
             .github/scripts/governance_audit.test.cjs
             .circleci/run-pr-policy.test.cjs
       - run:
+          name: Validate commit message format
+          command: |
+            if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
+              echo "No associated pull request; skipping commit format check."
+              exit 0
+            fi
+            bash .github/scripts/check_commit_format.sh \
+              "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" \
+              "${CIRCLE_PULL_REQUEST##*/}"
+      - run:
           name: Validate pull request
           command: node .circleci/run-pr-policy.cjs
+
+  docs-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Lint changed markdown
+          command: |
+            git fetch origin main
+            base=$(git merge-base origin/main HEAD)
+            files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.md' | tr '\n' ' ')
+            if [ -z "${files// /}" ]; then
+              echo "No markdown changes."
+              exit 0
+            fi
+            printf '%s\n' $files | xargs npx --yes markdownlint-cli2
+      - run:
+          name: Check docs updated with API changes
+          command: |
+            git fetch origin main
+            base=$(git merge-base origin/main HEAD)
+            changed=$(git diff --name-only "$base" HEAD)
+            modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
+            if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
+              echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
+              exit 1
+            fi
+            echo "Path coupling satisfied."
 
 workflows:
   quality:
@@ -112,3 +155,4 @@ workflows:
       - customer-quality
       - github-automation-quality
       - pr-policy
+      - docs-quality

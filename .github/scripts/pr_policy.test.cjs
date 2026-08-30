@@ -79,6 +79,21 @@ ${localValidation}
 - Window starts: Not required
 - Window expires: Not required
 - Restoration evidence: Not required
+
+## Governance confirmation
+
+- [x] I have read AGENT.md and the governance skill in full. Version read: v1.0
+
+## Documentation sync check
+
+- [x] This PR contains no changes that require documentation updates
+- [ ] Updated docs/api.md (API contract changes)
+- [ ] Updated docs/persistence-schema.md (persistence changes)
+- [ ] Updated docs/README.md (documents added, replaced, moved, or archived)
+
+## Impact statement
+
+- [x] I confirmed the changes do not affect unrelated code; any impact is described in the Summary
 `;
 }
 
@@ -149,6 +164,9 @@ test('accepts a Draft pull request with a valid issue reference', () => {
       'Complete `Owned behavior:` in `Summary`.',
       'Complete `Non-goals:` in `Summary`.',
       'Complete `Scope changed since issue:` in `Summary`.',
+      'Check the box in `Governance confirmation` after reading AGENT.md and the governance skill in full.',
+      'Check at least one box in `Documentation sync check`.',
+      'Check the box in `Impact statement` after confirming unrelated code is unaffected.',
     ],
     references: [192],
   });
@@ -403,4 +421,50 @@ test('rejects unresolved main movement on a path changed by the PR', async () =>
     core,
   });
   assert.ok(result.errors.some((error) => error.includes('Main changed paths')));
+});
+
+test('rejects a ready pull request whose governance confirmation box is unchecked', () => {
+  const body = readyBody().replace(
+    '- [x] I have read AGENT.md and the governance skill in full. Version read: v1.0',
+    '- [ ] I have read AGENT.md and the governance skill in full. Version read: v1.0',
+  );
+  const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
+  assert.ok(result.errors.some((error) => error.includes('Governance confirmation')));
+});
+
+test('rejects a ready pull request that omits the governance skill version read', () => {
+  const body = readyBody().replace(' Version read: v1.0', '');
+  const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
+  assert.ok(result.errors.some((error) => error.includes('version read (vX.Y)')));
+});
+
+test('rejects a ready pull request with no documentation sync box checked', () => {
+  const body = readyBody().replace(
+    '- [x] This PR contains no changes that require documentation updates',
+    '- [ ] This PR contains no changes that require documentation updates',
+  );
+  const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
+  assert.ok(result.errors.some((error) => error.includes('Documentation sync check')));
+});
+
+test('rejects a ready pull request whose impact statement box is unchecked', () => {
+  const body = readyBody().replace(
+    '- [x] I confirmed the changes do not affect unrelated code; any impact is described in the Summary',
+    '- [ ] I confirmed the changes do not affect unrelated code; any impact is described in the Summary',
+  );
+  const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
+  assert.ok(result.errors.some((error) => error.includes('Impact statement')));
+});
+
+test('downgrades missing governance sections to warnings on a Draft pull request', () => {
+  const result = validatePullRequestBody({
+    body: '## Linked issue\n\nRefs #192\n\n## Summary\n\nImplements the first bounded part; verification remains pending.',
+    isDraft: true,
+    owner,
+    repo,
+  });
+  assert.equal(result.errors.length, 0);
+  assert.ok(result.warnings.some((warning) => warning.includes('Governance confirmation')));
+  assert.ok(result.warnings.some((warning) => warning.includes('Documentation sync check')));
+  assert.ok(result.warnings.some((warning) => warning.includes('Impact statement')));
 });
