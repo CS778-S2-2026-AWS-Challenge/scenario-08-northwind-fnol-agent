@@ -765,7 +765,17 @@ def test_transport_configuration_cannot_drift_from_model_profile(
     config = gateway_config()
 
     with pytest.raises(ModelGatewayError) as captured:
-        replace(config, **{field_name: field_value})
+        if field_name == 'model':
+            replace(config, model=cast(str, field_value))
+        elif field_name == 'credential_environment_variable':
+            replace(
+                config,
+                credential_environment_variable=cast(str, field_value),
+            )
+        elif field_name == 'capabilities':
+            replace(config, capabilities=cast(ModelCapabilities, field_value))
+        else:
+            replace(config, timeout_seconds=cast(float, field_value))
 
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
 
