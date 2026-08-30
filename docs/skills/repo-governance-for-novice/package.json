@@ -11,7 +11,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ysoseri1224/repo-governance-for-novice.git"
+    "url": "git+https://github.com/Ysoseri1224/repo-governance-for-novice.git"
   },
   "author": "Ysoseri1224 (https://github.com/Ysoseri1224)",
   "license": "MIT",
