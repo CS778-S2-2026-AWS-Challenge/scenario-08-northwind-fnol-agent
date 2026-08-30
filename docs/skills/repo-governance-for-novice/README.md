@@ -42,17 +42,18 @@ promotes the folder to a plugin (invocation becomes
 
 ## Channel C — Claude Code plugin marketplace
 
-This directory is its own marketplace, so:
+This directory is its own marketplace, published standalone at
+https://github.com/Ysoseri1224/repo-governance-for-novice:
 
 ```text
-/plugin marketplace add <path-or-git-source-of-this-directory>
+/plugin marketplace add Ysoseri1224/repo-governance-for-novice
 /plugin install repo-governance-for-novice@repo-governance-for-novice-marketplace
 ```
 
-A local checkout path, a dedicated git repository containing this directory at
-its root, or a marketplace entry in any other marketplace pointing here
-(`{"source": "git-subdir", ...}` or `{"source": "npm", "package":
-"repo-governance-for-novice"}`) all work. Validate before distributing:
+A local checkout path also works, as does a marketplace entry in any other
+marketplace pointing here (`{"source": "git-subdir", ...}` or
+`{"source": "npm", "package": "repo-governance-for-novice"}`). Validate before
+distributing:
 
 ```bash
 claude plugin validate .
