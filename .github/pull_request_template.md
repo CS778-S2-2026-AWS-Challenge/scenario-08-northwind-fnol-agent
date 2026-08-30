@@ -83,4 +83,24 @@ the relevant failure states and tests before requesting review. -->
 <!-- Complete this only when the PR requires a protected repository operation. Use an @operator,
 exact #PR allowlist, ISO-8601 UTC timestamps, and the required ruleset or service restoration check. -->
 
+## Governance confirmation
+
+- [ ] I have read AGENT.md and the governance skill
+      (docs/skills/repo-governance-for-novice/) in full. Version read: vX.Y
+
+<!-- Replace vX.Y with the version line from SKILL.md. A checked box is a mandatory reminder,
+not proof; independent review remains the last line of defense. -->
+
+## Documentation sync check
+
+- [ ] This PR contains no changes that require documentation updates
+- [ ] Updated docs/api.md (API contract changes)
+- [ ] Updated docs/persistence-schema.md (persistence changes)
+- [ ] Updated docs/README.md (documents added, replaced, moved, or archived)
+
+## Impact statement
+
+- [ ] I confirmed the changes do not affect unrelated code; any impact is described in the
+      Summary
+
 <!-- If this PR follows a discovered regression or integration gap, explain the relationship here and state whether it changes the original issue's acceptance boundary. -->
