@@ -42,6 +42,14 @@ jobs:
           .github/scripts/review_policy.test.cjs
           .github/scripts/governance_audit.test.cjs
 
+      - name: Validate commit message format
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash .github/scripts/check_commit_format.sh
+          "${{ github.repository }}"
+          "${{ github.event.pull_request.number }}"
+
       - name: Validate pull request
         uses: actions/github-script@v7
         with:
