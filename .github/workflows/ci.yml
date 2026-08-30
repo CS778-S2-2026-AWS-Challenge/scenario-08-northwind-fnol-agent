@@ -45,6 +45,9 @@ jobs:
       - name: Test backend
         run: python -m pytest --cov=backend --cov-report=term-missing
 
+      - name: Check OpenAPI snapshot drift
+        run: python scripts/export_openapi.py --check
+
   customer-quality:
     name: Customer quality
     runs-on: ubuntu-latest
