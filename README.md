@@ -30,7 +30,7 @@ The project is in Sprint 2 and is advancing the full-path prototype into a repea
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
 ## Repository Operation Rules
 
@@ -58,7 +58,7 @@ agents must not merge pull requests or change Draft status without explicit curr
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
-| `docs/` | API contract, engineering conventions, and research material |
+| `docs/` | Product direction, API contract, engineering conventions, and research material |
 | `sprint/` | Time-bound sprint commitments and delivery flow |
 | `scripts/` | Repository-level development and verification commands |
 

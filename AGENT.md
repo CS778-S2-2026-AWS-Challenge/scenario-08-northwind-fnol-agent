@@ -16,6 +16,10 @@ The sole current source of governance rules is the repository governance skill:
    requires, and read them before acting. Required reading and the change-area contract matrix
    live in the skill's `before-work.md`.
 
+For product-direction or user-behaviour work, read [Northwind FNOL Product Soul](docs/product-soul.md)
+before the relevant files in `SPEC/`. It is the concise product-direction index; `SPEC/` remains
+the normative requirement and acceptance source.
+
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical
 reference only. Where an archived document disagrees with the skill, the skill prevails
