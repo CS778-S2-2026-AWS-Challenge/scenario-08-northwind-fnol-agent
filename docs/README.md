@@ -27,6 +27,7 @@ them:
   [AGENT.md](../AGENT.md); where an archived document disagrees with it, the skill prevails
 - [Current API Contract](api.md)
 - [Documentation Index](README.md)
+- [Northwind FNOL Product Soul](product-soul.md) — product direction and principles shared by the repository and the project plan
 
 ## Current Engineering Documents
 

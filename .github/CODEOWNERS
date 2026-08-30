@@ -5,6 +5,7 @@
 # This file takes effect only when branch protection or a ruleset enables
 # "Require review from Code Owners".
 
+/docs/product-soul.md     @Ysoseri1224
 /docs/skills/             @Ysoseri1224
 /docs/README.md           @Ysoseri1224
 /docs/archive/            @Ysoseri1224
