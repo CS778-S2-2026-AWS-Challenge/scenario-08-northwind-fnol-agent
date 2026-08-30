@@ -47,7 +47,7 @@ breaks.
 these paths must be approved by the code owner before merging, including PRs
 opened by agents:
 
-```
+```text
 /docs/skills/             @Ysoseri1224
 /docs/README.md           @Ysoseri1224
 /docs/archive/            @Ysoseri1224

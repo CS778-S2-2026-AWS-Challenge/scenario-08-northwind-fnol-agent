@@ -1,5 +1,6 @@
 {
   "name": "repo-governance-for-novice-marketplace",
+  "description": "Single-plugin marketplace distributing the Northwind FNOL repository governance skill.",
   "owner": {
     "name": "Ysoseri1224",
     "url": "https://github.com/Ysoseri1224"

@@ -3,7 +3,6 @@
 <!-- Use Closes/Fixes/Resolves only for complete delivery. Use Refs for partial work. -->
 <!-- Every PR must identify its primary repository issue. -->
 
-
 ## Summary
 
 <!-- Describe the current head, the change classification, and the observable outcome. -->
@@ -15,11 +14,9 @@
 - Non-goals:
 - Scope changed since issue: No
 
-
 ## Acceptance evidence
 
 <!-- Map each relevant issue acceptance criterion to current evidence. Do not claim evidence from another commit or environment. -->
-
 
 ## Local validation
 

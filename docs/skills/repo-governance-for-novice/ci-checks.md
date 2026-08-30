@@ -53,7 +53,7 @@ one:
   against the following regex (shell implementation; no commitlint or Node
   toolchain):
 
-```
+```text
 ^(feat|fix|docs|chore|ci|test|refactor|perf|revert)(\((backend|frontend|docs|deploy|scripts|api|deps)\))?!?: .+
 ```
 

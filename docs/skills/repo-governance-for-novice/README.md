@@ -26,7 +26,7 @@ Markdown directly.
 
 ## Channel B — Copy into a Claude Code skills directory
 
-```
+```bash
 # project scope
 cp -r repo-governance-for-novice <your-project>/.claude/skills/
 
@@ -44,7 +44,7 @@ promotes the folder to a plugin (invocation becomes
 
 This directory is its own marketplace, so:
 
-```
+```text
 /plugin marketplace add <path-or-git-source-of-this-directory>
 /plugin install repo-governance-for-novice@repo-governance-for-novice-marketplace
 ```
@@ -54,7 +54,7 @@ its root, or a marketplace entry in any other marketplace pointing here
 (`{"source": "git-subdir", ...}` or `{"source": "npm", "package":
 "repo-governance-for-novice"}`) all work. Validate before distributing:
 
-```
+```bash
 claude plugin validate .
 claude --plugin-dir .
 ```
