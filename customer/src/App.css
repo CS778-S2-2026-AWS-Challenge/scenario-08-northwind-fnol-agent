@@ -135,6 +135,7 @@
 }
 
 .claim-option {
+  position: relative;
   display: flex;
   min-height: 68px;
   align-items: center;
@@ -151,7 +152,15 @@
 }
 
 .claim-option input {
-  accent-color: #2c806a;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.claim-option:focus-within {
+  outline: 3px solid rgba(45, 137, 112, 0.24);
+  outline-offset: 2px;
 }
 
 .claim-option.is-selected {
@@ -1193,7 +1202,7 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .claim-tabs button {
+  .claim-option {
     min-height: 50px;
   }
   .guided-grid { grid-template-columns: 1fr; }

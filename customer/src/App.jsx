@@ -771,9 +771,8 @@ function App() {
                   </article>
                 )}
                 <div className="choice-divider"><span>Optional guided claim</span></div>
-                <h3>Choose a claim type for guided help</h3>
-                <fieldset className="claim-tabs">
-                  <legend className="visually-hidden">Claim type</legend>
+                <h3 id="claim-type-heading">Choose a claim type for guided help</h3>
+                <fieldset className="claim-tabs" aria-label="Claim type" aria-describedby="claim-type-heading">
                   {['motor', 'home', 'contents'].map((type) => (
                     <label
                       key={type}
