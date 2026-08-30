@@ -1,0 +1,23 @@
+{
+  "name": "repo-governance-for-novice",
+  "version": "1.0.0",
+  "description": "Repository governance skill for the Northwind FNOL repository (scenario-08): authority boundaries, task entry, branching, commit and PR rules, review and merge, documentation sync, CI checks, and design standards. Distributed as a Claude Code single-skill plugin; readable as plain Markdown by any coding agent.",
+  "keywords": [
+    "claude-code",
+    "claude-code-skill",
+    "claude-code-plugin",
+    "repository-governance",
+    "agent-governance"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent.git",
+    "directory": "docs/skills/repo-governance-for-novice"
+  },
+  "author": "Ysoseri1224 (https://github.com/Ysoseri1224)",
+  "license": "MIT",
+  "files": [
+    "*.md",
+    ".claude-plugin/"
+  ]
+}
