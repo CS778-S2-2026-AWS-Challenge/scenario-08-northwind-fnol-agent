@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 from botocore.exceptions import EndpointConnectionError
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from backend.adapters.evidence_storage import MinioEvidenceStorage
 from backend.app import create_app
@@ -61,6 +62,7 @@ class FastApiS3Client:
 
 
 def configure_minio_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('NORTHWIND_IDENTITY_MODE', 'developer')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ADAPTER', 's3_compatible')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://localhost:9000')
     monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access-key')
@@ -137,6 +139,50 @@ def test_environment_composes_minio_through_the_fastapi_evidence_flow(
     assert 'local-access-key' not in public_payload
     assert 'local-secret-key' not in public_payload
     assert '/finalised/' not in public_payload
+
+
+def test_minio_profile_rejects_fixture_proxy_without_reading_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_minio_environment(monkeypatch)
+    s3_client = FastApiS3Client()
+    monkeypatch.setattr(
+        'backend.adapters.evidence_storage.boto3.client',
+        lambda *_args, **_kwargs: s3_client,
+    )
+    app = create_app()
+
+    with TestClient(app) as client:
+        claim_id = create_claim(client, 'minio-proxy-rejection-claim')
+        requested = client.post(
+            f'/api/v1/claims/{claim_id}/evidence/uploads',
+            headers={
+                **CLAIMANT_AUTH,
+                'Idempotency-Key': 'minio-proxy-rejection-upload',
+                'If-Match': '1',
+            },
+            json={
+                'kind': 'incident_image',
+                'original_filename': 'damage.jpg',
+                'media_type': 'image/jpeg',
+                'size_bytes': len(PAYLOAD),
+            },
+        )
+        evidence_id = str(requested.json()['evidence_id'])
+
+        async def fail_if_streamed(_request: Request) -> Any:
+            raise AssertionError('The fixture-only proxy must reject before reading the body.')
+            yield b''
+
+        monkeypatch.setattr(Request, 'stream', fail_if_streamed)
+        rejected = client.put(
+            f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers={**CLAIMANT_AUTH, 'Content-Type': 'image/jpeg'},
+            content=b'arbitrary-body',
+        )
+
+    assert rejected.status_code == 409
+    assert rejected.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
 
 
 def test_expired_idempotent_replay_resigns_without_duplicate_or_revision_change(

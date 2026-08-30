@@ -20,6 +20,7 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
+from backend.services.external_services import claimant_assessor_action
 from backend.services.integrations import create_external_claim
 from backend.services.support import (
     now_utc,
@@ -101,6 +102,7 @@ def create_claim_from_confirmed_report(
                     customer_next_step=claim.customer_next_step,
                 ),
                 external_claim=claim.external_claim,
+                external_service_action=claimant_assessor_action(repository, claim),
                 customer_next_step=claim.customer_next_step,
             )
             repository.save_idempotency(
@@ -243,6 +245,7 @@ def create_claim_from_confirmed_report(
         revision=updated.revision,
         decision=claimant_decision,
         external_claim=result,
+        external_service_action=claimant_assessor_action(repository, updated),
         customer_next_step=updated.customer_next_step,
     )
     repository.save_idempotency(

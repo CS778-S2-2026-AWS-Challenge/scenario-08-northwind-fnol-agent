@@ -105,6 +105,17 @@ async function run({ env = process.env, fetchImpl = fetch, policyImpl = policy }
   }
 
   const github = {
+    paginate: async (method, parameters) => {
+      const records = [];
+      for (let page = 1; page <= 10; page += 1) {
+        const response = await method({ ...parameters, page, per_page: 100 });
+        const pageRecords = response.data;
+        if (!Array.isArray(pageRecords)) throw new Error('Expected a paginated GitHub array response.');
+        records.push(...pageRecords);
+        if (pageRecords.length < 100) break;
+      }
+      return records;
+    },
     rest: {
       issues: {
         get: async ({ owner: issueOwner, repo: issueRepo, issue_number: issueNumber }) => ({
@@ -116,10 +127,39 @@ async function run({ env = process.env, fetchImpl = fetch, policyImpl = policy }
           }),
         }),
       },
+      pulls: {
+        list: async ({ owner: pullOwner, repo: pullRepo, state, per_page: perPage, page }) => ({
+          data: await githubRequest({
+            apiUrl,
+            token,
+            path: `/repos/${encodeURIComponent(pullOwner)}/${encodeURIComponent(pullRepo)}/pulls?state=${encodeURIComponent(state)}&per_page=${perPage}&page=${page}`,
+            fetchImpl,
+          }),
+        }),
+        listFiles: async ({ owner: pullOwner, repo: pullRepo, pull_number: pullNumber, per_page: perPage, page }) => ({
+          data: await githubRequest({
+            apiUrl,
+            token,
+            path: `/repos/${encodeURIComponent(pullOwner)}/${encodeURIComponent(pullRepo)}/pulls/${pullNumber}/files?per_page=${perPage}&page=${page}`,
+            fetchImpl,
+          }),
+        }),
+      },
+      repos: {
+        compareCommitsWithBasehead: async ({ owner: compareOwner, repo: compareRepo, basehead }) => ({
+          data: await githubRequest({
+            apiUrl,
+            token,
+            path: `/repos/${encodeURIComponent(compareOwner)}/${encodeURIComponent(compareRepo)}/compare/${encodeURIComponent(basehead)}`,
+            fetchImpl,
+          }),
+        }),
+      },
     },
   };
   const core = {
     info: (message) => console.log(message),
+    warning: (message) => console.warn(message),
     setFailed: (message) => {
       console.error(message);
       process.exitCode = 1;

@@ -76,6 +76,119 @@ function queueDetail(item) {
   }
 }
 
+it('persists the collapsed employee sidebar across same-origin page loads', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const toggle = dom.window.document.querySelector('#sidebarToggle')
+
+  expect(page).not.toHaveClass('sidebar-collapsed')
+  toggle.click()
+  expect(page).toHaveClass('sidebar-collapsed')
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(toggle).toHaveAttribute('aria-label', 'Expand sidebar')
+  expect(dom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('true')
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+
+  const restoredDom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.localStorage.setItem('northwind-workbench-sidebar-collapsed', 'true')
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const restoredPage = restoredDom.window.document.querySelector('#workbenchPage')
+  const restoredToggle = restoredDom.window.document.querySelector('#sidebarToggle')
+
+  expect(restoredPage).toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'false')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Expand sidebar')
+
+  restoredToggle.click()
+  expect(restoredPage).not.toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'true')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+  expect(restoredDom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('false')
+  await waitFor(() => expect(restoredDom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  restoredDom.window.close()
+})
+
+it('defines a responsive off-canvas employee menu without shrinking the main content', () => {
+  expect(employeeHtml).toContain('@media(max-width:1024px)')
+  expect(employeeHtml).toContain('width:min(82vw,320px);')
+  expect(employeeHtml).toContain('transform:translateX(-105%);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar { transform:translateX(0);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }')
+  expect(employeeHtml).toContain('.content { width:100%; min-width:0;')
+  expect(employeeHtml).toContain("document.addEventListener('touchstart'")
+  expect(employeeHtml).toContain("document.addEventListener('touchend'")
+})
+
+it('opens and closes the mobile employee drawer accessibly', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn() }))
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const openButton = dom.window.document.querySelector('#mobileSidebarOpen')
+  const closeButton = dom.window.document.querySelector('#sidebarToggle')
+  const sidebar = dom.window.document.querySelector('#employeeSidebar')
+  const mobileHeader = dom.window.document.querySelector('#mobileWorkbenchHeader')
+  const content = dom.window.document.querySelector('#workbenchContent')
+  const chatWidget = dom.window.document.querySelector('#chatWidget')
+  const backdrop = dom.window.document.querySelector('#sidebarBackdrop')
+
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'true')
+  expect(sidebar.inert).toBe(true)
+  expect(content.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
+
+  openButton.click()
+  expect(page).toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'true')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'false')
+  expect(sidebar.inert).toBe(false)
+  expect(mobileHeader.inert).toBe(true)
+  expect(content.inert).toBe(true)
+  expect(chatWidget.inert).toBe(true)
+  expect(backdrop.hidden).toBe(false)
+  expect(closeButton).toHaveAttribute('aria-label', 'Close workbench menu')
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  const lastDrawerControl = dom.window.document.querySelector('#loadDemoQueue')
+  lastDrawerControl.focus()
+  lastDrawerControl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(mobileHeader.inert).toBe(false)
+  expect(content.inert).toBe(false)
+  expect(chatWidget.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
+  expect(dom.window.document.activeElement).toBe(openButton)
+
+  openButton.click()
+  expect(backdrop.hidden).toBe(false)
+  backdrop.click()
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(backdrop.hidden).toBe(true)
+  expect(dom.window.document.activeElement).toBe(openButton)
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+})
+
 it('toggles professional review controls without navigating away from the claim', async () => {
   const item = queueItem(90)
   const fetchMock = vi.fn((url) => {
@@ -107,6 +220,67 @@ it('toggles professional review controls without navigating away from the claim'
   dom.window.close()
 })
 
+it('opens a standard intake review workspace for an assigned created claim', async () => {
+  const item = queueItem(91, {
+    workflow_state: 'created', queue: 'created_routed', next_action: 'PROCEED',
+    route: 'standard_motor_intake', claim_creation_status: 'created', assignee_id: 'stf_demo',
+  })
+  const detail = {
+    ...queueDetail(item),
+    external_claim: {
+      external_claim_id: 'ext_91', claim_number: 'NW-91', creation_status: 'created',
+      route: 'standard_motor_intake', next_step: 'Claims intake review', expected_by: null,
+      limitations: [],
+    },
+  }
+  const fetchMock = vi.fn((url) => String(url).endsWith(`/${item.claim_id}`)
+    ? response(detail)
+    : response({ items: [item], page: { next_cursor: null } }))
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = fetchMock },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('.review-workspace h3')?.textContent)
+    .toBe('Claim review workspace'))
+  const toggle = dom.window.document.querySelector('[aria-controls="detailStaffActions"]')
+  expect(toggle).not.toBeNull()
+  toggle.click()
+  expect(dom.window.document.querySelector('#detailStaffActions').style.display).toBe('block')
+  expect(dom.window.document.querySelector('#createStaffActionBtn').disabled).toBe(false)
+  dom.window.close()
+})
+
+it('shows missing material as outstanding instead of submitted evidence', async () => {
+  const item = queueItem(92, {
+    workflow_state: 'created', queue: 'created_routed', route: 'standard_motor_intake',
+    claim_creation_status: 'created', assignee_id: 'stf_demo', evidence_state: 'incomplete',
+  })
+  const detail = {
+    ...queueDetail(item),
+    external_claim: { external_claim_id: 'ext_92', claim_number: 'NW-92', creation_status: 'created', route: 'standard_motor_intake', next_step: 'Claims intake review', expected_by: null, limitations: [] },
+    evidence: [{
+      evidence_id: 'evd_missing_image', kind: 'incident_image', status: 'incomplete',
+      file_status: 'not_available', original_filename: null, source: 'claimant',
+      responsible_party: 'claimant', wait_type: 'claimant', needed_for: ['later_action'],
+      claimant_note: 'No supporting material was available when the claim was submitted.',
+    }],
+  }
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = vi.fn((url) => String(url).endsWith(`/${item.claim_id}`) ? response(detail) : response({ items: [item], page: { next_cursor: null } })) },
+  })
+  await waitFor(() => expect(dom.window.document.querySelector('#evidenceReviewList').textContent)
+    .toContain('No evidence files submitted'))
+  const evidenceList = dom.window.document.querySelector('#evidenceReviewList')
+  expect(evidenceList.textContent).toContain('Outstanding materials')
+  expect(evidenceList.textContent).toContain('Incident Image')
+  expect(evidenceList.querySelectorAll('.evidence-review-card')).toHaveLength(0)
+  const workspace = dom.window.document.querySelector('.review-workspace')
+  expect(workspace.textContent).toContain('0Evidence sources')
+  expect(workspace.textContent).toContain('1Outstanding materials')
+  dom.window.close()
+})
 it('paginates a large queue, resets on filter change, and keeps handoff facts visible', async () => {
   const items = Array.from({ length: 8 }, (_, index) => queueItem(index + 1))
   items[0] = queueItem(1, { priority: 'high', open_handoff_count: 2 })
@@ -634,6 +808,118 @@ it('blocks incomplete evidence, saves signal findings sequentially, and isolates
   dom.window.close()
 })
 
+it('keeps deterministic reply templates internal through suggested, accepted, edited, and rejected states', async () => {
+  const item = queueItem(120, { claim_id: 'clm_agent_suggestion', open_handoff_count: 1, assignee_id: 'stf_demo' })
+  const detail = {
+    ...queueDetail(item),
+    active_session_id: 'ses_agent_suggestion',
+    messages: [{
+      message_id: 'msg_claimant', actor: 'claimant', visibility: 'shared',
+      content: { type: 'text', text: 'Can someone help me continue?' },
+      created_at: '2026-08-13T00:01:00Z',
+    }],
+    handoffs: [{
+      handoff_id: 'hnd_agent_suggestion', status: 'accepted', assigned_to: 'stf_demo',
+      priority: 'standard', trigger: 'claimant_support_request', requested_action: 'Help the claimant continue.',
+      packet: {},
+    }],
+    customer_next_step: {
+      status: 'human_support_in_progress',
+      summary: 'A Northwind staff member is reviewing the saved report.',
+      responsible_party: 'northwind', required_items: [],
+    },
+  }
+  const fetchMock = vi.fn((url) => {
+    if (String(url).endsWith('/clm_agent_suggestion')) return response(detail)
+    return response({ items: [item], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = fetchMock },
+  })
+  const document = dom.window.document
+
+  await waitFor(() => expect(document.querySelector('#customerChatNav').disabled).toBe(false))
+  expect(document.querySelector('#agentSuggestionTitle').textContent).toBe('Reply template')
+  document.querySelector('#customerChatNav').click()
+  await waitFor(() => expect(document.querySelector('#customerChatText').disabled).toBe(false))
+  document.querySelector('#generateAgentSuggestion').click()
+  await waitFor(() => expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Suggested'))
+  expect(document.querySelector('#customerChatText').value).toBe('')
+
+  document.querySelector('#useAgentSuggestion').click()
+  expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Accepted')
+  expect(document.querySelector('#customerChatText').value).toContain('Northwind staff member')
+  document.querySelector('#customerChatText').value += ' I checked the current claim state.'
+  document.querySelector('#customerChatText').dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Edited')
+  document.querySelector('#rejectAgentSuggestion').click()
+  expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Rejected')
+  expect(document.querySelector('#agentSuggestionText').value).toBe('')
+  dom.window.close()
+})
+
+it('reconciles a committed staff reply after the client loses its response', async () => {
+  const item = queueItem(121, {
+    claim_id: 'clm_staff_response_lost', open_handoff_count: 1, assignee_id: 'stf_demo',
+  })
+  let sendAttempts = 0
+  let delivered = false
+  const detail = () => ({
+    ...queueDetail(item),
+    active_session_id: 'ses_staff_response_lost',
+    messages: delivered ? [{
+      message_id: 'msg_staff_delivered', actor: 'staff', visibility: 'shared',
+      content: { type: 'text', text: 'Your claim can continue.' },
+      created_at: '2026-08-13T00:03:00Z',
+    }] : [],
+    handoffs: [{
+      handoff_id: 'hnd_staff_response_lost', status: 'accepted', assigned_to: 'stf_demo',
+      priority: 'standard', trigger: 'claimant_support_request',
+      requested_action: 'Help the claimant continue.', packet: {},
+    }],
+  })
+  const requestKeys = []
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (options.method === 'POST' && String(url).endsWith('/messages')) {
+      sendAttempts += 1
+      requestKeys.push(options.headers['Idempotency-Key'])
+      if (sendAttempts === 1) {
+        delivered = true // server commit happened, but its response was lost
+        return Promise.reject(new TypeError('Response lost'))
+      }
+      return response({ message: detail().messages[0], claim_revision: 3 })
+    }
+    if (String(url).endsWith(`/${item.claim_id}`)) return response(detail())
+    return response({ items: [item], page: { next_cursor: null } })
+  })
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = fetchMock
+      window.crypto.randomUUID = () => 'response-lost-key'
+    },
+  })
+  const document = dom.window.document
+
+  await waitFor(() => expect(document.querySelector('#customerChatNav').disabled).toBe(false))
+  document.querySelector('#customerChatNav').click()
+  await waitFor(() => expect(document.querySelector('#customerChatText').disabled).toBe(false))
+  document.querySelector('#customerChatText').value = 'Your claim can continue.'
+  document.querySelector('#customerChatSend').click()
+
+  await waitFor(() => expect(document.querySelector('#customerChatStatus').textContent)
+    .toContain('Delivery outcome unknown'))
+  expect(document.querySelector('#pendingStaffMessage').textContent)
+    .toContain('Delivery outcome unknown')
+  document.querySelector('#customerChatSend').click()
+
+  await waitFor(() => expect(document.querySelector('#customerChatHistory').textContent)
+    .toContain('Delivered'))
+  expect(requestKeys).toEqual(['staff-message-response-lost-key', 'staff-message-response-lost-key'])
+  expect(document.querySelectorAll('#customerChatHistory .customer-chat-message.staff')).toHaveLength(1)
+  dom.window.close()
+})
 it('announces queue failures and exposes named keyboard controls', async () => {
   let releaseRequest
   const pendingResponse = new Promise((resolve) => {

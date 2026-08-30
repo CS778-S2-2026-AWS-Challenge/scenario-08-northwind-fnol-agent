@@ -1,8 +1,10 @@
 from datetime import timedelta
+from hashlib import sha256
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.domain.models import SessionStatus
 from backend.repositories.fixture import FixtureRepository
 
@@ -25,7 +27,12 @@ def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
             'updated_at': claim.updated_at + timedelta(minutes=1),
         }
     )
-    repository.save_claim(updated, expected_revision=claim.revision)
+    # Pausing clears WorkingClaim.active_session_id, and
+    # docs/claim-state-transaction-boundary.md reserves pointer changes for the
+    # resume/start session mutation, so save_claim() correctly rejects it. No
+    # production path performs a pause, so this is fixture seeding rather than a
+    # repository operation.
+    repository._claims[claim.claim_id] = updated
     return updated.revision
 
 
@@ -66,7 +73,10 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     assert isinstance(evidence_id, str)
     assert requested.json()['revision'] == 2
 
-    checksum = f'sha256:{"a" * 64}'
+    content = b'a' * 2048
+    storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
+    checksum = f'sha256:{sha256(content).hexdigest()}'
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
         headers={

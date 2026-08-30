@@ -72,6 +72,39 @@ def test_fixture_repository_enforces_ownership_and_revision() -> None:
     assert error.value.current_revision == 1
 
 
+def test_fixture_claim_mutation_rejects_every_partial_write_precondition() -> None:
+    repository = FixtureRepository()
+    claim, session = make_claim()
+    updated = claim.model_copy(update={'revision': 2})
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/clm_fixture/consent',
+        key='claim-mutation-key',
+        request_fingerprint='claim-mutation-fingerprint',
+        claim_id=claim.claim_id,
+        session_id='',
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_claim_mutation(updated, 1, idempotency)
+
+    repository.create_claim(claim, session)
+    with pytest.raises(RevisionConflict):
+        repository.save_claim_mutation(updated, 0, idempotency)
+    with pytest.raises(KeyError):
+        repository.save_claim_mutation(
+            updated,
+            1,
+            IdempotencyRecord(**{**idempotency.__dict__, 'actor_id': 'another-customer'}),
+        )
+
+    repository.save_idempotency(idempotency)
+    with pytest.raises(IdempotencyConflict):
+        repository.save_claim_mutation(updated, 1, idempotency)
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+
+
 def test_fixture_repository_handles_missing_records_and_idempotency_conflicts() -> None:
     repository = FixtureRepository()
     claim, session = make_claim()
@@ -132,12 +165,17 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
         updated_at=claim.updated_at,
     )
     repository.save_message(message, 'cus_fixture')
+    earlier_tie_breaker = message.model_copy(update={'message_id': 'msg_a_fixture'})
+    repository.save_message(earlier_tie_breaker, 'cus_fixture')
     repository.save_evidence(evidence, 'cus_fixture')
 
     assert [item.claim_id for item in repository.list_claims_for_customer('cus_fixture')] == [
         claim.claim_id
     ]
-    assert repository.list_messages(claim.claim_id, session.session_id, 'cus_fixture') == [message]
+    assert repository.list_messages(claim.claim_id, session.session_id, 'cus_fixture') == [
+        earlier_tie_breaker,
+        message,
+    ]
     assert repository.list_messages(claim.claim_id, session.session_id, 'other_customer') == []
     assert repository.get_evidence(claim.claim_id, evidence.evidence_id, 'cus_fixture') == evidence
     assert repository.list_evidence(claim.claim_id, 'other_customer') == []
@@ -150,6 +188,7 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
 def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None:
     repository = FixtureRepository()
     claim, session = make_claim()
+    claim = claim.model_copy(update={'active_session_id': session.session_id})
     repository.create_claim(claim, session)
     claimant_message = MessageRecord(
         message_id='msg_claimant',

@@ -9,7 +9,13 @@ import json
 
 from backend.core.config import AgentRuntimeProfile, Settings
 from backend.core.model_gateway import build_model_gateway
-from backend.domain.model_gateway import ModelMessage, ModelRequest, ModelRole
+from backend.domain.model_gateway import (
+    ModelCapabilities,
+    ModelCompletionStatus,
+    ModelMessage,
+    ModelRequest,
+    ModelRole,
+)
 
 
 def main() -> int:
@@ -21,11 +27,9 @@ def main() -> int:
     response = gateway.complete(
         ModelRequest(
             purpose=settings.model_purpose,
-            actor='claimant_agent',
-            claim_scope='synthetic_working_claim',
-            policy_version='synthetic-policy-v1',
             prompt_version=settings.model_prompt_version,
             privacy_class=settings.model_privacy_class,
+            required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
                 ModelMessage(
                     role=ModelRole.SYSTEM,
@@ -60,6 +64,10 @@ def main() -> int:
             },
         )
     )
+    if response.completion_status is not ModelCompletionStatus.COMPLETE:
+        raise SystemExit('The model endpoint did not return a complete response.')
+    if response.structured_output is None:
+        raise SystemExit('The model endpoint did not return the required structured output.')
     print(
         json.dumps(
             {
@@ -70,9 +78,7 @@ def main() -> int:
                 'model': response.provider_model,
                 'request_id_present': bool(response.provider_request_id),
                 'usage': response.usage.model_dump(mode='json') if response.usage else None,
-                'capabilities': response.capabilities.model_dump(mode='json')
-                if response.capabilities
-                else None,
+                'capabilities': gateway.capabilities.model_dump(mode='json'),
             },
             separators=(',', ':'),
         )

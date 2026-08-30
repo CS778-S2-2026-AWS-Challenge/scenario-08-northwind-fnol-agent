@@ -26,6 +26,34 @@ export class GitHubClient {
     return this.restJson(`/repos/${owner}/${repo}/issues/${String(issueNumber)}`);
   }
 
+  async listIssueComments(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<Record<string, unknown>[]> {
+    const response = await this.request(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${String(issueNumber)}/comments?per_page=100`,
+      {},
+    );
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new GitHubApiError("GitHub REST comment list is not an array.", response.status);
+    }
+    return payload.filter(isRecord);
+  }
+
+  async createIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string,
+  ): Promise<void> {
+    await this.restJson(`/repos/${owner}/${repo}/issues/${String(issueNumber)}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  }
+
   async setCommitStatus(input: {
     owner: string;
     repo: string;

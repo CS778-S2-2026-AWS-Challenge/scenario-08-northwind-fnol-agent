@@ -1,4 +1,5 @@
-from typing import cast
+from hashlib import sha256
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from backend.adapters.evidence_storage import (
     S3CompatibleObjectStorageConfig,
 )
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import AssessorLocation, CreateExternalClaimRequest, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import PersistenceRepository
@@ -18,6 +19,7 @@ from scripts import reset_demo as reset_command
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def _populate_demo(
@@ -63,6 +65,13 @@ def _populate_demo(
         },
     )
     assert upload.status_code == 201
+    content = b'a' * 100
+    storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
+    storage.put_upload(
+        claim_id=claim['claim_id'],
+        evidence_id=upload.json()['evidence_id'],
+        content=content,
+    )
     completed = client.post(
         f'/api/v1/claims/{claim["claim_id"]}/evidence/{upload.json()["evidence_id"]}/complete',
         headers={
@@ -70,7 +79,7 @@ def _populate_demo(
             'Idempotency-Key': 'reset-demo-complete',
             'If-Match': str(upload.json()['revision']),
         },
-        json={'upload_checksum': f'sha256:{"a" * 64}'},
+        json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
     assert completed.status_code == 202
 
@@ -88,6 +97,7 @@ def _populate_demo(
             claim_id='clm_reset_adapter',
             external_claim_id=claim_outcome.result.external_claim_id,
             authorisation_ref='dec_reset_assessor',
+            claimant_consent_ref='cns_reset_assessor',
             requested_action='route_assessor',
             location=AssessorLocation(region='Auckland'),
         ),
@@ -103,7 +113,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
     assessor_adapter = MockAssessorServiceAdapter()
     storage = MockEvidenceStorage()
     app = create_app(
-        Settings(),
+        DEVELOPER_SETTINGS,
         repository,
         claims_service_adapter=claims_adapter,
         assessor_service_adapter=assessor_adapter,
@@ -137,7 +147,7 @@ def test_reset_clears_complete_demo_state_and_repeats_from_the_same_start() -> N
     [('synthetic-claimant', 403), ('synthetic-integration', 403), ('unknown', 401)],
 )
 def test_reset_rejects_non_staff_credentials(token: str, expected_status: int) -> None:
-    with TestClient(create_app(Settings())) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS)) as client:
         response = client.post(
             '/api/v1/workbench/demo/reset',
             headers={'Authorization': f'Bearer {token}'},
@@ -165,7 +175,7 @@ def test_reset_refuses_unknown_persistence_without_touching_mock_results() -> No
     )
     claims_adapter.create_claim(command, 'out-of-scope-fingerprint')
     app = create_app(
-        Settings(),
+        DEVELOPER_SETTINGS,
         repository=cast(PersistenceRepository, object()),
         claims_service_adapter=claims_adapter,
     )
@@ -190,7 +200,7 @@ def test_reset_fails_closed_for_minio_without_clearing_repository() -> None:
         ),
         client=object(),
     )
-    app = create_app(Settings(), repository=repository, evidence_storage=storage)
+    app = create_app(DEVELOPER_SETTINGS, repository=repository, evidence_storage=storage)
 
     with TestClient(app) as client:
         created = client.post(

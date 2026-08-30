@@ -20,6 +20,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     ResolveHandoffRequest,
+    SessionStatus,
     SignalDecisionRecord,
     SignalDecisionRequest,
     SignalDecisionResponse,
@@ -224,6 +225,14 @@ def send_staff_message(
             retryable=True,
             current_revision=claim.revision,
         )
+
+    active_session_id = claim.active_session_id
+    if active_session_id is None:
+        raise _validation('An active claimant session is required before sending a staff message.')
+    active_session = repository.get_session(claim_id, active_session_id, claim.customer_id)
+    if active_session is None or active_session.status is not SessionStatus.ACTIVE:
+        raise _validation('An active claimant session is required before sending a staff message.')
+
     handoffs = repository.list_handoffs(claim_id, claim.customer_id)
     active = next(
         (
@@ -235,11 +244,28 @@ def send_staff_message(
     )
     if active is None:
         raise _validation('An accepted handoff is required before sending a staff message.')
+    if active.assigned_to != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The handoff is assigned to another staff member.',
+        )
+    if payload.in_reply_to is not None:
+        referenced = repository.get_message(
+            claim_id,
+            active_session_id,
+            payload.in_reply_to,
+            claim.customer_id,
+        )
+        if referenced is None or referenced.visibility is MessageVisibility.INTERNAL_ONLY:
+            raise _validation(
+                'The reply reference must belong to the permitted claim conversation and session.'
+            )
     timestamp = now_utc()
     message = MessageRecord(
         message_id=new_id('msg'),
         claim_id=claim_id,
-        session_id=claim.active_session_id or '',
+        session_id=active_session_id,
         actor=ActorType.STAFF,
         visibility=MessageVisibility.SHARED,
         content=payload.content.model_dump(mode='json'),

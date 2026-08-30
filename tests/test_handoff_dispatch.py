@@ -8,7 +8,7 @@ from backend.adapters.handoff_dispatch import (
     MockHandoffDispatchAdapter,
 )
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -37,7 +37,7 @@ def dispatch_client(
     dispatch_adapter: MockHandoffDispatchAdapter,
 ) -> TestClient:
     app = create_app(
-        Settings(),
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         dispatch_repository,
         handoff_dispatch_adapter=dispatch_adapter,
     )
@@ -103,8 +103,6 @@ def test_notification_outage_keeps_the_request_its_state_and_the_staff_queue(
         entry = staff_queue_entry(client, claim_id)
         readiness = client.get('/health/ready')
 
-    # The claimant request still succeeds: dispatch runs after the handoff is
-    # durable, so a notification outage degrades delivery, not the request.
     assert response.status_code == 201
     body = response.json()
     assert body['delivery']['state'] == 'queued_locally'
@@ -120,12 +118,8 @@ def test_notification_outage_keeps_the_request_its_state_and_the_staff_queue(
     assert stored is not None
     assert claim is not None
     assert claim.revision == 2
-
-    # Nothing is lost: the Workbench queue is derived from persisted claim
-    # state, so staff still see the handoff while dispatch is down.
     assert entry is not None
     assert entry['priority'] == stored.priority.value
-
     assert readiness.json()['checks']['handoff_dispatch'] == 'unavailable'
 
 
@@ -142,8 +136,6 @@ def test_retry_during_an_outage_does_not_duplicate_the_handoff_or_the_revision(
         claim_id = create_claim(client, 'dispatch-retry-claim')
         first = request_support(client, claim_id, 'dispatch-retry-support')
         replay = request_support(client, claim_id, 'dispatch-retry-support')
-
-        # The claimant asks again on a new key while the service is still down.
         repeat = request_support(client, claim_id, 'dispatch-retry-support-2', revision=2)
 
     assert first.status_code == 201

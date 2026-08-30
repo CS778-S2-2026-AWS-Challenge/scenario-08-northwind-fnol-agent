@@ -10,13 +10,15 @@ system that loses either can present an extracted guess as a confirmed fact.
 """
 
 import json
+from hashlib import sha256
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import FormSource, FormStatus
 from backend.repositories.fixture import FixtureRepository
 
@@ -34,7 +36,8 @@ def repository() -> FixtureRepository:
 
 @pytest.fixture
 def client(repository: FixtureRepository) -> TestClient:
-    return TestClient(create_app(Settings(), repository))
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    return TestClient(create_app(settings, repository))
 
 
 def create_claim(client: TestClient, key: str) -> str:
@@ -76,6 +79,9 @@ def upload_and_process(
     )
     assert requested.status_code == 201
     evidence_id = str(requested.json()['evidence_id'])
+    content = b'c' * 512
+    storage = cast(MockEvidenceStorage, cast(Any, client.app).state.evidence_storage)
+    storage.put_upload(claim_id=claim_id, evidence_id=evidence_id, content=content)
 
     completed = client.post(
         f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
@@ -84,7 +90,7 @@ def upload_and_process(
             'Idempotency-Key': f'{case}-complete',
             'If-Match': str(start_revision + 1),
         },
-        json={'upload_checksum': f'sha256:{"c" * 64}'},
+        json={'upload_checksum': f'sha256:{sha256(content).hexdigest()}'},
     )
     assert completed.status_code == 202
 

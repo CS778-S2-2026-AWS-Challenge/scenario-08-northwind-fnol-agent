@@ -1,13 +1,14 @@
 from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
-from backend.adapters.claims_service import ClaimsServiceAdapter
+from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
 from backend.domain.models import (
     ClaimantClaim,
+    ClaimantExternalServiceResponse,
     ClaimantSession,
     ClaimCreationResponse,
     ClaimListResponse,
@@ -18,6 +19,7 @@ from backend.domain.models import (
     FormConfirmationResponse,
     FormPatchRequest,
     FormPatchResponse,
+    GrantAssessorConsentRequest,
     MessageListResponse,
     MessageTurnResponse,
     StartSessionRequest,
@@ -34,7 +36,9 @@ from backend.services.claims import (
     start_claim,
     update_form,
 )
-from backend.services.messages import list_claim_messages, submit_message
+from backend.services.external_services import grant_assessor_consent, request_assessor_routing
+from backend.services.message_history import list_claim_messages
+from backend.services.messages import submit_message
 from backend.services.resume import start_session_with_recovery
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
@@ -50,6 +54,10 @@ def agent_for(request: Request) -> AgentTurnProvider:
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
     return cast(ClaimsServiceAdapter, request.app.state.claims_service_adapter)
+
+
+def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
+    return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
 
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
@@ -114,6 +122,57 @@ def create_external_claim(
         idempotency_key,
         if_match,
     )
+
+
+@router.post(
+    '/{claim_id}/assessor-routing/consent',
+    response_model=ClaimantExternalServiceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_assessor_consent(
+    claim_id: str,
+    payload: GrantAssessorConsentRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantExternalServiceResponse:
+    result, replayed = grant_assessor_consent(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
+    '/{claim_id}/assessor-routing',
+    response_model=ClaimantExternalServiceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_assessor_routing(
+    claim_id: str,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> ClaimantExternalServiceResponse:
+    result, replayed = request_assessor_routing(
+        repository_for(request),
+        assessor_adapter_for(request),
+        principal,
+        claim_id,
+        idempotency_key,
+        if_match,
+    )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
 
 
 @router.post(

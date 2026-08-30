@@ -6,7 +6,42 @@ A claim has one authoritative current state shared by claimant, Agent, staff, an
 authorised integrations. A session, frontend, workbench, or external adapter must not
 maintain a competing private claim record.
 
-The claim uses independent dimensions rather than one mutually exclusive path:
+Target turn plans, proposals, execution plans, WorkItems, and UI projections are bounded
+records around this state. They may plan, propose, track, or display work, but they cannot
+become a second Claim State authority. Their implementation status and migration evidence
+are maintained in [Agent Runtime Progress](../docs/status/agent-runtime-progress.md).
+
+Claim content and Claim lifecycle are separate models. Content branches answer what
+information and rules apply to the incident. Lifecycle answers where the work is now,
+who owns it, and what it is waiting for.
+
+A Claim may activate several content branches at once, for example:
+
+```text
+motor + collision + another_party + police_report_pending
+```
+
+Only the rule engine may move a content branch through `proposed`, `active`, `suspended`,
+and `exited/corrected`. The model supplies candidates, supporting facts, and provenance.
+
+The lifecycle is an application-controlled state machine:
+
+```text
+no_claim
+  -> draft_active
+  -> waiting_customer | waiting_external | staff_support | professional_review
+  -> ready_to_create -> creating -> created
+  -> withdrawn | expired -> purged/anonymised
+```
+
+Lifecycle transitions do not rewrite incident facts or content branches. A Claim may
+also hold several independent `WorkItem` records for questions, evidence, professional
+judgement, external requests, claimant confirmation, or system work. Each item records
+its owner, status, the exact action it blocks, due time when known, source references,
+and completion evidence. Waiting for one item must not imply that all work has stopped.
+
+Other Claim attributes remain independent rather than forming one mutually exclusive
+path:
 
 ```text
 severity: fast_track | standard | complex
@@ -19,8 +54,10 @@ workflow_state: collecting | ready_for_next | awaiting_evidence | professional_r
 next_action
 ```
 
-Pending evidence must not erase another clear state or block work that does not depend
-on it.
+The workflow projection, workbench queue, priority, and `next_action` are calculated from
+lifecycle, WorkItems, content branches, service rules, and staff decisions. They are not
+separately maintained sources of truth. Pending evidence must not erase another clear
+state or block work that does not depend on it.
 
 ## Structured Facts
 
@@ -38,6 +75,11 @@ updated_at
 Extracted and inferred values remain proposed until the applicable confirmation or
 professional authority accepts them.
 
+Dynamic Form field-selection states such as `required_now`, `candidate_now`,
+`pending_later`, `inactive`, and `system_owned` describe relevance for the current action.
+They do not replace stored fact status. The current claimant and staff forms are
+recalculated projections of published Registry versions and the latest Claim State.
+
 ## Data Separation
 
 The system separates:
@@ -49,7 +91,11 @@ The system separates:
 - structured customer policy and claim-history records;
 - approved knowledge documents, versions, chunks, indexes, and citations;
 - model requests, outputs, usage, and evaluation results;
+- turn plans, model proposals, validated execution plans, action envelopes, tool results,
+  and final turn results;
 - internal signals, handoffs, staff actions, and claimant-safe updates;
+- WorkItems and external-service requests with preparation, authority, submission,
+  tracking, verification, reconciliation, and uncertain-outcome state;
 - versioned system configuration and publication records; and
 - append-only audit and operational events.
 
@@ -82,6 +128,11 @@ Complete conversation history remains durable. Routine model calls receive bound
 working context. Formal claim records, customer preferences, model working memory,
 knowledge, and operational logs remain separate. Returning users continue from the
 latest authorised Claim State, not from an old session copy.
+
+An old session may contribute bounded context but cannot overwrite a newer Claim
+revision. On resume, the application reloads the latest facts, content branches,
+lifecycle, WorkItems, commitments, and Registry versions, then recalculates the dynamic
+form and next action.
 
 ## Visibility
 

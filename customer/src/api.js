@@ -1,4 +1,8 @@
-const CLAIMANT_TOKEN = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || 'synthetic-claimant'
+let claimantToken = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
+
+export function setClaimantAccessToken(token) {
+  claimantToken = token || ''
+}
 
 export class ApiRequestError extends Error {
   constructor(message, { code, status, retryable = false, currentRevision = null } = {}) {
@@ -22,7 +26,7 @@ async function apiRequest(path, options = {}) {
     response = await fetch(path, {
       ...options,
       headers: {
-        Authorization: `Bearer ${CLAIMANT_TOKEN}`,
+        Authorization: `Bearer ${claimantToken}`,
         'Content-Type': 'application/json',
         ...options.headers,
       },
@@ -50,12 +54,90 @@ async function apiRequest(path, options = {}) {
   return payload
 }
 
-export function createClaim({ idempotencyKey = requestId('claim') } = {}) {
+export function loginClaimant({ email, password }) {
+  return apiRequest('/api/v1/auth/sessions', {
+    method: 'POST',
+    headers: { Authorization: '' },
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export function getAuthenticatedAccount() {
+  return apiRequest('/api/v1/account')
+}
+
+export function updateAccountProfile(profile) {
+  return apiRequest('/api/v1/account/profile', {
+    method: 'PATCH',
+    body: JSON.stringify(profile),
+  })
+}
+
+export function updateAccountPreferences(preferences) {
+  return apiRequest('/api/v1/account/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(preferences),
+  })
+}
+
+export async function logoutClaimant() {
+  try {
+    await apiRequest('/api/v1/auth/session', { method: 'DELETE' })
+  } finally {
+    setClaimantAccessToken(null)
+  }
+}
+
+export function createClaim({ idempotencyKey = requestId('claim'), incidentType = null } = {}) {
   return apiRequest('/api/v1/claims', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ' }),
+    body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ', incident_type: incidentType }),
   })
+}
+
+export function updateClaimFields({ claimId, revision, updates }) {
+  return apiRequest(`/api/v1/claims/${claimId}/form`, {
+    method: 'PATCH',
+    headers: { 'If-Match': String(revision) },
+    body: JSON.stringify({ updates }),
+  })
+}
+
+export function requestEvidenceUpload({ claimId, revision, file, kind = 'other_document', idempotencyKey = requestId('evidence-upload') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/uploads`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ kind, original_filename: file.name, media_type: file.type, size_bytes: file.size }),
+  })
+}
+
+export function completeEvidenceUpload({ claimId, evidenceId, revision, checksum, idempotencyKey = requestId('evidence-complete') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence/${evidenceId}/complete`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ upload_checksum: checksum }),
+  })
+}
+
+export function uploadEvidenceContent({ upload, file }) {
+  return apiRequest(upload.url, {
+    method: upload.method,
+    headers: upload.headers,
+    body: file,
+  })
+}
+
+export function registerPendingEvidence({ claimId, revision, kind, note, idempotencyKey = requestId('evidence-pending') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    body: JSON.stringify({ kind, status: 'incomplete', related_fields: [], needed_for: ['later_action'], claimant_note: note }),
+  })
+}
+
+export function getClaimEvidence(claimId) {
+  return apiRequest(`/api/v1/claims/${claimId}/evidence`)
 }
 
 export function getClaim(claimId) {
@@ -89,6 +171,35 @@ export function createExternalClaim({
   idempotencyKey = requestId('claim-creation'),
 }) {
   return apiRequest(`/api/v1/claims/${claimId}/creation`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+  })
+}
+
+export function grantAssessorConsent({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-consent'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing/consent`, {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': String(revision),
+    },
+    body: JSON.stringify({ consent: true }),
+  })
+}
+
+export function requestAssessorRouting({
+  claimId,
+  revision,
+  idempotencyKey = requestId('assessor-routing'),
+}) {
+  return apiRequest(`/api/v1/claims/${claimId}/assessor-routing`, {
     method: 'POST',
     headers: {
       'Idempotency-Key': idempotencyKey,

@@ -8,7 +8,7 @@ during FNOL, how that information is classified, and how a controlled branch sel
 dynamic subset for one claim.
 
 The model is derived from the
-[FNOL As-Is Process and Reporting Fields research](User_Research_and_Pain_Points/FNOL_As-Is_Process_and_Reporting_Fields_Concise_Research_Report_EN.md).
+[FNOL As-Is Process and Reporting Fields research](research/fnol-as-is-process-and-reporting-fields.md).
 Research provenance explains why a field group is considered; this document defines its
 architectural position. Neither source is an approved Northwind production form.
 
@@ -25,13 +25,14 @@ controlled branch rules.
 
 ```text
 natural claimant account
--> explicit facts and bounded classification proposals
+-> multiple explicit facts and bounded classification proposals
 -> safety and support interruption checks
--> claim-family branch proposal, such as motor, home, or contents
+-> content-branch candidates, such as motor, collision, or another party
 -> approved rule activates registered field groups and tags
 -> conditional sub-branches activate when supported by claim facts
 -> current-action requirements identify required-now and candidate fields
--> Agent asks one useful question or progresses the next safe action
+-> TurnPlan combines any useful response, form patches, lookups, and next step
+-> Runtime applies only validated and authorised effects
 -> the form and active branches are recalculated after every material change
 ```
 
@@ -99,31 +100,36 @@ the registry, rules, orchestration, API, consumers, fixtures, and tests are upda
 together.
 
 Lifecycle and operational fields such as claim status, next action, responsible party,
-follow-up due time, expiry, and purge status belong to Claim State and workflow records.
+WorkItems, follow-up due time, expiry, and purge status belong to Claim State and workflow
+records.
 They are not automatically claimant-facing FNOL fields and must not be confused with
 the dynamic information collected from the claimant.
 
-## Dynamic Branch Model
+## Content Branch Model
 
-### Branch types
+### Content-branch dimensions
 
 The decision structure is a graph rather than one irreversible questionnaire path:
 
-| Branch type | Examples | Behaviour |
+| Dimension | Examples | Behaviour |
 | --- | --- | --- |
-| Interruption | urgent safety, repeated human request, accessibility support | May interrupt any ordinary branch and preserve its progress |
 | Claim family | motor, home, contents, unknown | Activates the relevant predefined field group and collection rules |
-| Incident condition | another party, witness, Police involvement, theft, conflicting evidence | Adds only the applicable conditional fields, tags, evidence needs, and follow-up rules |
+| Incident type | collision, theft, fire, water, weather, accidental damage | Adds applicable incident facts, evidence needs, and question candidates |
+| Participant | another party, witness, Police, repairer, assessor | Adds only supported participant and coordination information |
+| Safety and support | injury, continuing danger, distress, accessibility | Supplies an interruption signal and changes support behaviour without becoming a workflow state |
 | Evidence state | available, missing, incomplete, unofficial, pending generation | Changes evidence responsibility without silently making unrelated fields mandatory |
 | Professional authority | coverage ambiguity, material conflict, review signal | Creates a bounded staff request and does not turn the signal into a decision |
-| Next action | continue intake, register evidence, hand off, create claim, route | Defines which active fields are required now and which may remain candidates |
 
 A claim may have a primary family branch and several simultaneous conditional branches.
 For example, a motor incident may also involve injury, another party, damaged property,
 pending Police evidence, and a professional-review need. One label must not erase another
 dimension.
 
-### Branch activation
+Content branches do not include `draft`, `waiting`, `review`, `ready_to_create`, or
+`created`. Those belong to the Claim lifecycle. Current work and blockers are represented
+by lifecycle and independent WorkItems, not by adding another content branch.
+
+### Content-branch activation
 
 - Explicit claimant facts may satisfy a condition directly when the statement is clear
   and the rule permits claimant-supplied confirmation.
@@ -136,6 +142,9 @@ dimension.
   silently committing the claim to an incompatible branch.
 - A branch correction recalculates applicable work. It preserves prior values and source
   history instead of deleting facts merely because they are no longer active questions.
+- The model records only a branch candidate, supporting facts, source references, and
+  uncertainty. The rule engine controls `proposed`, `active`, `suspended`, and
+  `exited/corrected` status.
 
 ### Field selection states
 
@@ -154,15 +163,19 @@ These are selection states, not replacements for the stored field states such as
 
 ### Question selection
 
-The Agent and orchestration layer choose the next question from active fields by:
+The Agent and orchestration layer choose the next useful interaction from active fields
+and WorkItems by:
 
 1. handling an explicit safety or support interruption first;
 2. reusing authenticated, retrieved, confirmed, or clearly claimant-supplied information;
 3. excluding inactive, system-owned, already confirmed, and later-stage fields;
 4. identifying missing fields required for the current next action;
 5. resolving one material ambiguity or conflict when it blocks selection;
-6. asking one focused question with the highest current value; and
-7. progressing without further questions when the next action is safe.
+6. combining an answer, explanation, lookup, or several supported fact proposals in the
+   same turn when useful;
+7. asking one focused question with the highest current value only when an answer is
+   needed; and
+8. progressing without further questions when the next action is safe.
 
 The system must not interpret the field taxonomy as a reason to complete every possible
 field in one interaction.
@@ -201,6 +214,12 @@ The same information value has different authority depending on its source:
 The internal form may translate natural language into professional field structure, but
 it must not change meaning or make the claimant review every low-impact internal field.
 
+A form-patch proposal records the field code, proposed value and status, source type and
+references, confidence state where applicable, confirmation need, and intended operation
+such as add or correct. Runtime validates each patch independently. One invalid patch
+does not make the model's remaining text authoritative, and one valid patch does not
+authorise unrelated proposed side effects.
+
 ## Tags and Review Signals
 
 Dynamic branches may activate registered processing tags or propose review signals, but
@@ -228,6 +247,9 @@ decisions and are not defined by this document.
 - Complete messages remain available under staff access, while the packet uses relevant
   message references so a professional is not forced to read the complete transcript
   before understanding the claim.
+- Resume also reloads lifecycle and WorkItems. Changing lifecycle or completing a
+  WorkItem may change the current purpose and permitted tools, but it does not rewrite
+  incident facts or content branches.
 
 ## Contract Change Boundary
 

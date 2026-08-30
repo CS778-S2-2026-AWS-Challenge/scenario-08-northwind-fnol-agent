@@ -4,6 +4,7 @@ from hashlib import sha256
 from typing import Protocol
 
 from backend.domain.models import (
+    AssessorRoutingFailureCode,
     AssessorRoutingResult,
     AssessorRoutingStatus,
     ClaimCreationStatus,
@@ -14,9 +15,19 @@ from backend.domain.models import (
 )
 from backend.services.support import now_utc
 
+AssessorFixtureFailure = AssessorRoutingFailureCode
+
 
 class AdapterIdempotencyConflict(Exception):
     """The same provider-neutral idempotency reference was reused differently."""
+
+
+class AssessorAdapterFailure(Exception):
+    """Bounded fixture failure without a provider payload or secret."""
+
+    def __init__(self, code: AssessorFixtureFailure) -> None:
+        super().__init__(code.value)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,12 +106,25 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
 class MockAssessorServiceAdapter(AssessorServiceAdapter):
     """Deterministic mock route keyed by the authorised requested action."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        failure_sequence: tuple[AssessorFixtureFailure, ...] = (),
+        routing_status: AssessorRoutingStatus = AssessorRoutingStatus.ASSIGNED,
+    ) -> None:
+        if routing_status not in {AssessorRoutingStatus.ASSIGNED, AssessorRoutingStatus.QUEUED}:
+            raise ValueError('The assessor fixture supports assigned or queued success only.')
         self._routed: dict[str, tuple[str, AssessorRoutingResult]] = {}
+        self._accepted_fingerprints: dict[str, str] = {}
+        self._attempts: dict[str, int] = {}
+        self._failure_sequence = failure_sequence
+        self._routing_status = routing_status
 
     def reset_demo_state(self) -> dict[str, int]:
         cleared = {'mock_assessor_results': len(self._routed)}
         self._routed.clear()
+        self._accepted_fingerprints.clear()
+        self._attempts.clear()
         return cleared
 
     def route_assessor(
@@ -108,7 +132,21 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
         command: RouteAssessorRequest,
         request_fingerprint: str,
     ) -> AssessorRoutingOutcome:
-        route_key = f'{command.claim_id}:{command.authorisation_ref}:{command.requested_action}'
+        route_key = ':'.join(
+            (
+                command.claim_id,
+                command.external_claim_id,
+                command.authorisation_ref,
+                command.claimant_consent_ref,
+                command.requested_action,
+            )
+        )
+        accepted_fingerprint = self._accepted_fingerprints.get(route_key)
+        if accepted_fingerprint is None:
+            self._accepted_fingerprints[route_key] = request_fingerprint
+        elif accepted_fingerprint != request_fingerprint:
+            raise AdapterIdempotencyConflict(route_key)
+
         existing = self._routed.get(route_key)
         if existing is not None:
             fingerprint, result = existing
@@ -116,13 +154,23 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
                 raise AdapterIdempotencyConflict(route_key)
             return AssessorRoutingOutcome(result=result, replayed=True)
 
+        attempt = self._attempts.get(route_key, 0)
+        self._attempts[route_key] = attempt + 1
+        if attempt < len(self._failure_sequence):
+            raise AssessorAdapterFailure(self._failure_sequence[attempt])
+
         digest = sha256(route_key.encode('utf-8')).hexdigest()[:10].upper()
         timestamp = now_utc()
+        assigned = self._routing_status is AssessorRoutingStatus.ASSIGNED
         result = AssessorRoutingResult(
-            routing_status=AssessorRoutingStatus.ASSIGNED,
-            assessor_reference=f'asr_fixture_{digest.lower()}',
+            routing_status=self._routing_status,
+            assessor_reference=f'asr_fixture_{digest.lower()}' if assigned else None,
             queue_reference=f'QUE-{command.location.region[:3].upper()}-{digest[:5]}',
-            next_step='An assessor will review the confirmed claim information.',
+            next_step=(
+                'An assessor will review the confirmed claim information.'
+                if assigned
+                else 'An assessor coordinator must assign the next available assessor.'
+            ),
             expected_by=timestamp + timedelta(hours=48),
             limitations=['Synthetic fixture routing; no production assessor was contacted.'],
         )

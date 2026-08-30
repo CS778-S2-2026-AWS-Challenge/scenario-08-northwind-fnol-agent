@@ -1,0 +1,58 @@
+{
+  "manifest_version": "1.0",
+  "corpus_id": "northwind-synthetic-policy-mvp-2026-1",
+  "synthetic": true,
+  "documents": [
+    {
+      "document_id": "nw-policy-motor-standard-mvp-2026-1",
+      "source_key": "knowledge/policies/MVP-2026.1/northwind-motor-standard-policy-mvp-2026.1.md",
+      "title": "Northwind Motor Standard Policy",
+      "document_type": "synthetic_policy_wording",
+      "version": "MVP-2026.1",
+      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
+      "jurisdiction": "NZ",
+      "insurer": "Northwind Insurance",
+      "product": "motor",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": "2027-01-01T00:00:00Z",
+      "authority": "northwind_synthetic_demo",
+      "visibility": "customer_and_staff",
+      "publication_status": "approved",
+      "checksum_sha256": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989"
+    },
+    {
+      "document_id": "nw-policy-home-standard-mvp-2026-1",
+      "source_key": "knowledge/policies/MVP-2026.1/northwind-home-standard-policy-mvp-2026.1.md",
+      "title": "Northwind Home Standard Policy",
+      "document_type": "synthetic_policy_wording",
+      "version": "MVP-2026.1",
+      "source_uri": "northwind://synthetic-policy/home/MVP-2026.1",
+      "jurisdiction": "NZ",
+      "insurer": "Northwind Insurance",
+      "product": "home",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": "2027-01-01T00:00:00Z",
+      "authority": "northwind_synthetic_demo",
+      "visibility": "customer_and_staff",
+      "publication_status": "approved",
+      "checksum_sha256": "1240612470e1ea03800e87fe6f48b24aa895559f9498daaeffd3d3be13c4eea7"
+    },
+    {
+      "document_id": "nw-policy-contents-standard-mvp-2026-1",
+      "source_key": "knowledge/policies/MVP-2026.1/northwind-contents-standard-policy-mvp-2026.1.md",
+      "title": "Northwind Contents Standard Policy",
+      "document_type": "synthetic_policy_wording",
+      "version": "MVP-2026.1",
+      "source_uri": "northwind://synthetic-policy/contents/MVP-2026.1",
+      "jurisdiction": "NZ",
+      "insurer": "Northwind Insurance",
+      "product": "contents",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": "2027-01-01T00:00:00Z",
+      "authority": "northwind_synthetic_demo",
+      "visibility": "customer_and_staff",
+      "publication_status": "approved",
+      "checksum_sha256": "041fd8fbf9eafaa2cd1ff13e2998c57ee725f5e32bf61c429abfe4272b87cf40"
+    }
+  ]
+}

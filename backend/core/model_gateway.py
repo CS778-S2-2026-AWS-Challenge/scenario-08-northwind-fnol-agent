@@ -4,7 +4,12 @@ from backend.adapters.model_gateway import (
     default_model_gateway_registry,
 )
 from backend.core.config import Settings
-from backend.domain.model_gateway import ModelCapabilities, ModelGateway, ModelProfile
+from backend.domain.model_gateway import (
+    ModelCapabilities,
+    ModelGateway,
+    ModelProfile,
+    ModelProfileStatus,
+)
 
 
 def build_model_gateway(
@@ -27,6 +32,7 @@ def build_model_gateway(
         capabilities=capabilities,
         timeout_seconds=settings.model_timeout_seconds,
         prompt_version=settings.model_prompt_version,
+        evaluation_status=ModelProfileStatus(settings.model_evaluation_status),
     )
     return resolved_registry.create(
         settings.model_protocol_adapter,
@@ -36,8 +42,6 @@ def build_model_gateway(
             credential_environment_variable=settings.model_api_key_env,
             timeout_seconds=settings.model_timeout_seconds,
             capabilities=capabilities,
-            protocol=settings.model_protocol_adapter,
-            region=settings.model_region,
             profile=profile,
         ),
     )

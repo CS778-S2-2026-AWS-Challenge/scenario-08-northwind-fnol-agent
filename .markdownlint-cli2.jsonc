@@ -1,0 +1,15 @@
+{
+  // Markdown lint policy: only markdown files changed in the current PR are
+  // linted (see the docs-quality CI job). Structural rules stay on; purely
+  // stylistic rules that would force a back-scan of existing documents are
+  // disabled.
+  "config": {
+    "MD013": false, // line length - existing documents wrap at varied widths
+    "MD024": { "siblings_only": true }, // repeated headings across sections are fine
+    "MD033": false, // inline HTML - templates rely on HTML comments
+    "MD034": false, // bare URLs - quoted configuration blocks include them
+    "MD036": false, // emphasis as heading - used deliberately in some documents
+    "MD041": false // first line need not be a top-level heading (frontmatter)
+  },
+  "ignores": ["node_modules", "docs/archive/**", "pre_archive/**", "config/knowledge-source-corpus/**"]
+}

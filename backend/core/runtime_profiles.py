@@ -64,7 +64,11 @@ _PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, RuntimeCapabilit
             ),
             DataRuntimeProfile.MONGODB: MappingProxyType(
                 {
-                    capability: RuntimeCapabilityStatus.UNAVAILABLE
+                    capability: (
+                        RuntimeCapabilityStatus.PENDING_CONFIRMATION
+                        if capability == 'persistence'
+                        else RuntimeCapabilityStatus.UNAVAILABLE
+                    )
                     for capability in RUNTIME_CAPABILITIES
                 }
             ),
@@ -107,14 +111,22 @@ class DataRuntimeBundle:
     knowledge_retrieval: KnowledgeRetriever
 
     def readiness_checks(self) -> dict[str, str]:
+        repository_status = getattr(self.repository, 'connection_status', None)
         return {
-            'persistence': 'using_fixture',
+            'persistence': (
+                str(repository_status()) if callable(repository_status) else 'using_fixture'
+            ),
             'evidence_storage': self.evidence_storage.connection_status(),
             'policy': self.policy_history.connection_status(),
             'claim_history': self.policy_history.connection_status(),
             'knowledge_documents': self.knowledge_documents.connection_status(),
             'knowledge_retrieval': self.knowledge_retrieval.connection_status(),
         }
+
+    def close(self) -> None:
+        close_repository = getattr(self.repository, 'close', None)
+        if callable(close_repository):
+            close_repository()
 
 
 def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) -> None:

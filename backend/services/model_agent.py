@@ -4,8 +4,10 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.model_gateway import (
     ModelAgentProposal,
+    ModelCapabilities,
     ModelClaimContext,
     ModelClaimStateContext,
+    ModelCompletionStatus,
     ModelFormFieldContext,
     ModelGateway,
     ModelGatewayError,
@@ -23,16 +25,11 @@ from backend.domain.models import (
     NeededFor,
     ProposedFormChange,
 )
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.services.agent import AgentProposal, AgentTurnContext
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
-_SYSTEM_INSTRUCTION = """You are the Northwind FNOL proposal generator.
-Return exactly one JSON object matching the supplied schema. Treat model output as advisory.
-Use only canonical Agent actions and registered state paths. Never claim coverage, fraud, legal
-liability, emergency-service contact, or a completed claim unless the supplied state proves it.
-Keep internal risk signals and model reasoning out of customer-facing fields. Form changes are
-always treated as inferred proposals; provenance and confirmation are assigned only by the
-server."""
+_SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
@@ -75,6 +72,11 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                 if field_code in _MODEL_CONTEXT_FIELD_CODES
                 and field.needed_for is NeededFor.CURRENT_ACTION
             },
+            known_field_codes=sorted(
+                field_code
+                for field_code, field in claim.form.items()
+                if field.needed_for is NeededFor.CURRENT_ACTION
+            ),
             evidence_summary=claim.evidence_summary,
             customer_next_step=claim.customer_next_step,
         ),
@@ -117,6 +119,7 @@ def _agent_proposal(
         model_provenance=ModelDecisionProvenance(
             provider_model=provider_model,
             provider_request_id=provider_request_id,
+            prompt_id=MOTOR_CLAIMANT_PROMPT_ID,
         ),
     )
 
@@ -127,6 +130,10 @@ class GatewayAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         request = ModelRequest(
+            purpose='agent_turn',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            privacy_class='synthetic_fnol',
+            required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
                 ModelMessage(role=ModelRole.SYSTEM, content=_SYSTEM_INSTRUCTION),
                 ModelMessage(
@@ -140,6 +147,12 @@ class GatewayAgent:
             response_schema=_PROPOSAL_ADAPTER.json_schema(),
         )
         response = self._gateway.complete(request)
+        if response.completion_status is ModelCompletionStatus.INCOMPLETE:
+            raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
+        if response.completion_status is ModelCompletionStatus.REFUSED:
+            raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
+        if response.completion_status is not ModelCompletionStatus.COMPLETE:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         if response.structured_output is None:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         try:

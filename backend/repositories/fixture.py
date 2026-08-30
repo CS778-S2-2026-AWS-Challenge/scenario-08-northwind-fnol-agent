@@ -3,6 +3,9 @@ from copy import deepcopy
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
+    AuthorityOutcome,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -11,6 +14,7 @@ from backend.domain.models import (
     SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
+    StaffActionStatus,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
@@ -30,6 +34,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
+        self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
@@ -50,6 +55,7 @@ class FixtureRepository(PersistenceRepository):
             'sessions': len(self._sessions),
             'messages': len(self._messages),
             'agent_decisions': len(self._decisions),
+            'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
@@ -63,6 +69,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions.clear()
         self._messages.clear()
         self._decisions.clear()
+        self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._retrievals.clear()
         self._review_signals.clear()
@@ -88,12 +95,50 @@ class FixtureRepository(PersistenceRepository):
         return deepcopy(claim) if claim is not None else None
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+        self._validate_claim_mutation(claim, expected_revision)
+        self._claims[claim.claim_id] = deepcopy(claim)
+
+    def _validate_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        *,
+        allow_active_session_change: bool = False,
+    ) -> WorkingClaim:
+        """Validate the shared Claim State precondition before any child write."""
         stored_claim = self._claims.get(claim.claim_id)
         if stored_claim is None:
             raise KeyError(claim.claim_id)
         if stored_claim.revision != expected_revision:
             raise RevisionConflict(stored_claim.revision)
+        if stored_claim.customer_id != claim.customer_id or claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
+        if (
+            not allow_active_session_change
+            and stored_claim.active_session_id != claim.active_session_id
+        ):
+            raise KeyError(claim.claim_id)
+        return stored_claim
+
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        self._validate_claim_mutation(claim, expected_revision)
+        if (
+            idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        if lookup in self._idempotency:
+            raise IdempotencyConflict(idempotency.key)
+
         self._claims[claim.claim_id] = deepcopy(claim)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_session(
         self,
@@ -119,14 +164,13 @@ class FixtureRepository(PersistenceRepository):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        stored_claim = self._validate_claim_mutation(
+            claim,
+            expected_revision,
+            allow_active_session_change=True,
+        )
         records_match = (
             stored_claim.customer_id == claim.customer_id
-            and claim.revision == expected_revision + 1
             and claim.active_session_id == session.session_id
             and session.claim_id == claim.claim_id
             and session.customer_id == claim.customer_id
@@ -222,11 +266,37 @@ class FixtureRepository(PersistenceRepository):
         message: MessageRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None or stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision if stored_claim else expected_revision)
-        if message.claim_id != claim.claim_id or message.session_id != session.session_id:
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        stored_session = self._sessions.get(session.session_id)
+        records_match = (
+            stored_session is not None
+            and stored_claim.active_session_id == session.session_id
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and claim.active_session_id == session.session_id
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.status is SessionStatus.ACTIVE
+            and session.context_revision == claim.revision
+            and message.claim_id == claim.claim_id
+            and message.session_id == session.session_id
+            and message.actor is ActorType.CLAIMANT
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.message_id == message.message_id
+        )
+        if not records_match:
             raise KeyError(claim.claim_id)
+        if message.message_id in self._messages:
+            raise IdempotencyConflict(message.message_id)
+        if message.client_message_id is not None and any(
+            existing.claim_id == claim.claim_id
+            and existing.client_message_id == message.client_message_id
+            for existing in self._messages.values()
+        ):
+            raise IdempotencyConflict(message.client_message_id)
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
@@ -276,7 +346,7 @@ class FixtureRepository(PersistenceRepository):
             for message in self._messages.values()
             if message.claim_id == claim_id and message.session_id == session_id
         ]
-        return sorted(messages, key=lambda message: message.created_at)
+        return sorted(messages, key=lambda message: (message.created_at, message.message_id))
 
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         if (
@@ -290,6 +360,105 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(decision.claim_id)
         self._decisions[decision.decision_id] = deepcopy(decision)
+
+    def get_assessor_routing_operation(
+        self,
+        operation_id: str,
+    ) -> AssessorRoutingOperation | None:
+        operation = self._assessor_routing_operations.get(operation_id)
+        return deepcopy(operation) if operation is not None else None
+
+    def save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+    ) -> None:
+        claim = self._claims.get(operation.claim_id)
+        if (
+            claim is None
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.authorised_revision > claim.revision
+        ):
+            raise KeyError(operation.claim_id)
+
+        existing = self._assessor_routing_operations.get(operation.operation_id)
+        if existing is None:
+            if operation.status is not AssessorRoutingOperationStatus.PREPARED:
+                raise IdempotencyConflict(operation.operation_id)
+            self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+            return
+
+        immutable_identity = (
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'authorised_revision',
+            'request_fingerprint',
+            'created_at',
+        )
+        if any(
+            getattr(existing, field_name) != getattr(operation, field_name)
+            for field_name in immutable_identity
+        ):
+            raise IdempotencyConflict(operation.operation_id)
+        if operation.updated_at < existing.updated_at:
+            raise IdempotencyConflict(operation.operation_id)
+        if existing.status in {
+            AssessorRoutingOperationStatus.ACCEPTED,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+        }:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        allowed_statuses = {
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.ACCEPTED,
+        }
+        if operation.status not in allowed_statuses:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+
+    def save_assessor_routing_preparation(
+        self,
+        operation: AssessorRoutingOperation,
+        decision: AgentDecisionRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self._claims.get(operation.claim_id)
+        session = self._sessions.get(decision.session_id)
+        if (
+            claim is None
+            or claim.customer_id != customer_id
+            or claim.active_session_id != decision.session_id
+            or session is None
+            or session.claim_id != claim.claim_id
+            or session.customer_id != customer_id
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.status is not AssessorRoutingOperationStatus.PREPARED
+            or operation.authorised_revision != claim.revision
+            or decision.claim_id != claim.claim_id
+            or decision.decision_id != operation.authorisation_ref
+            or decision.resulting_revision != operation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        ):
+            raise KeyError(operation.claim_id)
+
+        existing_operation = self._assessor_routing_operations.get(operation.operation_id)
+        existing_decision = self._decisions.get(decision.decision_id)
+        if existing_operation is not None or existing_decision is not None:
+            if existing_operation == operation and existing_decision == decision:
+                return
+            raise IdempotencyConflict(operation.operation_id)
+
+        self._decisions[decision.decision_id] = deepcopy(decision)
+        self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
 
     def get_agent_decision(
         self,
@@ -353,17 +522,37 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        existing_claimant_message = self._messages.get(claimant_message.message_id)
+        existing_agent_message = self._messages.get(agent_message.message_id)
+        existing_decision = self._decisions.get(decision.decision_id)
+        existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        existing_evidence = (
+            self._evidence.get(evidence.evidence_id) if evidence is not None else None
+        )
+        existing_children = (
+            existing_claimant_message,
+            existing_agent_message,
+            existing_decision,
+            existing_handoff,
+            existing_evidence,
+        )
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id
+            for existing in existing_children
+        )
         records_match = (
-            stored_claim.customer_id == claim.customer_id
+            child_ownership_matches
+            and claimant_message.message_id != agent_message.message_id
+            and stored_claim.customer_id == claim.customer_id
             and stored_session is not None
             and stored_session.claim_id == claim.claim_id
             and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and stored_claim.active_session_id == session.session_id
+            and claim.active_session_id == session.session_id
+            and session.status is SessionStatus.ACTIVE
             and claim.customer_id == session.customer_id
             and idempotency.actor_id == claim.customer_id
             and claim.claim_id == session.claim_id
@@ -391,6 +580,20 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        immutable_collision = next(
+            (
+                identity
+                for identity, existing in (
+                    (claimant_message.message_id, existing_claimant_message),
+                    (agent_message.message_id, existing_agent_message),
+                    (decision.decision_id, existing_decision),
+                )
+                if existing is not None
+            ),
+            None,
+        )
+        if immutable_collision is not None:
+            raise IdempotencyConflict(immutable_collision)
         duplicate_client_message = next(
             (
                 message
@@ -456,13 +659,11 @@ class FixtureRepository(PersistenceRepository):
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        self._validate_claim_mutation(claim, expected_revision)
+        existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
             evidence.claim_id != claim.claim_id
+            or (existing_evidence is not None and existing_evidence.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')
@@ -584,16 +785,75 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
     ) -> None:
-        stored = self._claims.get(claim.claim_id)
-        if stored is None:
-            raise KeyError(claim.claim_id)
-        if stored.revision != expected_revision:
-            raise RevisionConflict(stored.revision)
+        stored_claim = self._validate_claim_mutation(claim, expected_revision)
         if not any((staff_action, customer_update, signal_decision, handoff, message)):
             raise KeyError(claim.claim_id)
         records = (staff_action, customer_update, signal_decision, handoff, message)
-        if any(item is not None and item.claim_id != claim.claim_id for item in records):
+        active_session_id = claim.active_session_id or ''
+        stored_session = self._sessions.get(active_session_id) if message is not None else None
+        existing_staff_action = (
+            self._staff_actions.get(staff_action.action_id) if staff_action is not None else None
+        )
+        existing_customer_update = (
+            self._customer_updates.get(customer_update.update_id)
+            if customer_update is not None
+            else None
+        )
+        existing_signal_decision = (
+            self._signal_decisions.get(signal_decision.signal_decision_id)
+            if signal_decision is not None
+            else None
+        )
+        existing_handoff = self._handoffs.get(handoff.handoff_id) if handoff is not None else None
+        existing_message = self._messages.get(message.message_id) if message is not None else None
+        child_ownership_matches = all(
+            existing is None or existing.claim_id == claim.claim_id
+            for existing in (
+                existing_staff_action,
+                existing_customer_update,
+                existing_signal_decision,
+                existing_handoff,
+                existing_message,
+            )
+        )
+        records_match = (
+            child_ownership_matches
+            and all(item is None or item.claim_id == claim.claim_id for item in records)
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id in {'', active_session_id}
+            and (
+                staff_action is None
+                or (
+                    staff_action.status is not StaffActionStatus.COMPLETED
+                    and staff_action.completed_by is None
+                )
+                or (
+                    staff_action.status is StaffActionStatus.COMPLETED
+                    and staff_action.completed_by == idempotency.actor_id
+                )
+            )
+            and (customer_update is None or customer_update.created_by == idempotency.actor_id)
+            and (signal_decision is None or signal_decision.actor_id == idempotency.actor_id)
+            and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
+            and (
+                message is None
+                or (
+                    stored_claim.active_session_id == active_session_id
+                    and stored_session is not None
+                    and stored_session.claim_id == claim.claim_id
+                    and stored_session.customer_id == claim.customer_id
+                    and stored_session.status is SessionStatus.ACTIVE
+                    and message.actor is ActorType.STAFF
+                    and message.session_id == active_session_id
+                    and message.session_id == idempotency.session_id
+                    and idempotency.message_id == message.message_id
+                )
+            )
+        )
+        if not records_match:
             raise KeyError(claim.claim_id)
+        if existing_message is not None:
+            raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         existing = self._idempotency.get(lookup)
         if existing is not None and existing.request_fingerprint != idempotency.request_fingerprint:
@@ -644,13 +904,11 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
     ) -> None:
-        stored_claim = self._claims.get(claim.claim_id)
-        if stored_claim is None:
-            raise KeyError(claim.claim_id)
-        if stored_claim.revision != expected_revision:
-            raise RevisionConflict(stored_claim.revision)
+        self._validate_claim_mutation(claim, expected_revision)
+        existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
+            or (existing_handoff is not None and existing_handoff.claim_id != claim.claim_id)
             or idempotency.claim_id != claim.claim_id
             or idempotency.actor_id != claim.customer_id
             or idempotency.session_id != (claim.active_session_id or '')

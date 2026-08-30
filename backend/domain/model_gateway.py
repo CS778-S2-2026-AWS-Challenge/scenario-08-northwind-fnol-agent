@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,9 +53,22 @@ class ModelUsage(ModelContract):
     total_tokens: int | None = Field(default=None, ge=0)
 
 
+class ModelCompletionStatus(str, Enum):
+    COMPLETE = 'complete'
+    INCOMPLETE = 'incomplete'
+    REFUSED = 'refused'
+    UNKNOWN = 'unknown'
+
+
 class ModelCapabilities(ModelContract):
     structured_output: bool = False
     tools: bool = False
+
+
+class ModelProfileStatus(str, Enum):
+    CONFIGURED = 'configured'
+    DEGRADED = 'degraded'
+    UNAVAILABLE = 'unavailable'
 
 
 class ModelProfile(ModelContract):
@@ -74,9 +87,8 @@ class ModelProfile(ModelContract):
     privacy_class: str = Field(min_length=1, max_length=100)
     capabilities: ModelCapabilities
     timeout_seconds: float = Field(gt=0)
-    fallback_group: str | None = Field(default=None, max_length=100)
     prompt_version: str = Field(min_length=1, max_length=100)
-    evaluation_status: Literal['configured', 'degraded', 'unavailable'] = 'configured'
+    evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED
 
 
 class ModelRequest(ModelContract):
@@ -84,26 +96,20 @@ class ModelRequest(ModelContract):
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
     purpose: str = Field(default='agent_turn', min_length=1, max_length=100)
-    actor: str = Field(default='claimant_agent', min_length=1, max_length=100)
-    claim_scope: str = Field(default='working_claim', min_length=1, max_length=100)
-    policy_version: str = Field(default='current', min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
     privacy_class: str = Field(default='synthetic_fnol', min_length=1, max_length=100)
     required_capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
-    token_budget: int | None = Field(default=None, ge=1)
-    latency_budget_ms: int | None = Field(default=None, ge=1)
-    trace_context: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelResponse(ModelContract):
     text: str | None = None
     structured_output: dict[str, object] | None = None
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
+    completion_status: ModelCompletionStatus = ModelCompletionStatus.UNKNOWN
     finish_reason: str | None = None
     usage: ModelUsage | None = None
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
-    capabilities: ModelCapabilities | None = None
 
 
 class ModelClaimStateContext(ModelContract):
@@ -128,6 +134,7 @@ class ModelClaimContext(ModelContract):
     incident_type: str | None = None
     claim_state: ModelClaimStateContext
     form: dict[str, ModelFormFieldContext] = Field(default_factory=dict)
+    known_field_codes: list[str] = Field(default_factory=list)
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
 
@@ -165,6 +172,8 @@ class ModelGatewayErrorCode(str, Enum):
     AUTHENTICATION = 'authentication'
     RATE_LIMIT = 'rate_limit'
     PROVIDER = 'provider'
+    INCOMPLETE_RESPONSE = 'incomplete_response'
+    REFUSED_RESPONSE = 'refused_response'
     MALFORMED_RESPONSE = 'malformed_response'
     UNSUPPORTED_CAPABILITY = 'unsupported_capability'
     CONFIGURATION = 'configuration'
@@ -175,6 +184,10 @@ _ERROR_MESSAGES = {
     ModelGatewayErrorCode.AUTHENTICATION: 'The model endpoint rejected authentication.',
     ModelGatewayErrorCode.RATE_LIMIT: 'The model endpoint rate limit was reached.',
     ModelGatewayErrorCode.PROVIDER: 'The model endpoint could not complete the request.',
+    ModelGatewayErrorCode.INCOMPLETE_RESPONSE: (
+        'The model endpoint returned an incomplete response.'
+    ),
+    ModelGatewayErrorCode.REFUSED_RESPONSE: 'The model endpoint refused the request.',
     ModelGatewayErrorCode.MALFORMED_RESPONSE: 'The model endpoint returned an invalid response.',
     ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY: (
         'The selected model endpoint does not support a required capability.'

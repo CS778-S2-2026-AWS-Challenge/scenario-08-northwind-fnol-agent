@@ -1,14 +1,21 @@
 {
-  "fixture_set_id": "evidence-path-visibility-v2",
-  "description": "Synthetic visibility classifications for the complete canonical evidence set on each of the five primary Agent paths.",
+  "fixture_set_id": "evidence-path-visibility-v3",
+  "description": "Synthetic entry baselines and visibility classifications for the complete canonical evidence set on the five current MVP paths.",
   "entries": [
     {
       "scenario_id": "AT-01-clear-motor",
-      "business_path": "fast",
       "description": "A clear lower-risk claim with received claimant evidence, ready for controlled creation.",
+      "entry_baseline": {
+        "workflow_state": "ready_for_next",
+        "next_action": "CREATE_CLAIM",
+        "evidence_state": "received",
+        "customer_next_step_status": "ready_to_create",
+        "responsible_party": "northwind",
+        "handoff": null
+      },
       "evidence": [
         {
-          "fixture_id": "EV-VIS-01-fast-claimant-image",
+          "fixture_id": "EV-VIS-01-clear-claimant-image",
           "visibility": "claimant_visible",
           "evidence_id": "evd_fixture_path_fast_image"
         }
@@ -16,8 +23,21 @@
     },
     {
       "scenario_id": "AT-02-coverage-ambiguity",
-      "business_path": "professional_review",
       "description": "A coverage ambiguity whose canonical claimant evidence remains available for professional review.",
+      "entry_baseline": {
+        "workflow_state": "professional_review",
+        "next_action": "HANDOFF",
+        "evidence_state": "inconsistent",
+        "customer_next_step_status": "professional_review_queued",
+        "responsible_party": "claims_professional",
+        "handoff": {
+          "type": "professional_review",
+          "status": "queued",
+          "priority": "high",
+          "queue": "professional_review",
+          "trigger": "professional_review_required"
+        }
+      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-02-review-damage-photos",
@@ -38,8 +58,21 @@
     },
     {
       "scenario_id": "AT-04-urgent",
-      "business_path": "urgent",
       "description": "An explicit injury signal that requires urgent handoff regardless of later evidence work.",
+      "entry_baseline": {
+        "workflow_state": "professional_review",
+        "next_action": "URGENT_HANDOFF",
+        "evidence_state": "received",
+        "customer_next_step_status": "urgent_support_queued",
+        "responsible_party": "northwind",
+        "handoff": {
+          "type": "urgent_support",
+          "status": "queued",
+          "priority": "urgent",
+          "queue": "urgent_support",
+          "trigger": "urgent_safety_risk"
+        }
+      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-04-urgent-shared-image",
@@ -50,8 +83,21 @@
     },
     {
       "scenario_id": "AT-05-human-request",
-      "business_path": "human_request",
       "description": "A claimant has requested a person and the known shared evidence travels with the handoff.",
+      "entry_baseline": {
+        "workflow_state": "professional_review",
+        "next_action": "HANDOFF",
+        "evidence_state": "received",
+        "customer_next_step_status": "human_support_queued",
+        "responsible_party": "northwind",
+        "handoff": {
+          "type": "human_support",
+          "status": "queued",
+          "priority": "standard",
+          "queue": "claimant_support",
+          "trigger": "claimant_support_request"
+        }
+      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-05-human-shared-image",
@@ -62,8 +108,15 @@
     },
     {
       "scenario_id": "AT-06-pending-evidence",
-      "business_path": "pending_evidence",
       "description": "A police report does not exist yet, while unrelated safe reporting work can continue and internal pending work remains staff-only.",
+      "entry_baseline": {
+        "workflow_state": "ready_for_next",
+        "next_action": "PROCEED",
+        "evidence_state": "pending_generation",
+        "customer_next_step_status": "continue_current_report",
+        "responsible_party": "claimant",
+        "handoff": null
+      },
       "evidence": [
         {
           "fixture_id": "EV-VIS-06-pending-claimant-report",
