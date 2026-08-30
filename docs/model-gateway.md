@@ -113,7 +113,7 @@ This is a transport transformation only: the returned object must still pass the
 model and Runtime authority validation before it can affect Claim State.
 
 | Variable | Meaning |
-|---|---|
+| --- | --- |
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
 | `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; currently `openai_compatible` by default |
 | `MODEL_PROFILE_ID` | Identifier of the selected model profile |
