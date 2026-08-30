@@ -1,0 +1,19 @@
+# Review authority over critical paths. See the governance skill,
+# docs/skills/repo-governance-for-novice/review-merge.md section 6.3.
+# Contract documents (docs/api.md, docs/persistence-schema.md, ...) deliberately
+# have no owner; they are covered by normal review plus the path-coupling CI check.
+# This file takes effect only when branch protection or a ruleset enables
+# "Require review from Code Owners".
+
+/docs/skills/             @Ysoseri1224
+/docs/README.md           @Ysoseri1224
+/docs/archive/            @Ysoseri1224
+/.github/                 @Ysoseri1224
+/AGENT.md                 @Ysoseri1224
+/CLAUDE.md                @Ysoseri1224
+/AGENTS.md                @Ysoseri1224
+/SPEC/                    @Ysoseri1224
+/scripts/                 @Ysoseri1224
+/.githooks/               @Ysoseri1224
+/deploy/                  @Ysoseri1224
+/.circleci/               @Ysoseri1224
