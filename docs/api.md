@@ -57,6 +57,16 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
   identity design and is disabled outside development and test environments.
 - Sensitive fields MUST be filtered by the server, not hidden only in the frontend.
 
+The MVP development/test identity adapter provides two explicitly synthetic claimant accounts.
+With `NORTHWIND_IDENTITY_MODE=developer` enabled, `POST /api/v1/auth/sessions` validates the
+synthetic credential server-side and returns a
+short-lived opaque bearer token. Only its hash, authenticated `customer_id`, expiry, and
+revocation state are retained by the server. Claimant clients keep this token in memory only.
+The adapter is unavailable outside development and test; it is not a production identity
+provider or a production-readiness claim. The legacy fixed claimant token remains a bounded
+fixture compatibility credential while existing scenario clients migrate, and is likewise
+disabled outside development and test.
+
 Current scopes:
 
 | Scope | Purpose |
@@ -147,6 +157,30 @@ Collection response:
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
 
+## Claimant Identity and Account API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/auth/sessions` | Authenticate a development/test synthetic claimant and create an opaque session |
+| `GET` | `/auth/session` | Read the current authenticated claimant session |
+| `DELETE` | `/auth/session` | Revoke the current claimant session |
+| `GET` | `/account` | Read the authenticated claimant's profile and communication preferences |
+| `PATCH` | `/account/profile` | Update the authenticated claimant's approved profile fields |
+| `PATCH` | `/account/preferences` | Update the authenticated claimant's communication preferences |
+
+`POST /api/v1/auth/sessions` is the only development/test authentication exception to the
+general bearer requirement. It accepts `email` and `password`, returns `201` with
+`customer_id`, `access_token`, `token_type`, `expires_at`, and `development_identity: true`,
+and returns the same bounded `401 AUTHENTICATION_REQUIRED` response for unknown email and bad
+password. The request cannot supply `customer_id`, role, scopes, or claim ownership.
+
+All other routes above require the issued bearer token. Expired, invalid, and revoked tokens
+return `401`. Logout revokes the server-side session and returns `204`. Account responses are
+derived from the authenticated principal and never accept a customer identifier in their path
+or payload. Profile updates accept `display_name` and `phone`; preference updates accept the
+boolean `email` and `sms` fields. These fixture records contain anonymous `.invalid` addresses
+only and must not be represented as real Northwind customer data.
+
 ## Shared Types
 
 ### Resource Relationships
@@ -164,7 +198,9 @@ Customer
         |-- Staff Action
         |-- Claimant Update
         |-- Claim Event
-        \-- External Claim Reference
+        |-- External Claim Reference
+        |-- External-service Consent
+        \-- Assessor Routing Result
 ```
 
 A `Working Claim` is the authoritative FNOL record owned by this product. An `External Claim Reference` exists only after the configured claims service accepts claim creation. A session is a period of interaction with the working claim; ending a session does not end or duplicate the claim.
@@ -188,15 +224,24 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | Staff action | `act_01J4Y80B7D` |
 | Claim event | `evt_01J4Y81HNM` |
 
-### Agent Action
+### Current Agent Action Compatibility
 
-`AgentAction` is one of:
+The currently implemented transport field `AgentAction` is one of:
 
 ```text
 ASK | CLARIFY | CONFIRM | PROCEED | UPDATE | HANDOFF | URGENT_HANDOFF | CREATE_CLAIM
 ```
 
-Policy lookup, history lookup, evidence extraction, claim creation, and assessor routing are tools or side effects. They are not additional agent actions.
+This flat enum is retained for compatibility with current clients, fixtures, and stored
+Agent Decisions. It must not be extended as the foundation of new Agent behaviour.
+Policy lookup, history lookup, evidence extraction, claim creation, and assessor routing
+remain tools or side effects in the current transport.
+
+The target product action system uses separate `conversation`, `claim`, `human`,
+`external`, and `runtime` namespaces and permits several conversation moves and command
+proposals in one turn. It requires a coordinated transport migration described under
+the internal Agent turn boundary below. No target field or route is treated as
+implemented merely because it is described in the design documents.
 
 ### Claim State
 
@@ -246,6 +291,8 @@ The canonical backend record has these fields. API projections omit fields the c
 | `route` | string | No | Configured processing route, not a decision outcome |
 | `active_session_id` | string | No | Current active session when one exists |
 | `external_claim` | object | No | Claim service result after creation begins |
+| `external_service_consents` | array | Yes | Internal task-specific consent records; omitted from claimant projections |
+| `assessor_routing` | object | No | Provider-neutral assessor result after an authorised request succeeds |
 | `customer_next_step` | object | Yes | Claimant-safe status, responsibility, and expected timing |
 | `created_at` | timestamp | Yes | Server-generated creation time |
 | `updated_at` | timestamp | Yes | Server-generated last material update time |
@@ -432,7 +479,7 @@ The backend MUST maintain a versioned field registry with validation and display
 
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
-### Agent Decision
+### Current Compatibility Agent Decision
 
 ```json
 {
@@ -468,6 +515,12 @@ Extracted facts use the structured form envelope with `source` set to `image` or
 ```
 
 `authority.outcome` is `authorised`, `blocked`, or `review_required`. A blocked or review-required proposal MUST NOT execute its high-impact state change.
+
+`AgentDecision` is the current persisted and transported compatibility shape. It must not
+be relabelled as a target `TurnPlan`, `AgentProposal`, `ExecutionPlan`, or `TurnResult`.
+Those records distinguish model proposal, runtime approval, execution, and actual outcome
+and require new schemas, persistence, consumers, fixtures, and contract tests before
+entering this normative HTTP contract.
 
 ### Internal Signal
 
@@ -608,6 +661,8 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
+| `POST` | `/claims/{claim_id}/assessor-routing/consent` | Record bounded claimant permission for the contextual assessor action |
+| `POST` | `/claims/{claim_id}/assessor-routing` | Send the authorised assessor request and return its claimant-safe state |
 | `GET` | `/claims/{claim_id}/evidence` | List claimant-visible evidence state |
 | `POST` | `/claims/{claim_id}/evidence` | Register expected, missing, or pending evidence |
 | `POST` | `/claims/{claim_id}/evidence/uploads` | Request an evidence upload target |
@@ -689,6 +744,7 @@ Response `200`:
     "needs_attention": 0
   },
   "external_claim": null,
+  "external_service_action": null,
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
@@ -698,6 +754,14 @@ Response `200`:
 The claimant-facing `evidence_summary` MUST be calculated only from evidence records visible through the claimant evidence projection. It MUST NOT include counts derived from `internal_only` evidence or any record excluded from `GET /claims/{claim_id}/evidence`. The persisted Working Claim retains the authoritative aggregate over the full persisted evidence set for staff and operational use; persistence adapters MUST preserve that full aggregate. Claimant-safe aggregation is applied only at the claimant projection boundary.
 
 The `form` contains claimant-visible structured field records. `external_claim`, when present, contains `claim_number`, `creation_status`, `route`, `created_at`, and claimant-visible expected timing.
+
+`external_service_action` is omitted as `null` until an external participant action is a
+relevant next step. The controlled assessor action appears only after a motor claim has been
+created on the fixture route, its location is confirmed, and no open handoff or professional
+review blocks the action. It contains the service and provider labels, purpose, claimant-safe
+summary of the minimum data to be shared, consent state, progress/result state, and the
+provider-neutral routing result when accepted. It never exposes the raw consent record,
+authorisation decision, internal signals, or complete claim context.
 
 ### `POST /api/v1/claims/{claim_id}/sessions`
 
@@ -757,11 +821,12 @@ Request:
 
 When the explicitly configured Agent runtime uses a model gateway, a timeout, rate limit,
 or retryable provider failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
-Authentication, configuration, unsupported-capability, malformed-response, and other
-non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. Both
-outcomes use provider-neutral messages, preserve the current Claim revision, and do not
-write the claimant message, Agent decision, or idempotency result. Provider response bodies,
-credentials, prompts, and internal model context are never returned.
+Authentication, configuration, unsupported-capability, incomplete, refused, malformed-response,
+and other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`.
+Both outcomes use provider-neutral messages, preserve the current Claim revision, and do not write
+the claimant message, Agent decision, or idempotency result. A schema-valid partial result is still
+discarded unless the adapter normalises the provider termination state as complete. Provider
+response bodies, credentials, prompts, and internal model context are never returned.
 
 Response `200`:
 
@@ -898,6 +963,11 @@ Before invoking the adapter, the service records a deterministic `CREATE_CLAIM` 
 `CLAIM_CREATION_AUTHORISED`. A model proposal or claimant-supplied decision ID cannot authorise
 this operation.
 
+During the action-contract migration, this deterministic decision is the compatibility
+representation of an authorised `claim.create` action. The public response remains
+unchanged until the new ActionEnvelope and turn-result schemas are implemented and
+versioned together with clients and tests.
+
 Response `201`:
 
 ```json
@@ -921,6 +991,22 @@ Response `201`:
     "expected_by": "2026-08-11T05:00:00Z",
     "created_at": "2026-08-10T03:55:00Z"
   },
+  "external_service_action": {
+    "service_identity": "vehicle_damage_assessment_routing",
+    "service_name": "Vehicle damage assessment",
+    "provider": "Controlled assessment fixture",
+    "purpose": "Request an assessor for the vehicle damage recorded in this claim. This does not decide coverage or approve repairs.",
+    "shared_data_summary": [
+      "Your Northwind claim and external claim references",
+      "Northwind routing authority and your permission reference",
+      "The vehicle damage assessment request",
+      "Your confirmed incident region"
+    ],
+    "status": "consent_required",
+    "consent_status": null,
+    "routing": null,
+    "can_request": true
+  },
   "customer_next_step": {
     "status": "claim_created",
     "summary": "Claims intake review",
@@ -931,6 +1017,61 @@ Response `201`:
 
 An idempotent replay restores the same response. The mock adapter supplies synthetic values only;
 this contract does not assert a Northwind provider schema or AWS implementation.
+
+### `POST /api/v1/claims/{claim_id}/assessor-routing/consent`
+
+Records claimant permission for the exact controlled vehicle-assessment scope. The request
+requires `Idempotency-Key` and `If-Match`:
+
+```json
+{
+  "consent": true
+}
+```
+
+The client cannot widen the participant, action, or fields. The server records permission only
+for the claim and external-claim references, Northwind routing authority, consent reference,
+vehicle-damage assessment action, and confirmed incident region. Permission and Northwind
+routing authority remain separate requirements.
+
+Response `201`, or `200` for an identical replay, returns the new revision,
+`customer_next_step`, and the claimant-safe `external_service_action` with status
+`ready_to_request`. Raw consent references and the internal consent list are not returned.
+The consent, single Claim revision advance, and idempotency response are one repository
+mutation: a failed transaction leaves all three unchanged.
+
+This endpoint is available only when the external service action is a relevant next step. A
+draft, non-motor, pending or failed claim-creation result, open handoff, professional review, or
+already accepted assessor request is rejected without recording consent.
+
+### `POST /api/v1/claims/{claim_id}/assessor-routing`
+
+Sends the controlled provider-neutral assessor request after active claimant permission has been
+recorded. The request has no body and requires `Idempotency-Key` and `If-Match`. The server derives
+the external claim reference, current Northwind authority, active consent, requested action, and
+confirmed region from the shared Working Claim; the claimant cannot supply provider or routing
+payload fields.
+
+Response `201`, or `200` for an identical replay, returns the resulting claim revision,
+`customer_next_step`, and the claimant-safe action. Status is `assigned` only when an individual
+assessor reference was returned and `queued` when only a queue accepted the request.
+
+Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
+Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
+four leave the consented Working Claim revision unchanged, do not report assignment, and retain
+the same operation identity for an unchanged permitted retry. Automatic retry counts remain
+unapproved; the claimant client offers only an explicit retry for retryable failures.
+
+The authorised decision and prepared operation identity are persisted together before the
+provider call. A timeout retry reuses that durable authority record rather than replacing it
+with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
+idempotency response fails, the same request restores the authoritative assigned or queued state;
+the claimant client also reloads that state before presenting a failure message.
+If provider acceptance is durable but a concurrent Claim mutation wins the following
+compare-and-set, the first request returns the bounded revision conflict. Only the identical
+claimant request with the original idempotency key, revision, consent, authority, and operation
+identity may reconcile that accepted result without another provider call. An unrelated stale
+request remains a revision or idempotency conflict.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 
@@ -1340,9 +1481,11 @@ Resolving a handoff MUST record the staff result, state changes, claimant update
 
 ### `POST /api/v1/workbench/demo/seed-scenarios`
 
-Loads a bounded, mixed local workbench demonstration queue. AT-02, AT-04, and AT-05 exercise
-professional-review and human-handoff work, AT-06 exercises claimant, external-agency, and
-internal pending-evidence waits, while AT-10 exercises a created claim routed to an assessor.
+Loads a bounded, mixed local workbench demonstration queue through the canonical MVP journey
+catalogue. AT-01 exercises the clear path, AT-06 exercises claimant, external-agency, and
+internal pending-evidence waits, AT-04 and AT-05 exercise urgent and standard human handoff,
+and AT-02 exercises professional review. AT-10 is an additional created claim routed to an
+assessor; it does not replace a core path.
 This endpoint is not a handoff-only seed boundary. It is an explicit staff action: the
 workbench never calls it during page load. The route requires the synthetic staff credential, is
 available only in development and test environments, and returns
@@ -1350,23 +1493,33 @@ available only in development and test environments, and returns
 this set again. Runtime demo records are maintained under `backend/demo_data/scenarios/`, not
 under the test fixture tree.
 
+AT-02 also supplies the bounded structured MVP record graph: its `customer_reference` and
+`claim_id` connect the Working Claim to typed policy and claim-history retrievals, evidence,
+messages, and a professional-review handoff. The handoff packet references those records by
+their stable identifiers. Policy/history payloads remain available only from the authorised
+Workbench claim-detail route; claimant routes do not expose retrieval records, provider
+references, claim history, internal messages, or the staff packet. Both web clients discover
+the queue and claim detail through these APIs rather than embedding fixture payloads or IDs.
+
 Response `200`:
 
 ```json
 {
   "status": "seeded",
   "scenario_ids": [
-    "AT-02-coverage-ambiguity",
-    "AT-04-urgent",
-    "AT-05-human-request",
+    "AT-01-clear-motor",
     "AT-06-pending-evidence",
+    "AT-04-urgent",
+    "AT-02-coverage-ambiguity",
+    "AT-05-human-request",
     "AT-10-controlled-assessor"
   ],
   "claim_ids": [
-    "clm_fixture_at02",
-    "clm_fixture_at04",
-    "clm_fixture_at05",
+    "clm_fixture_at01",
     "clm_fixture_at06",
+    "clm_fixture_at04",
+    "clm_fixture_at02",
+    "clm_fixture_at05",
     "clm_fixture_at10"
   ]
 }
@@ -1471,8 +1624,9 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/internal/v1/agent/turns` | Produce and validate one agent decision proposal |
+| `POST` | `/internal/v1/agent/turns` | Produce the current compatibility Agent Decision proposal |
 | `POST` | `/internal/v1/policy/search` | Retrieve cited policy evidence |
+| `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
@@ -1499,15 +1653,12 @@ The orchestration request contains references and a bounded context package, not
 }
 ```
 
-Response is a complete `AgentDecision` proposal. Deterministic validation MUST run before high-impact changes or side effects. The full model prompt, hidden reasoning, and secrets are not part of the public contract or ordinary logs.
+Response is a complete current-compatibility `AgentDecision` proposal. Deterministic validation MUST run before high-impact changes or side effects. The full model prompt, hidden reasoning, and secrets are not part of the public contract or ordinary logs.
 
-The canonical product actions are `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`,
-`UPDATE`, `HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM`. They are business
-action semantics rather than MCP commands or provider tool names. Each action
-has stable preconditions, allowed state paths, tool policy, authority outcome,
-claimant-response requirement, and prohibited outcomes. A model-backed provider
-or MCP-connected tool adapter must implement these semantics rather than create
-an incompatible private action vocabulary.
+The current endpoint maps `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`, `UPDATE`,
+`HANDOFF`, `URGENT_HANDOFF`, and `CREATE_CLAIM` to its legacy decision shape. New
+provider adapters must not create an incompatible private vocabulary or mistake this
+compatibility enum for the complete target action model.
 
 The persisted decision records both `customer_response` and
 `customer_next_step`. `customer_response` is the contextual conversational
@@ -1518,8 +1669,8 @@ reply by repeating the next-step summary. For a model-backed proposal, these
 claimant-visible fields and `customer_reason` are server-rendered from the
 validated action and authority outcome; untrusted model prose is not persisted
 as the claimant response. The internal decision records `proposal_source` and
-bounded model provenance when applicable. Provider model and request identifiers
-must not appear in claimant projections.
+bounded model provenance when applicable. The executable prompt identifier, provider model, and
+provider request identifiers must not appear in claimant projections.
 
 Routine model context is task-minimal. It includes the current claimant text and
 only explicitly allow-listed, current-action form values. Policy numbers, contact
@@ -1527,6 +1678,65 @@ preferences, addresses and incident locations, other parties, police references,
 emergency-service records, and vehicle registrations are excluded. A model proposal
 cannot create internal review signals; a non-empty model `proposed_signals` value
 invalidates the complete turn before persistence.
+
+#### Target Agent Turn Migration Boundary
+
+The target Agent Runtime contract uses:
+
+```text
+provider-neutral ModelRequest
+-> current ModelResponse or a future higher-level ModelResult
+-> structured AgentProposal
+-> Registry and authority validation
+-> ExecutionPlan containing approved and rejected ActionEnvelopes
+-> tool and Claim-state execution
+-> TurnResult containing actual outcomes and final role projection
+```
+
+A target `TurnPlan` may contain multiple detected intents, conversation moves,
+content-branch candidates, form-patch proposals, Claim-command proposals, tool requests,
+unresolved work, and limitations, with one primary Runtime control directive.
+
+This section is a migration boundary, not an implemented route or payload. The target
+types beyond the existing `ModelRequest`, `ModelResponse`, and legacy `AgentProposal`
+enter a versioned HTTP contract only when backend models, Model Gateway,
+persistence, claimant and Workbench consumers, fixtures, generated OpenAPI, and contract
+tests are updated in the same pull request. Until then, `/internal/v1/agent/turns`
+continues to use the compatibility request and `AgentDecision` response above.
+
+### `POST /internal/v1/knowledge/search`
+
+Retrieves approved knowledge chunks after exact applicability filtering. Requires an integration
+principal. This route searches policy wording and guidance; it does not retrieve a customer's
+structured policy schedule or make a coverage decision.
+
+Request:
+
+```json
+{
+  "question": "How much excess do I have to pay?",
+  "jurisdiction": "NZ",
+  "visibility": "customer_and_staff",
+  "document_id": "nw-policy-motor-standard-mvp-2026-1",
+  "authority": "northwind_synthetic_demo",
+  "version": "MVP-2026.1",
+  "insurer": "Northwind Insurance",
+  "product": "motor",
+  "effective_at": "2026-08-25T00:00:00Z",
+  "limit": 3
+}
+```
+
+An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
+version, checksum, and source text for every result. `no_evidence` returns no results and an honest
+scope limitation. `unavailable` returns no results and a claimant-safe dependency limitation.
+Provider errors and object-store identifiers are not exposed. Missing applicability fields fail
+request validation rather than broadening the search.
+When a structured Policy Schedule supplies a wording document identifier, the caller includes
+`document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
+The approved document catalogue comes from the controlled publication manifest. Applicability is
+filtered before indexed objects are read, and a chunk whose governed identity, source metadata,
+or checksum differs from that manifest is treated as unavailable rather than returned as evidence.
 
 ### `POST /internal/v1/policy/search`
 
@@ -1763,6 +1973,7 @@ Request requires an authorised rule or staff decision:
   "claim_id": "clm_01J4Y7Q2AW",
   "external_claim_id": "ext_fixture_1042",
   "authorisation_ref": "dec_01J4YEBP6X",
+  "claimant_consent_ref": "cns_01J4YECONSENT",
   "requested_action": "vehicle_damage_assessment",
   "location": {
     "region": "Auckland"
@@ -1788,7 +1999,27 @@ Response `201`, or `200` for an idempotent replay:
 ```
 
 The authorisation reference must resolve to an authorised decision containing
-`ASSESSOR_RULE_AUTHORISED`. A severity value by itself is not routing authority.
+`ASSESSOR_RULE_AUTHORISED` for the current claim revision. The claimant-consent reference
+must resolve from the shared Working Claim to a granted record for
+`vehicle_damage_assessment_routing`, the requested action, and the minimum request fields.
+The consent actor must be the claimant linked to that Working Claim. Authorised-representative
+consent is not accepted until representative identity and authority are explicitly modelled.
+Northwind authority and claimant consent are separate requirements; a severity value by itself
+is not routing authority.
+
+The controlled fixture can return assigned or queued success. Timeout and unavailable
+return `DEPENDENCY_UNAVAILABLE` with `retryable: true`; access-denied or malformed fixture
+outcomes return `DEPENDENCY_FAILED` with `retryable: false`. All four preserve the current
+claim and include a bounded `assessor_service` reason. An identical retry after a transient
+failure uses the same operation identity, and an identical retry after success returns the
+accepted result without creating another task.
+
+The first authorised attempt durably reserves the operation identity and complete request
+fingerprint before invoking the provider. Reusing that identity with changed input is an
+idempotency conflict even when the first attempt timed out or the provider was unavailable.
+Provider acceptance is recorded before the Claim State compare-and-set. If a concurrent claim
+mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
+the latest claim revision without creating a second provider task.
 
 ## Reason Codes
 
@@ -1849,6 +2080,18 @@ All errors use one envelope:
 
 Customer error messages MUST be actionable and MUST NOT expose stack traces, prompts, credentials, internal-only signals, policy records belonging to another customer, or infrastructure details.
 
+Agent Runtime and Model Gateway may use a richer internal error record with `layer`,
+`retry_class`, `state_effect`, safe message key, diagnostic reference, and optional safe
+provider category. That internal record maps to the existing public error envelope; it
+does not expose provider payloads or silently create new HTTP status semantics.
+
+The target internal registry includes distinct conditions for model timeout, rate limit,
+unavailability, refusal, incomplete or malformed output, capability mismatch, context
+overflow, inapplicable or conflicting retrieval, unverifiable evidence, invalid tool
+arguments, unavailable tools, unknown external outcomes, idempotency conflict, and
+handoff-queue failure. These codes become normative API values only with implementation
+and contract tests.
+
 ## Health Endpoints
 
 ### `GET /health/live`
@@ -1901,6 +2144,10 @@ orchestration consumes the provider-neutral `ModelRequest` and `ModelResponse` c
 then converts structured output to the existing `AgentProposal`. Existing deterministic
 authority and state validation still controls execution.
 
+`ModelResponse` distinguishes complete, incomplete, refused, and unknown provider termination.
+Only a complete response can become an `AgentProposal`; all other outcomes fail before the Message
+API writes Claim State, messages, decisions, or idempotency results.
+
 The implemented `openai_compatible` adapter supports official, relay, and local
 compatible chat-completions endpoints through configuration. Non-compatible protocols
 register another adapter against the same internal contract without changing claimant
@@ -1919,10 +2166,17 @@ The persistence layer MUST support at least:
 - sessions, compact summaries, unresolved questions, and commitments;
 - complete messages stored outside routine model context;
 - evidence metadata, provenance, processing state, and secure object references;
-- agent decisions, reason codes, tool references, and validation outcomes;
+- current Agent Decisions and, after the coordinated migration, TurnPlans,
+  AgentProposals, ExecutionPlans, ActionEnvelopes, ToolRequests and results, and
+  TurnResults;
+- content-branch references, lifecycle state, and independent WorkItems;
+- reason codes, policy and Registry versions, authority checks, state effects, usage,
+  latency, and limitations;
 - internal signals and lifecycle decisions;
 - handoffs, assignments, staff actions, and claimant updates;
 - external claim creation results and conditional assessor actions;
+- external-request preparation, disclosure, authority, submission, tracking,
+  verification, unknown outcome, and reconciliation records;
 - append-only claim events and aggregate metric events;
 - idempotency records and optimistic-concurrency revisions.
 
@@ -1937,9 +2191,11 @@ unimplemented Cloudflare, MongoDB, or AWS profile fails process startup explicit
 does not create a partial provider bundle or fall back to fixture capabilities. The
 selected deployment profile itself is not returned by the public API.
 
-The model gateway and future Admin API also remain provider-neutral. Their HTTP routes
-and payloads are added to this contract only with the corresponding implementation,
-consumer, fixture, and contract-test changes.
+The model gateway remains an implemented provider-neutral internal dependency, and model
+selection is independent of the mutually exclusive data-runtime profile. Future model
+profile management, Gateway administration, and other Admin API routes and payloads are
+added to this contract only with the corresponding implementation, consumer,
+persistence, fixture, generated-OpenAPI, and contract-test changes.
 
 ## Contract Verification
 
@@ -1968,3 +2224,8 @@ These decisions do not prevent continued MVP implementation, but production beha
 8. Final deployment topology: in-process adapters or separately deployed internal services.
 9. Admin API resources, configuration approval levels, publication, rollback, secret references, and audit access.
 10. Model-gateway and knowledge-management API capabilities introduced by issues #204 and the Control Plane delivery plan.
+11. Versioning and compatibility period for replacing the legacy eight-action
+    `AgentDecision` transport with TurnPlan, namespaced ActionEnvelope, ExecutionPlan,
+    and TurnResult contracts.
+12. Production model-profile capabilities, privacy classes, fallback groups, evaluation
+    thresholds, and validity periods for each Agent purpose.

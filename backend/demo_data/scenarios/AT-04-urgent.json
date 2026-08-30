@@ -1,6 +1,7 @@
 {
   "scenario_id": "AT-04-urgent",
   "description": "Synthetic injury/danger report that interrupts intake with an urgent handoff.",
+  "business_path": "urgent",
   "claim": {
     "claim_id": "clm_fixture_at04",
     "customer_id": "cus_demo",

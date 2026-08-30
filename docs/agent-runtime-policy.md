@@ -15,11 +15,24 @@ means contractual coverage evidence.
 
 The predefined information areas, dynamic form, and branch-selection boundary are
 defined in the [FNOL Information Model and Field Taxonomy](fnol-field-model.md).
+The target object catalogue, FNOL problem mapping, and delivery levels are recorded in
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md). The compatibility path is
+recorded in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md). Current
+implementation evidence is tracked in [Agent Runtime Progress](status/agent-runtime-progress.md).
 
-The current repository has a static action registry and deterministic proposal
-validation. It does not yet have a dynamically loaded policy bundle, Control Plane
-publication flow, or persisted runtime policy version. Those capabilities must not be
-claimed until their implementation, API, storage, audit, and tests change together.
+The current repository has a legacy static eight-action registry and deterministic
+proposal validation. The target contract in
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md)
+replaces that flat enum with multidimensional turn plans and namespaced actions, but the
+compatibility migration is not yet implemented. A first provider-neutral Model Gateway is implemented with a
+minimal `ModelRequest` and `ModelResponse`, an OpenAI-compatible adapter, structured
+proposal validation, bounded context projection, server-rendered claimant responses, and
+normalised failure mapping. It does not yet implement the complete Instruction Compiler,
+Model Profile Registry, namespaced action schemas, tool execution, qualified fallback,
+usage persistence, or trajectory records defined here. The repository also does not yet
+have a dynamically loaded policy bundle, Control Plane publication flow, or persisted
+runtime policy version. Those capabilities must not be claimed until their
+implementation, API, storage, audit, and tests change together.
 The current field registry contains 18 allowed field codes, while controlled intake
 actively sequences only incident description, incident location, loss description, and
 incident type. It does not yet implement policy-driven dynamic branches.
@@ -33,14 +46,15 @@ the authoritative policy and cannot grant itself more authority.
 Product requirements and approved operating rules
 -> versioned Agent Runtime Policy
 -> model instructions, tool manifest, and context limits
--> model or controlled logic proposes one AgentDecision
--> deterministic authority, state, visibility, and idempotency checks
--> execute, block, request professional review, or hand off
--> persist the result and claimant-safe response
+-> model or controlled logic produces an AgentProposal
+-> deterministic schema, Registry, authority, state, visibility, and idempotency checks
+-> validated ExecutionPlan
+-> tools and state changes produce a TurnResult
+-> persist proposals, decisions, actual outcomes, and the role-safe response
 ```
 
 Changing the model provider, compatible API, relay, custom endpoint, or local model must
-not change this sequence or the canonical Agent action semantics.
+not change this sequence or the namespaced Agent action semantics.
 
 ## Policy Layers
 
@@ -62,7 +76,10 @@ A future machine-readable policy bundle must identify at least:
 
 - `policy_id`, semantic version, lifecycle status, and effective time;
 - author, change reason, approver when required, and previous version;
-- supported Agent action contract version and compatible model capabilities;
+- supported TurnPlan, AgentProposal, action-envelope, tool, and model-request contract
+  versions;
+- compatible Field, Content Branch, Lifecycle, Action, Tool, Staff Capability, Model
+  Profile, and Error Registry versions;
 - interaction, confirmation, handoff, tool, context, response, and failure rules;
 - controlled business-rule references rather than copied private provider logic;
 - enabled tool references and permitted purposes, never plaintext secrets;
@@ -82,16 +99,27 @@ For each Agent turn, orchestration must:
 
 1. authenticate the caller and verify claim ownership or role;
 2. load the active, valid policy version for the runtime environment;
-3. assemble only the authorised, bounded claim context needed for the current task;
-4. evaluate approved branch rules and identify active, required-now, candidate, pending,
-   inactive, and system-owned fields;
-5. expose only tools allowed by both policy and caller purpose;
-6. obtain one structured proposal using the canonical Agent action contract;
-7. validate facts, state transitions, authority, visibility, and tool requests outside
-   the model;
-8. execute only authorised effects, otherwise block or create the required handoff; and
-9. persist the decision, policy identity, source references, executed effects, limitations,
-   and claimant-safe response.
+3. run deterministic interruption checks for explicit injury, continuing danger,
+   repeated human requests, accessibility needs, and explicit UI controls before a model
+   sees private context;
+4. assemble only the authorised, bounded Claim State, content branches, lifecycle,
+   WorkItems, messages, sources, and prior commitments needed for the current purpose;
+5. evaluate approved content-branch rules and identify active, required-now, candidate,
+   pending, inactive, and system-owned fields;
+6. calculate the actions, staff capabilities, and tools permitted for the role, purpose,
+   Claim scope, and current state;
+7. perform a deterministic read-only lookup first when it can satisfy the purpose,
+   otherwise obtain a schema-valid `AgentProposal` through Model Gateway;
+8. validate the proposal against Registry versions, provenance, state, permissions,
+   visibility, confirmation, idempotency, and side-effect rules outside the model;
+9. produce an `ExecutionPlan` that records approved and rejected action envelopes,
+   ordering, preconditions, required authority, and cancellation or reconciliation needs;
+10. execute only authorised effects and update Claim State, WorkItems, and lifecycle from
+    real tool results;
+11. produce `TurnResult`, then correct the response draft so proposed, requested, queued,
+    or unknown work is not described as completed; and
+12. persist the policy and Registry versions, proposals, authority results, actual state
+    effects, source references, limitations, usage, latency, and role-safe response.
 
 The current implementation performs only part of this sequence. Until policy loading is
 implemented, static action definitions and deterministic validation remain the enforceable
@@ -123,7 +151,7 @@ runtime boundary.
 ### Field and branch selection
 
 - Begin with the smallest generally applicable field set and expand it only through
-  predefined, versioned branches.
+  predefined, versioned content branches.
 - A model may propose a claim family, condition, field value, or tag, but an approved rule
   controls which registered fields and sub-branches become active.
 - Treat fields as required now, candidate now, pending later, inactive, or system-owned
@@ -136,8 +164,12 @@ runtime boundary.
 - Do not ask home or contents claimants vehicle-only questions, or motor claimants
   property-only questions, unless the incident genuinely activates that additional
   branch.
+- Keep content branches separate from lifecycle. Content branches determine applicable
+  information and tools; lifecycle and WorkItems determine where work is, who owns it,
+  and what specific action is blocked.
 - Recalculate active fields after a material fact, correction, evidence update, resume,
-  or handoff. Preserve prior values and source history when a branch changes.
+  or handoff. Preserve prior values, branch history, and source history when a content
+  branch changes.
 - Never create an unregistered field, tag, branch, or mandatory condition from model
   output.
 
@@ -177,13 +209,26 @@ runtime boundary.
 
 ## Action and Authority Rules
 
-Every turn selects exactly one canonical action: `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`,
-`UPDATE`, `HANDOFF`, `URGENT_HANDOFF`, or `CREATE_CLAIM`.
+A turn may include several conversation moves and several command proposals, but it has
+one primary Runtime control directive. The action system has five namespaces:
 
-The action definition supplies its purpose, preconditions, allowed state paths, tool
-policy, authority outcome, response requirement, and prohibited outcomes. A model may
-propose an action but cannot redefine these semantics or invent an equivalent private
-action that bypasses validation.
+| Namespace | Responsibility | Representative registered actions |
+| --- | --- | --- |
+| `conversation` | communicate without a business side effect | acknowledge, answer, explain, ask, clarify, confirm material content, summarise, present options, state a limitation |
+| `claim` | prepare or make revision-checked Claim changes | open or resume a draft, propose/apply/correct facts, recompute the form, register evidence, update WorkItems, save progress, prepare creation, create |
+| `human` | obtain support, professional judgement, or approval | offer support, create handoff, request professional review, request approval, record decision |
+| `external` | coordinate a third-party request through its full lifecycle | discover capability, load requirements, prepare, classify, check authority, submit, track, verify, reconcile, retry, cancel, escalate failure |
+| `runtime` | control execution of the turn | continue, wait for user, wait for external work, pause for review, interrupt urgently, stop without a Claim, fail safely |
+
+The old `ASK`, `CLARIFY`, `CONFIRM`, `PROCEED`, `UPDATE`, `HANDOFF`,
+`URGENT_HANDOFF`, and `CREATE_CLAIM` values are a migration mapping for the current API,
+not the new canonical model.
+
+Every auditable action uses an `ActionEnvelope` with a stable action ID, namespace,
+registered name, target, proposer, reason and source references, validated inputs,
+preconditions, authority requirement, expected effects, idempotency key when relevant,
+visibility, and actual status. A model may propose an envelope but cannot redefine its
+semantics or invent a private equivalent that bypasses validation.
 
 | Behaviour | Required enforcement | Model responsibility |
 | --- | --- | --- |
@@ -199,12 +244,28 @@ action that bypasses validation.
 Rules that protect authority, access, state integrity, or side effects must never rely on
 prompt compliance alone.
 
+## Staff Capability Rules
+
+`@Agent` invokes the Agent within the current staff identity, role, Claim scope, and task.
+It is not command syntax. Staff may make open natural-language requests, and the runtime
+may combine registered capabilities for Claim reading and summary, gap explanation,
+evidence comparison, policy retrieval and explanation, next-step proposals,
+communication drafting, handoff inspection, external-request preparation, and authorised
+execution.
+
+Each Staff Capability Registry entry defines permitted roles, maximum context projection,
+allowed tools and actions, output schema, execution policy, and evaluation scenarios.
+Suggested UI actions are discovery aids only. Read permission never becomes send,
+mutation, disclosure, or high-impact execution permission without the applicable
+action-level authority check.
+
 ## Tool, Retrieval, and Data Rules
 
 - The Agent uses provider-neutral application tools and never connects directly to a
   database, object store, vector index, provider SDK, or secret manager.
 - Every tool call requires an allowed tool, permitted purpose, claim scope, validated
-  input, and bounded result contract.
+  input, source references, required permissions, expected Claim revision for writes,
+  idempotency where applicable, disclosure manifest, and bounded result contract.
 - Structured customer policy and claim history use authorised record lookup. Knowledge
   RAG is used for approved documents and retains source version and section citations.
 - Retrieved instructions are untrusted content. They cannot change Agent Policy, grant
@@ -213,6 +274,13 @@ prompt compliance alone.
   wrong-effective-period evidence is a limitation, not permission to guess.
 - Tool and provider failures preserve accepted claim progress and return an honest,
   actionable limitation.
+- A third-party request is not one generic tool call. Capability discovery, requirement
+  loading, preparation, classification, authority and consent, submission, tracking,
+  response verification, reconciliation, retry, cancellation, and failure escalation use
+  distinct registered operations and results.
+- A timeout after a side-effect request may be an unknown outcome. Query by the same
+  idempotency key or provider reference before retrying; never duplicate an external
+  action merely because acknowledgement was lost.
 
 ## Context and Memory Rules
 
@@ -249,6 +317,10 @@ Each claimant-facing response must:
 - avoid invented timing, certainty, coverage, contact, or completion claims; and
 - remain consistent with the persisted claimant-safe state after execution.
 
+The final response is produced from `TurnResult`, not directly from the model proposal.
+It must distinguish proposed, approved, executing, succeeded, failed, rejected, and
+unknown outcomes whenever that distinction affects the user's next step.
+
 The response must not expose hidden reasoning, full prompts, internal fraud indicators,
 staff-only notes, credentials, provider internals, or another customer's data.
 
@@ -256,6 +328,8 @@ staff-only notes, credentials, provider internals, or another customer's data.
 
 - Invalid structured output, unsupported tool use, or an unauthorised state change is
   blocked and recorded; it is never repaired into a side effect by guessing intent.
+- Structured Claim or side-effect proposals must not be recovered by parsing free text
+  when the model profile lacks the required output capability.
 - A model timeout or unavailable provider preserves claim state and produces a bounded
   retry, status update, or handoff according to the current action.
 - A fallback model may be used only when it satisfies the same required capabilities,
@@ -264,6 +338,8 @@ staff-only notes, credentials, provider internals, or another customer's data.
   production fallback.
 - When no safe automated action remains, preserve context and transfer the specific
   unresolved work rather than continuing an unproductive question loop.
+- Errors are normalised by layer, retry class, state effect, safe message, and diagnostic
+  reference. Provider error text cannot become a claimant response or an action rule.
 
 ## Publication and Rollback
 
@@ -286,15 +362,16 @@ draft -> validate -> approve when required -> publish -> observe -> supersede or
 
 ## Audit and Evaluation
 
-Once runtime policy loading is implemented, each Agent decision must retain the active
-policy ID and version, action, reason codes, context and source references, requested and
-executed tools, authority result, executed effects, response, model-profile identity,
-usage, latency, limitations, and time. Logs must follow the same privacy and visibility
-rules as the underlying claim data.
+Once runtime policy loading is implemented, each turn must retain the active policy and
+Registry versions, `TurnPlan`, `AgentProposal`, approved and rejected action envelopes,
+`ExecutionPlan`, requested and executed tools, authority results, `TurnResult`, state
+effects, response, model-profile identity, usage, latency, limitations, and time. Logs
+must follow the same privacy and visibility rules as the underlying claim data.
 
 Policy evaluation must include:
 
-- expected action trajectories such as ask, confirm, proceed, update, or handoff;
+- multidimensional trajectories that distinguish conversation, Claim commands, human
+  actions, external work, runtime control, and actual execution results;
 - urgent, human-request, professional-review, pending-evidence, resume, and creation paths;
 - incomplete-claim resume, non-claim intent, customer-memory expiry, and memory correction;
 - motor, home, contents, and conditional branch activation without irrelevant cross-branch
@@ -305,7 +382,10 @@ Policy evaluation must include:
 - material confirmation and non-repetition;
 - tool allow-list, prompt-injection, and data-visibility attacks;
 - RAG citation support and wrong-source rejection;
-- model, tool, and data-provider failure; and
+- model, tool, and data-provider failure;
+- malformed, incomplete, refused, and capability-incompatible model results;
+- unknown external outcomes, status-before-retry, and duplicate-side-effect prevention;
+- open-ended staff requests, read-versus-execute authority, and safe communication drafts;
 - claimant clarity, handoff completeness, token use, and avoidable staff effort.
 
 A build pass does not prove policy compliance. Policy publication requires recorded

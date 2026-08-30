@@ -6,13 +6,15 @@ can enable it.  This module provides the first durable slice and keeps provider
 document details below the repository boundary.
 """
 
+import os
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.domain.models import (
     ActorType,
@@ -41,6 +43,104 @@ from backend.repositories.protocols import (
 )
 
 ModelT = TypeVar('ModelT', bound=BaseModel)
+
+
+class MongoDBConfigurationError(ValueError):
+    """MongoDB configuration is missing, invalid, or cannot be verified."""
+
+
+@dataclass(frozen=True, slots=True)
+class MongoDBConnectionConfig:
+    uri: str = field(repr=False)
+    database_name: str
+    collection_name: str = 'northwind_records'
+    server_selection_timeout_ms: int = 5_000
+
+    @classmethod
+    def from_environment(cls) -> 'MongoDBConnectionConfig':
+        uri = os.getenv('NORTHWIND_MONGODB_URI', '').strip()
+        database_name = os.getenv('NORTHWIND_MONGODB_DATABASE', '').strip()
+        collection_name = os.getenv('NORTHWIND_MONGODB_COLLECTION', 'northwind_records').strip()
+        raw_timeout = os.getenv('NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS', '5000').strip()
+
+        missing = [
+            name
+            for name, value in (
+                ('NORTHWIND_MONGODB_URI', uri),
+                ('NORTHWIND_MONGODB_DATABASE', database_name),
+                ('NORTHWIND_MONGODB_COLLECTION', collection_name),
+            )
+            if not value
+        ]
+        if missing:
+            raise MongoDBConfigurationError(
+                f'Missing required MongoDB configuration: {", ".join(missing)}.'
+            )
+        try:
+            timeout = int(raw_timeout)
+        except ValueError as error:
+            raise MongoDBConfigurationError(
+                'NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS must be an integer.'
+            ) from error
+        if not 100 <= timeout <= 60_000:
+            raise MongoDBConfigurationError(
+                'NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS must be between 100 and 60000.'
+            )
+        if any(character in database_name for character in '/\\. "$'):
+            raise MongoDBConfigurationError('NORTHWIND_MONGODB_DATABASE is invalid.')
+        if collection_name.startswith('system.') or '\x00' in collection_name:
+            raise MongoDBConfigurationError('NORTHWIND_MONGODB_COLLECTION is invalid.')
+        return cls(
+            uri=uri,
+            database_name=database_name,
+            collection_name=collection_name,
+            server_selection_timeout_ms=timeout,
+        )
+
+
+def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepository':
+    """Connect and verify MongoDB before exposing the persistence adapter."""
+
+    client: MongoClient[Any] | None = None
+    try:
+        client = MongoClient(
+            config.uri,
+            serverSelectionTimeoutMS=config.server_selection_timeout_ms,
+        )
+        client.admin.command('ping')
+        return MongoDBRepository(
+            client,
+            config.database_name,
+            collection_name=config.collection_name,
+        )
+    except (PyMongoError, ValueError):
+        if client is not None:
+            client.close()
+        raise MongoDBConfigurationError(
+            'MongoDB connection or repository initialisation failed.'
+        ) from None
+
+
+def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
+    """Ping MongoDB without constructing a repository or changing provider state."""
+
+    client: MongoClient[Any] | None = None
+    try:
+        client = MongoClient(
+            config.uri,
+            serverSelectionTimeoutMS=config.server_selection_timeout_ms,
+        )
+        client.admin.command('ping')
+        return 'verified'
+    except (PyMongoError, ValueError):
+        return 'unavailable'
+    finally:
+        if client is not None:
+            client.close()
+
+
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+"""Child records whose identity may never be rebound or rewritten once persisted."""
 
 
 class MongoDBRepository:
@@ -75,6 +175,16 @@ class MongoDBRepository:
                 'client_message_id': {'$type': 'string'},
             },
         )
+
+    def connection_status(self) -> str:
+        try:
+            self._client.admin.command('ping')
+        except (PyMongoError, ValueError):
+            return 'unavailable'
+        return 'verified'
+
+    def close(self) -> None:
+        self._client.close()
 
     @staticmethod
     def _record_id(kind: str, identifier: str) -> str:
@@ -225,6 +335,9 @@ class MongoDBRepository:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -246,6 +359,29 @@ class MongoDBRepository:
                 projection={'revision': 1},
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
+
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=[],
+            )
+        )
 
     def get_session(
         self,
@@ -721,11 +857,14 @@ class MongoDBRepository:
     ) -> None:
         if (
             claim.revision != expected_revision + 1
+            or claim.active_session_id != session.session_id
             or session.claim_id != claim.claim_id
             or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
             or session.context_revision != claim.revision
             or message.claim_id != claim.claim_id
             or message.session_id != session.session_id
+            or message.actor is not ActorType.CLAIMANT
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
@@ -913,7 +1052,13 @@ class MongoDBRepository:
                 customer_id=claim.customer_id,
                 session=mongo_session,
             )
-            if stored_session is None or stored_session.claim_id != claim.claim_id:
+            if (
+                stored_session is None
+                or stored_session.claim_id != claim.claim_id
+                or stored_session.status is not SessionStatus.ACTIVE
+                or session.status is not SessionStatus.ACTIVE
+                or claim.active_session_id != session.session_id
+            ):
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
             if kind == 'message':
@@ -929,6 +1074,8 @@ class MongoDBRepository:
                 if (
                     message_session is None
                     or message_session.claim_id != claim.claim_id
+                    or message_session.status is not SessionStatus.ACTIVE
+                    or claim.active_session_id != record.session_id
                     or idempotency.session_id != record.session_id
                     or record.message_id
                     not in {idempotency.message_id, idempotency.agent_message_id}
@@ -951,6 +1098,7 @@ class MongoDBRepository:
             if existing is not None and (
                 existing.get('claim_id') != claim.claim_id
                 or existing.get('customer_id') != claim.customer_id
+                or kind in IMMUTABLE_CHILD_RECORD_KINDS
             ):
                 raise IdempotencyConflict(identifier)
             self._reject_client_message_conflict(document, session=mongo_session)
@@ -991,11 +1139,14 @@ class MongoDBRepository:
                 'customer_id': claim.customer_id,
                 'revision': expected_revision,
             },
-            projection={'revision': 1},
+            projection={'revision': 1, 'active_session_id': 1},
             session=mongo_session,
         )
         if current is None:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            return
+        if current.get('active_session_id') != claim.active_session_id:
+            raise KeyError(claim.claim_id)
 
     def _replace_claim_revision(
         self,

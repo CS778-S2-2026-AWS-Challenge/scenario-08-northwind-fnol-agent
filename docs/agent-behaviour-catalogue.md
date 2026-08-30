@@ -68,35 +68,35 @@ permitted next action; it is not a keyword shortcut.
 - **Input context:** Current Claim State, current-action fields, unresolved WorkItems, recent claimant message, channel, locale, and claimant scope.
 - **Output:** Claimant receives acknowledgement and the smallest useful next question or next step; staff receives nothing unless a handoff or review is required; Runtime returns a bounded plan and limitations.
 - **Target actions:** `conversation.acknowledge`, `conversation.ask`, `claim.propose_fact_patch`, `runtime.continue`, or `runtime.wait_for_user`.
-- **Authority:** The model may propose facts and wording; claimant confirmation and deterministic field/revision validation authorise Claim State changes.
+- **Authority:** A clear claimant statement carries claimant authority after deterministic field, schema, and revision validation; a model interpretation remains a proposal, and a material or ambiguous interpretation requires the applicable confirmation.
 - **Tool allow-list:** `none` for ordinary intake unless a separately selected behaviour exposes a declared tool.
-- **Permitted actions:** Extract explicit facts as proposals, preserve confirmed facts, ask for a required-now field, and record a later evidence commitment.
+- **Permitted actions:** Record a clear explicit statement as claimant-supplied with its message source, preserve and reuse it without mechanical reconfirmation, retain model inferences as proposals, ask for a required-now field, and record a later evidence commitment.
 - **Prohibited actions:** Inventing facts, confirming an inference, exposing internal signals, declaring coverage or fraud, or creating a claim without authority.
-- **Claim State effect:** Proposed fields remain `proposed`; a validated claimant confirmation or correction advances one revision; conversational text alone does not rewrite Claim State.
+- **Claim State effect:** A validated clear claimant statement may be recorded as claimant-supplied and reused without an additional confirmation turn; an inferred, ambiguous, or materially consequential interpretation remains `proposed` until the applicable confirmation or correction advances one revision. Model wording alone does not rewrite Claim State.
 - **Failure behaviour:** If the model or route classifier fails, preserve the current Claim revision and ask a bounded clarification or offer human support.
 - **Visibility:** Claimant sees safe acknowledgement, question, and next step; staff sees the shared Claim projection; internal diagnostics remain restricted.
 - **Claimant-visible response:** Acknowledge the account, preserve stated facts, and ask only the smallest required-now question or state the next safe step.
 - **Handoff condition:** No handoff by default; select a declared support, urgent, or professional-review behaviour when its condition is present.
-- **Proof:** Repeatable clear-claim trajectory with no repeated confirmed-fact question and one inspectable proposed/confirmed field transition.
+- **Proof:** A repeatable clear-claim trajectory records an explicit registration, location, and negative-injury statement with claimant/message provenance and does not ask for them again; a separate materially ambiguous interpretation remains proposed until the correction/confirmation path resolves it.
 - **Delivery level:** `Challenge/MVP target`.
 
 ### multi_intent_intake
 
 - **FNOL problem:** Claimants commonly combine incident facts, injury or danger information, evidence status, and a support request in one message; sequential questioning wastes turns.
-- **Trigger / intent:** One input contains two or more recognised FNOL intents that can be handled without contradicting safety or authority rules.
+- **Trigger / intent:** One input contains two or more recognised ordinary FNOL needs and no higher-precedence route is primary. When an urgent, human-support, resume, command, or other higher-precedence signal is present, that route remains primary while independently valid facts may still be preserved as secondary proposals.
 - **Input context:** Same claimant context as `ordinary_intake`, plus the route candidates, active content branches, safety signals, support preference, and current WorkItems.
 - **Output:** Claimant receives one coherent acknowledgement and only the unresolved question that matters for the next safe action; Runtime returns multiple bounded proposals and one primary route; staff receives a complete handoff context only if required.
-- **Target actions:** `conversation.acknowledge`, multiple `claim.propose_fact_patch` actions, `human.create_handoff` when authorised, and one `runtime.continue`, `runtime.wait_for_user`, or `runtime.interrupt_urgent` directive.
+- **Target actions:** `conversation.acknowledge`, `conversation.ask`, multiple `claim.propose_fact_patch` actions, and one `runtime.continue` or `runtime.wait_for_user` directive.
 - **Authority:** Each proposal is independently validated; one primary runtime directive controls the turn and higher-precedence safety/support authority wins.
 - **Tool allow-list:** Union of the tools declared by the selected bounded behaviours; no undeclared tool becomes available because several intents coexist.
-- **Permitted actions:** Record each explicit fact separately, identify conflicts, preserve source and confidence, and select one primary route while retaining other proposals.
+- **Permitted actions:** Record each clear explicit statement as claimant-supplied, retain inferred or ambiguous candidates as proposals, identify conflicts, preserve source and confidence, and select one primary route while retaining independently valid secondary proposals.
 - **Prohibited actions:** Collapsing distinct intents into one opaque action, silently prioritising a lower-safety intent, asking for facts already supplied, or executing several material mutations without validation.
 - **Claim State effect:** Each accepted field or handoff effect is validated against the same current revision; rejected proposals do not create partial competing state.
 - **Failure behaviour:** Partial understanding may preserve valid proposals only if the server can validate them independently; otherwise keep Claim State unchanged and ask one focused clarification.
 - **Visibility:** Claimant sees a concise combined response; staff sees source-linked proposals and unresolved work; internal route candidates remain restricted unless policy allows them.
 - **Claimant-visible response:** Address every material claimant need coherently, state what was understood, and ask at most the focused question needed for the primary route.
 - **Handoff condition:** Required only when the selected urgent, configured human-support, or professional-review behaviour requires it.
-- **Proof:** A synthetic message containing a motor incident, no injury, and a human request produces several namespaced proposals, one primary route, no repeated question, and no conflicting write.
+- **Proof:** A synthetic message stating a rear-end collision, location, time, the other vehicle's registration, and no injury selects `multi_intent_intake`, preserves each clear claimant-supplied fact with its message source, produces one primary runtime directive, and asks no repeated question. A separate mixed message with a human request proves `human_support` remains primary while independently valid incident facts are retained as secondary proposals.
 - **Delivery level:** `Challenge/MVP target`.
 
 ### explicit_command

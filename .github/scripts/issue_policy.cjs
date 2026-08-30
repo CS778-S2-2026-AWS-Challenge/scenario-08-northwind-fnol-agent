@@ -5,6 +5,11 @@ const REQUIRED_FIELDS = [
   'Acceptance criteria',
   'Related issue or PR',
   'Dependencies',
+  'Owned behavior',
+  'Expected impact area',
+  'Non-goals',
+  'Shared contracts',
+  'Risk class',
   'Owner or responsible contributor',
 ];
 
@@ -15,6 +20,15 @@ const ISSUE_TYPES = new Set([
   'Integration gap',
   'Security concern',
   'Maintenance or documentation',
+]);
+
+const RISK_CLASSES = new Set([
+  'Standard',
+  'Shared contract',
+  'Persistence or concurrency',
+  'External side effect',
+  'Identity, authority, security, or privacy',
+  'Repository governance or deployment',
 ]);
 
 function escapeRegExp(value) {
@@ -62,6 +76,10 @@ function validateIssueBody({ body }) {
     errors.push(`Choose one of: ${[...ISSUE_TYPES].join(', ')}.`);
   }
 
+  if (hasMeaningfulContent(fields['Risk class']) && !RISK_CLASSES.has(fields['Risk class'])) {
+    errors.push(`Choose one risk class: ${[...RISK_CLASSES].join(', ')}.`);
+  }
+
   if (hasMeaningfulContent(fields['Related issue or PR']) &&
       !isNone(fields['Related issue or PR']) &&
       !hasRepositoryReference(fields['Related issue or PR'])) {
@@ -71,7 +89,25 @@ function validateIssueBody({ body }) {
   return { errors, fields };
 }
 
+function validateDiscussionApproval({ body, creator, maintainer }) {
+  const errors = [];
+  if (!maintainer || (creator || '').toLowerCase() === maintainer.toLowerCase()) {
+    return { errors };
+  }
+  const approval = fieldContent(body || '', 'Discussion approval');
+  const threadUrl = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/discussions\/\d+\b/i;
+  if (!approval || !threadUrl.test(approval)) {
+    errors.push(
+      'Issues created by contributors other than the maintainer require prior approval: ' +
+        'post in the `Issue requests` Discussions category, wait for the maintainer\'s ' +
+        'explicit approval reply, and record the thread URL in `### Discussion approval`.',
+    );
+  }
+  return { errors };
+}
+
 module.exports = {
   fieldContent,
+  validateDiscussionApproval,
   validateIssueBody,
 };

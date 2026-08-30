@@ -27,7 +27,12 @@ def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
             'updated_at': claim.updated_at + timedelta(minutes=1),
         }
     )
-    repository.save_claim(updated, expected_revision=claim.revision)
+    # Pausing clears WorkingClaim.active_session_id, and
+    # docs/claim-state-transaction-boundary.md reserves pointer changes for the
+    # resume/start session mutation, so save_claim() correctly rejects it. No
+    # production path performs a pause, so this is fixture seeding rather than a
+    # repository operation.
+    repository._claims[claim.claim_id] = updated
     return updated.revision
 
 
