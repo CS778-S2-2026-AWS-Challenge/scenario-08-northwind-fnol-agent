@@ -34,9 +34,10 @@ Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint
 
 ## Repository Operation Rules
 
-All contributors and coding agents must follow [the repository operation rules](docs/repo_rule.md).
-Coding agents enter through [AGENT.md](AGENT.md), which defines the mandatory reading order and
-authority boundary. Install the versioned local quality hook once per clone:
+All contributors and coding agents must follow the
+[repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its
+file index. Install the versioned local quality hook once per clone:
 
 ```powershell
 ./scripts/install-git-hooks.ps1

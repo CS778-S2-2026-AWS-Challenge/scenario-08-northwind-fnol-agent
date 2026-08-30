@@ -11,20 +11,21 @@ time-bound commitments belong in `sprint/`.
 - `design/` records target architecture and rationale; it does not prove implementation.
 - `status/` records evidence observed at a named point in time; it does not create a contract.
 - `research/` informs product decisions within the limitations stated by each source.
-- `archive/` preserves dated planning, validation, and demonstration evidence; it is not current
-  product or engineering authority.
+- `skills/` holds the repository governance skill, the sole current source of governance rules.
+- `archive/` preserves dated planning, validation, demonstration, and superseded governance
+  records; it is not current product or engineering authority.
 
 Historical records must not override the current specification, API, data contracts, authority
 rules, or sprint commitments.
 
 ## Stable Entry Points
 
-These paths remain at the documentation root because repository instructions and contributor
-workflows depend on them:
+These paths remain stable because repository instructions and contributor workflows depend on
+them:
 
-- [Repository Operation Rules](repo_rule.md)
+- [Repository Governance Skill](skills/repo-governance-for-novice/SKILL.md) — routed from
+  [AGENT.md](../AGENT.md); where an archived document disagrees with it, the skill prevails
 - [Current API Contract](api.md)
-- [Development Conventions](development-conventions.md)
 - [Documentation Index](README.md)
 
 ## Current Engineering Documents
@@ -95,6 +96,15 @@ policy, or production authority unless the source explicitly supports that claim
 The archive keeps records needed for issue, test, and presentation traceability while removing
 them from the current-document layer. Original `day*` and `d4-*` names are retained inside the
 archive because they identify the Sprint task that produced the evidence.
+
+### Governance
+
+Superseded on 2026-08-30 by the
+[Repository Governance Skill](skills/repo-governance-for-novice/SKILL.md); kept as historical
+reference and never revised again. Where they disagree with the skill, the skill prevails.
+
+- [Repository Operation Rules (archived)](archive/governance/repo_rule.md)
+- [Development Conventions (archived)](archive/governance/development-conventions.md)
 
 ### Sprint 1
 
