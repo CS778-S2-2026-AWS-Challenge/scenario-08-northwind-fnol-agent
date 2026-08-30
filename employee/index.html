@@ -93,13 +93,6 @@
     .panel-header strong { font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: .12em; }
     .panel-header span { margin-left: auto; color: #64748b; font-size: 13px; }
     .panel-body { padding: 20px; }
-    .staff-connection { display:grid; gap:10px; margin-bottom:14px; padding:14px; border:1px solid #f0c36d; border-radius:12px; background:#fffaf0; }
-    .staff-connection[hidden] { display:none; }
-    .staff-connection strong { color:#713f12; font-size:13px; }
-    .staff-connection p { margin:0; color:#854d0e; font-size:11px; line-height:1.5; }
-    .staff-connection-row { display:flex; gap:8px; }
-    .staff-connection input { min-width:0; flex:1; min-height:40px; padding:8px 10px; border:1px solid #d6b56d; border-radius:8px; background:#fff; }
-    .staff-connection button { min-height:40px; padding:0 14px; border:1px solid #0f766e; border-radius:8px; color:#fff; background:#0f766e; font-weight:700; cursor:pointer; }
     .claim-list { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
     .claim-list button {width: 100%; min-height:96px;
       position:relative;
@@ -571,14 +564,6 @@
         <section class="panel">
           <div class="panel-header"><strong>Claim queue</strong><span id="claimCount">0 claims</span></div>
           <div class="panel-body">
-            <form id="staffConnection" class="staff-connection" hidden>
-              <strong>Connect the local employee workbench</strong>
-              <p>Enter the staff access token configured for this development backend. The token is stored only in this browser.</p>
-              <div class="staff-connection-row">
-                <input id="staffTokenInput" type="password" autocomplete="off" aria-label="Staff access token" placeholder="Staff access token" required>
-                <button type="submit">Connect</button>
-              </div>
-            </form>
             <div id="errorBanner" class="error" role="alert" style="display:none"></div>
             <ul id="claimList" class="claim-list"></ul>
             <div id="emptyState" class="empty-state" style="display:none">No matching claims were returned. Choose another queue or refresh.</div>
@@ -704,7 +689,6 @@
               </section>
               <div class="customer-chat-input">
                 <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
-                <button id="customerChatAccept" class="customer-chat-button" type="button" hidden>Accept handoff to reply</button>
                 <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
                 <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
               </div>
@@ -756,7 +740,7 @@
     // token only works against a backend started in explicit developer identity mode.
     // Set one for local use with:
     //   localStorage.setItem('northwind.staffToken', '<configured staff token>')
-    let staffToken = (() => {
+    const STAFF_TOKEN = (() => {
       try {
         return window.localStorage.getItem('northwind.staffToken') || '';
       } catch {
@@ -877,9 +861,7 @@
     let agentSuggestionClaimId = null;
     let acceptedSuggestionText = '';
     const CLAIMS_PER_PAGE = 3;
-    const QUEUE_REFRESH_INTERVAL_MS = 5000;
     let queuePage = 1;
-    let queueRefreshInFlight = false;
 
     const queueCopy = {
       all: ['Employee workbench', 'Every active claim, ordered by the highest open handoff priority.'],
@@ -947,7 +929,7 @@
     function getHeaders() {
       return {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${staffToken}`,
+        Authorization: `Bearer ${STAFF_TOKEN}`,
       };
     }
 
@@ -1023,7 +1005,7 @@
     async function fetchEvidenceFile(item) {
       const response = await fetch(
         `${API_BASE}/${encodeURIComponent(activeClaimId)}/evidence/${encodeURIComponent(item.evidence_id)}/content`,
-        { headers: { Authorization: `Bearer ${staffToken}` } },
+        { headers: { Authorization: `Bearer ${STAFF_TOKEN}` } },
       );
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
@@ -1035,7 +1017,7 @@
     async function fetchEvidenceData(item) {
       const response = await fetch(
         `${API_BASE}/${encodeURIComponent(activeClaimId)}/evidence/${encodeURIComponent(item.evidence_id)}/content-data`,
-        { headers: { Authorization: `Bearer ${staffToken}` } },
+        { headers: { Authorization: `Bearer ${STAFF_TOKEN}` } },
       );
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -2234,45 +2216,28 @@
       }
     }
 
-    async function loadClaims({ propagateError = false, silent = false } = {}) {
-      if (queueRefreshInFlight) return;
-      queueRefreshInFlight = true;
-      if (!silent) {
-        setError('');
-        setQueueLoading(true);
-      }
+    async function loadClaims({ propagateError = false } = {}) {
+      setError('');
+      setQueueLoading(true);
       const view = byId('viewSelect').value;
       try {
         const payload = await fetchClaims(view);
-        const previousClaimIds = new Set(claims.map(item => item.claim_id));
         claims = payload.items || [];
         renderClaims(claims);
         await refreshQueueOverview();
         if (claims.length && !claims.some(item => item.claim_id === activeClaimId)) {
           activeClaimId = claims[0].claim_id;
         }
-        const receivedNewClaim = claims.some(item => !previousClaimIds.has(item.claim_id));
-        if (activeClaimId) {
-          if (!silent || receivedNewClaim) await renderDetail(activeClaimId);
-        } else {
-          clearClaimDetail();
-        }
+        if (activeClaimId) await renderDetail(activeClaimId);
+        else clearClaimDetail();
         if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
-        if (!silent) {
-          clearClaimDetail();
-          setError(error.message);
-          if (error.code === 'AUTHENTICATION_REQUIRED') byId('staffConnection').hidden = false;
-        }
+        clearClaimDetail();
+        setError(error.message);
         if (propagateError) throw error;
       } finally {
-        queueRefreshInFlight = false;
-        if (!silent) setQueueLoading(false);
+        setQueueLoading(false);
       }
-    }
-
-    function refreshVisibleQueue() {
-      if (document.visibilityState === 'visible') loadClaims({ silent: true });
     }
 
     document.getElementById('viewSelect').addEventListener('change', () => {
@@ -2281,14 +2246,6 @@
       syncQueueNavigation();
     });
     document.getElementById('refreshClaims').addEventListener('click', loadClaims);
-    byId('staffConnection').addEventListener('submit', async event => {
-      event.preventDefault();
-      staffToken = byId('staffTokenInput').value.trim();
-      if (!staffToken) return;
-      try { localStorage.setItem('northwind.staffToken', staffToken); } catch (_) { /* Storage may be unavailable. */ }
-      byId('staffConnection').hidden = true;
-      await loadClaims();
-    });
     byId('loadDemoQueue').addEventListener('click', loadDemoQueue);
     byId('resetDemoQueue').addEventListener('click', resetAndLoadDemoQueue);
     byId('previousQueuePage').addEventListener('click', () => changeQueuePage(-1));
@@ -2303,9 +2260,6 @@
     byId('editAllSignalFindingsBtn').addEventListener('click', editAllSignalFindings);
 
     loadClaims();
-    window.setInterval(refreshVisibleQueue, QUEUE_REFRESH_INTERVAL_MS);
-    window.addEventListener('focus', refreshVisibleQueue);
-    document.addEventListener('visibilitychange', refreshVisibleQueue);
 
     // --- Internal AI assistant and customer conversation ---
     const chatWidget = byId('chatWidget');
@@ -2416,17 +2370,6 @@
       return claims.find(claim => claim.claim_id === activeCustomerChatId) || claims[0] || null;
     }
 
-    function isNearCustomerChatBottom(history, threshold = 96) {
-      return history.scrollHeight - history.scrollTop - history.clientHeight < threshold;
-    }
-
-    function scrollCustomerChatToLatest({ force = false, behavior = 'smooth' } = {}) {
-      const history = byId('customerChatHistory');
-      if (!history || (!force && !isNearCustomerChatBottom(history))) return;
-      history.scrollTo?.({ top: history.scrollHeight, behavior });
-      if (!history.scrollTo) history.scrollTop = history.scrollHeight;
-    }
-
     async function renderCustomerChat() {
       const claim = currentCustomerClaim();
       if (!claim) {
@@ -2459,7 +2402,6 @@
       }
       byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
       const history = byId('customerChatHistory');
-      const followLatest = !history.childElementCount || isNearCustomerChatBottom(history);
       history.replaceChildren();
       history.textContent = 'Loading persisted communication...';
       try {
@@ -2506,19 +2448,15 @@
         if (!uniqueEntries.length) history.textContent = 'No persisted customer communication is available.';
         const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
         const input = byId('customerChatText');
-        const accept = byId('customerChatAccept');
         const send = byId('customerChatSend');
-        accept.hidden = true;
         if (!openHandoff) {
           input.disabled = true;
           send.disabled = true;
-          byId('customerChatStatus').textContent = 'No open handoff. Direct customer messages require a support or review handoff.';
+          byId('customerChatStatus').textContent = 'No open handoff. Communication history is read-only.';
         } else if (openHandoff.status === 'queued') {
           input.disabled = true;
           send.disabled = true;
-          accept.hidden = false;
-          accept.dataset.handoffId = openHandoff.handoff_id;
-          byId('customerChatStatus').textContent = 'This handoff is waiting for an employee. Accept it here to reply.';
+          byId('customerChatStatus').textContent = 'Accept the handoff before issuing a formal customer update.';
         } else {
           input.disabled = false;
           send.disabled = false;
@@ -2526,7 +2464,7 @@
             ? `In progress with ${openHandoff.assigned_to}. Messages remain open until the handoff is resolved.`
             : `Accepted by ${openHandoff.assigned_to}. Send a message to begin support.`;
         }
-        scrollCustomerChatToLatest({ force: followLatest });
+        history.scrollTop = history.scrollHeight;
       } catch (error) {
         history.textContent = error.message;
       }
@@ -2602,7 +2540,6 @@
           : 'Sender: Staff · Audience: Claimant · Sending…';
       message.append(meta, body, delivery);
       byId('customerChatHistory').append(message);
-      scrollCustomerChatToLatest({ force: true });
     }
 
     async function sendCustomerChatMessage() {
@@ -2665,37 +2602,6 @@
         button.textContent = 'Retry message';
       } finally {
         button.disabled = false;
-      }
-    }
-
-    async function acceptCustomerChatHandoff() {
-      const claim = currentCustomerClaim();
-      const button = byId('customerChatAccept');
-      const handoffId = button.dataset.handoffId;
-      if (!claim || !handoffId || button.disabled) return;
-      button.disabled = true;
-      button.textContent = 'Accepting…';
-      byId('customerChatStatus').textContent = 'Accepting handoff…';
-      try {
-        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
-        await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoffId)}/accept`, {
-          method: 'POST',
-          headers: {
-            'Idempotency-Key': requestKey('accept-chat-handoff'),
-            'If-Match': String(detail.revision),
-          },
-          body: JSON.stringify({ assignee_id: null }),
-        });
-        detailCache.delete(claim.claim_id);
-        await refreshQueue();
-        await refreshDetail(claim.claim_id);
-        await renderCustomerChat();
-        byId('customerChatText').focus();
-      } catch (error) {
-        byId('customerChatStatus').textContent = `Could not accept handoff: ${error.message}`;
-      } finally {
-        button.disabled = false;
-        button.textContent = 'Accept handoff to reply';
       }
     }
 
@@ -2808,7 +2714,6 @@
     byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
     byId('customerChatBack').addEventListener('click', () => setView('workbench'));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
-    byId('customerChatAccept').addEventListener('click', acceptCustomerChatHandoff);
     byId('customerChatResolve').addEventListener('click', resolveCustomerHandoff);
     byId('customerChatText').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {

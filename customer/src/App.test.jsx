@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import at08ResumeFixture from '../../tests/fixtures/api/AT-08-resume-public.json'
 import App from './App.jsx'
-import { setClaimantAccessToken } from './api.js'
 
 function jsonResponse(body, status = 200) {
   return Promise.resolve(
@@ -225,61 +224,32 @@ describe('claimant intake', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     localStorage.clear()
-    setClaimantAccessToken('test-claimant-token')
   })
 
   afterEach(() => {
-    setClaimantAccessToken(null)
     vi.unstubAllGlobals()
   })
 
-  it('requires login before starting a claim and keeps the entered description', async () => {
+  it('lets claimants start without login and keeps employee access inside the login page', async () => {
     const user = userEvent.setup()
-    setClaimantAccessToken(null)
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: 'Motor' })).toBeChecked()
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
     expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine while it was parked.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
 
-    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeVisible()
-    expect(screen.getByRole('alert')).toHaveTextContent(/sign in to securely save/i)
+    expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
     expect(screen.getByRole('link', { name: 'Employee access' })).toHaveAttribute(
       'href',
       'http://127.0.0.1:8002/',
     )
     expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
     expect(screen.getByRole('note')).toHaveTextContent(/anonymous and synthetic/i)
-    expect(fetch).not.toHaveBeenCalled()
 
-    fetch
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', access_token: 'opaque-session-token',
-        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
-      }, 201))
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', development_identity: true,
-        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
-        preferences: { email: true, sms: false },
-      }))
-      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
-      .mockResolvedValueOnce(jsonResponse({
-        ...firstTurn(),
-        claimant_message: {
-          ...firstTurn().claimant_message,
-          content: { type: 'text', text: 'A car hit mine while it was parked.' },
-        },
-      }))
-    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
-    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
-
-    expect(await screen.findByRole('heading', { name: /build the details together/i })).toBeVisible()
-    expect(screen.getByText('A car hit mine while it was parked.')).toBeVisible()
-    expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer opaque-session-token')
+    await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
   })
 
   it('uses an in-memory authenticated session for account updates and logout', async () => {
@@ -307,7 +277,7 @@ describe('claimant intake', () => {
     expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer opaque-session-token')
 
     await user.click(screen.getByRole('button', { name: 'Log out' }))
-    expect(await screen.findByRole('heading', { name: /unexpected happens/i })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: /get back on track/i })).toBeVisible()
     expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer opaque-session-token')
   })
 
@@ -354,108 +324,12 @@ describe('claimant intake', () => {
     await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
     await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
     await user.click(screen.getByRole('button', { name: 'Log in' }))
-    await user.click(await screen.findByRole('button', { name: 'View claim conversations' }))
-    await user.click(await screen.findByRole('button', { name: /^Resume / }))
+    await user.click(await screen.findByRole('button', { name: 'View saved claims' }))
+    await user.click(await screen.findByRole('button', { name: 'Resume report' }))
 
     expect(await screen.findByText('I have your earlier report and can continue from here.')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Continue where you left off' })).toBeVisible()
     expect(fetch.mock.calls[5][1].headers.Authorization).toBe('Bearer opaque-session-token')
-  })
-
-  it('shows signed-in conversation history on the homepage without a load action', async () => {
-    const user = userEvent.setup()
-    setClaimantAccessToken(null)
-    fetch
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', access_token: 'opaque-session-token',
-        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
-      }, 201))
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', development_identity: true,
-        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
-        preferences: { email: true, sms: false },
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        items: [{
-          claim_id: 'clm_saved', revision: 6, incident_type: 'motor',
-          workflow_state: 'collecting', external_claim: null,
-          customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
-          updated_at: '2026-08-27T02:00:00Z', can_resume: true,
-        }],
-        page: { next_cursor: null },
-      }))
-    render(<App />)
-
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
-    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
-    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
-    await user.click(await screen.findByRole('link', { name: 'Northwind home' }))
-
-    expect(await screen.findByRole('button', { name: /^Resume / })).toBeVisible()
-    expect(screen.getByText(/Motor incident ·/)).toBeVisible()
-    expect(screen.getByText('Report SAVED')).toBeVisible()
-    expect(screen.queryByRole('button', { name: /load conversation history/i })).not.toBeInTheDocument()
-    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/claims?limit=25', expect.any(Object))
-  })
-
-  it('loads conversation history immediately for an existing authenticated session', async () => {
-    setClaimantAccessToken('existing-session-token', { presentAtStartup: true })
-    fetch.mockResolvedValueOnce(jsonResponse({
-      items: [{
-        claim_id: 'clm_existing', revision: 3, incident_type: 'home',
-        workflow_state: 'collecting', external_claim: null,
-        customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
-        updated_at: '2026-08-27T02:00:00Z', can_resume: true,
-      }],
-      page: { next_cursor: null },
-    }))
-
-    render(<App />)
-
-    expect(await screen.findByRole('button', { name: /^Resume Home incident/ })).toBeVisible()
-    expect(fetch).toHaveBeenCalledTimes(1)
-    expect(fetch).toHaveBeenCalledWith('/api/v1/claims?limit=25', expect.any(Object))
-  })
-
-  it('refreshes Recent automatically after a newly saved conversation', async () => {
-    const user = userEvent.setup()
-    setClaimantAccessToken(null)
-    const savedReport = {
-      claim_id: 'clm_test', revision: 2, incident_type: 'motor',
-      workflow_state: 'collecting', external_claim: null,
-      customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
-      updated_at: '2026-08-27T02:00:00Z', can_resume: true,
-    }
-    fetch
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', access_token: 'opaque-session-token',
-        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
-      }, 201))
-      .mockResolvedValueOnce(jsonResponse({
-        customer_id: 'cus_demo', development_identity: true,
-        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
-        preferences: { email: true, sms: false },
-      }))
-      .mockResolvedValueOnce(jsonResponse({ items: [], page: { next_cursor: null } }))
-      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
-      .mockResolvedValueOnce(jsonResponse(firstTurn()))
-      .mockResolvedValueOnce(jsonResponse({ items: [savedReport], page: { next_cursor: null } }))
-    render(<App />)
-
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
-    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
-    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
-    await user.click(screen.getByRole('button', { name: 'Log in' }))
-    await user.click(await screen.findByRole('link', { name: 'Northwind home' }))
-    expect(await screen.findByText(/No conversations yet/)).toBeVisible()
-
-    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
-    await user.click(await screen.findByRole('button', { name: 'Back' }))
-
-    expect(await screen.findByText(/Motor incident ·/)).toBeVisible()
-    expect(fetch).toHaveBeenNthCalledWith(6, '/api/v1/claims?limit=25', expect.any(Object))
   })
 
   it('keeps entered login details available after an authentication failure', async () => {
@@ -518,12 +392,20 @@ describe('claimant intake', () => {
 
     const description = screen.getByLabelText('Incident description')
     await user.type(description, 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('tab', { name: 'Home' }))
+    const claimTypeGroup = screen.getByRole('group', { name: 'Claim type' })
+    const motor = screen.getByRole('radio', { name: 'Motor' })
+    const home = screen.getByRole('radio', { name: 'Home' })
+    expect(description.compareDocumentPosition(claimTypeGroup)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(motor).toBeChecked()
+
+    await user.click(home)
     expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
     expect(screen.getByText('Emergency work records')).toBeVisible()
     expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.keyboard('{ArrowLeft}')
+    expect(motor).toBeChecked()
+    expect(motor).toHaveFocus()
     await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
     expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
     await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
@@ -773,9 +655,6 @@ describe('claimant intake', () => {
     await user.tab() // How it works navigation
     await user.tab() // Log in
     await user.tab()
-    expect(screen.getByRole('link', { name: /Start a claim/ })).toHaveFocus()
-    await user.tab() // Claim online scroll link
-    await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
     await user.type(description, 'Another vehicle hit my parked car.')
@@ -786,65 +665,17 @@ describe('claimant intake', () => {
     expect(await screen.findByRole('button', { name: 'Confirm details' })).toBeEnabled()
   })
 
-  it('returns from a started conversation without leaving a blank page', async () => {
-    window.history.replaceState({ northwindPage: 'home' }, '', window.location.href)
-    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
-    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
-    const user = userEvent.setup()
-    render(<App />)
-
-    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
-    expect(await screen.findByRole('heading', { name: /build the details together/i })).toBeVisible()
-
-    await user.click(screen.getByRole('button', { name: 'Back' }))
-    expect(await screen.findByRole('heading', { name: /unexpected happens/i })).toBeVisible()
-    expect(screen.getByLabelText('Incident description')).toBeEnabled()
-  })
-
-  it('keeps the newest claim message visible after sending', async () => {
-    const scrollTo = vi.fn()
-    const originalScrollTo = HTMLElement.prototype.scrollTo
-    HTMLElement.prototype.scrollTo = scrollTo
-    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
-    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
-    const user = userEvent.setup()
-    render(<App />)
-
-    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
-
-    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' })))
-    HTMLElement.prototype.scrollTo = originalScrollTo
-  })
-
-  it('restores the homepage when the browser navigates back from a conversation', async () => {
-    window.history.replaceState({ northwindPage: 'home' }, '', window.location.href)
-    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
-    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
-    const user = userEvent.setup()
-    render(<App />)
-
-    await user.type(screen.getByLabelText('Incident description'), 'A branch damaged my windscreen.')
-    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
-    expect(await screen.findByRole('heading', { name: /build the details together/i })).toBeVisible()
-
-    window.dispatchEvent(new PopStateEvent('popstate', { state: { northwindPage: 'home' } }))
-    expect(await screen.findByRole('heading', { name: /unexpected happens/i })).toBeVisible()
-    expect(screen.getByLabelText('Incident description')).toBeEnabled()
-  })
-
   it('resumes canonical AT-08 context without re-asking confirmed facts', async () => {
     mockAt08Resume()
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Refresh conversation history' }))
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
     expect(
-      (await screen.findAllByText(
+      await screen.findByText(
         'Confirm how the police report will be added when it becomes available.',
-      ))[0],
+      ),
     ).toBeVisible()
-    await user.click(screen.getByRole('button', { name: /^Resume / }))
+    await user.click(screen.getByRole('button', { name: 'Resume report' }))
 
     expect(await screen.findByText('Continue where you left off')).toBeVisible()
     expect(
@@ -906,9 +737,9 @@ describe('claimant intake', () => {
 
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Refresh conversation history' }))
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
 
-    expect(await screen.findByRole('button', { name: /^Resume / })).toBeVisible()
+    expect(await screen.findByRole('button', { name: 'Resume report' })).toBeVisible()
     expect(screen.queryByText('No saved reports are available to resume.')).not.toBeInTheDocument()
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -933,8 +764,8 @@ describe('claimant intake', () => {
 
     const user = userEvent.setup()
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Refresh conversation history' }))
-    await user.click(await screen.findByRole('button', { name: /^Resume / }))
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
+    await user.click(await screen.findByRole('button', { name: 'Resume report' }))
 
     expect(screen.queryByText('Where did the incident happen?')).not.toBeInTheDocument()
     expect(
@@ -962,9 +793,6 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Retry claim message' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'Retry claim message' }))
     await screen.findByRole('button', { name: 'Confirm details' })
-    expect(screen.getByLabelText('Saved conversations')).toBeVisible()
-    expect(screen.getByText(/Incident: Another vehicle hit my parked car/)).toBeVisible()
-    expect(screen.getByText(/Saved · Current conversation/)).toBeVisible()
     expect(screen.getAllByText('Another vehicle hit my parked car.')[0]).toBeVisible()
     expect(screen.queryByText(/Delivery outcome unknown/)).not.toBeInTheDocument()
 
@@ -1642,8 +1470,8 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'Refresh conversation history' }))
-    const resumeButtons = await screen.findAllByRole('button', { name: /^Resume / })
+    await user.click(screen.getByRole('button', { name: 'Resume a saved report' }))
+    const resumeButtons = await screen.findAllByRole('button', { name: 'Resume report' })
     act(() => {
       resumeButtons[0].click()
       resumeButtons[1].click()

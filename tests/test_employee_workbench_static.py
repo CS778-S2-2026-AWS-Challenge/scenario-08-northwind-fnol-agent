@@ -116,44 +116,6 @@ def test_employee_workbench_loads_linked_records_from_the_claim_api() -> None:
         assert fixture_identifier not in page
 
 
-def test_employee_workbench_refreshes_when_new_customer_claims_arrive() -> None:
-    page = WORKBENCH.read_text(encoding='utf-8')
-
-    assert 'const QUEUE_REFRESH_INTERVAL_MS = 5000;' in page
-    assert 'if (queueRefreshInFlight) return;' in page
-    assert 'loadClaims({ silent: true })' in page
-    assert "window.addEventListener('focus', refreshVisibleQueue)" in page
-    assert "document.addEventListener('visibilitychange', refreshVisibleQueue)" in page
-
-
-def test_employee_workbench_exposes_a_bounded_staff_connection_flow() -> None:
-    page = WORKBENCH.read_text(encoding='utf-8')
-
-    assert 'id="staffConnection"' in page
-    assert 'id="staffTokenInput"' in page
-    assert "error.code === 'AUTHENTICATION_REQUIRED'" in page
-    assert "localStorage.setItem('northwind.staffToken', staffToken)" in page
-    assert 'Authorization: `Bearer ${staffToken}`' in page
-
-
-def test_customer_chat_can_accept_a_queued_handoff_before_replying() -> None:
-    page = WORKBENCH.read_text(encoding='utf-8')
-
-    assert 'id="customerChatAccept"' in page
-    assert 'async function acceptCustomerChatHandoff()' in page
-    assert "requestKey('accept-chat-handoff')" in page
-    assert 'body: JSON.stringify({ assignee_id: null })' in page
-    assert "byId('customerChatAccept').addEventListener('click', acceptCustomerChatHandoff)" in page
-
-
-def test_customer_chat_follows_new_messages_without_disrupting_history_review() -> None:
-    page = WORKBENCH.read_text(encoding='utf-8')
-
-    assert 'function isNearCustomerChatBottom(history, threshold = 96)' in page
-    assert 'scrollCustomerChatToLatest({ force: true })' in page
-    assert 'scrollCustomerChatToLatest({ force: followLatest })' in page
-
-
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
@@ -287,7 +249,7 @@ def test_employee_evidence_files_use_the_authorised_staff_viewer() -> None:
 
     assert 'async function viewEvidenceFile(item)' in page
     assert '/evidence/${encodeURIComponent(item.evidence_id)}/content`' in page
-    assert '{ headers: { Authorization: `Bearer ${staffToken}` } }' in page
+    assert '{ headers: { Authorization: `Bearer ${STAFF_TOKEN}` } }' in page
     assert 'label: `View ${item.original_filename}`' in page
     assert "['uploaded', 'processing', 'ready'].includes(item.file_status)" in page
     assert 'id="evidencePreviewDialog"' in page

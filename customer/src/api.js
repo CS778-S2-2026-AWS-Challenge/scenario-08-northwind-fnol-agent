@@ -1,17 +1,7 @@
 let claimantToken = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
-let claimantTokenWasPresentAtStartup = Boolean(claimantToken)
 
-export function setClaimantAccessToken(token, { presentAtStartup = false } = {}) {
+export function setClaimantAccessToken(token) {
   claimantToken = token || ''
-  claimantTokenWasPresentAtStartup = Boolean(claimantToken) && presentAtStartup
-}
-
-export function hasClaimantAccessToken() {
-  return Boolean(claimantToken)
-}
-
-export function hasStartupClaimantAccessToken() {
-  return claimantTokenWasPresentAtStartup
 }
 
 export class ApiRequestError extends Error {
