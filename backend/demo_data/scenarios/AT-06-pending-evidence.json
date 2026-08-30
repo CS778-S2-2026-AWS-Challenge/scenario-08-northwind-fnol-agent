@@ -1,6 +1,7 @@
 {
   "scenario_id": "AT-06-pending-evidence",
   "description": "Synthetic motor claim with a police report that will be generated later.",
+  "business_path": "pending",
   "claim": {
     "claim_id": "clm_fixture_at06",
     "customer_id": "cus_demo",

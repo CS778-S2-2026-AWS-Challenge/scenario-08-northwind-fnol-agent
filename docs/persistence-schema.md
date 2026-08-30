@@ -48,6 +48,7 @@ fixtures, and transaction tests change together.
 | Group | Records | Primary ownership |
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
+| Claimant auth session | hash of an opaque development/test token, authenticated customer reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -58,7 +59,7 @@ fixtures, and transaction tests change together.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | claim-creation result, routing result, external participant task, idempotency result | `claim_id` and operation identity |
+| Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
 | External request | capability and requirement versions, request type, disclosure manifest, consent and authority, idempotency, provider reference, status, verified response, reconciliation result | `claim_id`, `external_request_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
@@ -81,18 +82,38 @@ and checksums rather than embedding those bytes.
 8. Read staff queues by priority, state, owner, next action, and service timing.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Resolve the active configuration version and read its immutable publication record.
-12. Read customer memory only through a purpose-limited, visibility-filtered access path.
-13. Create and process follow-up tasks by due time, responsibility, priority, and status.
-14. Append audit events and query them by authorised subject and time range.
-15. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
+11. Resolve a current task-specific claimant consent before invoking an external participant.
+12. Reserve an immutable external-operation identity and fingerprint before invocation, then
+    recover its accepted result independently of a later Claim State compare-and-set.
+13. Resolve the active configuration version and read its immutable publication record.
+14. Read customer memory only through a purpose-limited, visibility-filtered access path.
+15. Create and process follow-up tasks by due time, responsibility, priority, and status.
+16. Append audit events and query them by authorised subject and time range.
+17. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
     state effect, and final role projection without exposing hidden or restricted data.
-16. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
+18. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
     priority without treating Claim lifecycle as the only work status.
-17. Reconcile an external request by Northwind operation identity, idempotency key, or
+19. Reconcile an external request by Northwind operation identity, idempotency key, or
     provider reference before any retry after an unknown outcome.
-18. Resolve one active, evaluated Model Profile by purpose and privacy class without
+20. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
+21. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+    browser-supplied customer identifier to alter the authenticated principal.
+22. Read and update the authenticated claimant's approved profile and communication
+    preferences by `customer_id` without exposing another Customer record.
+
+## Development/Test Identity Invariants
+
+- Raw claimant access tokens are returned once and are never persisted; repositories retain
+  only a one-way token hash.
+- A session binds exactly one server-selected `customer_id`, creation time, expiry time, and
+  optional revocation time.
+- Expired or revoked sessions cannot authenticate and logout is immediately effective.
+- Synthetic credential verification and session persistence are fixture capabilities only;
+  selecting a production environment fails closed until an approved identity provider and
+  durable identity adapter exist.
+- Profile and communication preferences are Customer records, not browser-local authority.
+- Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 
 ## Claim Revision and Idempotency
 
@@ -103,6 +124,24 @@ and checksums rather than embedding those bytes.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- External-service consent records are claim-scoped and retain service identity, requested
+  action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
+  consent change advances the Working Claim revision; an adapter result cannot invent or
+  reactivate consent.
+- The claimant consent mutation atomically stores its idempotency result with the one Claim State
+  revision advance. The assessor request uses a separate operation identity so provider retry does
+  not replay or rewrite the consent mutation.
+- Assessor routing persists its immutable identity, complete request fingerprint, consent and
+  authority references, authorised claim revision, and `prepared` state before provider
+  invocation. The authority decision and prepared operation are one atomic repository mutation;
+  retries never replace the durable decision record. Retryable failure, terminal failure, and
+  accepted result are explicit transitions.
+- Provider acceptance is durable before the final Claim State compare-and-set. If another claim
+  mutation advances the revision first, an unchanged retry reconciles the accepted result into a
+  new claim revision without invoking or creating a second external task.
+- If the Claim result is durable but the public route-idempotency response is not, an unchanged
+  retry derives the same decision identity, verifies its authorised revision, restores the stored
+  routing result, and then completes the missing idempotency response.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 
@@ -189,7 +228,8 @@ and checksums rather than embedding those bytes.
   motivated the review.
 - An Agent decision identifies whether its proposal came from `controlled_agent` or
   `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
-  profile, provider-reported model identifier, and provider request identifier when supplied.
+  profile, executable prompt identifier, provider-reported model identifier, and provider request
+  identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic

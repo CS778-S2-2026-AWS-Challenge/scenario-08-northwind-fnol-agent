@@ -105,11 +105,15 @@ HUMAN_REQUEST_PATTERNS = (
 )
 PENDING_POLICE_REPORT_PATTERNS = (
     re.compile(
-        r'\bpolice\s+(?:report|reference)\b.*\b(?:later|next\s+week|pending|not\s+ready)\b',
+        r'\bpolice\b[^.!?]{0,100}\b(?:report|reference)\b[^.!?]{0,100}'
+        r'\b(?:later|next\s+week|pending|not\s+(?:ready|available|issued|generated)|'
+        r'has\s+not\s+been\s+(?:issued|generated)|hasn\x27t\s+been\s+(?:issued|generated))\b',
         re.IGNORECASE,
     ),
     re.compile(
-        r'\b(?:later|next\s+week|pending|not\s+ready)\b.*\bpolice\s+(?:report|reference)\b',
+        r'\b(?:later|next\s+week|pending|not\s+(?:ready|available|issued|generated)|'
+        r'has\s+not\s+been\s+(?:issued|generated)|hasn\x27t\s+been\s+(?:issued|generated))\b'
+        r'[^.!?]{0,100}\bpolice\b[^.!?]{0,60}\b(?:report|reference)\b',
         re.IGNORECASE,
     ),
 )
@@ -419,6 +423,10 @@ class AgentTurnProvider(Protocol):
 
 def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal | None:
     message_text = context.message_text or ''
+    active_handoff = context.claim.claim_state.next_action in {
+        AgentAction.HANDOFF,
+        AgentAction.URGENT_HANDOFF,
+    }
     injury_signal = _contains_unnegated_signal(
         message_text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS
     )
@@ -452,10 +460,9 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='urgent',
             controlled_rule_authorised=True,
         )
-    if context.claim.claim_state.next_action not in {
-        AgentAction.HANDOFF,
-        AgentAction.URGENT_HANDOFF,
-    } and any(pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS):
+    if not active_handoff and any(
+        pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS
+    ):
         return AgentProposal(
             action=AgentAction.HANDOFF,
             reason_codes=['HUMAN_SUPPORT_REQUESTED'],
@@ -481,50 +488,8 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='standard',
             controlled_rule_authorised=True,
         )
-    return None
-
-
-class InvariantGuardedAgent:
-    """Applies server-owned turn interrupts before the configured provider."""
-
-    def __init__(self, provider: AgentTurnProvider) -> None:
-        self._provider = provider
-
-    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        interrupt = deterministic_interrupt_proposal(context)
-        return interrupt if interrupt is not None else self._provider.propose_turn(context)
-
-
-class ControlledAgent:
-    """Deterministic prototype provider that can be replaced by a model adapter."""
-
-    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        message_text = context.message_text or ''
-        interrupt = deterministic_interrupt_proposal(context)
-        if interrupt is not None:
-            return interrupt
-        if context.claim.claim_state.next_action in {
-            AgentAction.HANDOFF,
-            AgentAction.URGENT_HANDOFF,
-        }:
-            return AgentProposal(
-                action=AgentAction.UPDATE,
-                reason_codes=['HANDOFF_ALREADY_QUEUED'],
-                customer_reason='Your additional information has been kept with the report.',
-                customer_response=(
-                    'I have added that information to the report already waiting for Northwind '
-                    'support.'
-                ),
-                customer_next_step=context.claim.customer_next_step,
-                form_changes=[],
-                state_changes=[],
-                proposed_signals=[],
-                required_tools=[],
-                next_action_requirements=[],
-            )
-        if context.professional_review_required and any(
-            pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS
-        ):
+    if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
+        if context.professional_review_required and not active_handoff:
             return AgentProposal(
                 action=AgentAction.UPDATE,
                 reason_codes=['EVIDENCE_PENDING_GENERATION', 'PROFESSIONAL_REVIEW_REQUIRED'],
@@ -560,8 +525,75 @@ class ControlledAgent:
                     },
                 ],
                 next_action_requirements=[],
+                controlled_rule_authorised=True,
             )
+        pending_field = context.claim.form.get('authorities.police_report_reference')
+        already_pending = (
+            pending_field is not None and pending_field.status is FormStatus.PENDING_GENERATION
+        )
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['EVIDENCE_PENDING_GENERATION'],
+            customer_reason='The police report has not been issued and is needed only later.',
+            customer_response=(
+                'That is okay. I have recorded that the police report is expected later. '
+                'It will not block the parts of your report that can safely continue now.'
+            ),
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=(
+                []
+                if already_pending
+                else [
+                    {
+                        'tool': 'evidence_registry',
+                        'operation': 'record_pending_generation',
+                        'kind': 'police_report',
+                    }
+                ]
+            ),
+            next_action_requirements=[],
+            controlled_rule_authorised=True,
+        )
+    if active_handoff:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['HANDOFF_ALREADY_QUEUED'],
+            customer_reason='Your additional information has been kept with the report.',
+            customer_response=(
+                'I have added that information to the report already waiting for Northwind support.'
+            ),
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=[],
+        )
+    return None
 
+
+class InvariantGuardedAgent:
+    """Applies server-owned turn interrupts before the configured provider."""
+
+    def __init__(self, provider: AgentTurnProvider) -> None:
+        self._provider = provider
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        interrupt = deterministic_interrupt_proposal(context)
+        return interrupt if interrupt is not None else self._provider.propose_turn(context)
+
+
+class ControlledAgent:
+    """Deterministic prototype provider that can be replaced by a model adapter."""
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        message_text = context.message_text or ''
+        interrupt = deterministic_interrupt_proposal(context)
+        if interrupt is not None:
+            return interrupt
         if context.message_text is not None:
             guided = _guided_proposal(context, message_text)
             if guided is not None:

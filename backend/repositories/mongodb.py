@@ -121,6 +121,28 @@ def connect_mongodb_repository(config: MongoDBConnectionConfig) -> 'MongoDBRepos
         ) from None
 
 
+def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
+    """Ping MongoDB without constructing a repository or changing provider state."""
+
+    client: MongoClient[Any] | None = None
+    try:
+        client = MongoClient(
+            config.uri,
+            serverSelectionTimeoutMS=config.server_selection_timeout_ms,
+        )
+        client.admin.command('ping')
+        return 'verified'
+    except (PyMongoError, ValueError):
+        return 'unavailable'
+    finally:
+        if client is not None:
+            client.close()
+
+
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+"""Child records whose identity may never be rebound or rewritten once persisted."""
+
+
 class MongoDBRepository:
     """MongoDB implementation of the core Claim/Session/Message boundary.
 
@@ -313,6 +335,9 @@ class MongoDBRepository:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -334,6 +359,29 @@ class MongoDBRepository:
                 projection={'revision': 1},
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
+
+    def save_claim_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        if (
+            claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=[],
+            )
+        )
 
     def get_session(
         self,
@@ -809,11 +857,14 @@ class MongoDBRepository:
     ) -> None:
         if (
             claim.revision != expected_revision + 1
+            or claim.active_session_id != session.session_id
             or session.claim_id != claim.claim_id
             or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
             or session.context_revision != claim.revision
             or message.claim_id != claim.claim_id
             or message.session_id != session.session_id
+            or message.actor is not ActorType.CLAIMANT
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
@@ -1001,7 +1052,13 @@ class MongoDBRepository:
                 customer_id=claim.customer_id,
                 session=mongo_session,
             )
-            if stored_session is None or stored_session.claim_id != claim.claim_id:
+            if (
+                stored_session is None
+                or stored_session.claim_id != claim.claim_id
+                or stored_session.status is not SessionStatus.ACTIVE
+                or session.status is not SessionStatus.ACTIVE
+                or claim.active_session_id != session.session_id
+            ):
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
             if kind == 'message':
@@ -1017,6 +1074,8 @@ class MongoDBRepository:
                 if (
                     message_session is None
                     or message_session.claim_id != claim.claim_id
+                    or message_session.status is not SessionStatus.ACTIVE
+                    or claim.active_session_id != record.session_id
                     or idempotency.session_id != record.session_id
                     or record.message_id
                     not in {idempotency.message_id, idempotency.agent_message_id}
@@ -1039,6 +1098,7 @@ class MongoDBRepository:
             if existing is not None and (
                 existing.get('claim_id') != claim.claim_id
                 or existing.get('customer_id') != claim.customer_id
+                or kind in IMMUTABLE_CHILD_RECORD_KINDS
             ):
                 raise IdempotencyConflict(identifier)
             self._reject_client_message_conflict(document, session=mongo_session)
@@ -1079,11 +1139,14 @@ class MongoDBRepository:
                 'customer_id': claim.customer_id,
                 'revision': expected_revision,
             },
-            projection={'revision': 1},
+            projection={'revision': 1, 'active_session_id': 1},
             session=mongo_session,
         )
         if current is None:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            return
+        if current.get('active_session_id') != claim.active_session_id:
+            raise KeyError(claim.claim_id)
 
     def _replace_claim_revision(
         self,
