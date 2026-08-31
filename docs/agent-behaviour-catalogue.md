@@ -6,7 +6,7 @@ This catalogue is the bounded behaviour deliverable for issue #233. It defines t
 behaviour contract that the route dispatcher and later Runtime work must implement. It does
 not claim that every target action or provider is already implemented. Current transport
 schemas remain in `docs/api.md`. Target Runtime objects and delivery levels are defined by
-the coordinated design in PR #314 and `docs/agent-runtime-target.md`. This catalogue is
+the coordinated design in PR #314 and `docs/design/agent-runtime/agent-runtime-target.md`. This catalogue is
 reviewed first as the behavioural baseline; PR #314 merges first so that its target contract
 exists before this dependent catalogue merges. The two PRs are intentionally sequenced, and
 this catalogue does not duplicate the target object definitions.
