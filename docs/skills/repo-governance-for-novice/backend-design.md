@@ -167,7 +167,7 @@ database). Five rules extracted from AWS DynamoDB best practices:
 
 ## 12.5 Code style
 
-The tool configuration behind `./scripts/check.ps1` (ruff, mypy, and the rest)
+The tool configuration used by the CircleCI backend-quality job (ruff, mypy, and the rest)
 is authoritative. Only the following **tool blind-spot** rules are extracted
 from the Google Python / TypeScript style guides; on any conflict with tool
 configuration, the tools win. The Airbnb JavaScript Style Guide is not adopted
