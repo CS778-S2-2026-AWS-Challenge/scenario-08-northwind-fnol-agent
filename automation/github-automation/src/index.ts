@@ -1,17 +1,44 @@
 import { synchronizeReadyDrafts } from "./drafts";
 import { GitHubClient } from "./github";
+import { ISSUE_POLICY_ACTIONS, evaluateIssuePolicy } from "./issue-policy";
 import { syncPullRequestKanban } from "./kanban";
 import { evaluatePullRequestPolicy } from "./pr-policy";
 import { reconcilePullRequestStatuses } from "./reconcile";
 import type { GitHubQueueMessage, WorkerEnv } from "./types";
-import { parsePullRequestEvent } from "./validation";
+import { parseIssueEvent, parsePullRequestEvent } from "./validation";
 import { handleWebhook } from "./webhook";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function processIssueEvent(message: GitHubQueueMessage, env: WorkerEnv): Promise<void> {
+  const event = parseIssueEvent(message.payload);
+  if (event.repository.fullName.toLowerCase() !== env.TARGET_REPOSITORY.toLowerCase()) {
+    console.warn(JSON.stringify({
+      event: "repository_ignored",
+      deliveryId: message.deliveryId,
+      repository: event.repository.fullName,
+    }));
+    return;
+  }
+  if (!ISSUE_POLICY_ACTIONS.includes(event.action)) return;
+
+  const client = new GitHubClient(env.GITHUB_TOKEN);
+  const policy = await evaluateIssuePolicy(event, client, env.MAINTAINER_LOGIN);
+  console.log(JSON.stringify({
+    event: "issue_processed",
+    deliveryId: message.deliveryId,
+    issue: event.issue.number,
+    policyErrors: policy.errors.length,
+  }));
+}
+
 async function processGitHubEvent(message: GitHubQueueMessage, env: WorkerEnv): Promise<void> {
+  if (message.eventName === "issues") {
+    await processIssueEvent(message, env);
+    return;
+  }
   if (message.eventName !== "pull_request") return;
   const event = parsePullRequestEvent(message.payload);
   if (event.repository.fullName.toLowerCase() !== env.TARGET_REPOSITORY.toLowerCase()) {

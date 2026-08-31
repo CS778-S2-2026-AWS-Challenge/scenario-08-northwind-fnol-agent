@@ -188,6 +188,7 @@ def test_fixture_repository_supports_customer_message_and_evidence_access_patter
 def test_fixture_repository_persists_agent_turn_as_one_consistent_unit() -> None:
     repository = FixtureRepository()
     claim, session = make_claim()
+    claim = claim.model_copy(update={'active_session_id': session.session_id})
     repository.create_claim(claim, session)
     claimant_message = MessageRecord(
         message_id='msg_claimant',

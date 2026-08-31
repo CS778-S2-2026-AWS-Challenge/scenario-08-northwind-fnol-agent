@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fieldContent, validateIssueBody } = require('./issue_policy.cjs');
+const { fieldContent, validateDiscussionApproval, validateIssueBody } = require('./issue_policy.cjs');
 
 const validBody = `### Issue type
 Regression validation
@@ -20,6 +20,21 @@ Refs #134
 
 ### Dependencies
 None
+
+### Owned behavior
+Fallback response regression evidence.
+
+### Expected impact area
+Backend API tests.
+
+### Non-goals
+No route or UI changes.
+
+### Shared contracts
+None
+
+### Risk class
+Standard
 
 ### Owner or responsible contributor
 @jxu316-arch`;
@@ -82,6 +97,54 @@ test('rejects an unsupported issue type', () => {
   assert.ok(result.errors.some((error) => error.includes('Choose one of')));
 });
 
+test('rejects missing ownership boundaries and an unsupported risk class', () => {
+  const body = validBody
+    .replace('Fallback response regression evidence.', '')
+    .replace('Standard\n\n### Owner', 'Unbounded\n\n### Owner');
+  const errors = validateIssueBody({ body }).errors;
+  assert.ok(errors.some((error) => error.includes('Owned behavior')));
+  assert.ok(errors.some((error) => error.includes('risk class')));
+});
+
 test('extracts a field without HTML comments', () => {
   assert.equal(fieldContent('### Deliverable\n<!-- prompt -->\nAdd a test\n### Dependencies\nNone', 'Deliverable'), 'Add a test');
+});
+
+test('skips discussion approval for issues created by the maintainer', () => {
+  const result = validateDiscussionApproval({
+    body: validBody,
+    creator: 'Ysoseri1224',
+    maintainer: 'Ysoseri1224',
+  });
+  assert.deepEqual(result.errors, []);
+});
+
+test('rejects a non-maintainer issue without a discussion approval link', () => {
+  const result = validateDiscussionApproval({
+    body: validBody,
+    creator: 'someone-else',
+    maintainer: 'Ysoseri1224',
+  });
+  assert.equal(result.errors.length, 1);
+  assert.ok(result.errors[0].includes('Discussion approval'));
+});
+
+test('accepts a non-maintainer issue with an approved discussion thread URL', () => {
+  const body = `${validBody}\n### Discussion approval\nhttps://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/12\n`;
+  const result = validateDiscussionApproval({
+    body,
+    creator: 'someone-else',
+    maintainer: 'Ysoseri1224',
+  });
+  assert.deepEqual(result.errors, []);
+});
+
+test('rejects a non-maintainer discussion approval field without a thread URL', () => {
+  const body = `${validBody}\n### Discussion approval\nNone - I prefer not to ask.\n`;
+  const result = validateDiscussionApproval({
+    body,
+    creator: 'someone-else',
+    maintainer: 'Ysoseri1224',
+  });
+  assert.equal(result.errors.length, 1);
 });

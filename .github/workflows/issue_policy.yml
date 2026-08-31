@@ -30,11 +30,19 @@ jobs:
 
       - name: Validate issue content
         uses: actions/github-script@v7
+        env:
+          MAINTAINER_LOGIN: Ysoseri1224
         with:
           script: |
             const policy = require('./.github/scripts/issue_policy.cjs');
             const issue = context.payload.issue;
             const result = policy.validateIssueBody({body: issue.body || ''});
+            const approval = policy.validateDiscussionApproval({
+              body: issue.body || '',
+              creator: issue.user?.login || '',
+              maintainer: process.env.MAINTAINER_LOGIN,
+            });
+            result.errors.push(...approval.errors);
             const marker = '<!-- issue-policy -->';
 
             if (result.errors.length === 0) {

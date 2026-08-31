@@ -17,12 +17,13 @@ from backend.adapters.evidence_storage import (
 from backend.api.evidence import _read_bounded_upload
 from backend.api.workbench import _evidence_storage_key, _safe_download_filename
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.repositories.fixture import FixtureRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 UPLOAD_PAYLOAD = {
     'kind': 'incident_image',
@@ -131,7 +132,7 @@ def storage_client(
     storage_repository: FixtureRepository,
     storage: MockEvidenceStorage,
 ) -> TestClient:
-    app = create_app(Settings(), storage_repository, evidence_storage=storage)
+    app = create_app(DEVELOPER_SETTINGS, storage_repository, evidence_storage=storage)
     return TestClient(app)
 
 

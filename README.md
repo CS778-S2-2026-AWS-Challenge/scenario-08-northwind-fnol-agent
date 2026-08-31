@@ -26,17 +26,18 @@ The service should:
 
 ## Current Stage
 
-The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, and staff review. Control Plane implementation is product-direction work tracked separately as extra backlog, not a committed Sprint 2 capacity item.
+The project is in Sprint 3 and is advancing the MVP into a repeatable Validation Prototype. Current work validates the Agent, claimant and staff experiences, shared Claim Context, knowledge retrieval, data runtime profiles, Control Plane, third-party service boundaries, and confirmed AWS capabilities across representative motor, home, and contents paths.
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
 ## Repository Operation Rules
 
-All contributors and coding agents must follow [the repository operation rules](docs/repo_rule.md).
-Coding agents enter through [AGENT.md](AGENT.md), which defines the mandatory reading order and
-authority boundary. Install the versioned local quality hook once per clone:
+All contributors and coding agents must follow the
+[repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its
+file index. Install the versioned local quality hook once per clone:
 
 ```powershell
 ./scripts/install-git-hooks.ps1
@@ -57,7 +58,7 @@ agents must not merge pull requests or change Draft status without explicit curr
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
-| `docs/` | API contract, engineering conventions, and research material |
+| `docs/` | Product direction, API contract, engineering conventions, and research material |
 | `sprint/` | Time-bound sprint commitments and delivery flow |
 | `scripts/` | Repository-level development and verification commands |
 
@@ -86,6 +87,15 @@ Start the backend:
 ```powershell
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+To run a configured model profile from the ignored project `.env`, load it explicitly:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+```
+
+Deployment environments inject the same variable names through their secret and configuration
+mechanisms; they must not package the local `.env` file.
 
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
@@ -148,7 +158,8 @@ The command clears only the in-memory fixture repository and mock adapter state,
 prints a record count for every cleared store, and exits non-zero when the backend
 cannot confirm the reset. It refuses to run against components that have not
 explicitly opted into the synthetic reset boundary. The concrete API and logical
-DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
+DynamoDB mapping is preserved as a historical Sprint 1
+[fixture example](docs/archive/sprint-1/validation/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 
