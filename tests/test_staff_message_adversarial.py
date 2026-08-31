@@ -208,21 +208,16 @@ def test_staff_reply_rejects_message_from_another_claim_without_mutation(
     other_body = other_claim.json()
     other_claim_id = cast(str, other_body['claim']['claim_id'])
     other_session_id = cast(str, other_body['session']['session_id'])
-    other_message = client.post(
-        f'/api/v1/claims/{other_claim_id}/sessions/{other_session_id}/messages',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'cross-claim-target-message',
-            'If-Match': str(other_body['claim']['revision']),
-        },
-        json={
-            'client_message_id': 'cross-claim-target-message',
-            'content': {'type': 'text', 'text': 'This belongs to another claim.'},
-            'evidence_refs': [],
-        },
+    other_message = MessageRecord(
+        message_id='msg_cross_claim_reply_target',
+        claim_id=other_claim_id,
+        session_id=other_session_id,
+        actor=ActorType.CLAIMANT,
+        visibility=MessageVisibility.SHARED,
+        content={'type': 'text', 'text': 'This belongs to another claim.'},
+        created_at=datetime(2026, 8, 26, 7, 45, tzinfo=UTC),
     )
-    assert other_message.status_code == 200
-    other_message_id = cast(str, other_message.json()['claimant_message']['message_id'])
+    repository.save_message(other_message, claim.customer_id)
 
     before_messages = repository.list_messages(
         claim_id,
@@ -241,7 +236,7 @@ def test_staff_reply_rejects_message_from_another_claim_without_mutation(
         },
         json={
             'content': {'type': 'text', 'text': 'Cross-claim reply should be rejected.'},
-            'in_reply_to': other_message_id,
+            'in_reply_to': other_message.message_id,
         },
     )
 
