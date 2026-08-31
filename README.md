@@ -36,15 +36,10 @@ The product direction is summarised in [Northwind FNOL Product Soul](docs/produc
 
 All contributors and coding agents must follow the
 [repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
-Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its
-file index. Install the versioned local quality hook once per clone:
-
-```powershell
-./scripts/install-git-hooks.ps1
-```
-
-Every pull request must reference a repository issue and pass the required GitHub checks. Coding
-agents must not merge pull requests or change Draft status without explicit current authorisation.
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its file index.
+Every pull request must reference a repository issue and pass the configured remote quality
+checks. Coding agents must not merge pull requests or change Draft status without explicit current
+authorisation.
 
 ## Repository Layout
 
@@ -102,6 +97,18 @@ FastAPI evidence flow against local MinIO, start the packaged service and config
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
 
+To run the bounded local MVP persistence path, start the local MongoDB replica set and MinIO
+initialisers, then use `deploy/runtime/local-mvp.env.example`. The repeatable
+`py -3.12 scripts/run_local_mvp_smoke.py` check verifies MongoDB-backed claimant/staff recovery,
+revision and idempotency behaviour, protected MinIO evidence bytes, and governed knowledge
+retrieval. Policy/history remain synthetic. After those checks pass,
+`py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
+against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
+accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
+and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
+transport is repeatable contract evidence, not a live-provider claim; a live run additionally
+requires an approved endpoint and secret supplied through the documented model environment.
+
 In another terminal, start the claimant client:
 
 ```powershell
@@ -116,15 +123,22 @@ Copy the non-secret values from `.env.example` into the process environment when
 
 ## Verification
 
-Run the complete repository quality gate before pushing and before requesting review:
+CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
+linting, types, tests and coverage, PR policy, GitHub automation, documentation, and the claimant
+client for every pull request.
+
+For focused local backend verification while developing, run the checks affected by the change:
 
 ```powershell
-./scripts/check.ps1
+py -3.12 -m ruff format --check .
+py -3.12 -m ruff check .
+py -3.12 -m mypy backend tests
+py -3.12 -m pytest
 ```
 
-After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run.
-The command checks backend formatting, linting, types, tests and coverage, the pull-request policy
-validator, the external GitHub automation Worker, and then checks and builds the claimant client.
+The claimant and GitHub automation packages retain their own `npm` verification commands. Local
+focused checks shorten feedback time but do not replace the exact-head CircleCI result required for
+review and merge.
 
 Run the synthetic integration fixtures from the repository root with:
 

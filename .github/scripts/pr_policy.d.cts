@@ -3,7 +3,6 @@ export interface PullRequestPolicyInput {
   isDraft: boolean;
   owner: string;
   repo: string;
-  requireLocalQualityEvidence?: boolean;
 }
 
 export interface PullRequestPolicyResult {

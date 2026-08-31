@@ -32,6 +32,10 @@ def _local_minio_result(endpoint: str | None) -> dict[str, object]:
     return result
 
 
+def _local_mvp_result() -> dict[str, object]:
+    return _runtime_result('local-mvp.env.example')
+
+
 def _mongodb_connectivity(probe: bool) -> str:
     if not probe:
         return 'not_checked'
@@ -46,6 +50,7 @@ def build_validation_report(
 ) -> tuple[dict[str, object], bool]:
     fixture = _runtime_result('fixture.env.example')
     local_minio = _local_minio_result(minio_endpoint)
+    local_mvp = _local_mvp_result() if minio_endpoint is not None else None
     mongodb = _runtime_result('mongodb.env.example')
     cloudflare = _runtime_result('cloudflare.env.example')
     aws = _runtime_result('aws.env.example')
@@ -69,6 +74,18 @@ def build_validation_report(
                 'startup': local_minio,
                 'scope': 'fixture data bundle with explicit S3-compatible evidence storage',
             },
+            'local_mvp': {
+                'classification': (
+                    'verified'
+                    if local_mvp is not None and local_mvp.get('status') == 'startup_ready'
+                    else 'not_checked'
+                ),
+                'startup': local_mvp,
+                'scope': (
+                    'local MongoDB persistence and MinIO evidence/knowledge; '
+                    'synthetic policy/history'
+                ),
+            },
             'mongodb': {
                 'classification': 'partial',
                 'startup': mongodb,
@@ -88,7 +105,12 @@ def build_validation_report(
     }
     expected = fixture.get('status') == 'startup_ready' and candidate_refusal
     if minio_endpoint is not None:
-        expected = expected and local_minio.get('status') == 'startup_ready'
+        expected = (
+            expected
+            and local_minio.get('status') == 'startup_ready'
+            and local_mvp is not None
+            and local_mvp.get('status') == 'startup_ready'
+        )
     return report, expected
 
 

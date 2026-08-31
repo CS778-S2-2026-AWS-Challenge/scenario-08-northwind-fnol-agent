@@ -60,7 +60,7 @@ async function processGitHubEvent(message: GitHubQueueMessage, env: WorkerEnv): 
     "synchronize",
   ];
   const policy = policyActions.includes(event.action)
-    ? await evaluatePullRequestPolicy(event, client, env.REMOTE_CI_PROVIDER)
+    ? await evaluatePullRequestPolicy(event, client)
     : { errors: [] };
   await syncPullRequestKanban(event, client, env);
   console.log(JSON.stringify({

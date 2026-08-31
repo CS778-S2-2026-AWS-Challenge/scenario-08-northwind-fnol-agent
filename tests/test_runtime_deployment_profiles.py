@@ -23,6 +23,11 @@ EXAMPLES = ROOT / 'deploy' / 'runtime'
             DataRuntimeProfile.FIXTURE,
             ObjectStorageAdapter.S3_COMPATIBLE,
         ),
+        (
+            'local-mvp.env.example',
+            DataRuntimeProfile.LOCAL_MVP,
+            ObjectStorageAdapter.S3_COMPATIBLE,
+        ),
         ('mongodb.env.example', DataRuntimeProfile.MONGODB, ObjectStorageAdapter.S3_COMPATIBLE),
         ('cloudflare.env.example', DataRuntimeProfile.CLOUDFLARE, ObjectStorageAdapter.FIXTURE),
         ('aws.env.example', DataRuntimeProfile.AWS, ObjectStorageAdapter.FIXTURE),
@@ -59,6 +64,16 @@ def test_fixture_example_passes_the_real_startup_preflight() -> None:
 
 def test_fixture_example_enables_the_development_identity_boundary() -> None:
     values = load_environment_example(EXAMPLES / 'fixture.env.example')
+
+    with isolated_environment(values):
+        settings = Settings.from_environment()
+
+    assert settings.environment == 'development'
+    assert settings.identity_mode is IdentityMode.DEVELOPER
+
+
+def test_local_mvp_example_enables_the_development_identity_boundary() -> None:
+    values = load_environment_example(EXAMPLES / 'local-mvp.env.example')
 
     with isolated_environment(values):
         settings = Settings.from_environment()
@@ -136,6 +151,61 @@ def test_local_minio_example_refuses_startup_when_service_is_unavailable(
     assert result['status'] == 'startup_refused'
     assert result['readiness']['evidence_storage'] == 'unavailable'  # type: ignore[index]
     assert 'evidence_storage=unavailable' in str(result['reason'])
+
+
+def test_local_mvp_example_preflights_the_complete_configured_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConnectedRepository:
+        @staticmethod
+        def connection_status() -> str:
+            return 'verified'
+
+        @staticmethod
+        def close() -> None:
+            return None
+
+    class AvailableAdapter:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'configured_service'
+
+        @staticmethod
+        def get_chunk(_chunk_id: str) -> None:
+            return None
+
+        @staticmethod
+        def search(_request: object) -> list[object]:
+            return []
+
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.connect_mongodb_repository',
+        lambda _config: ConnectedRepository(),
+    )
+    monkeypatch.setattr('backend.core.runtime_profiles.MinioEvidenceStorage', AvailableAdapter)
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeObjectStore.from_config',
+        lambda _config: object(),
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeRetriever', AvailableAdapter
+    )
+
+    result, exit_code = inspect_runtime(EXAMPLES / 'local-mvp.env.example')
+
+    assert exit_code == 0
+    assert result['status'] == 'startup_ready'
+    assert result['readiness'] == {
+        'persistence': 'verified',
+        'evidence_storage': 'configured_service',
+        'policy': 'using_fixture',
+        'claim_history': 'using_fixture',
+        'knowledge_documents': 'configured_service',
+        'knowledge_retrieval': 'configured_service',
+    }
 
 
 def test_environment_inspection_does_not_inherit_or_leak_managed_host_settings(
