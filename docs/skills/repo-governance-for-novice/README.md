@@ -73,7 +73,7 @@ The skill is written for the Northwind FNOL repository but designed for
 minimal-cost porting. See the "Adapting this skill to another repository"
 section at the end of `SKILL.md` for the exact list of anchors to edit
 (maintainer handle, CODEOWNERS block, Kanban URL, contract-document paths,
-quality-gate scripts, stack descriptions).
+remote quality checks, stack descriptions).
 
 ## Versioning
 

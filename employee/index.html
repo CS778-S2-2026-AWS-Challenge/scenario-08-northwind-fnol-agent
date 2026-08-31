@@ -164,7 +164,6 @@
     .detail-panel > #detailStaffActions { order:1; }
     .detail-panel > #detailReview { order:2; }
     .detail-panel > #detailEvidence { order:3; }
-    .detail-panel > #detailNextStep { order:4; }
     .detail-panel > #detailHistory { order:5; }
     .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
     .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
@@ -369,6 +368,7 @@
 
     /* Assistant and customer conversation components */
     .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
+    .chat-widget[hidden] { display:none; }
     .chat-widget.dragging { opacity:.96; transition:none; }
     .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
     .chat-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 18px; background:linear-gradient(135deg,#173a56 0%,#157f79 100%); color:#fff; cursor:grab; touch-action:none; user-select:none; }
@@ -395,14 +395,10 @@
 
     .chat-attachment-preview div { font-size:12px; line-height:1.3; }
     .chat-attachment-preview small { display:block; color:#68707d; margin-top:4px; }
-    .customer-chat-view { min-height:calc(100vh - 48px); }
-    .customer-chat-panel { min-height:calc(100vh - 48px); display:grid; grid-template-rows:auto 1fr; overflow:hidden; border:1px solid #e2e8f0; border-radius:18px; background:#fff; box-shadow:0 18px 48px rgba(15,23,42,.04); }
-    .customer-chat-panel > header { display:flex; align-items:center; justify-content:space-between; padding:20px; border-bottom:1px solid #e2e8f0; }
-    .customer-chat-content { min-height:0; display:grid; grid-template-columns:250px 1fr; }
+    .customer-chat-content { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr); }
     .customer-chat-list { padding:18px; overflow:auto; border-right:1px solid #e2e8f0; background:#fbfeff; }
     .customer-chat-list h3 { margin:0 0 12px; font-size:12px; color:#475467; letter-spacing:.08em; text-transform:uppercase; }
-    .customer-chat-list button { width:100%; margin-bottom:8px; padding:10px 12px; border:1px solid #d7e0e9; border-radius:10px; background:#f8fbfc; color:#0f3444; text-align:left; cursor:pointer; }
-    .customer-chat-list button.active { border-color:#157f79; background:#157f79; color:#fff; }
+    .customer-chat-list .context-row { grid-template-columns:1fr; }
     .customer-chat-main { min-width:0; min-height:0; display:flex; flex-direction:column; padding:18px; }
     .customer-chat-title { display:flex; align-items:start; justify-content:space-between; gap:12px; margin-bottom:14px; }
     .customer-chat-status { color:#64748b; font-size:12px; margin-top:4px; }
@@ -415,7 +411,6 @@
     .agent-suggestion-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
     .agent-suggestion-heading strong { margin-right:auto; color:#5b21b6; }
     .agent-suggestion-status { color:#6b7280; font-size:11px; }
-    .agent-suggestion-copy { width:100%; min-height:72px; margin-top:9px; padding:9px 10px; border:1px solid #ddd6fe; border-radius:9px; background:#fff; color:#312e81; font:inherit; resize:vertical; }
     .agent-suggestion-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
     .agent-suggestion-actions button { padding:7px 10px; border:1px solid #a78bfa; border-radius:8px; background:#fff; color:#5b21b6; font-weight:700; cursor:pointer; }
     .agent-suggestion-actions button:disabled { opacity:.5; cursor:not-allowed; }
@@ -464,6 +459,8 @@
     @media(max-width:720px) {
       .content { width:100%; min-width:0; padding:14px 12px; }
       .panel, .detail-panel, .panel-body, .review-workspace { min-width:0; }
+      .customer-chat-content { grid-template-columns:1fr; }
+      .customer-chat-input { flex-wrap:wrap; }
       .panel-header { align-items:flex-start; padding:14px; }
       .panel-body, .review-workspace { padding:14px; }
       .queue-overview { grid-template-columns:1fr; }
@@ -472,8 +469,6 @@
       .claim-detail-tabs { top:8px; margin-inline:-4px; }
       .claim-detail-tabs button { padding:9px 11px; font-size:12px; }
       .claim-list button { width:100%; }
-      .customer-chat-content { grid-template-columns:1fr; }
-      .customer-chat-list { display:none; }
       .chat-widget { right:8px; bottom:8px; width:min(300px,calc(100vw - 16px)); }
     }
   </style>
@@ -512,7 +507,7 @@
           <nav class="sidebar-nav" aria-label="Workbench navigation">
             <button id="workbenchNav" class="active" type="button" title="Claim workbench"><span class="nav-icon" aria-hidden="true">▦</span><span class="nav-label">Claim workbench</span></button>
             <button id="pendingEvidenceNav" type="button" title="Pending evidence"><span class="nav-icon" aria-hidden="true">◷</span><span class="nav-label">Pending evidence</span></button>
-            <button id="customerChatNav" type="button" title="Customer chat"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-label">Customer chat</span></button>
+            <button id="customerChatNav" type="button" title="Claim conversations"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-label">Claim conversations</span></button>
           </nav>
         </div>
 
@@ -577,34 +572,77 @@
 
         <section class="detail-panel">
           <nav id="claimDetailTabs" class="claim-detail-tabs" aria-label="Claim detail sections" role="tablist" hidden>
-            <button type="button" role="tab" data-detail-tab="overview" aria-selected="true">Claim detail &amp; review</button>
-            <button type="button" role="tab" data-detail-tab="evidence" aria-selected="false">Evidence and claim facts</button>
-            <button type="button" role="tab" data-detail-tab="review" aria-selected="false">Handoffs and internal review</button>
-            <button type="button" role="tab" data-detail-tab="history" aria-selected="false">History and continuity</button>
+            <button id="claimDetailOverviewTab" type="button" role="tab" data-detail-tab="overview" aria-controls="detailSummary" aria-selected="true">Claim detail &amp; review</button>
+            <button id="claimDetailEvidenceTab" type="button" role="tab" data-detail-tab="evidence" aria-controls="detailEvidence" aria-selected="false">Evidence and claim facts</button>
+            <button id="claimDetailReviewTab" type="button" role="tab" data-detail-tab="review" aria-controls="detailReview" aria-selected="false">Handoffs and internal review</button>
+            <button id="claimDetailConversationTab" type="button" role="tab" data-detail-tab="conversation" aria-controls="detailConversation" aria-selected="false">Conversation</button>
+            <button id="claimDetailHistoryTab" type="button" role="tab" data-detail-tab="history" aria-controls="detailHistory" aria-selected="false">History</button>
           </nav>
-          <div class="detail-section" id="detailSummary" data-detail-page="overview">
+          <div class="detail-section" id="detailSummary" role="tabpanel" aria-labelledby="claimDetailOverviewTab" data-detail-page="overview">
             <h2>Claim detail</h2>
             <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
           </div>
-          <div class="detail-section" id="detailNextStep" data-detail-page="history" style="display:none">
-            <div class="claim-actions">
-              <div class="action-copy"><strong>Continue this claim</strong><span>Communication and guidance tools</span></div>
-              <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
-              <button id="toggleAssistantBtn" class="customer-chat-close" type="button">Open assistant</button>
-            </div>
-          </div>
-          <details class="detail-section" id="detailEvidence" data-detail-page="evidence" style="display:none" open>
+          <details class="detail-section" id="detailEvidence" role="tabpanel" aria-labelledby="claimDetailEvidenceTab" data-detail-page="evidence" style="display:none" open>
             <summary>Evidence and claim facts <span class="detail-section-hint">What we know and what is still pending</span></summary>
             <div id="detailEvidenceContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailReview" data-detail-page="review" style="display:none">
+          <details class="detail-section" id="detailReview" role="tabpanel" aria-labelledby="claimDetailReviewTab" data-detail-page="review" style="display:none">
             <summary>Handoffs and internal review <span class="detail-section-hint">Assignments, signals and review context</span></summary>
             <div id="detailReviewContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailHistory" data-detail-page="history" style="display:none">
-            <summary>History and continuity <span class="detail-section-hint">Previous sessions and communication</span></summary>
+          <details class="detail-section" id="detailHistory" role="tabpanel" aria-labelledby="claimDetailHistoryTab" data-detail-page="history" style="display:none">
+            <summary>History <span class="detail-section-hint">Prior commitments and unresolved work</span></summary>
             <div id="detailHistoryContext" class="detail-section-body"></div>
           </details>
+          <section class="detail-section" id="detailConversation" role="tabpanel" aria-labelledby="claimDetailConversationTab" data-detail-page="conversation" hidden>
+            <div class="customer-chat-title">
+              <div>
+                <h2 id="customerChatTitle">Claimant conversation</h2>
+                <div id="customerChatStatus" class="customer-chat-status" role="status" aria-live="polite"></div>
+              </div>
+              <button id="customerChatHandoffAction" class="customer-chat-close" type="button" hidden>Accept handoff to reply</button>
+            </div>
+            <div class="customer-chat-content">
+              <aside class="customer-chat-list" aria-labelledby="conversationContextTitle">
+                <h3 id="conversationContextTitle">Reply context</h3>
+                <div id="customerChatContext" class="context-stack"></div>
+              </aside>
+              <div class="customer-chat-main">
+                <div class="customer-chat-title">
+                  <div><strong id="customerChatHeader">Select a claim</strong><div class="customer-chat-status">Persisted messages in the active claim session</div></div>
+                </div>
+                <div id="customerChatHistory" class="customer-chat-history" aria-live="polite" aria-relevant="additions text"></div>
+                <section class="customer-chat-composer" aria-labelledby="customerChatReplyTitle">
+                  <div class="customer-chat-title">
+                    <div>
+                      <strong id="customerChatReplyTitle">Reply to claimant</strong>
+                      <div class="customer-chat-status">
+                        Write your own reply or build a deterministic template from the current claim context.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="customer-chat-input">
+                    <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a claimant-safe reply or build a template here…"></textarea>
+                    <button id="customerChatSend" class="customer-chat-button" type="button">Send to claimant</button>
+                  </div>
+                  <section id="agentSuggestionPanel" class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
+                    <div class="agent-suggestion-heading">
+                      <strong id="agentSuggestionTitle">Reply template</strong>
+                      <span id="agentSuggestionStatus" class="agent-suggestion-status" aria-live="polite">Not requested · Draft stays internal</span>
+                    </div>
+                    <div class="agent-suggestion-footer">
+                      <p id="agentSuggestionReason" class="customer-chat-status">The deterministic template uses claimant-safe claim state · Nothing is sent until you press Send to claimant</p>
+                      <div class="agent-suggestion-actions">
+                        <button id="generateAgentSuggestion" type="button">Build template</button>
+                        <button id="refreshAgentSuggestion" type="button" disabled>Refresh draft</button>
+                      </div>
+                    </div>
+                  </section>
+                </section>
+              </div>
+            </div>
+          </section>
           <details class="detail-section integrated-review-controls" id="detailStaffActions" data-detail-page="overview" style="display:none">
             <summary>Complete the professional review <span class="detail-section-hint">Three guided steps</span></summary>
             <div class="detail-section-body">
@@ -656,46 +694,6 @@
       </div>
       </section>
 
-      <section id="customerChatView" class="customer-chat-view" hidden aria-labelledby="customerChatTitle">
-        <div class="customer-chat-panel">
-          <header>
-            <div>
-              <strong id="customerChatTitle">Customer chat</strong>
-              <div class="customer-chat-status">Direct customer communication, separate from the internal AI assistant.</div>
-            </div>
-            <button id="customerChatBack" class="customer-chat-close" type="button">Back to workbench</button>
-          </header>
-          <div class="customer-chat-content">
-            <aside class="customer-chat-list">
-              <h3>Customer chats</h3>
-              <div id="customerChatList"></div>
-            </aside>
-            <div class="customer-chat-main">
-              <div class="customer-chat-title">
-                <div><strong id="customerChatHeader">Select a conversation</strong><div id="customerChatStatus" class="customer-chat-status"></div></div>
-              </div>
-              <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
-              <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
-                <div class="agent-suggestion-heading">
-                  <strong id="agentSuggestionTitle">Reply template</strong>
-                  <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
-                </div>
-                <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
-                <div class="agent-suggestion-actions">
-                  <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
-                  <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
-                  <button id="rejectAgentSuggestion" type="button" disabled>Reject</button>
-                </div>
-              </section>
-              <div class="customer-chat-input">
-                <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
-                <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
-                <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
@@ -709,6 +707,17 @@
       <div class="evidence-preview-body">
         <img id="evidencePreviewImage" alt="" hidden>
         <iframe id="evidencePreviewDocument" title="Evidence document preview" hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="handoffRequiredDialog" class="handoff-required-dialog" aria-labelledby="handoffRequiredTitle" aria-describedby="handoffRequiredDescription">
+    <div class="handoff-required-content">
+      <h2 id="handoffRequiredTitle">Accept this handoff before replying</h2>
+      <p id="handoffRequiredDescription">This reply is still saved as a draft. Accept the handoff first so Northwind records you as responsible before anything is sent to the claimant.</p>
+      <div class="handoff-required-actions">
+        <button id="handoffRequiredCancel" type="button">Keep as draft</button>
+        <button id="handoffRequiredAccept" class="handoff-required-accept" type="button">Accept handoff</button>
       </div>
     </div>
   </dialog>
@@ -860,6 +869,9 @@
     let agentSuggestionState = 'not_requested';
     let agentSuggestionClaimId = null;
     let acceptedSuggestionText = '';
+    let agentSuggestionVersion = 0;
+    let refreshingAgentSuggestion = false;
+    let handoffRequiredDialogTrigger = null;
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -896,6 +908,7 @@
     }
 
     function syncClaimDetailTabs() {
+      byId('chatWidget').hidden = activeDetailTab === 'conversation';
       document.querySelectorAll('[data-detail-tab]').forEach(button => {
         const selected = button.dataset.detailTab === activeDetailTab;
         button.setAttribute('aria-selected', String(selected));
@@ -914,9 +927,15 @@
     function selectClaimDetailTab(tab, focus = false) {
       activeDetailTab = tab;
       syncClaimDetailTabs();
+      let renderPromise = Promise.resolve();
+      if (tab === 'conversation' && activeClaimId) {
+        activeCustomerChatId = activeClaimId;
+        renderPromise = renderCustomerChat();
+      }
       const selectedTab = document.querySelector(`[data-detail-tab="${tab}"]`);
       selectedTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       if (focus) selectedTab?.focus();
+      return renderPromise;
     }
 
     function setQueueLoading(loading) {
@@ -1351,7 +1370,7 @@
       detailTabClaimId = null;
       syncClaimDetailTabs();
       byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
-      ['detailNextStep', 'detailEvidence', 'detailReview', 'detailHistory', 'detailStaffActions']
+      ['detailEvidence', 'detailReview', 'detailConversation', 'detailHistory', 'detailStaffActions']
         .forEach(id => { byId(id).style.display = 'none'; });
       setMutationStatus('');
       syncStaffControlState();
@@ -1772,7 +1791,7 @@
         ...session.pending_items.map(item => `Pending: ${item}`),
         ...session.prior_commitments.map(item => `Commitment: ${item}`),
       ]);
-      historyContainer.append(contextBlock('Session continuity', bulletList(continuityItems)));
+      historyContainer.append(contextBlock('Claim continuity', bulletList(continuityItems)));
 
       const signalRows = (detail.signals || []).map(signal => ({
         label: textOrEmpty(signal.code || signal.signal_id, 'Internal signal'),
@@ -1796,8 +1815,6 @@
       (detail.handoffs || []).forEach(handoff => handoffContainer.append(renderHandoff(detail, handoff)));
       if (!detail.handoffs?.length) handoffContainer.append(bulletList([]));
       reviewContainer.append(contextBlock('Human handoff', handoffContainer));
-
-      historyContainer.append(contextBlock('Communication history', communicationHistory(detail)));
 
       const hasReviewWork = signalRows.length > 0 || (detail.handoffs || []).some(
         handoff => !['resolved', 'cancelled'].includes(handoff.status)
@@ -1858,37 +1875,10 @@
       return wrapper;
     }
 
-    function communicationHistory(detail) {
-      const history = document.createElement('div');
-      history.className = 'context-list';
-      const entries = [
-        ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
-          actor: item.actor,
-          text: item.content.text,
-          createdAt: item.created_at,
-        })),
-        ...(detail.customer_updates || []).map(item => ({
-          actor: 'staff',
-          text: item.summary,
-          createdAt: item.created_at,
-        })),
-      ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
-      if (!entries.length) return bulletList([]);
-      entries.forEach(entry => {
-        const item = document.createElement('div');
-        item.className = `communication-entry ${entry.actor}`;
-        const meta = document.createElement('strong');
-        meta.textContent = `${formatLabel(entry.actor)} · ${new Date(entry.createdAt).toLocaleString()}`;
-        const body = document.createElement('p');
-        body.textContent = entry.text;
-        item.append(meta, body);
-        history.append(item);
-      });
-      return history;
-    }
-
     async function acceptHandoff(detail, handoff, button) {
+      const originalLabel = button.textContent;
       button.disabled = true;
+      button.textContent = 'Accepting…';
       try {
         await apiRequest(`${API_BASE}/${encodeURIComponent(detail.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/accept`, {
           method: 'POST',
@@ -1900,9 +1890,12 @@
         });
         await refreshDetail(detail.claim_id);
         await refreshQueue();
+        return true;
       } catch (error) {
         setError(error.message);
         button.disabled = false;
+        button.textContent = originalLabel;
+        return false;
       }
     }
 
@@ -2108,10 +2101,10 @@
           if (reviewWorkspace) detailContent.append(reviewWorkspace);
 
           renderContext(detail);
-          byId('detailNextStep').style.display = 'block';
           byId('detailEvidence').style.display = 'block';
           byId('detailReview').style.display = 'block';
           byId('detailHistory').style.display = 'block';
+          byId('detailConversation').style.display = 'block';
           byId('claimDetailTabs').hidden = false;
           populateStaffControls(detail);
           const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
@@ -2123,7 +2116,10 @@
           byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none';
           byId('detailStaffActions').open = showReviewControls;
           syncClaimDetailTabs();
-          if (!customerChatView.hidden) renderCustomerChat();
+          if (activeDetailTab === 'conversation') {
+            activeCustomerChatId = detail.claim_id;
+            renderCustomerChat();
+          }
         })
         .catch(error => {
           activeClaimDetail = null;
@@ -2154,9 +2150,8 @@
     function syncQueueNavigation() {
       const selectedView = byId('viewSelect').value;
       const pendingSelected = selectedView === 'awaiting_evidence';
-      const workbenchVisible = !byId('workbenchView').hidden;
-      byId('pendingEvidenceNav').classList.toggle('active', workbenchVisible && pendingSelected);
-      byId('workbenchNav').classList.toggle('active', workbenchVisible && !pendingSelected);
+      byId('pendingEvidenceNav').classList.toggle('active', pendingSelected);
+      byId('workbenchNav').classList.toggle('active', !pendingSelected);
       const [title, description] = queueCopy[selectedView] || [formatLabel(selectedView), 'Claims matching the selected operational queue.'];
       byId('queueTitle').textContent = title;
       byId('queueTitle').nextElementSibling.textContent = description;
@@ -2168,7 +2163,6 @@
     async function selectQueue(view) {
       byId('viewSelect').value = view;
       queuePage = 1;
-      setView('workbench');
       syncQueueNavigation();
       await loadClaims();
     }
@@ -2230,7 +2224,6 @@
         }
         if (activeClaimId) await renderDetail(activeClaimId);
         else clearClaimDetail();
-        if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
         clearClaimDetail();
         setError(error.message);
@@ -2268,51 +2261,13 @@
     const chatBody = byId('chatBody');
     const chatInput = byId('chatInput');
     const chatFileInput = byId('chatFileInput');
-    const workbenchView = byId('workbenchView');
-    const customerChatView = byId('customerChatView');
     let activeCustomerChatId = null;
     let assistantAttachments = [];
     let chatDrag = null;
     let pendingCustomerMessage = null;
-    let customerChatHistoryEntryCreated = false;
-
-    function workbenchUrl() {
-      return `${window.location.pathname}${window.location.search}`;
-    }
-
-    function setView(view, { updateHistory = true } = {}) {
-      const showCustomerChat = view === 'customer-chat';
-      workbenchView.hidden = showCustomerChat;
-      customerChatView.hidden = !showCustomerChat;
-      byId('customerChatNav').classList.toggle('active', showCustomerChat);
-      const pendingSelected = byId('viewSelect').value === 'awaiting_evidence';
-      byId('pendingEvidenceNav').classList.toggle('active', !showCustomerChat && pendingSelected);
-      byId('workbenchNav').classList.toggle('active', !showCustomerChat && !pendingSelected);
-      if (showCustomerChat) renderCustomerChat();
-      if (!updateHistory) return;
-      if (showCustomerChat && window.location.hash !== '#customer-chat') {
-        window.history.pushState({ workbenchView: 'customer-chat' }, '', '#customer-chat');
-        customerChatHistoryEntryCreated = true;
-      } else if (!showCustomerChat && window.location.hash === '#customer-chat') {
-        if (customerChatHistoryEntryCreated) {
-          customerChatHistoryEntryCreated = false;
-          window.history.back();
-        } else {
-          window.history.replaceState({ workbenchView: 'workbench' }, '', workbenchUrl());
-        }
-      }
-    }
-
-    function restoreViewFromHistory() {
-      setView(window.location.hash === '#customer-chat' ? 'customer-chat' : 'workbench', {
-        updateHistory: false,
-      });
-    }
-
     function setAssistantOpen(open) {
       chatWidget.classList.toggle('closed', !open);
       chatToggle.textContent = open ? 'Close' : 'Open';
-      byId('toggleAssistantBtn').textContent = open ? 'Close assistant' : 'Open assistant';
       if (open) chatInput.focus();
     }
 
@@ -2367,38 +2322,58 @@
     }
 
     function currentCustomerClaim() {
-      return claims.find(claim => claim.claim_id === activeCustomerChatId) || claims[0] || null;
+      return claims.find(claim => claim.claim_id === activeCustomerChatId)
+        || claims.find(claim => claim.claim_id === activeClaimId)
+        || null;
+    }
+
+    function renderConversationContext(detail) {
+      const context = byId('customerChatContext');
+      context.replaceChildren();
+      const handoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
+      const facts = Object.entries(detail.form || {})
+        .filter(([, field]) => field.status === 'confirmed')
+        .slice(0, 4)
+        .map(([code, field]) => `${formatLabel(code)}: ${textOrEmpty(field.value)}`);
+      context.append(
+        contextBlock('Current task', definitionList([
+          { label: 'Status', value: formatLabel(detail.claim_state?.workflow_state) },
+          { label: 'Next safe action', value: detail.customer_next_step?.summary },
+          { label: 'Staff request', value: handoff?.requested_action || handoff?.reason },
+        ])),
+        contextBlock('Known facts', definitionList([
+          { label: 'Confirmed', value: facts },
+        ])),
+        contextBlock('Outstanding', definitionList([
+          { label: 'Pending items', value: handoff?.packet?.pending_items || [] },
+          { label: 'Promised next step', value: handoff?.packet?.promised_next_step },
+        ])),
+      );
     }
 
     async function renderCustomerChat() {
       const claim = currentCustomerClaim();
       if (!claim) {
-        byId('customerChatList').replaceChildren();
-        byId('customerChatHeader').textContent = 'No customer chats available';
-        byId('customerChatStatus').textContent = 'Load claims to view customer conversations.';
-        byId('customerChatHistory').textContent = 'No customer conversation has been selected.';
+        byId('customerChatContext').replaceChildren();
+        byId('customerChatHeader').textContent = 'No claim selected';
+        byId('customerChatStatus').textContent = 'Select a claim to read its conversation and reply.';
+        byId('customerChatHistory').textContent = 'No claim conversation is available.';
         return;
       }
+      if (pendingCustomerMessage?.claimId !== claim.claim_id) {
+        pendingCustomerMessage = null;
+        byId('customerChatText').value = '';
+        byId('customerChatSend').textContent = 'Send to claimant';
+      }
       activeCustomerChatId = claim.claim_id;
-      const list = byId('customerChatList');
-      list.replaceChildren();
-      claims.forEach(item => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.classList.toggle('active', item.claim_id === claim.claim_id);
-        button.textContent = `${item.claim_id} · ${item.customer_reference}`;
-        button.addEventListener('click', () => {
-          activeCustomerChatId = item.claim_id;
-          renderCustomerChat();
-        });
-        list.append(button);
-      });
       byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
       if (agentSuggestionClaimId !== claim.claim_id) {
         agentSuggestionClaimId = claim.claim_id;
         acceptedSuggestionText = '';
-        byId('agentSuggestionText').value = '';
-        setAgentSuggestionState('not_requested', 'Internal draft only');
+        agentSuggestionVersion = 0;
+        byId('agentSuggestionReason').textContent =
+          'The deterministic template uses claimant-safe claim state · Nothing is sent until you press Send to claimant';
+        setAgentSuggestionState('not_requested', 'Draft stays internal');
       }
       byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
       const history = byId('customerChatHistory');
@@ -2407,6 +2382,7 @@
       try {
         const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
         detailCache.set(claim.claim_id, detail);
+        renderConversationContext(detail);
         history.replaceChildren();
         const entries = [
           ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
@@ -2449,24 +2425,33 @@
         const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
         const input = byId('customerChatText');
         const send = byId('customerChatSend');
+        const handoffAction = byId('customerChatHandoffAction');
         if (!openHandoff) {
           input.disabled = true;
           send.disabled = true;
+          handoffAction.disabled = true;
+          handoffAction.hidden = true;
           byId('customerChatStatus').textContent = 'No open handoff. Communication history is read-only.';
         } else if (openHandoff.status === 'queued') {
           input.disabled = true;
-          send.disabled = true;
-          byId('customerChatStatus').textContent = 'Accept the handoff before issuing a formal customer update.';
+          send.disabled = false;
+          handoffAction.disabled = false;
+          handoffAction.hidden = false;
+          handoffAction.textContent = 'Accept handoff to reply';
+          byId('customerChatStatus').textContent = 'Accept this handoff to take responsibility and reply to the claimant.';
         } else {
           input.disabled = false;
           send.disabled = false;
+          handoffAction.disabled = false;
+          handoffAction.hidden = false;
+          handoffAction.textContent = 'Resolve handoff';
           byId('customerChatStatus').textContent = openHandoff.status === 'in_progress'
             ? `In progress with ${openHandoff.assigned_to}. Messages remain open until the handoff is resolved.`
             : `Accepted by ${openHandoff.assigned_to}. Send a message to begin support.`;
         }
         history.scrollTop = history.scrollHeight;
       } catch (error) {
-        history.textContent = error.message;
+        history.textContent = `Conversation could not be loaded because ${error.message} Refresh the claim and try again.`;
       }
     }
 
@@ -2476,50 +2461,109 @@
         return;
       }
       activeCustomerChatId = claimId;
-      setView('customer-chat');
-      byId('customerChatText').focus();
+      selectClaimDetailTab('conversation').then(() => byId('customerChatText').focus());
     }
 
     function setAgentSuggestionState(state, message) {
       agentSuggestionState = state;
       byId('agentSuggestionStatus').textContent = `${formatLabel(state)} · ${message}`;
       const ready = ['suggested', 'edited', 'accepted'].includes(state);
-      byId('useAgentSuggestion').disabled = !ready;
-      byId('rejectAgentSuggestion').disabled = !ready;
+      byId('refreshAgentSuggestion').disabled = !ready;
+      byId('refreshAgentSuggestion').textContent = state === 'generating' && refreshingAgentSuggestion
+        ? 'Refreshing draft…'
+        : 'Refresh draft';
       byId('generateAgentSuggestion').disabled = state === 'generating';
+      byId('generateAgentSuggestion').textContent = state === 'generating' ? 'Building…' : 'Build template';
+      byId('agentSuggestionPanel').setAttribute('aria-busy', String(state === 'generating'));
     }
 
-    async function generateAgentSuggestion() {
-      setAgentSuggestionState('generating', 'Internal draft only; nothing will be sent');
+    async function generateAgentSuggestion({ refreshing = false } = {}) {
+      refreshingAgentSuggestion = refreshing;
+      const reply = byId('customerChatText');
+      const currentText = reply.value.trim();
+      const draftIsInBox = currentText && reply.value === acceptedSuggestionText;
+
+      if (currentText && !draftIsInBox && !refreshing) {
+        refreshingAgentSuggestion = false;
+        setAgentSuggestionState(
+          agentSuggestionState === 'generating' ? 'not_requested' : agentSuggestionState,
+          'The reply box already has your text · Clear it first to build a template',
+        );
+        return;
+      }
+
+      setAgentSuggestionState(
+        'generating',
+        refreshing
+          ? 'Refreshing draft · Nothing will be sent'
+          : 'Creating draft · Nothing will be sent',
+      );
+
       try {
         const claim = currentCustomerClaim();
-        if (!claim) throw new Error('Select a claim before generating a suggestion.');
-        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
-        const nextStep = detail.customer_next_step?.summary || 'We are reviewing your report.';
-        const suggestion = `${nextStep} If you have any questions or additional information, reply here and I will add it to your claim.`;
-        byId('agentSuggestionText').value = suggestion;
+
+        if (!claim) {
+          throw new Error(
+            'A reply draft could not be created because no claim is selected.'
+          );
+        }
+
+        const detail =
+          detailCache.get(claim.claim_id) ||
+          await fetchClaimDetail(claim.claim_id);
+
+        const nextStep =
+          detail.customer_next_step?.summary ||
+          'We are reviewing your report.';
+
+        await new Promise(resolve => setTimeout(resolve, 180));
+
+        const suggestion =
+          agentSuggestionVersion % 2 === 0
+            ? `${nextStep} If you have any questions or additional information, reply here and I will add it to your claim.`
+            : `Here is the latest update on your claim: ${nextStep} You can reply here if you have a question or need to add anything.`;
+
+        reply.value = suggestion;
+        acceptedSuggestionText = suggestion;
         agentSuggestionClaimId = claim.claim_id;
-        acceptedSuggestionText = '';
-        setAgentSuggestionState('suggested', 'Review required; not sent');
+
+        byId('agentSuggestionReason').textContent =
+          'Draft written into the reply box from the current claimant-safe next step. Review and edit it before sending.';
+
+        setAgentSuggestionState(
+          'suggested',
+          reply.disabled
+            ? 'Draft in the reply box · Accept the handoff to edit or send'
+            : 'Draft in the reply box · Review before sending',
+        );
+        if (!reply.disabled) reply.focus({ preventScroll:true });
+
       } catch (error) {
-        byId('agentSuggestionText').value = '';
-        setAgentSuggestionState('failed', error.message || 'Suggestion unavailable; write the reply manually');
+        byId('agentSuggestionReason').textContent =
+          error.message || 'Draft could not be created.';
+
+        setAgentSuggestionState(
+          'failed',
+          'Draft could not be created'
+        );
+      } finally {
+        refreshingAgentSuggestion = false;
       }
     }
 
-    function useAgentSuggestion() {
-      const suggestion = byId('agentSuggestionText').value.trim();
-      if (!suggestion) return;
-      byId('customerChatText').value = suggestion;
-      acceptedSuggestionText = suggestion;
-      setAgentSuggestionState('accepted', 'Copied for staff review; not sent');
-      byId('customerChatText').focus();
+    function refreshAgentSuggestion() {
+      if (agentSuggestionState === 'generating') return;
+      acceptedSuggestionText = '';
+      agentSuggestionVersion += 1;
+      return generateAgentSuggestion({ refreshing: true });
     }
 
-    function rejectAgentSuggestion() {
-      byId('agentSuggestionText').value = '';
-      acceptedSuggestionText = '';
-      setAgentSuggestionState('rejected', 'Discarded; nothing was sent');
+    function showHandoffRequiredDialog() {
+      const dialog = byId('handoffRequiredDialog');
+      if (dialog.open) return;
+      handoffRequiredDialogTrigger = document.activeElement;
+      dialog.showModal();
+      byId('handoffRequiredCancel').focus({ preventScroll:true });
     }
 
     function renderTransientStaffMessage(text, state) {
@@ -2539,18 +2583,34 @@
           ? 'Sender: Staff · Audience: Claimant · Delivery outcome unknown · Retry to reconcile'
           : 'Sender: Staff · Audience: Claimant · Sending…';
       message.append(meta, body, delivery);
+      if (state === 'failed' || state === 'unknown') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'customer-chat-close';
+        retry.textContent = state === 'unknown' ? 'Reconcile and retry' : 'Retry message';
+        retry.addEventListener('click', sendCustomerChatMessage);
+        message.append(retry);
+      }
       byId('customerChatHistory').append(message);
+      message.scrollIntoView?.({ block: 'nearest' });
     }
 
     async function sendCustomerChatMessage() {
       const input = byId('customerChatText');
       const text = input.value.trim();
       const claim = currentCustomerClaim();
-      if (!text) return;
       if (!claim) {
         byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
         return;
       }
+      const activeHandoff = (activeClaimDetail?.handoffs || []).find(
+        item => !['resolved', 'cancelled'].includes(item.status)
+      );
+      if (activeHandoff?.status === 'queued') {
+        showHandoffRequiredDialog();
+        return;
+      }
+      if (!text) return;
       const button = byId('customerChatSend');
       if (button.disabled) return;
       button.disabled = true;
@@ -2585,7 +2645,10 @@
         });
         input.value = '';
         pendingCustomerMessage = null;
-        button.textContent = 'Send message';
+        button.textContent = 'Send to claimant';
+        if (['suggested', 'accepted', 'edited'].includes(agentSuggestionState)) {
+          setAgentSuggestionState('sent_by_staff', 'Sent only after staff action');
+        }
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
@@ -2611,7 +2674,7 @@
       const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
       const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
       if (!handoff) return;
-      const button = byId('customerChatResolve');
+      const button = byId('customerChatHandoffAction');
       button.disabled = true;
       try {
         await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/resolve`, {
@@ -2632,6 +2695,23 @@
       } finally {
         button.disabled = false;
       }
+    }
+
+    async function handleCustomerHandoffAction() {
+      const handoff = (activeClaimDetail?.handoffs || []).find(
+        item => !['resolved', 'cancelled'].includes(item.status)
+      );
+      if (handoff?.status === 'queued') {
+        const button = byId('customerChatHandoffAction');
+        byId('customerChatStatus').textContent = 'Accepting handoff…';
+        const accepted = await acceptHandoff(activeClaimDetail, handoff, button);
+        if (accepted && activeDetailTab === 'conversation') await renderCustomerChat();
+        if (!accepted) {
+          byId('customerChatStatus').textContent = 'The handoff was not accepted. Review the error, then try again.';
+        }
+        return;
+      }
+      resolveCustomerHandoff();
     }
 
     function startChatDrag(event) {
@@ -2672,7 +2752,6 @@
     document.addEventListener('pointermove', dragChat);
     document.addEventListener('pointerup', stopChatDrag);
     document.addEventListener('pointercancel', stopChatDrag);
-    byId('toggleAssistantBtn').addEventListener('click', () => setAssistantOpen(chatWidget.classList.contains('closed')));
     byId('chatSend').addEventListener('click', sendAssistantMessage);
     byId('chatInput').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -2685,7 +2764,6 @@
       assistantAttachments = Array.from(chatFileInput.files || []);
       renderAttachmentPreview();
     });
-    byId('openCustomerChatBtn').addEventListener('click', () => openCustomerChat());
     document.querySelectorAll('[data-detail-tab]').forEach((button, index, buttons) => {
       button.addEventListener('click', () => selectClaimDetailTab(button.dataset.detailTab));
       button.addEventListener('keydown', event => {
@@ -2703,27 +2781,45 @@
     byId('pendingEvidenceNav').addEventListener('click', () => selectQueue('awaiting_evidence'));
     byId('evidencePreviewClose').addEventListener('click', () => byId('evidencePreviewDialog').close());
     byId('evidencePreviewDialog').addEventListener('close', clearEvidencePreview);
-    byId('generateAgentSuggestion').addEventListener('click', generateAgentSuggestion);
-    byId('useAgentSuggestion').addEventListener('click', useAgentSuggestion);
-    byId('rejectAgentSuggestion').addEventListener('click', rejectAgentSuggestion);
+    byId('handoffRequiredCancel').addEventListener('click', () => byId('handoffRequiredDialog').close());
+    byId('handoffRequiredAccept').addEventListener('click', async () => {
+      byId('handoffRequiredDialog').close();
+      await handleCustomerHandoffAction();
+    });
+    byId('handoffRequiredDialog').addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        byId('handoffRequiredDialog').close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const first = byId('handoffRequiredCancel');
+      const last = byId('handoffRequiredAccept');
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    byId('handoffRequiredDialog').addEventListener('close', () => {
+      handoffRequiredDialogTrigger?.focus?.({ preventScroll:true });
+      handoffRequiredDialogTrigger = null;
+    });
+    byId('generateAgentSuggestion').addEventListener('click', () => generateAgentSuggestion());
+    byId('refreshAgentSuggestion').addEventListener('click', refreshAgentSuggestion);
     byId('customerChatText').addEventListener('input', event => {
-      if (agentSuggestionState === 'accepted' && event.target.value !== acceptedSuggestionText) {
+      if (
+        ['suggested', 'accepted'].includes(agentSuggestionState)
+        && event.target.value !== acceptedSuggestionText
+      ) {
         setAgentSuggestionState('edited', 'Edited by staff; not sent');
       }
     });
-    byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
-    byId('customerChatBack').addEventListener('click', () => setView('workbench'));
+    byId('customerChatNav').addEventListener('click', () => openCustomerChat(activeClaimId || claims[0]?.claim_id));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
-    byId('customerChatResolve').addEventListener('click', resolveCustomerHandoff);
-    byId('customerChatText').addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendCustomerChatMessage();
-      }
-    });
-    window.addEventListener('popstate', restoreViewFromHistory);
-    window.addEventListener('hashchange', restoreViewFromHistory);
-    restoreViewFromHistory();
+    byId('customerChatHandoffAction').addEventListener('click', handleCustomerHandoffAction);
   </script>
 </body>
 </html>

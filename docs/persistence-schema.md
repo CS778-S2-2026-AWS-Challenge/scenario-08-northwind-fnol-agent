@@ -7,12 +7,14 @@ rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical sch
 Physical mappings belong inside the selected runtime-profile adapters and must preserve
 this contract.
 
-The current MongoDB work remains an unselected adapter implementation. Its repository
+The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
 method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
 Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
 Idempotency records. Mock-backed tests verify document mapping, ownership filters,
-relationship checks, revision conflicts, and mutation ordering. These tests do not prove
-MongoDB transaction rollback or concurrency behaviour.
+relationship checks, revision conflicts, and mutation ordering. The local replica-set smoke
+verifies real multi-document writes, restart recovery, and stale-revision refusal. The additional
+shared transaction-boundary hardening in PR #288 remains a merge dependency and is not duplicated
+here.
 
 The adapter owns bounded environment parsing and verified client construction through
 `MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
@@ -24,12 +26,14 @@ raises a bounded error without returning the connection URI. The non-secret sett
 - `NORTHWIND_MONGODB_COLLECTION`; and
 - `NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS`.
 
-These connection primitives do not by themselves enable the MongoDB runtime profile.
+These connection primitives do not by themselves enable any runtime profile.
 
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
-The fixture profile remains the only complete profile at this stage. MongoDB adapter
+`DATA_RUNTIME_PROFILE=local_mvp` is separately available for the verified local MongoDB + MinIO
+development composition. It does not claim Atlas object storage, Atlas Search, or production
+provider conformance; policy and claim-history lookups remain synthetic. MongoDB adapter
 documents use `record_type` as their internal discriminator so domain fields such as
 Evidence `kind` and Retrieval `kind` remain unchanged.
 

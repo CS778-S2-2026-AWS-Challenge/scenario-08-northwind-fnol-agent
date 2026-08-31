@@ -24,6 +24,7 @@ commit under review.
 | --- | --- | --- | --- |
 | Compatibility `AgentDecision` transport | implemented | `docs/api.md` and current API/contract tests | Deprecated fallback until the migration removal gate passes. |
 | Provider-neutral Model Gateway | implemented | `docs/model-gateway.md`, issue #204 and its merged implementation | Streaming, qualified fallback, usage persistence, and trajectory records remain out of scope. |
+| Namespaced Agent Action Registry | implemented | `backend/domain/agent_action_registry.py` and `tests/test_agent_action_registry.py`, issue #365 | The registry defines the target vocabulary and validation boundaries; Runtime execution, target turn persistence, and transport migration remain separate work. |
 | One authoritative Claim State | implemented rule | `SPEC/04-claim-state-and-data.md`, `docs/persistence-schema.md`, issue #237 | Target turn records and complete WorkItem persistence still require coordinated migration. |
 | Multi-intent `TurnPlan` | specified | `docs/design/agent-runtime/agent-runtime-target.md` | Needs target schema, trajectory fixture, and repeatable non-repetition measurement. |
 | Source-preserving `AgentProposal` | specified/partial gateway support | `docs/model-gateway.md` and target contract | Target proposal schema, provenance coverage, and consumer migration are incomplete. |

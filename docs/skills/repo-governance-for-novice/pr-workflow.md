@@ -65,14 +65,13 @@ exempt). Above the cap, the Summary must explain why the PR cannot be split.
 An oversized PR that could have been split but was not is a legitimate reason
 for `Changes requested` (see `review-merge.md` section 6.1).
 
-## 5.3 Quality gate and CI failures
+## 5.3 Validation and CI failures
 
-Run the full local quality gate before pushing and record the exact command and
-result in the PR description (`./scripts/check.ps1` + `Result: PASS`). Never
-present results from another branch, worktree, commit, or environment as
-current evidence. After pushing, monitor CI progress; if any check fails,
-**rework immediately** — fix and rerun the full gate rather than waiting for
-review to point it out.
+Run focused checks for the affected code before pushing and record only commands and results that
+were actually run. Never present results from another branch, worktree, commit, or environment as
+current evidence. CircleCI provides the authoritative exact-head quality result. After pushing,
+monitor its checks; if any check fails, **rework immediately** and push the correction rather than
+waiting for review to point it out.
 
 A successful build or API-level assertion does not prove a claimant or staff
 user journey; the type of evidence must match the behavior being claimed.
@@ -94,6 +93,7 @@ Local validation / Contract and data impact / Governance exception):
 - [ ] Updated docs/api.md (API contract changes)
 - [ ] Updated docs/persistence-schema.md (persistence changes)
 - [ ] Updated docs/README.md (documents added, replaced, moved, or archived)
+- [ ] Updated other affected current documentation
 
 ## Impact statement
 - [ ] I confirmed the changes do not affect unrelated code; any impact is

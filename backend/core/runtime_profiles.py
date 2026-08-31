@@ -13,11 +13,18 @@ from backend.adapters.knowledge import (
     FixtureKnowledgeDocumentStore,
     FixtureKnowledgeRetriever,
 )
+from backend.adapters.knowledge_object_store import (
+    S3CompatibleKnowledgeConfig,
+    S3CompatibleKnowledgeObjectStore,
+)
+from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, PolicyHistoryAdapter
 from backend.core.config import DataRuntimeProfile, ObjectStorageAdapter, Settings
 from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBConnectionConfig, connect_mongodb_repository
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.knowledge_manifest import load_approved_sources
 
 
 class RuntimeProfileConfigurationError(ValueError):
@@ -54,6 +61,16 @@ _PROFILE_CAPABILITIES: Mapping[DataRuntimeProfile, Mapping[str, RuntimeCapabilit
                 {
                     capability: RuntimeCapabilityStatus.USING_FIXTURE
                     for capability in RUNTIME_CAPABILITIES
+                }
+            ),
+            DataRuntimeProfile.LOCAL_MVP: MappingProxyType(
+                {
+                    'persistence': RuntimeCapabilityStatus.VERIFIED,
+                    'evidence_storage': RuntimeCapabilityStatus.VERIFIED,
+                    'policy': RuntimeCapabilityStatus.USING_FIXTURE,
+                    'claim_history': RuntimeCapabilityStatus.USING_FIXTURE,
+                    'knowledge_documents': RuntimeCapabilityStatus.VERIFIED,
+                    'knowledge_retrieval': RuntimeCapabilityStatus.VERIFIED,
                 }
             ),
             DataRuntimeProfile.CLOUDFLARE: MappingProxyType(
@@ -171,6 +188,36 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             policy_history=MockPolicyHistoryAdapter(),
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
+        )
+
+    if settings.data_runtime_profile is DataRuntimeProfile.LOCAL_MVP:
+        if settings.object_storage_adapter is not ObjectStorageAdapter.S3_COMPATIBLE:
+            raise RuntimeProfileConfigurationError(
+                "Data runtime profile 'local_mvp' requires "
+                'NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible.'
+            )
+        repository = connect_mongodb_repository(MongoDBConnectionConfig.from_environment())
+        try:
+            evidence_storage = MinioEvidenceStorage(
+                S3CompatibleObjectStorageConfig.from_environment()
+            )
+            knowledge_store = S3CompatibleKnowledgeObjectStore.from_config(
+                S3CompatibleKnowledgeConfig.from_environment()
+            )
+            knowledge_retrieval = S3CompatibleKnowledgeRetriever(
+                knowledge_store,
+                load_approved_sources().values(),
+            )
+        except Exception:
+            repository.close()
+            raise
+        return DataRuntimeBundle(
+            profile=DataRuntimeProfile.LOCAL_MVP,
+            repository=repository,
+            evidence_storage=evidence_storage,
+            policy_history=MockPolicyHistoryAdapter(),
+            knowledge_documents=knowledge_retrieval,
+            knowledge_retrieval=knowledge_retrieval,
         )
 
     missing = ', '.join(missing_runtime_capabilities(settings.data_runtime_profile))

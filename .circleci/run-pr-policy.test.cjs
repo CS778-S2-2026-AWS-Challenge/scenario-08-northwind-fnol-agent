@@ -75,7 +75,6 @@ test('skips policy validation for a commit with no pull request', async () => {
 
 test('validates the pull request at the exact CircleCI commit', async () => {
   let receivedContext;
-  let receivedQualityMode;
   const fetchImpl = async (url) => {
     if (url.endsWith('/commits/abc123/pulls')) {
       return response([{ number: 42, head: { sha: 'abc123' } }]);
@@ -95,9 +94,8 @@ test('validates the pull request at the exact CircleCI commit', async () => {
     },
     fetchImpl,
     policyImpl: {
-      run: async ({ context, requireLocalQualityEvidence }) => {
+      run: async ({ context }) => {
         receivedContext = context;
-        receivedQualityMode = requireLocalQualityEvidence;
       },
     },
   });
@@ -105,7 +103,6 @@ test('validates the pull request at the exact CircleCI commit', async () => {
   assert.equal(receivedContext.repo.owner, 'example');
   assert.equal(receivedContext.repo.repo, 'repo');
   assert.equal(receivedContext.payload.pull_request.number, 42);
-  assert.equal(receivedQualityMode, false);
 });
 
 test('provides paginated read-only repository state to the policy', async () => {
