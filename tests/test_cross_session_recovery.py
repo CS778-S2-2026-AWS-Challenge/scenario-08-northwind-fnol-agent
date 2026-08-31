@@ -94,6 +94,46 @@ def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 3
 
 
+def test_resume_revision_baseline_is_atomic_and_idempotent() -> None:
+    repository, claim_id, active_session_id = seeded_scenario('AT-08-resume')
+    pause_active_session(repository, claim_id, active_session_id)
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+    assert before.active_session_id is None
+    sessions_before = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    headers = {**AUTH, 'Idempotency-Key': 'resume-revision-baseline'}
+
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
+        first = client.post(
+            f'/api/v1/claims/{claim_id}/sessions',
+            headers=headers,
+            json={'intent': 'resume'},
+        )
+        replay = client.post(
+            f'/api/v1/claims/{claim_id}/sessions',
+            headers=headers,
+            json={'intent': 'resume'},
+        )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    body = first.json()
+    resumed_session_id = body['session_id']
+    assert isinstance(resumed_session_id, str)
+
+    after = repository.get_claim(claim_id, 'cus_demo')
+    resumed = repository.get_session(claim_id, resumed_session_id, 'cus_demo')
+    sessions_after = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    assert after is not None
+    assert resumed is not None
+    assert after.revision == before.revision + 1
+    assert after.active_session_id == resumed_session_id
+    assert resumed.context_revision == before.revision
+    assert len(sessions_after) == len(sessions_before) + 1
+    assert repository.claim_count == 1
+
+
 def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> None:
     repository, claim_id, active_session_id = seeded_scenario('AT-06-pending-evidence')
     pause_active_session(repository, claim_id, active_session_id, clear_context=True)
