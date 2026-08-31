@@ -11,6 +11,11 @@ only as good as the evidence in its row.
 
 Compiled against `main` at `26d6d790`, which carries the #271 canonical path validation and the #281 regression entry point. Every command in the re-derivation section below exists on that commit and was run there to produce the classifications recorded here.
 
+PR #350 updates the two local-provider rows owned by `@liyang6620` after synchronising with
+`main@4c90e2a`. Those rows use the real local MongoDB/MinIO smoke and six-case governed RAG
+evaluation recorded in `docs/status/runtime-profile-validation.md`; the other rows retain the
+original #282 evidence base.
+
 Status vocabulary is the one fixed by the Sprint 2 Week 4 baseline:
 
 - **verified** — the named capability and environment were directly demonstrated and the
@@ -36,6 +41,8 @@ production capability: `fixture-dependent` is a real, useful status, not a softe
 | Canonical scenario and evidence baseline | #241 and #251 via merged PRs #324, #348 and #312. Five canonical MVP business paths each resolve to exactly one scenario, entry baselines bind workflow, action, evidence state, claimant next step and handoff shape, and loading fails on stale or contradictory declarations. | @bdfa123 |
 | Claimant/staff visibility boundary on the five MVP paths | #271. Staff see the complete canonical evidence set on every path while no retrieval identifier, `internal_only` message identifier, or internal handoff identifier reaches a claimant; a handoff the claimant requested is visible to them by design. Repeatable with `python scripts/run_canonical_path_validation.py`, and confirmed load-bearing by disabling the projection filter. | @bdfa123 |
 | Runtime profile isolation and fail-closed refusal | #256 via merged PRs #332 and #335. `python scripts/validate_runtime_profiles.py` reports `isolation: verified_fail_closed`; the `fixture` profile starts ready, and `mongodb`, `cloudflare` and `aws` refuse startup with errors naming only missing capabilities, without listening on a port or assembling a fixture fallback. | @liyang6620 |
+| Local MVP data composition | PR #350 verifies the explicit `local_mvp` profile against a local transaction-capable MongoDB replica set and the packaged MinIO service. `python scripts/run_local_mvp_smoke.py` proves Claim, Session, Message, Evidence metadata, Retrieval, Review Signal and Idempotency recovery after application reconstruction; protected Evidence bytes remain in MinIO; stale revisions and a conflicting retrieval bundle leave no partial write. Policy and claim history remain explicitly synthetic, so this row does not promote the provider-specific `mongodb` profile or claim Atlas conformance. | @liyang6620 |
+| Knowledge retrieval against a real ingested MinIO store | PR #350 records `python scripts/verify_local_rag.py config/rag-evaluation-cases.json` passing all six governed cases against the packaged MinIO service. Applicable results retain exact document, version, section and checksum citations; wrong-insurer and untrusted-instruction cases return no result. This verifies the named local environment only, not Atlas Search, a vector index, or automatic Agent-to-RAG orchestration. | @liyang6620 |
 
 ## Fixture-dependent
 
@@ -62,7 +69,6 @@ production capability: `fixture-dependent` is a real, useful status, not a softe
 | AWS data runtime profile | `validate_runtime_profiles.py` classifies `aws` as `unavailable` with `startup_refused`; services, permissions, schema, region, credentials and deployment target are unconfirmed. | @liyang6620 |
 | Cloudflare data runtime profile | Classified `unavailable` with `startup_refused`; provider services, bindings, schema and credentials are unconfirmed. | @liyang6620 |
 | Live MinIO object storage in an unconfigured environment | `docs/status/runtime-profile-validation.md` records `local-minio` as `verified` in an environment with the packaged MinIO service present. In a bare clone the same classification is `unavailable`, and `run_minio_fastapi_smoke.py` refuses with `Set NORTHWIND_OBJECT_STORAGE_ADAPTER=s3_compatible`. Both statements are true of different environments; the capability is verified only where that provider is actually running. | @liyang6620 |
-| Knowledge retrieval against a real ingested store | `query_knowledge.py` has no configuration signal that proves an ingested store exists and is always reported as not executed by the regression entry point. Filtered retrieval with citations is implemented and merged through #255, but no recorded run in this repository demonstrates it against real ingested sources. | @liyang6620 |
 | Admin API and Control Plane configuration | `require_administrator` exists in `backend/core/auth.py` but is deliberately wired to no route, and the identity contract reserves `admin:read`/`admin:write` for a future Admin API. The full Control Plane backlog is `extra` parent scope in #209 and outside the Sprint 2 Week 4 commitment. | @LLL263 |
 | Persisted identity access audit | The identity contract requires every verified principal to expose non-secret metadata for an audit record, and `Principal` now carries `auth_source` and `synthetic`. No access-audit persistence exists. | @jxu316-arch |
 

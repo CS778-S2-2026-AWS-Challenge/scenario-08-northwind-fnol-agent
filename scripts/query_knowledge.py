@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.adapters.knowledge_object_store import S3CompatibleKnowledgeObjectStore
 from backend.adapters.knowledge_retrieval import S3CompatibleKnowledgeRetriever
 from backend.domain.knowledge import KnowledgeSearch
-from scripts.ingest_knowledge_source import load_approved_sources
+from backend.services.knowledge_manifest import load_approved_sources
 
 
 def required_environment(name: str) -> str:
