@@ -628,9 +628,14 @@ class MongoDBRepository:
             return
 
         immutable_identity = (
-            'claim_id', 'external_claim_id', 'authorisation_ref',
-            'claimant_consent_ref', 'requested_action', 'authorised_revision',
-            'request_fingerprint', 'created_at',
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'authorised_revision',
+            'request_fingerprint',
+            'created_at',
         )
         if any(getattr(existing, name) != getattr(operation, name) for name in immutable_identity):
             raise IdempotencyConflict(operation.operation_id)
@@ -680,24 +685,33 @@ class MongoDBRepository:
 
         def persist(mongo_session: Any) -> None:
             existing_operation = self._get(
-                'assessor_routing_operation', operation.operation_id,
-                AssessorRoutingOperation, session=mongo_session,
+                'assessor_routing_operation',
+                operation.operation_id,
+                AssessorRoutingOperation,
+                session=mongo_session,
             )
             existing_decision = self._get(
-                'agent_decision', decision.decision_id,
-                AgentDecisionRecord, session=mongo_session,
+                'agent_decision',
+                decision.decision_id,
+                AgentDecisionRecord,
+                session=mongo_session,
             )
             if existing_operation is not None or existing_decision is not None:
                 if existing_operation == operation and existing_decision == decision:
                     return
                 raise IdempotencyConflict(operation.operation_id)
             self._put(
-                'agent_decision', decision.decision_id, decision,
-                customer_id=customer_id, claim_id=decision.claim_id,
+                'agent_decision',
+                decision.decision_id,
+                decision,
+                customer_id=customer_id,
+                claim_id=decision.claim_id,
                 session=mongo_session,
             )
             self._put(
-                'assessor_routing_operation', operation.operation_id, operation,
+                'assessor_routing_operation',
+                operation.operation_id,
+                operation,
                 session=mongo_session,
             )
 
