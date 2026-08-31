@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from backend.services.knowledge_ingestion import KnowledgeManifestError
+from backend.services.knowledge_manifest import load_approved_sources
 from scripts.ingest_knowledge_source import (
     IngestionRequest,
-    load_approved_sources,
     load_request,
     resolve_source,
 )
@@ -31,6 +31,21 @@ def test_identity_only_request_resolves_the_controlled_manifest(tmp_path: Path) 
 
     assert source == manifest[(request.document_id, request.version)]
     assert source.expected_checksum
+
+
+def test_repository_ingestion_requests_resolve_the_controlled_manifest() -> None:
+    manifest = load_approved_sources()
+    request_directory = Path('config/knowledge-ingestion-requests')
+    request_paths = sorted(request_directory.glob('*.json'))
+
+    assert [path.stem for path in request_paths] == ['contents', 'home', 'motor']
+    for path in request_paths:
+        request = load_request(path)
+        source = resolve_source(request, manifest)
+        assert (source.document_id, source.version) == (
+            request.document_id,
+            request.version,
+        )
 
 
 def test_request_cannot_supply_governed_metadata(tmp_path: Path) -> None:

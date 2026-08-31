@@ -14,7 +14,7 @@ service mappings below are implementation options, not claims of availability.
 ## Core Decisions
 
 - One running application uses exactly one data runtime profile.
-- `cloudflare`, `mongodb`, and `aws` profiles are mutually exclusive. A process
+- `local_mvp`, `cloudflare`, `mongodb`, and `aws` profiles are explicit selections. A process
   must not silently read from or write to another profile as a fallback.
 - Domain records and service interfaces are provider-neutral. Provider keys,
   SDK types, transport payloads, and infrastructure names stay inside adapters.
@@ -268,7 +268,7 @@ configuration, API, persistence, fixtures, and tests support them together.
 The composition root selects one complete adapter bundle at startup:
 
 ```text
-DATA_RUNTIME_PROFILE=fixture | cloudflare | mongodb | aws
+DATA_RUNTIME_PROFILE=fixture | local_mvp | cloudflare | mongodb | aws
 ```
 
 ```text
@@ -288,6 +288,7 @@ from a second profile without a separately approved architecture change.
 | Profile | Candidate transactional store | Candidate object store | Candidate knowledge/index services | Status |
 | --- | --- | --- | --- | --- |
 | `fixture` | In-memory fixture repository | Synthetic object adapter, or explicitly configured local MinIO | Deterministic fixture retriever | Available for controlled tests and local demonstrations |
+| `local_mvp` | Local transaction-capable MongoDB replica set | Local S3-compatible MinIO | Governed synthetic MinIO corpus and keyword retrieval | Verified development composition; policy/history remain synthetic |
 | `cloudflare` | D1 | R2 | R2 plus Vectorize and/or approved search service | Candidate; access and limits must be verified |
 | `mongodb` | MongoDB Atlas collections | GridFS or an approved MongoDB-managed object pattern | Atlas Search and Atlas Vector Search | Repository adapter in progress; transactions, object storage, topology, and access are not yet verified |
 | `aws` | DynamoDB or another approved AWS transactional service | S3 | OpenSearch, Bedrock Knowledge Bases, or another approved AWS retrieval service | Candidate; service access and permissions must be verified |
@@ -312,21 +313,23 @@ The application composition root must:
 
 The current implementation selects `fixture` by default and assembles its persistence,
 evidence, structured policy/history, knowledge-document, and knowledge-retrieval
-capabilities as one bundle. Selecting `cloudflare`, `mongodb`, or `aws` currently fails
+capabilities as one bundle. `local_mvp` explicitly assembles local MongoDB persistence,
+MinIO evidence and governed knowledge, plus clearly labelled synthetic policy/history.
+Selecting `cloudflare`, `mongodb`, or `aws` currently fails
 startup with an explicit unsupported-profile error. Those profiles must remain
 unavailable until one complete provider-specific bundle and its conformance tests exist;
 the application does not fill missing capabilities from `fixture`.
 
 The runtime capability table used by the composition root is:
 
-| Capability | `fixture` | `cloudflare` | `mongodb` | `aws` |
-| --- | --- | --- | --- | --- |
-| `persistence` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `evidence_storage` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `policy` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `claim_history` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `knowledge_documents` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
-| `knowledge_retrieval` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| Capability | `fixture` | `local_mvp` | `cloudflare` | `mongodb` | `aws` |
+| --- | --- | --- | --- | --- | --- |
+| `persistence` | `using_fixture` | `verified` | `pending_confirmation` | `pending_confirmation` | `pending_confirmation` |
+| `evidence_storage` | `using_fixture` | `verified` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `policy` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `claim_history` | `using_fixture` | `using_fixture` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_documents` | `using_fixture` | `verified` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
+| `knowledge_retrieval` | `using_fixture` | `verified` | `pending_confirmation` | `unavailable` | `pending_confirmation` |
 
 The capability-status vocabulary separates readiness from implementation source.
 `using_fixture` means that the controlled fixture capability is ready, while `verified`
@@ -334,15 +337,12 @@ means that a non-fixture provider capability has passed its required verificatio
 statuses are start-capable. `pending_confirmation` and `unavailable` are not
 start-capable and appear in the named missing-capability error.
 
-The table currently provides diagnostic input to `build_data_runtime_bundle`; it is not
-the sole composition gate. `validate_data_runtime_bundle` independently rejects every
-externally supplied non-fixture bundle until a complete provider-specific composition
-path and its conformance tests are implemented. Changing a table entry to `verified`
-alone therefore cannot enable a provider or assemble a mixed bundle. The current table
-is intentionally conservative: MongoDB repository code exists, but complete provider
-conformance, protected object storage, and runtime bundle verification are still
-outstanding. MongoDB persistence is recorded as `pending_confirmation` after a bounded
-Atlas connection and transaction probe. This does not make the profile start-capable.
+The table provides diagnostic input to `build_data_runtime_bundle`; it is not the sole composition
+gate. Externally supplied non-fixture bundles remain rejected, so changing a table entry alone
+cannot enable a provider. `local_mvp` has its own fixed composition path and cannot silently replace
+a missing adapter. The provider-specific `mongodb` profile remains conservative: complete Atlas
+provider conformance, protected object storage, and retrieval remain outstanding. Its connection
+foundation does not make that profile start-capable.
 Runtime bundles close provider repositories at application shutdown when the selected
 repository exposes a close operation.
 

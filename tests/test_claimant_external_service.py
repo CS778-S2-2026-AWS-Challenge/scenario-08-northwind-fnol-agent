@@ -320,11 +320,10 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     location = stored_before_consent.form['incident.location'].model_copy(
         update={'value': {'city': 'Auckland'}}
     )
-    repository.save_claim(
-        stored_before_consent.model_copy(
-            update={'form': {**stored_before_consent.form, 'incident.location': location}}
-        ),
-        expected_revision=revision,
+    # Fixture seeding: this precondition is outside the save_claim() transaction
+    # boundary (pointer change or revision-neutral write), so it is stored directly.
+    repository._claims[stored_before_consent.claim_id] = stored_before_consent.model_copy(
+        update={'form': {**stored_before_consent.form, 'incident.location': location}}
     )
     consent = _grant_consent(client, claim_id, revision, key='route-success')
 

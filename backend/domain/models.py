@@ -478,6 +478,7 @@ class ModelDecisionProvenance(ContractModel):
     runtime_profile: Literal['model_gateway'] = 'model_gateway'
     provider_model: str | None = Field(default=None, max_length=300)
     provider_request_id: str | None = Field(default=None, max_length=500)
+    prompt_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class AgentDecisionRecord(ContractModel):

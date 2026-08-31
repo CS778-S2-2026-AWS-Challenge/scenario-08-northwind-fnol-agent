@@ -76,6 +76,119 @@ function queueDetail(item) {
   }
 }
 
+it('persists the collapsed employee sidebar across same-origin page loads', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const toggle = dom.window.document.querySelector('#sidebarToggle')
+
+  expect(page).not.toHaveClass('sidebar-collapsed')
+  toggle.click()
+  expect(page).toHaveClass('sidebar-collapsed')
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(toggle).toHaveAttribute('aria-label', 'Expand sidebar')
+  expect(dom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('true')
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+
+  const restoredDom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.localStorage.setItem('northwind-workbench-sidebar-collapsed', 'true')
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const restoredPage = restoredDom.window.document.querySelector('#workbenchPage')
+  const restoredToggle = restoredDom.window.document.querySelector('#sidebarToggle')
+
+  expect(restoredPage).toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'false')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Expand sidebar')
+
+  restoredToggle.click()
+  expect(restoredPage).not.toHaveClass('sidebar-collapsed')
+  expect(restoredToggle).toHaveAttribute('aria-expanded', 'true')
+  expect(restoredToggle).toHaveAttribute('aria-label', 'Collapse sidebar')
+  expect(restoredDom.window.localStorage.getItem('northwind-workbench-sidebar-collapsed')).toBe('false')
+  await waitFor(() => expect(restoredDom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  restoredDom.window.close()
+})
+
+it('defines a responsive off-canvas employee menu without shrinking the main content', () => {
+  expect(employeeHtml).toContain('@media(max-width:1024px)')
+  expect(employeeHtml).toContain('width:min(82vw,320px);')
+  expect(employeeHtml).toContain('transform:translateX(-105%);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar { transform:translateX(0);')
+  expect(employeeHtml).toContain('.page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }')
+  expect(employeeHtml).toContain('.content { width:100%; min-width:0;')
+  expect(employeeHtml).toContain("document.addEventListener('touchstart'")
+  expect(employeeHtml).toContain("document.addEventListener('touchend'")
+})
+
+it('opens and closes the mobile employee drawer accessibly', async () => {
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously', url: 'http://127.0.0.1:8002/',
+    beforeParse(window) {
+      window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn() }))
+      window.fetch = vi.fn(() => response({ items: [], page: { next_cursor: null } }))
+    },
+  })
+  const page = dom.window.document.querySelector('#workbenchPage')
+  const openButton = dom.window.document.querySelector('#mobileSidebarOpen')
+  const closeButton = dom.window.document.querySelector('#sidebarToggle')
+  const sidebar = dom.window.document.querySelector('#employeeSidebar')
+  const mobileHeader = dom.window.document.querySelector('#mobileWorkbenchHeader')
+  const content = dom.window.document.querySelector('#workbenchContent')
+  const chatWidget = dom.window.document.querySelector('#chatWidget')
+  const backdrop = dom.window.document.querySelector('#sidebarBackdrop')
+
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'true')
+  expect(sidebar.inert).toBe(true)
+  expect(content.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
+
+  openButton.click()
+  expect(page).toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'true')
+  expect(sidebar).toHaveAttribute('aria-hidden', 'false')
+  expect(sidebar.inert).toBe(false)
+  expect(mobileHeader.inert).toBe(true)
+  expect(content.inert).toBe(true)
+  expect(chatWidget.inert).toBe(true)
+  expect(backdrop.hidden).toBe(false)
+  expect(closeButton).toHaveAttribute('aria-label', 'Close workbench menu')
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  const lastDrawerControl = dom.window.document.querySelector('#loadDemoQueue')
+  lastDrawerControl.focus()
+  lastDrawerControl.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+  expect(dom.window.document.activeElement).toBe(closeButton)
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(openButton).toHaveAttribute('aria-expanded', 'false')
+  expect(mobileHeader.inert).toBe(false)
+  expect(content.inert).toBe(false)
+  expect(chatWidget.inert).toBe(false)
+  expect(backdrop.hidden).toBe(true)
+  expect(dom.window.document.activeElement).toBe(openButton)
+
+  openButton.click()
+  expect(backdrop.hidden).toBe(false)
+  backdrop.click()
+  expect(page).not.toHaveClass('mobile-sidebar-open')
+  expect(backdrop.hidden).toBe(true)
+  expect(dom.window.document.activeElement).toBe(openButton)
+  await waitFor(() => expect(dom.window.document.querySelector('#refreshClaims')).not.toBeDisabled())
+  dom.window.close()
+})
+
 it('toggles professional review controls without navigating away from the claim', async () => {
   const item = queueItem(90)
   const fetchMock = vi.fn((url) => {
@@ -221,6 +334,76 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
       expect.any(Object),
     )
   })
+  dom.window.close()
+})
+
+it('proves the staff queue and claim-detail skeleton from shared Claim Context', async () => {
+  const item = queueItem(93, {
+    workflow_state: 'awaiting_evidence',
+    queue: 'awaiting_evidence',
+    priority: 'high',
+    route: 'pending_materials',
+    evidence_state: 'incomplete',
+    evidence_summary: { received: 1, pending: 1, needs_attention: 0 },
+    pending_evidence_count: 1,
+    pending_evidence: [{
+      kind: 'police_report',
+      wait_type: 'claimant',
+      expected_timing: 'Within 2 days',
+    }],
+    next_action: 'ASK',
+    next_action_summary: 'Upload the police report when it is available.',
+    responsible_party: 'claimant',
+    open_handoff_count: 1,
+    assignee_id: 'stf_queue_owner',
+  })
+  const detail = {
+    ...queueDetail(item),
+    claim_state: { workflow_state: item.workflow_state, evidence: item.evidence_state },
+    evidence_summary: item.evidence_summary,
+    form: {
+      'incident.location': {
+        value: 'Queen Street',
+        status: 'confirmed',
+        source: 'claimant',
+        source_refs: ['msg_claimant'],
+      },
+    },
+  }
+  const fetchMock = vi.fn((url) => String(url).endsWith(`/${item.claim_id}`)
+    ? response(detail)
+    : response({ items: [item], page: { next_cursor: null } }))
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = fetchMock },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('#claimList > button')).not.toBeNull())
+  const card = dom.window.document.querySelector('#claimList > button')
+  expect(card.textContent).toContain('Awaiting evidence')
+  expect(card.textContent).toContain('Assigned to stf_queue_owner')
+  expect(card.textContent).toContain('Priority: High')
+  expect(card.textContent).toContain('1 pending evidence')
+  expect(card.textContent).toContain('Waiting on claimant')
+  expect(card.textContent).toContain('Police Report · Within 2 days')
+  expect(card.textContent).toContain('Next · Claimant')
+  expect(card.textContent).toContain('Upload the police report when it is available.')
+
+  card.click()
+  await waitFor(() => expect(dom.window.document.querySelector('#detailContent').textContent)
+    .toContain(item.claim_id))
+  const summary = dom.window.document.querySelector('[aria-label="Operational summary"]')
+  expect(summary.textContent).toContain('Awaiting Evidence')
+  expect(summary.textContent).toContain('Pending Materials')
+  expect(summary.textContent).toContain('Claimant')
+  expect(summary.textContent).toContain('Upload the police report when it is available.')
+  expect(dom.window.document.querySelector('#detailEvidenceContext').textContent)
+    .toContain('Queen Street')
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining(`/claims/${item.claim_id}`),
+    expect.any(Object),
+  )
   dom.window.close()
 })
 

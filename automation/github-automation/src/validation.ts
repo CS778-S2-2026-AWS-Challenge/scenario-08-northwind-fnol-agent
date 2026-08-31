@@ -1,4 +1,4 @@
-import type { JsonRecord, PullRequestEvent } from "./types";
+import type { IssueEvent, JsonRecord, PullRequestEvent } from "./types";
 
 export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -37,6 +37,27 @@ export function optionalRecord(value: unknown): JsonRecord | null {
 export function requireArray(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${path} must be an array.`);
   return value;
+}
+
+export function parseIssueEvent(payload: unknown): IssueEvent {
+  const event = requireRecord(payload, "payload");
+  const repository = requireRecord(event.repository, "payload.repository");
+  const issue = requireRecord(event.issue, "payload.issue");
+  const user = requireRecord(issue.user, "payload.issue.user");
+
+  return {
+    action: requireString(event.action, "payload.action"),
+    repository: {
+      fullName: requireString(repository.full_name, "payload.repository.full_name"),
+    },
+    issue: {
+      number: requireInteger(issue.number, "payload.issue.number"),
+      body: optionalString(issue.body) ?? "",
+      state: requireString(issue.state, "payload.issue.state"),
+      creator: requireString(user.login, "payload.issue.user.login"),
+      htmlUrl: requireString(issue.html_url, "payload.issue.html_url"),
+    },
+  };
 }
 
 export function parsePullRequestEvent(payload: unknown): PullRequestEvent {

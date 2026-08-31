@@ -11,37 +11,69 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #f1f5f9; }
+    body { margin: 0; min-height: 100vh; overflow-x:hidden; background: #f1f5f9; }
     button, select, textarea, input { font: inherit; }
     button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible {
       outline: 3px solid rgba(56, 189, 248, .55);
       outline-offset: 2px;
     }
     a { color: inherit; text-decoration: none; }
+    .visually-hidden { position:absolute !important; width:1px !important; height:1px !important; padding:0 !important; margin:-1px !important; overflow:hidden !important; clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important; }
 
-    .page { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
-    .sidebar { background: #0f172a; color: #f8fafc; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
-    .brand { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
-    .brand span { color: #38bdf8; }
-    .sidebar p { margin: 0; color: #cbd5e1; line-height: 1.6; font-size: 14px; }
-    .filters { display: grid; gap: 12px; }
-    .filters label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: .12em; }
-    .filters select, .filters button { width: 100%; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; background: #0f172a; color: #f8fafc; }
+    .page { min-width:0; display: grid; grid-template-columns: 268px minmax(0,1fr); min-height: 100vh; }
+    .page, .sidebar { transition:grid-template-columns .2s ease,width .2s ease,padding .2s ease; }
+    .sidebar { position:sticky; top:0; height:100vh; overflow-y:auto; background:linear-gradient(180deg,#1d1662 0%,#26264b 58%,#3c1a69 100%); color:#f8fafc; padding:20px 16px 16px; display:flex; flex-direction:column; gap:14px; border-right:1px solid rgba(113, 94, 234, 0.853); box-shadow:12px 0 36px rgba(15,23,42,.08); scrollbar-width:thin; scrollbar-color:#315b57 transparent; }
+    .brand-lockup { display:flex; align-items:center; gap:9px; padding:0 3px 11px; border-bottom:1px solid rgba(148,210,199,.16); }
+    .sidebar-toggle { flex:0 0 32px; width:32px; height:32px; display:grid; place-items:center; margin-left:auto; border:1px solid rgba(202,201,247,.28); border-radius:50%; background:linear-gradient(145deg,rgba(255,255,255,.14),rgba(255,255,255,.06)); color:#fff; box-shadow:0 5px 14px rgba(8,5,37,.2); cursor:pointer; transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease; }
+    .sidebar-toggle:hover { border-color:#8ce5d6; background:linear-gradient(145deg,rgba(140,229,214,.24),rgba(255,255,255,.08)); box-shadow:0 7px 17px rgba(8,5,37,.3); transform:translateY(-1px); }
+    .toggle-chevron { width:8px; height:8px; border-bottom:2px solid currentColor; border-left:2px solid currentColor; transform:translateX(2px) rotate(45deg); transition:transform .2s ease; }
+    .brand-mark { display:grid; flex:0 0 34px; width:34px; height:34px; place-items:center; border-radius:9px; background:linear-gradient(145deg,#34b7a6,#147d75); box-shadow:0 6px 16px rgba(20,125,117,.26); color:#fff; font-size:16px; font-weight:800; }
+    .brand { font-size:16px; font-weight:800; letter-spacing:-.025em; line-height:1.15; }
+    .brand span { display:block; margin-top:4px; color:#8ce5d6; font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
+    .sidebar p { margin:0; color:#cac9f7; line-height:1.6; font-size:12px; }
+    .sidebar-toolbar { display:contents; }
+    .mobile-workbench-header, .sidebar-backdrop { display:none; }
+    .sidebar-section-label { margin:10px 4px 6px; color:#967fa6; font-size:9px; font-weight:750; letter-spacing:.16em; text-transform:uppercase; }
+    .filters { display:grid; gap:10px; }
+    .filters label { font-size:11px; color:#cac9f7; text-transform:uppercase; letter-spacing:.14em; font-weight:750; }
+    .filters select, .filters button { width:100%; min-height:40px; border:1px solid #315653; border-radius:9px; padding:8px 34px 8px 11px; background:#2f3e57; color:#f8fafc; font-size:13px; }
+    .filters select { color-scheme:dark; cursor:pointer; }
     .filters button { cursor: pointer; border-color: #38bdf8; background: #0f172a; }
-    .sidebar-nav { display:grid; gap:8px; }
-    .sidebar-nav button { width:100%; border:1px solid #334155; border-radius:10px; padding:12px 14px; background:#0f172a; color:#f8fafc; text-align:left; cursor:pointer; }
-    .sidebar-nav button:hover, .sidebar-nav button.active { border-color:#38bdf8; background:#172b45; }
-    .demo-controls { display:grid; gap:8px; padding-top:14px; border-top:1px solid #334155; }
-    .demo-controls button { width:100%; border:1px solid #334155; border-radius:10px; padding:10px 12px; background:#172033; color:#e2e8f0; text-align:left; cursor:pointer; }
-    .demo-controls button:hover { border-color:#38bdf8; }
+    .sidebar-nav { display:grid; gap:4px; }
+    .sidebar-nav button { position:relative; width:100%; min-height:42px; display:flex; align-items:center; gap:9px; border:1px solid transparent; border-radius:9px; padding:6px 10px; background:transparent; color:#c9dcda; text-align:left; font-size:13px; font-weight:650; cursor:pointer; transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease; }
+    .sidebar-nav button::after { position:absolute; right:12px; color:#6e928e; content:'›'; font-size:20px; font-weight:400; }
+    .sidebar-nav button:hover { border-color:rgba(94,234,212,.18); background:rgba(50,125,117,.16); color:#fff; transform:translateX(2px); }
+    .sidebar-nav button.active { border-color:rgba(94,234,212,.28); background:linear-gradient(90deg,rgba(36,155,143,.32),rgba(36,155,143,.12)); color:#fff; box-shadow:inset 3px 0 #52d6c5; }
+    .nav-icon { display:grid; flex:0 0 27px; width:27px; height:27px; place-items:center; border-radius:7px; background:rgba(148,210,199,.1); color:#9cded4; font-size:13px; }
+    .sidebar-nav button.active .nav-icon { background:#2b9b8f; color:#fff; box-shadow:0 5px 13px rgba(20,125,117,.28); }
+    .refresh-claims { min-height:40px; display:flex; align-items:center; justify-content:center; gap:7px; border:1px solid #3b6661; border-radius:9px; background:rgba(255,255,255,.04); color:#d5e8e5; font-size:13px; font-weight:700; cursor:pointer; }
+    .refresh-claims:hover { border-color:#62cdbf; background:rgba(50,125,117,.16); }
+    .demo-controls { display:grid; gap:6px; padding-top:11px; border-top:1px solid rgba(148,210,199,.16); }
+    .demo-controls button { width:100%; min-height:38px; border:1px solid #315653; border-radius:9px; padding:7px 10px; background:rgba(255,255,255,.04); color:#d6e8e5; font-size:12px; text-align:left; cursor:pointer; }
+    .demo-controls button:hover { border-color:#62cdbf; }
     .demo-controls button.danger { border-color:#7f1d1d; background:#3f1d26; color:#fecaca; }
     .demo-status { margin:0; color:#94a3b8; font-size:11px; line-height:1.45; }
     .status-bar { margin-top: auto; font-size: 12px; color: #94a3b8; line-height: 1.7; }
 
-    .help { margin-top:auto; padding:17px 12px 0; border-top:1px solid #29475f; color:#aac0d1; font-size:12px; }.help b { display:block; color:#fff; margin-bottom:3px; }
-    .profile { margin-top:14px; padding:10px; border-radius:8px; background:#173a56; }.avatar { display:inline-grid; width:27px; height:27px; margin-right:7px; place-items:center; border-radius:50%; background:#2fa49f; color:#fff; font-size:10px; font-weight:700; vertical-align:middle; }
+    .help { margin-top:auto; padding:11px 3px 0; border-top:1px solid rgba(148,210,199,.16); color:#91aaa7; font-size:11px; line-height:1.5; }.help b { display:block; color:#e8f4f2; margin-bottom:4px; font-size:12px; }
+    .profile { position:relative; display:grid; grid-template-columns:32px 1fr; align-items:center; gap:8px; margin-top:9px; padding:8px; border:1px solid rgba(148,210,199,.16); border-radius:10px; background:rgba(255,255,255,.055); color:#f3faf9; font-size:11px; }.avatar { display:grid; width:32px; height:32px; place-items:center; border-radius:9px; background:linear-gradient(145deg,#38b8a8,#176e69); color:#fff; font-size:10px; font-weight:800; }.profile-copy { display:grid; gap:1px; }.profile-copy small { color:#8faeaa; }.profile-status { position:absolute; top:9px; left:32px; width:8px; height:8px; border:2px solid #163433; border-radius:50%; background:#4ade80; }
 
-    .content { padding: 24px; }
+    .page.sidebar-collapsed { grid-template-columns:72px 1fr; }
+    .page.sidebar-collapsed .sidebar { width:72px; padding:17px 9px 14px; align-items:stretch; gap:12px; box-shadow:8px 0 28px rgba(15,23,42,.12); }
+    .page.sidebar-collapsed .brand-lockup { flex-direction:column; gap:11px; padding:0 0 14px; }
+    .page.sidebar-collapsed .brand, .page.sidebar-collapsed .filters, .page.sidebar-collapsed .sidebar-section-label, .page.sidebar-collapsed .nav-label, .page.sidebar-collapsed .refresh-label, .page.sidebar-collapsed .demo-controls, .page.sidebar-collapsed .profile-copy { display:none; }
+    .page.sidebar-collapsed .sidebar-toggle { width:34px; height:34px; margin:0; border-color:rgba(140,229,214,.35); background:rgba(140,229,214,.12); }
+    .page.sidebar-collapsed .toggle-chevron { transform:translateX(-2px) rotate(225deg); }
+    .page.sidebar-collapsed .sidebar-nav { gap:7px; }
+    .page.sidebar-collapsed .sidebar-nav button { min-height:46px; justify-content:center; padding-inline:5px; border-radius:12px; }
+    .page.sidebar-collapsed .sidebar-nav button::after { display:none; }
+    .page.sidebar-collapsed .nav-icon { flex-basis:34px; width:34px; height:34px; border-radius:10px; font-size:15px; }
+    .page.sidebar-collapsed .sidebar-nav button.active { border-color:rgba(140,229,214,.36); background:rgba(52,183,166,.2); box-shadow:none; }
+    .page.sidebar-collapsed .refresh-claims { min-height:44px; margin-top:2px; padding:0; border-radius:12px; border-color:rgba(202,201,247,.2); font-size:0; }
+    .page.sidebar-collapsed .refresh-claims > [aria-hidden="true"] { font-size:17px; }
+    .page.sidebar-collapsed .help { display:none; }
+
+    .content { min-width:0; padding: 24px; }
     .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 20px; }
     .header h1 { margin: 0; font-size: 28px; }
     .header p { margin: 0; color: #475569; max-width: 650px; }
@@ -132,7 +164,6 @@
     .detail-panel > #detailStaffActions { order:1; }
     .detail-panel > #detailReview { order:2; }
     .detail-panel > #detailEvidence { order:3; }
-    .detail-panel > #detailNextStep { order:4; }
     .detail-panel > #detailHistory { order:5; }
     .detail-section { background: #ffffff; border-radius: 18px; border: 1px solid #e2e8f0; padding: 20px; }
     .detail-section h2 { margin: 0 0 12px; font-size: 16px; }
@@ -337,6 +368,7 @@
 
     /* Assistant and customer conversation components */
     .chat-widget { position:fixed; right:22px; bottom:22px; width:340px; max-height:520px; display:flex; flex-direction:column; border-radius:24px; overflow:hidden; background:#fff; border:1px solid rgba(16,42,67,.12); box-shadow:0 26px 60px rgba(7,22,44,.16); transition:opacity .22s ease, width .22s ease, max-height .22s ease, border .22s ease, box-shadow .22s ease, background .22s ease; font-size:13px; z-index:50; touch-action:none; }
+    .chat-widget[hidden] { display:none; }
     .chat-widget.dragging { opacity:.96; transition:none; }
     .chat-widget.closed { width:178px; min-height:auto; max-height:none; }
     .chat-header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 18px; background:linear-gradient(135deg,#173a56 0%,#157f79 100%); color:#fff; cursor:grab; touch-action:none; user-select:none; }
@@ -363,14 +395,10 @@
 
     .chat-attachment-preview div { font-size:12px; line-height:1.3; }
     .chat-attachment-preview small { display:block; color:#68707d; margin-top:4px; }
-    .customer-chat-view { min-height:calc(100vh - 48px); }
-    .customer-chat-panel { min-height:calc(100vh - 48px); display:grid; grid-template-rows:auto 1fr; overflow:hidden; border:1px solid #e2e8f0; border-radius:18px; background:#fff; box-shadow:0 18px 48px rgba(15,23,42,.04); }
-    .customer-chat-panel > header { display:flex; align-items:center; justify-content:space-between; padding:20px; border-bottom:1px solid #e2e8f0; }
-    .customer-chat-content { min-height:0; display:grid; grid-template-columns:250px 1fr; }
+    .customer-chat-content { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr); }
     .customer-chat-list { padding:18px; overflow:auto; border-right:1px solid #e2e8f0; background:#fbfeff; }
     .customer-chat-list h3 { margin:0 0 12px; font-size:12px; color:#475467; letter-spacing:.08em; text-transform:uppercase; }
-    .customer-chat-list button { width:100%; margin-bottom:8px; padding:10px 12px; border:1px solid #d7e0e9; border-radius:10px; background:#f8fbfc; color:#0f3444; text-align:left; cursor:pointer; }
-    .customer-chat-list button.active { border-color:#157f79; background:#157f79; color:#fff; }
+    .customer-chat-list .context-row { grid-template-columns:1fr; }
     .customer-chat-main { min-width:0; min-height:0; display:flex; flex-direction:column; padding:18px; }
     .customer-chat-title { display:flex; align-items:start; justify-content:space-between; gap:12px; margin-bottom:14px; }
     .customer-chat-status { color:#64748b; font-size:12px; margin-top:4px; }
@@ -401,71 +429,114 @@
     }
     @media(max-width:1100px) { .queue-grid{grid-template-columns:repeat(3,1fr)}.workspace{grid-template-columns:1fr}.view-grid{grid-template-columns:1fr}.sidebar{width:210px} }
     @media(max-width:1024px) {
-      .sidebar { width:100%; }
+      .page, .page.sidebar-collapsed { display:block; }
+      .mobile-workbench-header { position:sticky; z-index:35; top:0; min-height:64px; display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #d7e2ea; background:rgba(255,255,255,.96); box-shadow:0 8px 24px rgba(15,23,42,.08); backdrop-filter:blur(12px); }
+      .mobile-workbench-header .brand-mark { flex-basis:38px; width:38px; height:38px; }
+      .mobile-workbench-title { min-width:0; color:#173a38; font-size:15px; font-weight:800; line-height:1.15; }
+      .mobile-workbench-title span { display:block; margin-top:3px; color:#64748b; font-size:9px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+      .mobile-sidebar-open { width:42px; height:42px; display:grid; place-items:center; margin-left:auto; border:1px solid #bcd5d0; border-radius:12px; background:#eef8f6; color:#145e59; cursor:pointer; }
+      .mobile-sidebar-open-icon, .mobile-sidebar-open-icon::before, .mobile-sidebar-open-icon::after { width:19px; height:2px; display:block; border-radius:2px; background:currentColor; }
+      .mobile-sidebar-open-icon { position:relative; }
+      .mobile-sidebar-open-icon::before, .mobile-sidebar-open-icon::after { position:absolute; left:0; content:''; }
+      .mobile-sidebar-open-icon::before { top:-6px; }
+      .mobile-sidebar-open-icon::after { top:6px; }
+      .sidebar, .page.sidebar-collapsed .sidebar { position:fixed; z-index:60; inset:0 auto 0 0; width:min(82vw,320px); max-width:calc(100vw - 48px); height:100dvh; padding:18px 15px 15px; align-items:stretch; gap:14px; overflow-y:auto; transform:translateX(-105%); transition:transform .24s ease,box-shadow .24s ease; }
+      .page.mobile-sidebar-open .sidebar { transform:translateX(0); box-shadow:24px 0 55px rgba(15,23,42,.3); }
+      .page.sidebar-collapsed .brand-lockup { flex-direction:row; gap:9px; padding:0 3px 11px; border-bottom:1px solid rgba(148,210,199,.16); }
+      .page.sidebar-collapsed .brand, .page.sidebar-collapsed .filters, .page.sidebar-collapsed .sidebar-section-label, .page.sidebar-collapsed .nav-label, .page.sidebar-collapsed .refresh-label, .page.sidebar-collapsed .demo-controls, .page.sidebar-collapsed .profile-copy { display:initial; }
+      .page.sidebar-collapsed .sidebar-toggle { width:34px; height:34px; margin-left:auto; }
+      .page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:contents; }
+      .page.sidebar-collapsed .sidebar-nav { display:grid; gap:4px; }
+      .page.sidebar-collapsed .sidebar-nav button { min-height:42px; justify-content:flex-start; padding:6px 10px; }
+      .page.sidebar-collapsed .sidebar-nav button::after { display:block; }
+      .page.sidebar-collapsed .nav-icon { flex-basis:27px; width:27px; height:27px; }
+      .page.sidebar-collapsed .refresh-claims { min-height:40px; padding:0; font-size:13px; }
+      .page.sidebar-collapsed .refresh-claims > [aria-hidden="true"] { font-size:inherit; }
+      .page.sidebar-collapsed .help { display:block; }
+      .sidebar-backdrop { position:fixed; z-index:50; inset:0; display:block; padding:0; border:0; background:rgba(8,15,30,.52); opacity:0; pointer-events:none; transition:opacity .24s ease; }
+      .page.mobile-sidebar-open .sidebar-backdrop { opacity:1; pointer-events:auto; }
+      body.mobile-sidebar-active { overflow:hidden; }
     }
     @media(max-width:720px) {
-      .content { min-width:0; padding:16px; }
+      .content { width:100%; min-width:0; padding:14px 12px; }
+      .panel, .detail-panel, .panel-body, .review-workspace { min-width:0; }
+      .customer-chat-content { grid-template-columns:1fr; }
+      .customer-chat-input { flex-wrap:wrap; }
+      .panel-header { align-items:flex-start; padding:14px; }
+      .panel-body, .review-workspace { padding:14px; }
       .queue-overview { grid-template-columns:1fr; }
       .detail-grid, .staff-form-grid, .context-row, .evidence-review-card { grid-template-columns:1fr; }
       .signal-draft-list, .signal-actions { margin-left:0; }
       .claim-detail-tabs { top:8px; margin-inline:-4px; }
       .claim-detail-tabs button { padding:9px 11px; font-size:12px; }
       .claim-list button { width:100%; }
-      .customer-chat-content { grid-template-columns:1fr; }
-      .customer-chat-list { display:none; }
+      .chat-widget { right:8px; bottom:8px; width:min(300px,calc(100vw - 16px)); }
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <aside class="sidebar">
-      <div class="brand">Northwind <span>Workbench</span></div>
-      
-
-      <div class="filters">
-        <label for="viewSelect">Queue filter</label>
-        <select id="viewSelect">
-          <option value="all">All claims</option>
-          <option value="urgent">Urgent requests</option>
-          <option value="human_requests">Human requests</option>
-          <option value="new_untriaged">New and untriaged</option>
-          <option value="awaiting_evidence">Awaiting evidence</option>
-          <option value="professional_review">Professional review</option>
-          <option value="ready_to_progress">Ready to progress</option>
-          <option value="created_routed">Created / routed</option>
-        </select>
+  <div class="page" id="workbenchPage">
+    <header id="mobileWorkbenchHeader" class="mobile-workbench-header">
+      <div class="brand-mark" aria-hidden="true">N</div>
+      <div class="mobile-workbench-title">Northwind <span>Claims workbench</span></div>
+      <button id="mobileSidebarOpen" class="mobile-sidebar-open" type="button" aria-controls="employeeSidebar" aria-expanded="false" aria-label="Open workbench menu"><span class="mobile-sidebar-open-icon" aria-hidden="true"></span></button>
+    </header>
+    <aside id="employeeSidebar" class="sidebar" aria-label="Workbench menu">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">N</div>
+        <div class="brand">Northwind <span>Claims workbench</span></div>
+        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar"><span class="toggle-chevron" aria-hidden="true"></span></button>
       </div>
 
-      <nav class="sidebar-nav" aria-label="Workbench navigation">
-        <button id="workbenchNav" class="active" type="button">Claim workbench</button>
-        <button id="pendingEvidenceNav" type="button">Pending evidence</button>
-        <button id="customerChatNav" type="button">Customer chat</button>
-      </nav>
+      <div class="sidebar-toolbar">
+        <div class="filters">
+          <label for="viewSelect">Queue filter</label>
+          <select id="viewSelect">
+            <option value="all">All claims</option>
+            <option value="urgent">Urgent requests</option>
+            <option value="human_requests">Human requests</option>
+            <option value="new_untriaged">New and untriaged</option>
+            <option value="awaiting_evidence">Awaiting evidence</option>
+            <option value="professional_review">Professional review</option>
+            <option value="ready_to_progress">Ready to progress</option>
+            <option value="created_routed">Created / routed</option>
+          </select>
+        </div>
 
-      <button id="refreshClaims" type="button">Refresh claims</button>
-      <div class="demo-controls">
-        <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
-        <button id="resetDemoQueue" class="danger" type="button" hidden>Reset and load demo queue</button>
-        <p id="demoStatus" class="demo-status" aria-live="polite">Demo data is only available in the local development environment.</p>
-      </div>
+        <div class="workspace-links">
+          <p class="sidebar-section-label">Workspace</p>
+          <nav class="sidebar-nav" aria-label="Workbench navigation">
+            <button id="workbenchNav" class="active" type="button" title="Claim workbench"><span class="nav-icon" aria-hidden="true">▦</span><span class="nav-label">Claim workbench</span></button>
+            <button id="pendingEvidenceNav" type="button" title="Pending evidence"><span class="nav-icon" aria-hidden="true">◷</span><span class="nav-label">Pending evidence</span></button>
+            <button id="customerChatNav" type="button" title="Claim conversations"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-label">Claim conversations</span></button>
+          </nav>
+        </div>
 
-      <div class="help">
-        <b>Need a hand?</b>
-        Start with the recommended next step. You can ask for help at any point.
-        <div class="profile"><span class="avatar">LZ</span>Lin Zhang<br><small style="margin-left:35px">Claims Professional</small>
+        <button id="refreshClaims" class="refresh-claims" type="button" title="Refresh claims"><span aria-hidden="true">↻</span><span class="refresh-label">Refresh claims</span></button>
+        <div class="demo-controls">
+          <button id="loadDemoQueue" type="button">Load workbench demo queue</button>
+          <button id="resetDemoQueue" class="danger" type="button" hidden>Reset and load demo queue</button>
+          <p id="demoStatus" class="demo-status" aria-live="polite">Demo data is only available in the local development environment.</p>
+        </div>
+
+        <div class="help">
+          <div class="profile">
+            <span class="avatar">LZ</span>
+            <span class="profile-status" aria-label="Available"></span>
+            <span class="profile-copy"><strong>Lin Zhang</strong><small>Claims Professional</small></span>
+          </div>
         </div>
       </div>
-    
     </aside>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" tabindex="-1" aria-label="Close workbench menu" hidden></button>
 
-    <main class="content">
+    <main id="workbenchContent" class="content">
       <section id="workbenchView" aria-busy="false">
-      <div class="header">
-        <div>
-          <h1 id="queueTitle">Employee workbench</h1>
-          <p>Use the staff workbench to browse authorised claims and inspect internal-only status projected from the shared claim record.</p>
-        </div>
+      <div class="visually-hidden" aria-live="polite">
+        <h1 id="queueTitle">Employee workbench</h1>
+        <p>Claims matching the selected operational queue.</p>
       </div>
+
 
       <nav class="queue-overview" aria-label="Priority handoff queues">
         <button id="urgentQueueCard" class="is-urgent" type="button" data-queue-view="urgent" aria-pressed="false">
@@ -502,34 +573,68 @@
 
         <section class="detail-panel">
           <nav id="claimDetailTabs" class="claim-detail-tabs" aria-label="Claim detail sections" role="tablist" hidden>
-            <button type="button" role="tab" data-detail-tab="overview" aria-selected="true">Claim detail &amp; review</button>
-            <button type="button" role="tab" data-detail-tab="evidence" aria-selected="false">Evidence and claim facts</button>
-            <button type="button" role="tab" data-detail-tab="review" aria-selected="false">Handoffs and internal review</button>
-            <button type="button" role="tab" data-detail-tab="history" aria-selected="false">History and continuity</button>
+            <button id="claimDetailOverviewTab" type="button" role="tab" data-detail-tab="overview" aria-controls="detailSummary" aria-selected="true">Claim detail &amp; review</button>
+            <button id="claimDetailEvidenceTab" type="button" role="tab" data-detail-tab="evidence" aria-controls="detailEvidence" aria-selected="false">Evidence and claim facts</button>
+            <button id="claimDetailReviewTab" type="button" role="tab" data-detail-tab="review" aria-controls="detailReview" aria-selected="false">Handoffs and internal review</button>
+            <button id="claimDetailConversationTab" type="button" role="tab" data-detail-tab="conversation" aria-controls="detailConversation" aria-selected="false">Conversation</button>
+            <button id="claimDetailHistoryTab" type="button" role="tab" data-detail-tab="history" aria-controls="detailHistory" aria-selected="false">History</button>
           </nav>
-          <div class="detail-section" id="detailSummary" data-detail-page="overview">
+          <div class="detail-section" id="detailSummary" role="tabpanel" aria-labelledby="claimDetailOverviewTab" data-detail-page="overview">
             <h2>Claim detail</h2>
             <div id="detailContent"><p class="muted">Select a claim to view its workbench projection.</p></div>
           </div>
-          <div class="detail-section" id="detailNextStep" data-detail-page="history" style="display:none">
-            <div class="claim-actions">
-              <div class="action-copy"><strong>Continue this claim</strong><span>Communication and guidance tools</span></div>
-              <button id="openCustomerChatBtn" class="customer-chat-button" type="button">View customer communication</button>
-              <button id="toggleAssistantBtn" class="customer-chat-close" type="button">Open assistant</button>
-            </div>
-          </div>
-          <details class="detail-section" id="detailEvidence" data-detail-page="evidence" style="display:none" open>
+          <details class="detail-section" id="detailEvidence" role="tabpanel" aria-labelledby="claimDetailEvidenceTab" data-detail-page="evidence" style="display:none" open>
             <summary>Evidence and claim facts <span class="detail-section-hint">What we know and what is still pending</span></summary>
             <div id="detailEvidenceContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailReview" data-detail-page="review" style="display:none">
+          <details class="detail-section" id="detailReview" role="tabpanel" aria-labelledby="claimDetailReviewTab" data-detail-page="review" style="display:none">
             <summary>Handoffs and internal review <span class="detail-section-hint">Assignments, signals and review context</span></summary>
             <div id="detailReviewContext" class="detail-section-body"></div>
           </details>
-          <details class="detail-section" id="detailHistory" data-detail-page="history" style="display:none">
-            <summary>History and continuity <span class="detail-section-hint">Previous sessions and communication</span></summary>
+          <details class="detail-section" id="detailHistory" role="tabpanel" aria-labelledby="claimDetailHistoryTab" data-detail-page="history" style="display:none">
+            <summary>History <span class="detail-section-hint">Prior commitments and unresolved work</span></summary>
             <div id="detailHistoryContext" class="detail-section-body"></div>
           </details>
+          <section class="detail-section" id="detailConversation" role="tabpanel" aria-labelledby="claimDetailConversationTab" data-detail-page="conversation" hidden>
+            <div class="customer-chat-title">
+              <div>
+                <h2 id="customerChatTitle">Claimant conversation</h2>
+                <div id="customerChatStatus" class="customer-chat-status" role="status" aria-live="polite"></div>
+              </div>
+              <button id="customerChatHandoffAction" class="customer-chat-close" type="button" hidden>Accept handoff to reply</button>
+            </div>
+            <div class="customer-chat-content">
+              <aside class="customer-chat-list" aria-labelledby="conversationContextTitle">
+                <h3 id="conversationContextTitle">Reply context</h3>
+                <div id="customerChatContext" class="context-stack"></div>
+              </aside>
+              <div class="customer-chat-main">
+                <div class="customer-chat-title">
+                  <div><strong id="customerChatHeader">Select a claim</strong><div class="customer-chat-status">Persisted messages in the active claim session</div></div>
+                </div>
+                <div id="customerChatHistory" class="customer-chat-history" aria-live="polite" aria-relevant="additions text"></div>
+                <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
+                  <div class="agent-suggestion-heading">
+                    <strong id="agentSuggestionTitle">Reply template</strong>
+                    <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
+                  </div>
+                  <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
+                  <div class="agent-suggestion-actions">
+                    <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
+                    <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
+                    <button id="rejectAgentSuggestion" type="button" disabled>Reject</button>
+                  </div>
+                </section>
+                <div class="customer-chat-title">
+                  <div><strong>Reply to claimant</strong><div class="customer-chat-status">Press Enter to send · Shift+Enter for a new line</div></div>
+                </div>
+                <div class="customer-chat-input">
+                  <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a claimant-safe reply…"></textarea>
+                  <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
+                </div>
+              </div>
+            </div>
+          </section>
           <details class="detail-section integrated-review-controls" id="detailStaffActions" data-detail-page="overview" style="display:none">
             <summary>Complete the professional review <span class="detail-section-hint">Three guided steps</span></summary>
             <div class="detail-section-body">
@@ -581,46 +686,6 @@
       </div>
       </section>
 
-      <section id="customerChatView" class="customer-chat-view" hidden aria-labelledby="customerChatTitle">
-        <div class="customer-chat-panel">
-          <header>
-            <div>
-              <strong id="customerChatTitle">Customer chat</strong>
-              <div class="customer-chat-status">Direct customer communication, separate from the internal AI assistant.</div>
-            </div>
-            <button id="customerChatBack" class="customer-chat-close" type="button">Back to workbench</button>
-          </header>
-          <div class="customer-chat-content">
-            <aside class="customer-chat-list">
-              <h3>Customer chats</h3>
-              <div id="customerChatList"></div>
-            </aside>
-            <div class="customer-chat-main">
-              <div class="customer-chat-title">
-                <div><strong id="customerChatHeader">Select a conversation</strong><div id="customerChatStatus" class="customer-chat-status"></div></div>
-              </div>
-              <div id="customerChatHistory" class="customer-chat-history" aria-live="polite"></div>
-              <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
-                <div class="agent-suggestion-heading">
-                  <strong id="agentSuggestionTitle">Reply template</strong>
-                  <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
-                </div>
-                <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
-                <div class="agent-suggestion-actions">
-                  <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
-                  <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
-                  <button id="rejectAgentSuggestion" type="button" disabled>Reject</button>
-                </div>
-              </section>
-              <div class="customer-chat-input">
-                <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a message to the claimant..."></textarea>
-                <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
-                <button id="customerChatResolve" class="customer-chat-close" type="button">Resolve handoff</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
@@ -661,9 +726,115 @@
 
   <script>
     const API_BASE = 'http://127.0.0.1:8000/api/v1/workbench/claims';
-    const STAFF_TOKEN = 'synthetic-staff';
+    // Explicit local developer opt-in. This page ships no credential; a synthetic
+    // token only works against a backend started in explicit developer identity mode.
+    // Set one for local use with:
+    //   localStorage.setItem('northwind.staffToken', '<configured staff token>')
+    const STAFF_TOKEN = (() => {
+      try {
+        return window.localStorage.getItem('northwind.staffToken') || '';
+      } catch {
+        return '';
+      }
+    })();
 
     const byId = id => document.getElementById(id);
+    const SIDEBAR_STORAGE_KEY = 'northwind-workbench-sidebar-collapsed';
+    const mobileSidebarQuery = globalThis.matchMedia?.('(max-width: 1024px)');
+
+    function isMobileSidebar() {
+      return mobileSidebarQuery?.matches === true;
+    }
+
+    function setMobileSidebarOpen(open, returnFocus = false) {
+      const shouldOpen = Boolean(open && isMobileSidebar());
+      byId('workbenchPage').classList.toggle('mobile-sidebar-open', shouldOpen);
+      document.body.classList.toggle('mobile-sidebar-active', shouldOpen);
+      byId('mobileSidebarOpen').setAttribute('aria-expanded', String(shouldOpen));
+      byId('employeeSidebar').setAttribute('aria-hidden', String(isMobileSidebar() && !shouldOpen));
+      byId('employeeSidebar').inert = isMobileSidebar() && !shouldOpen;
+      byId('mobileWorkbenchHeader').inert = shouldOpen;
+      byId('workbenchContent').inert = shouldOpen;
+      byId('chatWidget').inert = shouldOpen;
+      byId('sidebarBackdrop').hidden = !shouldOpen;
+      if (shouldOpen) byId('sidebarToggle').focus();
+      if (!shouldOpen && returnFocus) byId('mobileSidebarOpen').focus();
+    }
+
+    function getMobileSidebarFocusable() {
+      return [...byId('employeeSidebar').querySelectorAll('button, select, input, textarea, a[href], [tabindex]')]
+        .filter(element => !element.disabled && !element.hidden && element.tabIndex >= 0);
+    }
+
+    function setSidebarCollapsed(collapsed, persist = true) {
+      sidebarCollapsed = collapsed;
+      byId('workbenchPage').classList.toggle('sidebar-collapsed', collapsed && !isMobileSidebar());
+      const toggle = byId('sidebarToggle');
+      const effectiveCollapsed = collapsed && !isMobileSidebar();
+      toggle.setAttribute('aria-expanded', String(isMobileSidebar() ? true : !effectiveCollapsed));
+      toggle.setAttribute('aria-label', isMobileSidebar() ? 'Close workbench menu' : effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      toggle.title = toggle.getAttribute('aria-label');
+      if (persist) {
+        try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed)); } catch (_) { /* Storage may be unavailable. */ }
+      }
+    }
+
+    let sidebarCollapsed = false;
+    try { sidebarCollapsed = localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'; } catch (_) { /* Use the expanded default. */ }
+    setSidebarCollapsed(sidebarCollapsed, false);
+    byId('sidebarToggle').addEventListener('click', () => {
+      if (isMobileSidebar()) {
+        setMobileSidebarOpen(false, true);
+        return;
+      }
+      setSidebarCollapsed(!byId('workbenchPage').classList.contains('sidebar-collapsed'));
+    });
+    byId('mobileSidebarOpen').addEventListener('click', () => setMobileSidebarOpen(true));
+    byId('sidebarBackdrop').addEventListener('click', () => setMobileSidebarOpen(false, true));
+
+    let sidebarTouchStart = null;
+    document.addEventListener('touchstart', event => {
+      const touch = event.touches[0];
+      if (!touch || !isMobileSidebar()) return;
+      const menuOpen = byId('workbenchPage').classList.contains('mobile-sidebar-open');
+      if (menuOpen || touch.clientX <= 28) sidebarTouchStart = { x: touch.clientX, y: touch.clientY, menuOpen };
+    }, { passive:true });
+    document.addEventListener('touchend', event => {
+      const touch = event.changedTouches[0];
+      if (!touch || !sidebarTouchStart) return;
+      const deltaX = touch.clientX - sidebarTouchStart.x;
+      const deltaY = touch.clientY - sidebarTouchStart.y;
+      if (Math.abs(deltaX) >= 56 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        if (!sidebarTouchStart.menuOpen && deltaX > 0) setMobileSidebarOpen(true);
+        if (sidebarTouchStart.menuOpen && deltaX < 0) setMobileSidebarOpen(false, true);
+      }
+      sidebarTouchStart = null;
+    }, { passive:true });
+    document.addEventListener('keydown', event => {
+      const menuOpen = byId('workbenchPage').classList.contains('mobile-sidebar-open');
+      if (event.key === 'Escape' && menuOpen) {
+        setMobileSidebarOpen(false, true);
+        return;
+      }
+      if (event.key === 'Tab' && menuOpen) {
+        const focusable = getMobileSidebarFocusable();
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    });
+    mobileSidebarQuery?.addEventListener?.('change', () => {
+      setMobileSidebarOpen(false);
+      setSidebarCollapsed(sidebarCollapsed, false);
+    });
+    setMobileSidebarOpen(false);
+
     let claims = [];
     let activeClaimId = null;
     let activeClaimDetail = null;
@@ -715,6 +886,7 @@
     }
 
     function syncClaimDetailTabs() {
+      byId('chatWidget').hidden = activeDetailTab === 'conversation';
       document.querySelectorAll('[data-detail-tab]').forEach(button => {
         const selected = button.dataset.detailTab === activeDetailTab;
         button.setAttribute('aria-selected', String(selected));
@@ -733,9 +905,15 @@
     function selectClaimDetailTab(tab, focus = false) {
       activeDetailTab = tab;
       syncClaimDetailTabs();
+      let renderPromise = Promise.resolve();
+      if (tab === 'conversation' && activeClaimId) {
+        activeCustomerChatId = activeClaimId;
+        renderPromise = renderCustomerChat();
+      }
       const selectedTab = document.querySelector(`[data-detail-tab="${tab}"]`);
       selectedTab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       if (focus) selectedTab?.focus();
+      return renderPromise;
     }
 
     function setQueueLoading(loading) {
@@ -1170,7 +1348,7 @@
       detailTabClaimId = null;
       syncClaimDetailTabs();
       byId('detailContent').innerHTML = '<p class="muted">Select a claim to view its workbench projection.</p>';
-      ['detailNextStep', 'detailEvidence', 'detailReview', 'detailHistory', 'detailStaffActions']
+      ['detailEvidence', 'detailReview', 'detailConversation', 'detailHistory', 'detailStaffActions']
         .forEach(id => { byId(id).style.display = 'none'; });
       setMutationStatus('');
       syncStaffControlState();
@@ -1591,7 +1769,7 @@
         ...session.pending_items.map(item => `Pending: ${item}`),
         ...session.prior_commitments.map(item => `Commitment: ${item}`),
       ]);
-      historyContainer.append(contextBlock('Session continuity', bulletList(continuityItems)));
+      historyContainer.append(contextBlock('Claim continuity', bulletList(continuityItems)));
 
       const signalRows = (detail.signals || []).map(signal => ({
         label: textOrEmpty(signal.code || signal.signal_id, 'Internal signal'),
@@ -1615,8 +1793,6 @@
       (detail.handoffs || []).forEach(handoff => handoffContainer.append(renderHandoff(detail, handoff)));
       if (!detail.handoffs?.length) handoffContainer.append(bulletList([]));
       reviewContainer.append(contextBlock('Human handoff', handoffContainer));
-
-      historyContainer.append(contextBlock('Communication history', communicationHistory(detail)));
 
       const hasReviewWork = signalRows.length > 0 || (detail.handoffs || []).some(
         handoff => !['resolved', 'cancelled'].includes(handoff.status)
@@ -1677,37 +1853,10 @@
       return wrapper;
     }
 
-    function communicationHistory(detail) {
-      const history = document.createElement('div');
-      history.className = 'context-list';
-      const entries = [
-        ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
-          actor: item.actor,
-          text: item.content.text,
-          createdAt: item.created_at,
-        })),
-        ...(detail.customer_updates || []).map(item => ({
-          actor: 'staff',
-          text: item.summary,
-          createdAt: item.created_at,
-        })),
-      ].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
-      if (!entries.length) return bulletList([]);
-      entries.forEach(entry => {
-        const item = document.createElement('div');
-        item.className = `communication-entry ${entry.actor}`;
-        const meta = document.createElement('strong');
-        meta.textContent = `${formatLabel(entry.actor)} · ${new Date(entry.createdAt).toLocaleString()}`;
-        const body = document.createElement('p');
-        body.textContent = entry.text;
-        item.append(meta, body);
-        history.append(item);
-      });
-      return history;
-    }
-
     async function acceptHandoff(detail, handoff, button) {
+      const originalLabel = button.textContent;
       button.disabled = true;
+      button.textContent = 'Accepting…';
       try {
         await apiRequest(`${API_BASE}/${encodeURIComponent(detail.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/accept`, {
           method: 'POST',
@@ -1719,9 +1868,12 @@
         });
         await refreshDetail(detail.claim_id);
         await refreshQueue();
+        return true;
       } catch (error) {
         setError(error.message);
         button.disabled = false;
+        button.textContent = originalLabel;
+        return false;
       }
     }
 
@@ -1927,10 +2079,10 @@
           if (reviewWorkspace) detailContent.append(reviewWorkspace);
 
           renderContext(detail);
-          byId('detailNextStep').style.display = 'block';
           byId('detailEvidence').style.display = 'block';
           byId('detailReview').style.display = 'block';
           byId('detailHistory').style.display = 'block';
+          byId('detailConversation').style.display = 'block';
           byId('claimDetailTabs').hidden = false;
           populateStaffControls(detail);
           const isProfessionalReview = detail.claim_state.workflow_state === 'professional_review';
@@ -1942,7 +2094,10 @@
           byId('detailStaffActions').style.display = showReviewControls ? 'block' : 'none';
           byId('detailStaffActions').open = showReviewControls;
           syncClaimDetailTabs();
-          if (!customerChatView.hidden) renderCustomerChat();
+          if (activeDetailTab === 'conversation') {
+            activeCustomerChatId = detail.claim_id;
+            renderCustomerChat();
+          }
         })
         .catch(error => {
           activeClaimDetail = null;
@@ -1973,9 +2128,8 @@
     function syncQueueNavigation() {
       const selectedView = byId('viewSelect').value;
       const pendingSelected = selectedView === 'awaiting_evidence';
-      const workbenchVisible = !byId('workbenchView').hidden;
-      byId('pendingEvidenceNav').classList.toggle('active', workbenchVisible && pendingSelected);
-      byId('workbenchNav').classList.toggle('active', workbenchVisible && !pendingSelected);
+      byId('pendingEvidenceNav').classList.toggle('active', pendingSelected);
+      byId('workbenchNav').classList.toggle('active', !pendingSelected);
       const [title, description] = queueCopy[selectedView] || [formatLabel(selectedView), 'Claims matching the selected operational queue.'];
       byId('queueTitle').textContent = title;
       byId('queueTitle').nextElementSibling.textContent = description;
@@ -1987,7 +2141,6 @@
     async function selectQueue(view) {
       byId('viewSelect').value = view;
       queuePage = 1;
-      setView('workbench');
       syncQueueNavigation();
       await loadClaims();
     }
@@ -2049,7 +2202,6 @@
         }
         if (activeClaimId) await renderDetail(activeClaimId);
         else clearClaimDetail();
-        if (!customerChatView.hidden && activeClaimId) renderCustomerChat();
       } catch (error) {
         clearClaimDetail();
         setError(error.message);
@@ -2087,51 +2239,13 @@
     const chatBody = byId('chatBody');
     const chatInput = byId('chatInput');
     const chatFileInput = byId('chatFileInput');
-    const workbenchView = byId('workbenchView');
-    const customerChatView = byId('customerChatView');
     let activeCustomerChatId = null;
     let assistantAttachments = [];
     let chatDrag = null;
     let pendingCustomerMessage = null;
-    let customerChatHistoryEntryCreated = false;
-
-    function workbenchUrl() {
-      return `${window.location.pathname}${window.location.search}`;
-    }
-
-    function setView(view, { updateHistory = true } = {}) {
-      const showCustomerChat = view === 'customer-chat';
-      workbenchView.hidden = showCustomerChat;
-      customerChatView.hidden = !showCustomerChat;
-      byId('customerChatNav').classList.toggle('active', showCustomerChat);
-      const pendingSelected = byId('viewSelect').value === 'awaiting_evidence';
-      byId('pendingEvidenceNav').classList.toggle('active', !showCustomerChat && pendingSelected);
-      byId('workbenchNav').classList.toggle('active', !showCustomerChat && !pendingSelected);
-      if (showCustomerChat) renderCustomerChat();
-      if (!updateHistory) return;
-      if (showCustomerChat && window.location.hash !== '#customer-chat') {
-        window.history.pushState({ workbenchView: 'customer-chat' }, '', '#customer-chat');
-        customerChatHistoryEntryCreated = true;
-      } else if (!showCustomerChat && window.location.hash === '#customer-chat') {
-        if (customerChatHistoryEntryCreated) {
-          customerChatHistoryEntryCreated = false;
-          window.history.back();
-        } else {
-          window.history.replaceState({ workbenchView: 'workbench' }, '', workbenchUrl());
-        }
-      }
-    }
-
-    function restoreViewFromHistory() {
-      setView(window.location.hash === '#customer-chat' ? 'customer-chat' : 'workbench', {
-        updateHistory: false,
-      });
-    }
-
     function setAssistantOpen(open) {
       chatWidget.classList.toggle('closed', !open);
       chatToggle.textContent = open ? 'Close' : 'Open';
-      byId('toggleAssistantBtn').textContent = open ? 'Close assistant' : 'Open assistant';
       if (open) chatInput.focus();
     }
 
@@ -2186,32 +2300,50 @@
     }
 
     function currentCustomerClaim() {
-      return claims.find(claim => claim.claim_id === activeCustomerChatId) || claims[0] || null;
+      return claims.find(claim => claim.claim_id === activeCustomerChatId)
+        || claims.find(claim => claim.claim_id === activeClaimId)
+        || null;
+    }
+
+    function renderConversationContext(detail) {
+      const context = byId('customerChatContext');
+      context.replaceChildren();
+      const handoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
+      const facts = Object.entries(detail.form || {})
+        .filter(([, field]) => field.status === 'confirmed')
+        .slice(0, 4)
+        .map(([code, field]) => `${formatLabel(code)}: ${textOrEmpty(field.value)}`);
+      context.append(
+        contextBlock('Current task', definitionList([
+          { label: 'Status', value: formatLabel(detail.claim_state?.workflow_state) },
+          { label: 'Next safe action', value: detail.customer_next_step?.summary },
+          { label: 'Staff request', value: handoff?.requested_action || handoff?.reason },
+        ])),
+        contextBlock('Known facts', definitionList([
+          { label: 'Confirmed', value: facts },
+        ])),
+        contextBlock('Outstanding', definitionList([
+          { label: 'Pending items', value: handoff?.packet?.pending_items || [] },
+          { label: 'Promised next step', value: handoff?.packet?.promised_next_step },
+        ])),
+      );
     }
 
     async function renderCustomerChat() {
       const claim = currentCustomerClaim();
       if (!claim) {
-        byId('customerChatList').replaceChildren();
-        byId('customerChatHeader').textContent = 'No customer chats available';
-        byId('customerChatStatus').textContent = 'Load claims to view customer conversations.';
-        byId('customerChatHistory').textContent = 'No customer conversation has been selected.';
+        byId('customerChatContext').replaceChildren();
+        byId('customerChatHeader').textContent = 'No claim selected';
+        byId('customerChatStatus').textContent = 'Select a claim to read its conversation and reply.';
+        byId('customerChatHistory').textContent = 'No claim conversation is available.';
         return;
       }
+      if (pendingCustomerMessage?.claimId !== claim.claim_id) {
+        pendingCustomerMessage = null;
+        byId('customerChatText').value = '';
+        byId('customerChatSend').textContent = 'Send message';
+      }
       activeCustomerChatId = claim.claim_id;
-      const list = byId('customerChatList');
-      list.replaceChildren();
-      claims.forEach(item => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.classList.toggle('active', item.claim_id === claim.claim_id);
-        button.textContent = `${item.claim_id} · ${item.customer_reference}`;
-        button.addEventListener('click', () => {
-          activeCustomerChatId = item.claim_id;
-          renderCustomerChat();
-        });
-        list.append(button);
-      });
       byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
       if (agentSuggestionClaimId !== claim.claim_id) {
         agentSuggestionClaimId = claim.claim_id;
@@ -2226,6 +2358,7 @@
       try {
         const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
         detailCache.set(claim.claim_id, detail);
+        renderConversationContext(detail);
         history.replaceChildren();
         const entries = [
           ...(detail.messages || []).filter(item => item.content?.text).map(item => ({
@@ -2268,24 +2401,33 @@
         const openHandoff = (detail.handoffs || []).find(item => !['resolved', 'cancelled'].includes(item.status));
         const input = byId('customerChatText');
         const send = byId('customerChatSend');
+        const handoffAction = byId('customerChatHandoffAction');
         if (!openHandoff) {
           input.disabled = true;
           send.disabled = true;
+          handoffAction.disabled = true;
+          handoffAction.hidden = true;
           byId('customerChatStatus').textContent = 'No open handoff. Communication history is read-only.';
         } else if (openHandoff.status === 'queued') {
           input.disabled = true;
           send.disabled = true;
-          byId('customerChatStatus').textContent = 'Accept the handoff before issuing a formal customer update.';
+          handoffAction.disabled = false;
+          handoffAction.hidden = false;
+          handoffAction.textContent = 'Accept handoff to reply';
+          byId('customerChatStatus').textContent = 'Accept this handoff to take responsibility and reply to the claimant.';
         } else {
           input.disabled = false;
           send.disabled = false;
+          handoffAction.disabled = false;
+          handoffAction.hidden = false;
+          handoffAction.textContent = 'Resolve handoff';
           byId('customerChatStatus').textContent = openHandoff.status === 'in_progress'
             ? `In progress with ${openHandoff.assigned_to}. Messages remain open until the handoff is resolved.`
             : `Accepted by ${openHandoff.assigned_to}. Send a message to begin support.`;
         }
         history.scrollTop = history.scrollHeight;
       } catch (error) {
-        history.textContent = error.message;
+        history.textContent = `Conversation could not be loaded because ${error.message} Refresh the claim and try again.`;
       }
     }
 
@@ -2295,8 +2437,7 @@
         return;
       }
       activeCustomerChatId = claimId;
-      setView('customer-chat');
-      byId('customerChatText').focus();
+      selectClaimDetailTab('conversation').then(() => byId('customerChatText').focus());
     }
 
     function setAgentSuggestionState(state, message) {
@@ -2358,7 +2499,16 @@
           ? 'Sender: Staff · Audience: Claimant · Delivery outcome unknown · Retry to reconcile'
           : 'Sender: Staff · Audience: Claimant · Sending…';
       message.append(meta, body, delivery);
+      if (state === 'failed' || state === 'unknown') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'customer-chat-close';
+        retry.textContent = state === 'unknown' ? 'Reconcile and retry' : 'Retry message';
+        retry.addEventListener('click', sendCustomerChatMessage);
+        message.append(retry);
+      }
       byId('customerChatHistory').append(message);
+      message.scrollIntoView?.({ block: 'nearest' });
     }
 
     async function sendCustomerChatMessage() {
@@ -2430,7 +2580,7 @@
       const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
       const handoff = (detail.handoffs || []).find(item => ['accepted', 'in_progress'].includes(item.status));
       if (!handoff) return;
-      const button = byId('customerChatResolve');
+      const button = byId('customerChatHandoffAction');
       button.disabled = true;
       try {
         await apiRequest(`${API_BASE}/${encodeURIComponent(claim.claim_id)}/handoffs/${encodeURIComponent(handoff.handoff_id)}/resolve`, {
@@ -2451,6 +2601,23 @@
       } finally {
         button.disabled = false;
       }
+    }
+
+    async function handleCustomerHandoffAction() {
+      const handoff = (activeClaimDetail?.handoffs || []).find(
+        item => !['resolved', 'cancelled'].includes(item.status)
+      );
+      if (handoff?.status === 'queued') {
+        const button = byId('customerChatHandoffAction');
+        byId('customerChatStatus').textContent = 'Accepting handoff…';
+        const accepted = await acceptHandoff(activeClaimDetail, handoff, button);
+        if (accepted && activeDetailTab === 'conversation') await renderCustomerChat();
+        if (!accepted) {
+          byId('customerChatStatus').textContent = 'The handoff was not accepted. Review the error, then try again.';
+        }
+        return;
+      }
+      resolveCustomerHandoff();
     }
 
     function startChatDrag(event) {
@@ -2491,7 +2658,6 @@
     document.addEventListener('pointermove', dragChat);
     document.addEventListener('pointerup', stopChatDrag);
     document.addEventListener('pointercancel', stopChatDrag);
-    byId('toggleAssistantBtn').addEventListener('click', () => setAssistantOpen(chatWidget.classList.contains('closed')));
     byId('chatSend').addEventListener('click', sendAssistantMessage);
     byId('chatInput').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -2504,7 +2670,6 @@
       assistantAttachments = Array.from(chatFileInput.files || []);
       renderAttachmentPreview();
     });
-    byId('openCustomerChatBtn').addEventListener('click', () => openCustomerChat());
     document.querySelectorAll('[data-detail-tab]').forEach((button, index, buttons) => {
       button.addEventListener('click', () => selectClaimDetailTab(button.dataset.detailTab));
       button.addEventListener('keydown', event => {
@@ -2530,19 +2695,15 @@
         setAgentSuggestionState('edited', 'Edited by staff; not sent');
       }
     });
-    byId('customerChatNav').addEventListener('click', () => setView('customer-chat'));
-    byId('customerChatBack').addEventListener('click', () => setView('workbench'));
+    byId('customerChatNav').addEventListener('click', () => openCustomerChat(activeClaimId || claims[0]?.claim_id));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
-    byId('customerChatResolve').addEventListener('click', resolveCustomerHandoff);
+    byId('customerChatHandoffAction').addEventListener('click', handleCustomerHandoffAction);
     byId('customerChatText').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         sendCustomerChatMessage();
       }
     });
-    window.addEventListener('popstate', restoreViewFromHistory);
-    window.addEventListener('hashchange', restoreViewFromHistory);
-    restoreViewFromHistory();
   </script>
 </body>
 </html>

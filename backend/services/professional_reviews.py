@@ -21,6 +21,9 @@ from backend.services.evidence_handoff import (
 )
 from backend.services.support import now_utc
 
+PROFESSIONAL_REVIEW_NEXT_STEP_STATUS = 'professional_review_queued'
+PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY = ResponsibleParty.CLAIMS_PROFESSIONAL
+
 
 def build_policy_review_handoff(
     repository: PersistenceRepository,
@@ -104,8 +107,8 @@ def build_policy_review_handoff(
         created_at=timestamp,
     )
     next_step = CustomerNextStep(
-        status='professional_review_queued',
+        status=PROFESSIONAL_REVIEW_NEXT_STEP_STATUS,
         summary=promised_next_step,
-        responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
+        responsible_party=PROFESSIONAL_REVIEW_RESPONSIBLE_PARTY,
     )
     return handoff, next_step

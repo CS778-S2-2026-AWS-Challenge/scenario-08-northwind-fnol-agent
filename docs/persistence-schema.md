@@ -7,12 +7,14 @@ rules. It does not prescribe a Cloudflare, MongoDB, AWS, or fixture physical sch
 Physical mappings belong inside the selected runtime-profile adapters and must preserve
 this contract.
 
-The current MongoDB work remains an unselected adapter implementation. Its repository
+The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
 method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
 Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
 Idempotency records. Mock-backed tests verify document mapping, ownership filters,
-relationship checks, revision conflicts, and mutation ordering. These tests do not prove
-MongoDB transaction rollback or concurrency behaviour.
+relationship checks, revision conflicts, and mutation ordering. The local replica-set smoke
+verifies real multi-document writes, restart recovery, and stale-revision refusal. The additional
+shared transaction-boundary hardening in PR #288 remains a merge dependency and is not duplicated
+here.
 
 The adapter owns bounded environment parsing and verified client construction through
 `MongoDBConnectionConfig` and `connect_mongodb_repository`. A connection is exposed to the
@@ -24,12 +26,14 @@ raises a bounded error without returning the connection URI. The non-secret sett
 - `NORTHWIND_MONGODB_COLLECTION`; and
 - `NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS`.
 
-These connection primitives do not by themselves enable the MongoDB runtime profile.
+These connection primitives do not by themselves enable any runtime profile.
 
 `DATA_RUNTIME_PROFILE=mongodb` MUST continue to fail closed until the repository is
 verified against a transaction-capable supported MongoDB deployment, the protected
 evidence-byte adapter is implemented, and a complete `DataRuntimeBundle` is assembled.
-The fixture profile remains the only complete profile at this stage. MongoDB adapter
+`DATA_RUNTIME_PROFILE=local_mvp` is separately available for the verified local MongoDB + MinIO
+development composition. It does not claim Atlas object storage, Atlas Search, or production
+provider conformance; policy and claim-history lookups remain synthetic. MongoDB adapter
 documents use `record_type` as their internal discriminator so domain fields such as
 Evidence `kind` and Retrieval `kind` remain unchanged.
 
@@ -48,6 +52,7 @@ fixtures, and transaction tests change together.
 | Group | Records | Primary ownership |
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
+| Claimant auth session | hash of an opaque development/test token, authenticated customer reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `customer_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -96,6 +101,23 @@ and checksums rather than embedding those bytes.
     provider reference before any retry after an unknown outcome.
 20. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
+21. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+    browser-supplied customer identifier to alter the authenticated principal.
+22. Read and update the authenticated claimant's approved profile and communication
+    preferences by `customer_id` without exposing another Customer record.
+
+## Development/Test Identity Invariants
+
+- Raw claimant access tokens are returned once and are never persisted; repositories retain
+  only a one-way token hash.
+- A session binds exactly one server-selected `customer_id`, creation time, expiry time, and
+  optional revocation time.
+- Expired or revoked sessions cannot authenticate and logout is immediately effective.
+- Synthetic credential verification and session persistence are fixture capabilities only;
+  selecting a production environment fails closed until an approved identity provider and
+  durable identity adapter exist.
+- Profile and communication preferences are Customer records, not browser-local authority.
+- Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 
 ## Claim Revision and Idempotency
 
@@ -210,7 +232,8 @@ and checksums rather than embedding those bytes.
   motivated the review.
 - An Agent decision identifies whether its proposal came from `controlled_agent` or
   `model_gateway`. A model-backed decision retains only bounded audit provenance: runtime
-  profile, provider-reported model identifier, and provider request identifier when supplied.
+  profile, executable prompt identifier, provider-reported model identifier, and provider request
+  identifier when supplied.
   These provider references are internal-only and never enter claimant projections.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
