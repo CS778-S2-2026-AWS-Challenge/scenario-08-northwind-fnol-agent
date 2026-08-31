@@ -771,22 +771,25 @@ function App() {
                   </article>
                 )}
                 <div className="choice-divider"><span>Optional guided claim</span></div>
-                <h3>Choose a claim type for guided help</h3>
-                <div className="claim-tabs" role="tablist" aria-label="Claim type">
+                <h3 id="claim-type-heading">Choose a claim type for guided help</h3>
+                <fieldset className="claim-tabs" aria-label="Claim type" aria-describedby="claim-type-heading">
                   {['motor', 'home', 'contents'].map((type) => (
-                    <button
+                    <label
                       key={type}
-                      type="button"
-                      role="tab"
-                      aria-selected={claimType === type}
-                      className={claimType === type ? 'is-selected' : ''}
-                      onClick={() => setClaimType(type)}
+                      className={`claim-option ${claimType === type ? 'is-selected' : ''}`}
                     >
+                      <input
+                        type="radio"
+                        name="claim-type"
+                        value={type}
+                        checked={claimType === type}
+                        onChange={() => setClaimType(type)}
+                      />
                       <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
                       {type[0].toUpperCase() + type.slice(1)}
-                    </button>
+                    </label>
                   ))}
-                </div>
+                </fieldset>
               <div className="preparation-list">
                 <h3>Helpful to have ready for your {claimType} claim</h3>
                 <p>These items are useful, not required. You can start above without them and add missing information later.</p>

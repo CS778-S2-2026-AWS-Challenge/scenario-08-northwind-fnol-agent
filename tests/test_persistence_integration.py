@@ -176,3 +176,84 @@ def test_resume_and_handoff_share_one_authoritative_claim_revision(
     assert sum(session.status is SessionStatus.ACTIVE for session in sessions) == 1
     assert all(session.claim_id == claim_id for session in sessions)
     assert all(session.context_revision <= final_claim.revision for session in sessions)
+
+
+def test_claim_session_and_evidence_share_one_persistence_baseline(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'context-baseline-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    created_body = cast(dict[str, Any], created.json())
+    claim = cast(dict[str, Any], created_body['claim'])
+    session = cast(dict[str, Any], created_body['session'])
+    claim_id = cast(str, claim['claim_id'])
+    session_id = cast(str, session['session_id'])
+    assert claim['revision'] == 1
+
+    endpoint = f'/api/v1/claims/{claim_id}/evidence'
+    registered = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'context-baseline-evidence',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'police_report',
+            'status': 'pending_generation',
+            'needed_for': ['later_action'],
+            'claimant_note': 'The report is not available yet.',
+        },
+    )
+    assert registered.status_code == 201
+    evidence = cast(dict[str, Any], registered.json()['evidence'])
+    evidence_id = cast(str, evidence['evidence_id'])
+
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    stored_evidence = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_session is not None
+    assert stored_evidence is not None
+    assert repository.claim_count == 1
+    assert stored_claim.revision == 2
+    assert stored_claim.active_session_id == session_id
+    assert stored_session.claim_id == claim_id
+    assert stored_evidence.claim_id == claim_id
+
+    stale = client.post(
+        endpoint,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'context-baseline-stale-evidence',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'receipt',
+            'status': 'pending_generation',
+            'needed_for': ['later_action'],
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert repository.get_claim(claim_id, 'cus_demo') == stored_claim
+    assert repository.list_evidence(claim_id, 'cus_demo') == [stored_evidence]
+
+    listed = client.get(endpoint, headers=auth_headers)
+    read_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert listed.status_code == 200
+    assert listed.json()['items'] == [evidence]
+    assert 'provenance' not in listed.json()['items'][0]
+    assert read_claim.status_code == 200
+    assert read_claim.json()['revision'] == 2
+    assert read_claim.json()['evidence_summary'] == {
+        'received': 0,
+        'pending': 1,
+        'needs_attention': 0,
+    }
