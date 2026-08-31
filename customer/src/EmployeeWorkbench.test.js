@@ -878,7 +878,7 @@ it('blocks incomplete evidence, saves signal findings sequentially, and isolates
   dom.window.close()
 })
 
-it('keeps deterministic reply templates internal through suggested, accepted, edited, and rejected states', async () => {
+it('builds deterministic reply templates in the shared reply box and keeps them internal until staff send', async () => {
   const item = queueItem(120, { claim_id: 'clm_agent_suggestion', open_handoff_count: 1, assignee_id: 'stf_demo' })
   const detail = {
     ...queueDetail(item),
@@ -911,21 +911,39 @@ it('keeps deterministic reply templates internal through suggested, accepted, ed
 
   await waitFor(() => expect(document.querySelector('#customerChatNav').disabled).toBe(false))
   expect(document.querySelector('#agentSuggestionTitle').textContent).toBe('Reply template')
+  expect(document.querySelector('.customer-chat-composer')).toHaveAttribute(
+    'aria-labelledby',
+    'customerChatReplyTitle',
+  )
+  expect(document.querySelector('#customerChatText').compareDocumentPosition(
+    document.querySelector('#agentSuggestionTitle'),
+  ) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   document.querySelector('#customerChatNav').click()
   await waitFor(() => expect(document.querySelector('#customerChatText').disabled).toBe(false))
+
+  // The deterministic template lands in the shared reply box, with no separate copy field.
+  expect(document.querySelector('#agentSuggestionText')).toBeNull()
+  expect(document.querySelector('#useAgentSuggestion')).toBeNull()
+
   document.querySelector('#generateAgentSuggestion').click()
   await waitFor(() => expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Suggested'))
-  expect(document.querySelector('#customerChatText').value).toBe('')
+  const firstSuggestion = document.querySelector('#customerChatText').value
+  expect(firstSuggestion).toContain('Northwind staff member')
 
-  document.querySelector('#useAgentSuggestion').click()
-  expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Accepted')
-  expect(document.querySelector('#customerChatText').value).toContain('Northwind staff member')
   document.querySelector('#customerChatText').value += ' I checked the current claim state.'
   document.querySelector('#customerChatText').dispatchEvent(new dom.window.Event('input', { bubbles: true }))
   expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Edited')
-  document.querySelector('#rejectAgentSuggestion').click()
-  expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Rejected')
-  expect(document.querySelector('#agentSuggestionText').value).toBe('')
+
+  document.querySelector('#refreshAgentSuggestion').click()
+  expect(document.querySelector('#refreshAgentSuggestion')).toBeDisabled()
+  expect(document.querySelector('#refreshAgentSuggestion').textContent).toBe('Refreshing draft…')
+  await waitFor(() => expect(document.querySelector('#agentSuggestionStatus').textContent).toContain('Suggested'))
+  expect(document.querySelector('#customerChatText').value).not.toBe(firstSuggestion)
+  expect(document.querySelector('#customerChatText').value).toContain('Northwind staff member')
+  expect(document.querySelector('#refreshAgentSuggestion').textContent).toBe('Refresh draft')
+
+  // Nothing is sent by drafting alone; the staff Send action is still required.
+  expect(document.querySelectorAll('#customerChatHistory .customer-chat-message.staff')).toHaveLength(0)
   dom.window.close()
 })
 
