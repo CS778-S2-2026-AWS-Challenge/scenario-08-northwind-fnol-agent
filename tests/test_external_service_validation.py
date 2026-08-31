@@ -11,10 +11,12 @@ from backend.adapters.claims_service import (
     MockAssessorServiceAdapter,
 )
 from backend.app import create_app
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 JOURNEY_PATH = Path(__file__).parent / 'fixtures' / 'journeys' / 'AT-01-clear-motor-creation.json'
 
 
@@ -106,6 +108,7 @@ def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> N
     repository = FixtureRepository()
     with TestClient(
         create_app(
+            DEVELOPER_SETTINGS,
             repository=repository,
             assessor_service_adapter=NeverCalledAssessorAdapter(),
         )
@@ -149,7 +152,7 @@ def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> N
 
 def test_success_is_claimant_safe_and_replays_without_a_second_assignment() -> None:
     repository = FixtureRepository()
-    with TestClient(create_app(repository=repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
         claim_id, revision = _create_assessor_ready_claim(client, key='validation-success')
         consent_revision = _grant_consent(
             client,
@@ -201,7 +204,13 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
 ) -> None:
     repository = FixtureRepository()
     adapter = MockAssessorServiceAdapter(failure_sequence=(failure,))
-    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
         claim_id, revision = _create_assessor_ready_claim(
             client,
             key=f'validation-{failure.value}',

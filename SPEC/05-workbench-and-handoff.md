@@ -1,9 +1,10 @@
 # Workbench, Handoff, and Administration
 
 The staff `@Agent` entry point below is a target product capability. Its bounded authority,
-source visibility, and proof requirements are defined in [Agent Runtime Target](../docs/agent-runtime-target.md).
+source visibility, and proof requirements are defined in
+[Agent Runtime Target](../docs/design/agent-runtime/agent-runtime-target.md).
 The current Workbench transport remains governed by `docs/api.md` and the implementation
-status is recorded in [Agent Runtime Progress](../docs/agent-runtime-progress.md).
+status is recorded in [Agent Runtime Progress](../docs/status/agent-runtime-progress.md).
 
 ## Claim Operations Workbench
 

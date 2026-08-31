@@ -151,6 +151,16 @@ def test_retrieval_filters_metadata_before_ranking_and_returns_citation() -> Non
     ]
 
 
+def test_direct_chunk_read_uses_the_same_governed_ingestion_state() -> None:
+    value = retriever(chunk())
+
+    result = value.get_chunk('nw-motor#MTR-EXC-01')
+
+    assert result is not None
+    assert result.document_id == 'nw-motor'
+    assert value.get_chunk('missing-chunk') is None
+
+
 def test_schedule_backed_retrieval_requires_the_exact_wording_document() -> None:
     value = retriever(chunk())
 

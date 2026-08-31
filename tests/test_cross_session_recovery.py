@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -17,6 +17,7 @@ from backend.repositories.scenario_loader import load_scenario, seed_scenario
 
 SCENARIO_DIRECTORY = Path(__file__).parents[1] / 'backend' / 'demo_data' / 'scenarios'
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def seeded_scenario(name: str) -> tuple[FixtureRepository, str, str]:
@@ -54,15 +55,17 @@ def pause_active_session(
         }
     )
     repository.save_session(paused)
-    repository.save_claim(
-        claim.model_copy(
-            update={
-                'active_session_id': None,
-                'revision': claim.revision + 1,
-                'updated_at': claim.updated_at + timedelta(minutes=1),
-            }
-        ),
-        expected_revision=claim.revision,
+    # Pausing clears WorkingClaim.active_session_id, and
+    # docs/claim-state-transaction-boundary.md reserves pointer changes for the
+    # resume/start session mutation, so save_claim() correctly rejects it. No
+    # production path performs a pause, so this is fixture seeding rather than a
+    # repository operation.
+    repository._claims[claim.claim_id] = claim.model_copy(
+        update={
+            'active_session_id': None,
+            'revision': claim.revision + 1,
+            'updated_at': claim.updated_at + timedelta(minutes=1),
+        }
     )
 
 
@@ -72,7 +75,7 @@ def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     assert source is not None
     pause_active_session(repository, claim_id, active_session_id)
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at08-again'},
@@ -89,6 +92,46 @@ def test_resume_uses_latest_persisted_context_without_duplication() -> None:
     assert source.prior_commitments[0] in body['resume']['prior_commitments']
     assert repository.claim_count == 1
     assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 3
+
+
+def test_resume_revision_baseline_is_atomic_and_idempotent() -> None:
+    repository, claim_id, active_session_id = seeded_scenario('AT-08-resume')
+    pause_active_session(repository, claim_id, active_session_id)
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+    assert before.active_session_id is None
+    sessions_before = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    headers = {**AUTH, 'Idempotency-Key': 'resume-revision-baseline'}
+
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
+        first = client.post(
+            f'/api/v1/claims/{claim_id}/sessions',
+            headers=headers,
+            json={'intent': 'resume'},
+        )
+        replay = client.post(
+            f'/api/v1/claims/{claim_id}/sessions',
+            headers=headers,
+            json={'intent': 'resume'},
+        )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    body = first.json()
+    resumed_session_id = body['session_id']
+    assert isinstance(resumed_session_id, str)
+
+    after = repository.get_claim(claim_id, 'cus_demo')
+    resumed = repository.get_session(claim_id, resumed_session_id, 'cus_demo')
+    sessions_after = repository.list_sessions_for_claim(claim_id, 'cus_demo')
+    assert after is not None
+    assert resumed is not None
+    assert after.revision == before.revision + 1
+    assert after.active_session_id == resumed_session_id
+    assert resumed.context_revision == before.revision
+    assert len(sessions_after) == len(sessions_before) + 1
+    assert repository.claim_count == 1
 
 
 def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> None:
@@ -128,7 +171,7 @@ def test_resume_rebuilds_pending_work_and_commitment_from_durable_records() -> N
         'cus_demo',
     )
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at06-durable'},
@@ -157,7 +200,7 @@ def test_resume_uses_confirmed_description_when_session_summary_is_empty() -> No
     description = claim.form['incident.description'].value
     assert isinstance(description, str)
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at08-description'},
@@ -206,7 +249,7 @@ def test_resume_rebuilds_question_and_generic_pending_item() -> None:
         'cus_demo',
     )
 
-    with TestClient(create_app(Settings(), repository)) as client:
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository)) as client:
         response = client.post(
             f'/api/v1/claims/{claim_id}/sessions',
             headers={**AUTH, 'Idempotency-Key': 'resume-at06-question'},

@@ -26,24 +26,20 @@ The service should:
 
 ## Current Stage
 
-The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, and staff review. Control Plane implementation is product-direction work tracked separately as extra backlog, not a committed Sprint 2 capacity item.
+The project is in Sprint 3 and is advancing the MVP into a repeatable Validation Prototype. Current work validates the Agent, claimant and staff experiences, shared Claim Context, knowledge retrieval, data runtime profiles, Control Plane, third-party service boundaries, and confirmed AWS capabilities across representative motor, home, and contents paths.
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
 ## Repository Operation Rules
 
-All contributors and coding agents must follow [the repository operation rules](docs/repo_rule.md).
-Coding agents enter through [AGENT.md](AGENT.md), which defines the mandatory reading order and
-authority boundary. Install the versioned local quality hook once per clone:
-
-```powershell
-./scripts/install-git-hooks.ps1
-```
-
-Every pull request must reference a repository issue and pass the required GitHub checks. Coding
-agents must not merge pull requests or change Draft status without explicit current authorisation.
+All contributors and coding agents must follow the
+[repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its file index.
+Every pull request must reference a repository issue and pass the configured remote quality
+checks. Coding agents must not merge pull requests or change Draft status without explicit current
+authorisation.
 
 ## Repository Layout
 
@@ -57,7 +53,7 @@ agents must not merge pull requests or change Draft status without explicit curr
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
-| `docs/` | API contract, engineering conventions, and research material |
+| `docs/` | Product direction, API contract, engineering conventions, and research material |
 | `sprint/` | Time-bound sprint commitments and delivery flow |
 | `scripts/` | Repository-level development and verification commands |
 
@@ -87,10 +83,31 @@ Start the backend:
 py -3.12 -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+To run a configured model profile from the ignored project `.env`, load it explicitly:
+
+```powershell
+py -3.12 -m uvicorn backend.main:app --env-file .env --reload --host 127.0.0.1 --port 8000
+```
+
+Deployment environments inject the same variable names through their secret and configuration
+mechanisms; they must not package the local `.env` file.
+
 The default object store remains the deterministic fixture adapter. To run the same
 FastAPI evidence flow against local MinIO, start the packaged service and configure the
 `s3_compatible` adapter as described in
 [MinIO Object-Storage Boundary](docs/minio-object-storage.md).
+
+To run the bounded local MVP persistence path, start the local MongoDB replica set and MinIO
+initialisers, then use `deploy/runtime/local-mvp.env.example`. The repeatable
+`py -3.12 scripts/run_local_mvp_smoke.py` check verifies MongoDB-backed claimant/staff recovery,
+revision and idempotency behaviour, protected MinIO evidence bytes, and governed knowledge
+retrieval. Policy/history remain synthetic. After those checks pass,
+`py -3.12 scripts/run_local_model_mvp_smoke.py` verifies the merged provider-neutral model path
+against the same MongoDB composition with a deterministic OpenAI-compatible transport. It covers
+accepted-turn provenance, restart recovery, replay without a second model call, stale revisions,
+and atomic timeout, malformed, incomplete, and unauthorised-output failures. This deterministic
+transport is repeatable contract evidence, not a live-provider claim; a live run additionally
+requires an approved endpoint and secret supplied through the documented model environment.
 
 In another terminal, start the claimant client:
 
@@ -106,15 +123,22 @@ Copy the non-secret values from `.env.example` into the process environment when
 
 ## Verification
 
-Run the complete repository quality gate before pushing and before requesting review:
+CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
+linting, types, tests and coverage, PR policy, GitHub automation, documentation, and the claimant
+client for every pull request.
+
+For focused local backend verification while developing, run the checks affected by the change:
 
 ```powershell
-./scripts/check.ps1
+py -3.12 -m ruff format --check .
+py -3.12 -m ruff check .
+py -3.12 -m mypy backend tests
+py -3.12 -m pytest
 ```
 
-After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run.
-The command checks backend formatting, linting, types, tests and coverage, the pull-request policy
-validator, the external GitHub automation Worker, and then checks and builds the claimant client.
+The claimant and GitHub automation packages retain their own `npm` verification commands. Local
+focused checks shorten feedback time but do not replace the exact-head CircleCI result required for
+review and merge.
 
 Run the synthetic integration fixtures from the repository root with:
 
@@ -148,7 +172,8 @@ The command clears only the in-memory fixture repository and mock adapter state,
 prints a record count for every cleared store, and exits non-zero when the backend
 cannot confirm the reset. It refuses to run against components that have not
 explicitly opted into the synthetic reset boundary. The concrete API and logical
-DynamoDB mapping is [documented here](docs/api-dynamodb-fixture-examples.md).
+DynamoDB mapping is preserved as a historical Sprint 1
+[fixture example](docs/archive/sprint-1/validation/api-dynamodb-fixture-examples.md).
 
 ## Contract Changes
 

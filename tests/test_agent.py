@@ -10,7 +10,13 @@ from backend.domain.models import (
     StateChange,
     WorkingClaim,
 )
-from backend.services.agent import AgentProposal, authorised_state_changes, validate_proposal
+from backend.services.agent import (
+    AgentProposal,
+    AgentTurnContext,
+    InvariantGuardedAgent,
+    authorised_state_changes,
+    validate_proposal,
+)
 
 
 def make_claim() -> WorkingClaim:
@@ -115,3 +121,43 @@ def test_handoff_reason_code_alone_cannot_bypass_high_impact_review() -> None:
     candidate.reason_codes[:] = ['HUMAN_SUPPORT_REQUESTED']
 
     assert validate_proposal(candidate).outcome is AuthorityOutcome.REVIEW_REQUIRED
+
+
+def test_invariant_guard_short_circuits_and_otherwise_delegates() -> None:
+    class RecordingAgent:
+        call_count = 0
+
+        def propose_turn(self, _context: AgentTurnContext) -> AgentProposal:
+            self.call_count += 1
+            return proposal(
+                AgentAction.UPDATE,
+                StateChange(path='claim_state.next_action', to='UPDATE'),
+            )
+
+    provider = RecordingAgent()
+    guarded = InvariantGuardedAgent(provider)
+    claim = make_claim()
+
+    interrupt = guarded.propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses_agent',
+            trigger_message_id='msg_interrupt',
+            message_text='I need a human.',
+            evidence_refs=[],
+        )
+    )
+    delegated = guarded.propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses_agent',
+            trigger_message_id='msg_delegated',
+            message_text='A support person emailed me yesterday.',
+            evidence_refs=[],
+        )
+    )
+
+    assert interrupt.action is AgentAction.HANDOFF
+    assert interrupt.controlled_rule_authorised is True
+    assert delegated.action is AgentAction.UPDATE
+    assert provider.call_count == 1
