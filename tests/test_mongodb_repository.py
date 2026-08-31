@@ -1,26 +1,48 @@
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from threading import Barrier, Lock
+from typing import Any, ClassVar
 
 import mongomock
 import pytest
+from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 
+from backend.adapters.claims_service import MockAssessorServiceAdapter
+from backend.domain.external_services import (
+    ASSESSOR_CONSENT_FIELDS,
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+)
 from backend.domain.models import (
+    ActorReference,
     ActorType,
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorLocation,
+    AssessorRoutingFailureCode,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
+    ClaimCreationStatus,
     ClaimState,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
+    ExternalClaimResult,
+    ExternalServiceConsent,
+    ExternalServiceConsentStatus,
+    IntegrationSource,
     MessageRecord,
     MessageVisibility,
     ResponsibleParty,
+    RouteAssessorRequest,
     SessionRecord,
     SessionStatus,
     StaffActionRecord,
@@ -33,12 +55,20 @@ from backend.domain.retrieval import (
     RetrievalSource,
     ReviewSignalRecord,
 )
-from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.mongodb import (
+    MongoDBConfigurationError,
+    MongoDBConnectionConfig,
+    MongoDBRepository,
+    connect_mongodb_repository,
+    probe_mongodb_connectivity,
+)
 from backend.repositories.protocols import (
     IdempotencyConflict,
+    IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.integrations import assessor_operation_id, route_assessor
 
 
 def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
@@ -154,6 +184,500 @@ def repository() -> MongoDBRepository:
     return repository
 
 
+def test_mongodb_connection_config_requires_uri_and_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('NORTHWIND_MONGODB_URI', raising=False)
+    monkeypatch.delenv('NORTHWIND_MONGODB_DATABASE', raising=False)
+
+    with pytest.raises(MongoDBConfigurationError, match='NORTHWIND_MONGODB_URI'):
+        MongoDBConnectionConfig.from_environment()
+
+
+def test_mongodb_connection_config_reads_bounded_non_secret_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_COLLECTION', 'claim_records')
+    monkeypatch.setenv('NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS', '750')
+
+    config = MongoDBConnectionConfig.from_environment()
+
+    assert config.database_name == 'northwind_test'
+    assert config.collection_name == 'claim_records'
+    assert config.server_selection_timeout_ms == 750
+
+
+def test_mongodb_connection_config_representation_redacts_secret_uri() -> None:
+    config = MongoDBConnectionConfig(
+        'mongodb+srv://private-user:private-secret@example.invalid',
+        'northwind_test',
+    )
+
+    representation = repr(config)
+
+    assert 'private-user' not in representation
+    assert 'private-secret' not in representation
+    assert 'mongodb+srv' not in representation
+    assert "database_name='northwind_test'" in representation
+
+
+@pytest.mark.parametrize('timeout', ['not-a-number', '99', '60001'])
+def test_mongodb_connection_config_rejects_invalid_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout: str,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_SERVER_SELECTION_TIMEOUT_MS', timeout)
+
+    with pytest.raises(MongoDBConfigurationError, match='TIMEOUT'):
+        MongoDBConnectionConfig.from_environment()
+
+
+@pytest.mark.parametrize(
+    ('variable', 'value', 'message'),
+    [
+        ('NORTHWIND_MONGODB_DATABASE', 'invalid/database', 'DATABASE is invalid'),
+        ('NORTHWIND_MONGODB_COLLECTION', 'system.secrets', 'COLLECTION is invalid'),
+    ],
+)
+def test_mongodb_connection_config_rejects_invalid_names(
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://localhost:27017')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_MONGODB_COLLECTION', 'claim_records')
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(MongoDBConfigurationError, match=message):
+        MongoDBConnectionConfig.from_environment()
+
+
+def test_connected_mongodb_repository_reports_verified_and_can_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client: Any = mongomock.MongoClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+    repository = connect_mongodb_repository(
+        MongoDBConnectionConfig('mongodb://unused', 'northwind_test')
+    )
+
+    assert repository.connection_status() == 'verified'
+    repository.close()
+
+
+def test_mongodb_connectivity_probe_pings_and_closes_without_repository_initialisation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ProbeAdmin:
+        calls: ClassVar[list[str]] = []
+
+        @classmethod
+        def command(cls, name: str) -> None:
+            cls.calls.append(name)
+
+    class ProbeClient:
+        admin = ProbeAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = ProbeClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig('mongodb://unused', 'northwind_test')
+    )
+
+    assert status == 'verified'
+    assert client.admin.calls == ['ping']
+    assert client.closed is True
+
+
+def test_assessor_routing_persistence_is_provider_backed_and_idempotent(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_mongo_001',
+                claim_number='NW-001',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    decision = _decision(claim, session, message).model_copy(
+        update={
+            'decision_id': 'dec_assessor_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+            'resulting_revision': claim.revision,
+        }
+    )
+    operation = AssessorRoutingOperation(
+        operation_id='aro_mongo_001',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_mongo_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref='consent_mongo_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint='fingerprint_mongo_001',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+
+    repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == operation
+    assert repository.get_agent_decision_internal(claim.claim_id, decision.decision_id) == decision
+    stored_operation = repository._collection.find_one(
+        {'_id': repository._record_id('assessor_routing_operation', operation.operation_id)}
+    )
+    assert stored_operation is not None
+    assert stored_operation['claim_id'] == claim.claim_id
+
+    repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    accepted = operation.model_copy(
+        update={
+            'status': AssessorRoutingOperationStatus.ACCEPTED,
+            'result': AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.ASSIGNED,
+                assessor_reference='asr_mongo_001',
+                next_step='await_assessor',
+            ),
+            'updated_at': operation.created_at,
+        }
+    )
+    repository.save_assessor_routing_operation(accepted)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == accepted
+    repository.save_assessor_routing_operation(accepted)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_operation(
+            accepted.model_copy(update={'request_fingerprint': 'different'})
+        )
+    assert accepted.result is not None
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_operation(
+            accepted.model_copy(
+                update={
+                    'result': accepted.result.model_copy(
+                        update={'assessor_reference': 'asr_mongo_changed'}
+                    )
+                }
+            )
+        )
+
+
+def test_assessor_routing_service_executes_with_mongodb_repository(
+    repository: MongoDBRepository,
+) -> None:
+    timestamp = _claim().created_at
+    consent = ExternalServiceConsent(
+        consent_ref='consent_service_001',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        permitted_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        status=ExternalServiceConsentStatus.GRANTED,
+        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_mongo_001'),
+        granted_at=timestamp,
+    )
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_service_001',
+                claim_number='NW-SERVICE',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=timestamp,
+            ),
+            'external_service_consents': [consent],
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    decision = _decision(claim, session, _message(claim, session)).model_copy(
+        update={
+            'decision_id': 'dec_service_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    payload = RouteAssessorRequest(
+        claim_id=claim.claim_id,
+        external_claim_id='ext_service_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref=consent.consent_ref,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        location=AssessorLocation(region='Auckland'),
+    )
+
+    result, replayed = route_assessor(
+        repository,
+        MockAssessorServiceAdapter(),
+        payload,
+        authorisation_decision=decision,
+    )
+
+    assert replayed is False
+    assert result.routing_status is AssessorRoutingStatus.ASSIGNED
+    operation = repository.get_assessor_routing_operation(assessor_operation_id(payload))
+    assert operation is not None
+    assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
+    assert operation.result == result
+    stored_claim = repository.get_claim_internal(claim.claim_id)
+    assert stored_claim is not None
+    assert stored_claim.assessor_routing == result
+
+
+@pytest.mark.parametrize(
+    ('status', 'failure_code'),
+    [
+        (
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingFailureCode.TIMEOUT,
+        ),
+        (
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingFailureCode.ACCESS_DENIED,
+        ),
+    ],
+)
+def test_assessor_routing_mongodb_persists_failure_transitions_and_terminal_immutability(
+    repository: MongoDBRepository,
+    status: AssessorRoutingOperationStatus,
+    failure_code: AssessorRoutingFailureCode,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_failure_001',
+                claim_number='NW-FAILURE',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    repository.create_claim(claim, _session(claim))
+    operation = AssessorRoutingOperation(
+        operation_id=f'aro_{status.value}',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_failure_001',
+        authorisation_ref='dec_failure_001',
+        claimant_consent_ref='consent_failure_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint=f'fingerprint_{status.value}',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+    repository.save_assessor_routing_operation(operation)
+    failed = operation.model_copy(
+        update={
+            'status': status,
+            'failure_code': failure_code,
+            'updated_at': operation.created_at,
+        }
+    )
+    repository.save_assessor_routing_operation(failed)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == failed
+    if status is AssessorRoutingOperationStatus.RETRYABLE_FAILURE:
+        accepted = failed.model_copy(
+            update={
+                'status': AssessorRoutingOperationStatus.ACCEPTED,
+                'failure_code': None,
+                'result': AssessorRoutingResult(
+                    routing_status=AssessorRoutingStatus.ASSIGNED,
+                    assessor_reference='asr_retryable_001',
+                    next_step='await_assessor',
+                ),
+            }
+        )
+        repository.save_assessor_routing_operation(accepted)
+        assert repository.get_assessor_routing_operation(operation.operation_id) == accepted
+    if status is AssessorRoutingOperationStatus.TERMINAL_FAILURE:
+        with pytest.raises(IdempotencyConflict):
+            repository.save_assessor_routing_operation(
+                failed.model_copy(
+                    update={
+                        'failure_code': AssessorRoutingFailureCode.MALFORMED,
+                        'updated_at': failed.updated_at,
+                    }
+                )
+            )
+
+
+def test_assessor_routing_mongodb_preparation_is_atomic_on_conflicting_decision(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_atomic_001',
+                claim_number='NW-ATOMIC',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    decision = _decision(claim, session, message).model_copy(
+        update={
+            'decision_id': 'dec_atomic_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    conflicting_decision = decision.model_copy(update={'customer_response': 'conflicting decision'})
+    repository.save_agent_decision(conflicting_decision, claim.customer_id)
+    operation = AssessorRoutingOperation(
+        operation_id='aro_atomic_001',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_atomic_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref='consent_atomic_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint='fingerprint_atomic_001',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    assert repository.get_assessor_routing_operation(operation.operation_id) is None
+    assert (
+        repository.get_agent_decision_internal(claim.claim_id, decision.decision_id)
+        == conflicting_decision
+    )
+
+
+def test_mongodb_connectivity_probe_bounds_failure_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingAdmin:
+        @staticmethod
+        def command(_name: str) -> None:
+            raise ServerSelectionTimeoutError(
+                'provider rejected mongodb+srv://probe-user:probe-secret@example.invalid'
+            )
+
+    class FailingClient:
+        admin = FailingAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FailingClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+
+    status = probe_mongodb_connectivity(
+        MongoDBConnectionConfig(
+            'mongodb+srv://configured-user:configured-secret@example.invalid',
+            'northwind_test',
+        )
+    )
+
+    assert status == 'unavailable'
+    assert client.closed is True
+
+
+def test_mongodb_connection_failure_closes_client_without_exposing_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingAdmin:
+        @staticmethod
+        def command(name: str) -> None:
+            assert name == 'ping'
+            raise ServerSelectionTimeoutError(
+                'provider rejected mongodb+srv://ping-user:ping-secret@example.invalid'
+            )
+
+    class FailingClient:
+        admin = FailingAdmin()
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client: FailingClient = FailingClient()
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', lambda *args, **kwargs: client)
+    secret_uri = 'mongodb+srv://user:secret@example.invalid'
+
+    with pytest.raises(MongoDBConfigurationError) as error:
+        connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
+
+    assert client.closed
+    formatted = ''.join(traceback.format_exception(error.value))
+    assert secret_uri not in formatted
+    assert 'ping-user' not in formatted
+    assert 'ping-secret' not in formatted
+    assert 'provider rejected' not in formatted
+
+
+@pytest.mark.parametrize('provider_error', [ValueError, ConfigurationError])
+def test_mongodb_constructor_failure_is_bounded_without_exposing_uri(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_error: type[Exception],
+) -> None:
+    secret_uri = 'mongodb+srv://constructor-user:constructor-secret@example.invalid'
+
+    def fail_constructor(*args: object, **kwargs: object) -> None:
+        raise provider_error(f'invalid provider URI: {secret_uri}')
+
+    monkeypatch.setattr('backend.repositories.mongodb.MongoClient', fail_constructor)
+
+    with pytest.raises(MongoDBConfigurationError) as error:
+        connect_mongodb_repository(MongoDBConnectionConfig(secret_uri, 'northwind_test'))
+
+    formatted = ''.join(traceback.format_exception(error.value))
+    assert secret_uri not in formatted
+    assert 'constructor-user' not in formatted
+    assert 'constructor-secret' not in formatted
+    assert 'invalid provider URI' not in formatted
+
+
+def test_mongodb_connection_status_bounds_local_configuration_failure(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_ping(_name: str) -> None:
+        raise ValueError('invalid local client configuration')
+
+    monkeypatch.setattr(repository._client.admin, 'command', fail_ping)
+
+    assert repository.connection_status() == 'unavailable'
+
+
 def test_claim_and_session_round_trip_enforces_customer_ownership(
     repository: MongoDBRepository,
 ) -> None:
@@ -179,6 +703,40 @@ def test_claim_save_uses_optimistic_revision(repository: MongoDBRepository) -> N
     with pytest.raises(RevisionConflict) as error:
         repository.save_claim(updated.model_copy(update={'revision': 3}), expected_revision=1)
     assert error.value.current_revision == 2
+
+
+def test_claim_mutation_persists_revision_and_idempotency_together(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    updated = claim.model_copy(update={'revision': 2})
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/clm_mongo_001/consent',
+        key='claim-mutation-key',
+        request_fingerprint='claim-mutation-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    repository.save_claim_mutation(updated, 1, idempotency)
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+    with pytest.raises(KeyError):
+        repository.save_claim_mutation(
+            updated.model_copy(update={'revision': 3}),
+            2,
+            IdempotencyRecord(**{**idempotency.__dict__, 'actor_id': 'another-customer'}),
+        )
 
 
 def test_idempotency_rejects_changed_replay(repository: MongoDBRepository) -> None:

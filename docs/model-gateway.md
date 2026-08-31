@@ -4,6 +4,12 @@ The model gateway is the internal provider-neutral boundary between Agent orches
 and model transports. It does not add a public model endpoint or grant model output any
 new authority.
 
+The target turn and FNOL problem mapping are defined in
+[Agent Runtime Target](design/agent-runtime/agent-runtime-target.md), and the compatibility path is
+isolated in [Agent Runtime Migration](design/agent-runtime/agent-runtime-migration.md).
+This document remains authoritative for what the current Gateway implementation actually
+supports.
+
 ## Implemented Boundary
 
 Agent orchestration sends `ModelRequest` and receives `ModelResponse`. These contracts
@@ -12,13 +18,19 @@ normalise:
 - system, user, assistant, and tool messages;
 - optional JSON-schema structured output;
 - function-tool declarations and calls;
-- assistant text, finish reason, provider model and request identity; and
+- assistant text, provider-neutral completion status, raw finish reason, provider model and
+  request identity; and
 - input, output, and total token usage when supplied by the endpoint.
 
 `GatewayAgent` converts a normalised structured response into the existing
 `AgentProposal`. The existing deterministic validation then authorises, blocks, or
 requires review for the proposal. A model response never executes a tool, writes claim
 state, creates a claim, or authorises a handoff by itself.
+
+Every adapter maps provider termination data to `complete`, `incomplete`, `refused`, or
+`unknown`. `GatewayAgent` accepts a proposal only from a `complete` response. Truncated,
+refused, filtered, cancelled, and unrecognised results are discarded before proposal
+validation or persistence, even when their partial content happens to match the schema.
 
 The model receives an explicit minimum context projection rather than the durable
 `WorkingClaim`. The projection contains the channel, locale, incident type, customer-safe
@@ -33,6 +45,9 @@ unregistered field remain outside routine model context.
 The projection also excludes Claim, Customer, Session, Message, and Evidence identifiers;
 source references and actor identities; internal fraud, coverage, and severity signals;
 provider fingerprints; routes; timestamps; and external Claim or assessor results.
+For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
+model that the field already exists without disclosing its value. This supports non-repetition
+without widening the routine model-data projection.
 
 The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
 but it cannot set fact provenance or confirmation state. The server converts every accepted
@@ -52,9 +67,10 @@ authorised low-impact actions use action-specific server responses. This prevent
 presenting approval, rejection, liability, fraud, or emergency-service claims to a claimant.
 
 Each persisted model-backed decision records `proposal_source: model_gateway` and bounded audit
-provenance containing the runtime profile, provider-reported model identifier, and provider request
-identifier when supplied. These provider references are internal-only and are absent from claimant
-messages and decision projections. Token usage persistence remains a current limitation.
+provenance containing the runtime profile, executable prompt identifier, provider-reported model
+identifier, and provider request identifier when supplied. These references are internal-only and
+are absent from claimant messages and decision projections. Token usage persistence remains a
+current limitation.
 
 The model-facing schema does not contain the server-only `controlled_rule_authorised`
 marker, and rejects a response that tries to provide it. Because the current Agent request
@@ -66,11 +82,20 @@ The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
 configured model failure does not silently fall back to the controlled fixture.
 
-## OpenAI-Compatible Adapter
+## Implemented Adapters
+
+### OpenAI-Compatible
 
 The `openai_compatible` adapter calls `POST {MODEL_BASE_URL}/chat/completions`. Official
 APIs, relay services, and local servers that implement this protocol use the same code;
 only configuration changes.
+
+When an endpoint implements OpenAI strict structured outputs, the adapter translates the
+provider-neutral Pydantic schema into that protocol's accepted JSON Schema subset. Every object
+property becomes required, optional values remain nullable, object shapes reject undeclared
+properties, defaults are removed, and unconstrained scalar values are represented explicitly.
+This is a transport transformation only: the returned object must still pass the original domain
+model and Runtime authority validation before it can affect Claim State.
 
 | Variable | Meaning |
 |---|---|
@@ -93,6 +118,32 @@ output and tool requests are rejected before transport when the selected adapter
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
 
+### Amazon Bedrock Converse
+
+The `bedrock_converse` adapter calls
+`POST {MODEL_BASE_URL}/model/{MODEL_IDENTIFIER}/converse`. It authenticates with the bearer token
+stored in the environment variable named by `MODEL_API_KEY_ENV`; for Bedrock API keys this should
+name `AWS_BEARER_TOKEN_BEDROCK`. The adapter never reads a credential from a source-controlled
+profile.
+
+Bedrock Converse does not use the OpenAI request or response shape. The adapter maps system and
+conversation messages to Converse content blocks and supplies the response schema as a forced
+`toolChoice` with `toolSpec.inputSchema.json`. Only one `toolUse` block for the reserved
+`northwind_agent_proposal` transport tool is accepted as structured output; prompt-only JSON text
+does not satisfy the declared capability. The adapter normalises text, completion status, stop
+reason, usage, configured model identity, and AWS request identity into `ModelResponse`. HTTP
+authentication, rate-limit, provider, timeout, and malformed-output failures use the same
+provider-neutral errors as other adapters.
+
+The executable claimant prompt is `northwind-fnol-motor-claimant-v2`, stored under
+`backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
+current minimum Claim projection and response schema; the adapter does not own FNOL behaviour.
+Changing the prompt requires a new prompt identifier and regression evidence.
+
+The repository includes configuration and transport tests, but a deployment is live only after an
+authorised model invocation succeeds in its selected AWS account and region. Model listing or
+successful local composition is not proof of Runtime access.
+
 ## Custom Protocols
 
 A non-compatible HTTP or local protocol implements the `ModelGateway` contract and is
@@ -112,6 +163,8 @@ The gateway distinguishes:
 - `authentication`;
 - `rate_limit`;
 - `provider`;
+- `incomplete_response`;
+- `refused_response`;
 - `malformed_response`;
 - `unsupported_capability`; and
 - `configuration`.
@@ -121,15 +174,15 @@ retryable provider failures retain a retryable flag for later orchestration poli
 
 At the claimant message API boundary, a timeout, rate limit, or other retryable provider
 failure returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`. Authentication,
-configuration, unsupported capability, malformed response, and other non-retryable model
-failures return `502 DEPENDENCY_FAILED` with `retryable: false`. These responses expose no
-provider detail and leave the Claim revision, messages, decisions, and idempotency records
-unchanged.
+configuration, unsupported capability, incomplete or refused completion, malformed response, and
+other non-retryable model failures return `502 DEPENDENCY_FAILED` with `retryable: false`. These
+responses expose no provider detail and leave the Claim revision, messages, decisions, and
+idempotency records unchanged.
 
 ## Current Limitations
 
-- The included transport implements synchronous OpenAI-compatible chat completions;
-  streaming and provider-specific response APIs are not implemented.
+- The included transports implement synchronous OpenAI-compatible chat completions and Bedrock
+  Converse; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
 - The gateway normalises tool calls, but the current `GatewayAgent` requests only a
@@ -141,3 +194,28 @@ unchanged.
 - Readiness reports `configured` after successful local composition. It does not claim
   that remote credentials, connectivity, model quality, or production readiness have
   been verified.
+
+## Target Runtime Relationship
+
+The implemented Gateway is the first provider-neutral transport and validation layer. It
+does not yet implement the complete target Agent Runtime contract:
+
+- the current `ModelRequest` carries messages, response schema, and tool declarations;
+  the target request also binds purpose, actor, Claim scope, policy and Registry versions,
+  privacy class, budgets, trace context, and the exact actions and tools allowed;
+- the current `ModelResponse` normalises transport output; the target Runtime additionally
+  distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
+  and final `TurnResult`;
+- the current `GatewayAgent` produces the legacy eight-action `AgentProposal`; the target
+  action model separates conversation moves, Claim commands, human actions, external
+  coordination, and one Runtime control directive;
+- the current configuration declares endpoint capabilities; the target Model Profile
+  Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
+  and qualified fallback groups; and
+- the current Gateway rejects tool calls from Agent turns; future tool use requires a
+  published Tool Registry, per-turn allow-list, server authority checks, typed results,
+  idempotency, and trajectory tests before execution is enabled.
+
+These are incremental extensions, not reasons to replace the implemented provider-neutral
+port. Current compatibility types remain supported until the versioned API, persistence,
+consumers, fixtures, and tests migrate together.

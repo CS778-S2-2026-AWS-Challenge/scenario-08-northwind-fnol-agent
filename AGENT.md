@@ -4,14 +4,26 @@ This file applies to every coding agent working in this repository. Read it befo
 repository-changing commands, editing files, pushing a branch, creating or updating a pull
 request, or submitting a review.
 
-1. Read [the repository operation rules](docs/repo_rule.md) in full and follow them.
-2. Inspect `git status --short --branch` and preserve all existing worktree changes.
-3. Read `README.md`, `SPEC/README.md`, the relevant files in `SPEC/`,
-   `docs/development-conventions.md`, `docs/api.md`, the current sprint document, and the
-   source and tests affected by the task.
-4. Read the additional contract document selected by the change matrix in
-   `docs/repo_rule.md`. Do not treat a historical prototype or presentation record as the
-   current contract.
+The sole current source of governance rules is the repository governance skill:
+
+1. Read
+   [docs/skills/repo-governance-for-novice/SKILL.md](docs/skills/repo-governance-for-novice/SKILL.md)
+   in full. It defines the general principles and indexes the twelve chapter files covering
+   authority boundaries, required reading, task entry, branching, commit and PR rules, review
+   and merge, documentation sync, credentials, CI checks, and frontend and backend design
+   standards.
+2. Follow the skill's "Scenario quick reference" to select the chapter files your task
+   requires, and read them before acting. Required reading and the change-area contract matrix
+   live in the skill's `before-work.md`.
+
+For product-direction or user-behaviour work, read [Northwind FNOL Product Soul](docs/product-soul.md)
+before the relevant files in `SPEC/`. It is the concise product-direction index; `SPEC/` remains
+the normative requirement and acceptance source.
+
+The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
+archived under [docs/archive/governance/](docs/archive/governance/) and are historical
+reference only. Where an archived document disagrees with the skill, the skill prevails
+without exception. Do not maintain a separate or conflicting rule set in this file.
 
 If an instruction conflicts with the current user's explicit authorisation, or if the required
 source of truth is unavailable or contradictory, stop before changing repository or GitHub

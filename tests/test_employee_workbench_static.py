@@ -97,11 +97,30 @@ def test_employee_professional_review_connects_evidence_uncertainty_and_results(
     assert "['Outstanding materials', outstandingEvidence.length]" in page
 
 
+def test_employee_workbench_loads_linked_records_from_the_claim_api() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'fetchClaims(view)' in page
+    assert 'fetchClaimDetail(claimId)' in page
+    assert 'detail.retrievals || []' in page
+    assert 'detail.messages || []' in page
+    assert 'detail.evidence || []' in page
+    assert 'detail.handoffs || []' in page
+    for fixture_identifier in (
+        'clm_fixture_at02',
+        'ret_fixture_at02_policy',
+        'ret_fixture_at02_history',
+        'POL-MVP-HOME-2048',
+        'HIST-MVP-2024-017',
+    ):
+        assert fixture_identifier not in page
+
+
 def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seeds() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     render_handoff = page[
-        page.index('function renderHandoff') : page.index('function communicationHistory')
+        page.index('function renderHandoff') : page.index('function acceptHandoff')
     ]
     render_context = page[
         page.index('function renderContext') : page.index('function renderHandoff')
@@ -166,7 +185,9 @@ def test_employee_workbench_groups_detail_with_progressive_disclosure() -> None:
     assert 'id="detailReview"' in page
     assert 'Handoffs and internal review' in page
     assert 'id="detailHistory"' in page
-    assert 'History and continuity' in page
+    assert '>History</button>' in page
+    assert '<summary>History <span class="detail-section-hint">' in page
+    assert "contextBlock('Claim continuity', bulletList(continuityItems))" in page
     assert (
         '<details class="detail-section integrated-review-controls" id="detailStaffActions"' in page
     )
@@ -185,12 +206,37 @@ def test_employee_workbench_uses_accessible_claim_detail_tabs() -> None:
     assert 'data-detail-page="evidence"' in page
     assert 'data-detail-page="review"' in page
     assert 'data-detail-page="history"' in page
-    assert 'id="detailNextStep" data-detail-page="history"' in page
+    tab_panel_pairs = {
+        'claimDetailOverviewTab': 'detailSummary',
+        'claimDetailEvidenceTab': 'detailEvidence',
+        'claimDetailReviewTab': 'detailReview',
+        'claimDetailConversationTab': 'detailConversation',
+        'claimDetailHistoryTab': 'detailHistory',
+    }
+    for tab_id, panel_id in tab_panel_pairs.items():
+        assert page.count(f'id="{tab_id}"') == 1
+        assert page.count(f'aria-controls="{panel_id}"') == 1
+        panel_markup = page[
+            page.index(f'id="{panel_id}"') : page.index('>', page.index(f'id="{panel_id}"'))
+        ]
+        assert 'role="tabpanel"' in panel_markup
+        assert f'aria-labelledby="{tab_id}"' in panel_markup
+    assert 'id="detailNextStep"' not in page
     assert 'function selectClaimDetailTab(tab, focus = false)' in page
     assert 'section.inert = section.hidden' in page
     assert "section.setAttribute('aria-hidden', String(section.hidden))" in page
     assert '.claim-detail-tabs { position:sticky;' in page
     assert "['ArrowLeft', 'ArrowRight', 'Home', 'End']" in page
+
+
+def test_employee_conversation_layout_does_not_add_absolute_track_sizes() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert (
+        '.customer-chat-content { min-height:0; display:grid; '
+        'grid-template-columns:minmax(0,1fr) minmax(0,2fr); }'
+    ) in page
+    assert 'grid-template-columns:minmax(280px,340px) 1fr' not in page
 
 
 def test_employee_workbench_exposes_pending_queue_and_demo_recovery() -> None:
@@ -275,18 +321,22 @@ def test_employee_workbench_explains_when_the_local_api_cannot_be_reached() -> N
     assert 'Start the backend and keep it running, then refresh this page.' in page
 
 
-def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigation() -> None:
+def test_employee_workbench_prevents_duplicate_updates_and_keeps_chat_in_claim_detail() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     assert 'This claimant update has already been recorded.' in page
     assert 'pendingCustomerMessage' in page
-    assert "window.location.hash !== '#customer-chat'" in page
-    assert "window.addEventListener('popstate', restoreViewFromHistory)" in page
-    assert "window.addEventListener('hashchange', restoreViewFromHistory)" in page
-    assert 'customerChatHistoryEntryCreated' in page
+    assert 'data-detail-tab="conversation"' in page
+    assert 'data-detail-page="conversation"' in page
+    assert "selectClaimDetailTab('conversation')" in page
+    assert 'id="customerChatView"' not in page
+    assert 'id="customerChatContext"' in page
+    assert '>Accept handoff to reply</button>' in page
+    assert "button.textContent = 'Accepting…'" in page
+    assert 'const accepted = await acceptHandoff(activeClaimDetail, handoff, button)' in page
 
 
-def test_employee_messaging_defines_delivery_retry_and_template_states() -> None:
+def test_employee_messaging_keeps_deterministic_template_behind_staff_send_action() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     assert 'Sender: ${formatLabel(item.actor)} · Audience: Claimant · Delivered' in page
@@ -295,9 +345,68 @@ def test_employee_messaging_defines_delivery_retry_and_template_states() -> None
     assert "button.textContent = 'Retry message'" in page
     assert 'Retry with the same safe request key to reconcile' in page
     assert 'id="agentSuggestionStatus"' in page
-    for state in ('generating', 'suggested', 'accepted', 'edited', 'rejected', 'failed'):
-        assert f"setAgentSuggestionState('{state}'" in page
-    assert 'Internal draft only; nothing will be sent' in page
-    assert 'Copied for staff review; not sent' in page
+    for state in ('generating', 'suggested', 'failed'):
+        assert f"'{state}'," in page
+    assert "setAgentSuggestionState('not_requested', 'Draft stays internal')" in page
+    assert "setAgentSuggestionState('edited', 'Edited by staff; not sent')" in page
+    # The deterministic template and staff reply share one text box: no separate copy step.
+    assert 'id="agentSuggestionText"' not in page
+    assert 'id="useAgentSuggestion"' not in page
+    assert 'id="agentSuggestionResult"' not in page
+    assert '>Use this draft</button>' not in page
+    assert 'The deterministic template uses claimant-safe claim state · Nothing is sent' in page
     assert '>Reply template<' in page
-    assert '>Agent reply suggestion<' not in page
+    assert '>Build template</button>' in page
+    assert '@Agent' not in page
+    assert '>Refresh draft</button>' in page
+    assert 'function refreshAgentSuggestion()' in page
+    assert 'agentSuggestionVersion += 1;' in page
+    assert 'setTimeout(resolve, 180)' in page
+    assert 'Here is the latest update on your claim:' in page
+    assert 'id="customerChatContextPanel"' not in page
+    assert page.index('id="customerChatReplyTitle"') < page.index('id="agentSuggestionTitle"')
+    assert 'Draft in the reply box · Accept the handoff to edit or send' in page
+    assert 'reply.value = suggestion;' in page
+    assert "byId('customerChatHandoffAction').focus()" not in page
+    assert 'reply.focus({ preventScroll:true });' in page
+    assert '>Send to claimant</button>' in page
+    assert 'id="handoffRequiredDialog"' in page
+    assert '>Accept this handoff before replying<' in page
+    assert '>Keep as draft</button>' in page
+    assert '>Accept handoff</button>' in page
+    assert "if (activeHandoff?.status === 'queued')" in page
+    assert 'showHandoffRequiredDialog();' in page
+    assert (
+        "} else if (openHandoff.status === 'queued') {\n"
+        '          input.disabled = true;\n'
+        '          send.disabled = false;' in page
+    )
+    assert 'handoffRequiredDialogTrigger = document.activeElement;' in page
+    assert "byId('handoffRequiredCancel').focus({ preventScroll:true });" in page
+    assert "if (event.key === 'Escape')" in page
+    assert "if (event.key !== 'Tab') return;" in page
+    assert 'handoffRequiredDialogTrigger?.focus?.({ preventScroll:true });' in page
+    assert "setAgentSuggestionState('sent_by_staff', 'Sent only after staff action')" in page
+    assert "byId('customerChatText').addEventListener('keydown'" not in page
+
+
+def test_employee_workbench_ships_no_embedded_staff_credential() -> None:
+    """The page must not carry a working credential.
+
+    Issue #247 deliverable 10 and the identity contract's migration rules require
+    browser synthetic-token access to be an explicit local opt-in, not a default
+    baked into the static asset.
+    """
+
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    for synthetic_token in (
+        'synthetic-staff',
+        'synthetic-claimant',
+        'synthetic-admin',
+        'synthetic-integration',
+    ):
+        assert synthetic_token not in page
+
+    assert "localStorage.getItem('northwind.staffToken')" in page
+    assert "const STAFF_TOKEN = '" not in page

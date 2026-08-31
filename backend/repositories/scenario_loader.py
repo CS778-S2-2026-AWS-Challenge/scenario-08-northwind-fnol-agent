@@ -24,27 +24,70 @@ from backend.domain.models import (
     EvidenceState,
     EvidenceStatus,
     EvidenceSummary,
+    FormSource,
+    HandoffPriority,
     HandoffRecord,
+    HandoffStatus,
+    HandoffTrigger,
+    HandoffType,
     MessageRecord,
+    ResponsibleParty,
     SessionRecord,
     SessionStatus,
     StaffActionRecord,
     StaffActionStatus,
+    WorkflowState,
     WorkingClaim,
 )
-from backend.domain.retrieval import RetrievalRecord
+from backend.domain.retrieval import PolicyRetrievalRecord, RetrievalKind, RetrievalRecord
 from backend.repositories.protocols import IdempotencyRecord, PersistenceRepository
 from backend.services.retrieval_review import persist_retrieval_record
 
 CANONICAL_SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
 SCENARIO_DERIVED_ENTRY_FIELDS = frozenset(
-    {'claim_id', 'claim_state', 'customer_next_step', 'evidence_summary'}
+    {
+        'business_path',
+        'claim_id',
+        'claim_state',
+        'customer_next_step',
+        'evidence_summary',
+        'handoffs',
+    }
 )
+
+
+class EvidenceBusinessPath(str, Enum):
+    CLEAR = 'clear'
+    PENDING = 'pending'
+    URGENT = 'urgent'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    HANDOFF = 'handoff'
+
+
+class LinkedMvpRecordBaseline(ContractModel):
+    """Stable identifiers for one complete, API-served synthetic record graph."""
+
+    customer_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    policy_retrieval_id: str = Field(min_length=1, max_length=100)
+    claim_history_retrieval_id: str = Field(min_length=1, max_length=100)
+    evidence_ids: list[str] = Field(min_length=1)
+    handoff_id: str = Field(min_length=1, max_length=100)
+    message_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_unique_record_identifiers(self) -> 'LinkedMvpRecordBaseline':
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError('Linked MVP evidence identifiers must be unique.')
+        if len(self.message_ids) != len(set(self.message_ids)):
+            raise ValueError('Linked MVP message identifiers must be unique.')
+        return self
 
 
 class ScenarioFixture(ContractModel):
     scenario_id: str = Field(pattern=r'^AT-\d{2}-[a-z0-9-]+$')
     description: str = Field(min_length=1, max_length=500)
+    business_path: EvidenceBusinessPath | None = None
     claim: WorkingClaim
     sessions: list[SessionRecord] = Field(min_length=1)
     evidence: list[EvidenceRecord] = Field(default_factory=list)
@@ -53,6 +96,7 @@ class ScenarioFixture(ContractModel):
     handoffs: list[HandoffRecord] = Field(default_factory=list)
     staff_actions: list[StaffActionRecord] = Field(default_factory=list)
     customer_updates: list[CustomerUpdateRecord] = Field(default_factory=list)
+    linked_records: LinkedMvpRecordBaseline | None = None
     expected: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
@@ -78,6 +122,9 @@ class ScenarioFixture(ContractModel):
         if any(session.context_revision > self.claim.revision for session in self.sessions):
             raise ValueError('Session context_revision cannot exceed the claim revision.')
 
+        evidence_ids = {record.evidence_id for record in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError('Scenario evidence identifiers must be unique.')
         if any(record.claim_id != self.claim.claim_id for record in self.evidence):
             raise ValueError('Every evidence item must belong to the scenario claim.')
         if self.claim.claim_state.evidence is not evidence_state_for(self.evidence):
@@ -109,6 +156,25 @@ class ScenarioFixture(ContractModel):
             )
 
         message_ids = {message.message_id for message in self.messages}
+        if len(message_ids) != len(self.messages):
+            raise ValueError('Scenario message identifiers must be unique.')
+        if any(not set(message.evidence_refs).issubset(evidence_ids) for message in self.messages):
+            raise ValueError('Every message evidence_ref must reference scenario evidence.')
+        message_conversations = {
+            message.message_id: (message.claim_id, message.session_id) for message in self.messages
+        }
+        for message in self.messages:
+            if message.in_reply_to is None:
+                continue
+            if message.in_reply_to not in message_ids:
+                raise ValueError('Every message in_reply_to must reference a scenario message.')
+            if message_conversations[message.in_reply_to] != (
+                message.claim_id,
+                message.session_id,
+            ):
+                raise ValueError(
+                    'A message in_reply_to must reference a message in the same claim and session.'
+                )
         handoff_ids = {handoff.handoff_id for handoff in self.handoffs}
         if len(handoff_ids) != len(self.handoffs):
             raise ValueError('Scenario handoff identifiers must be unique.')
@@ -119,6 +185,35 @@ class ScenarioFixture(ContractModel):
             for handoff in self.handoffs
         ):
             raise ValueError('A handoff source_message_id must reference a scenario message.')
+        if any(
+            not set(handoff.packet.evidence_refs).issubset(evidence_ids)
+            for handoff in self.handoffs
+        ):
+            raise ValueError('Every handoff evidence_ref must reference scenario evidence.')
+
+        policy_retrieval_ids = {
+            record.retrieval_id for record in self.retrievals if record.kind is RetrievalKind.POLICY
+        }
+        history_retrieval_ids = {
+            record.retrieval_id
+            for record in self.retrievals
+            if record.kind is RetrievalKind.CLAIM_HISTORY
+        }
+        for field_code, fact in self.claim.form.items():
+            if fact.source is not FormSource.POLICY:
+                continue
+            if not fact.source_refs:
+                raise ValueError(f'{field_code} declares policy provenance without a source_ref.')
+            if not set(fact.source_refs).issubset(policy_retrieval_ids):
+                raise ValueError(f'{field_code} must reference a scenario policy retrieval record.')
+
+        if any(
+            not set(handoff.packet.history_evidence_refs).issubset(history_retrieval_ids)
+            for handoff in self.handoffs
+        ):
+            raise ValueError(
+                'Every handoff history_evidence_ref must reference a scenario history retrieval.'
+            )
 
         action_ids = {action.action_id for action in self.staff_actions}
         if len(action_ids) != len(self.staff_actions):
@@ -153,6 +248,65 @@ class ScenarioFixture(ContractModel):
                 f'{sorted(unregistered_packet_fields)}. '
                 'Add them to backend/domain/field_registry.py.'
             )
+
+        linked = self.linked_records
+        if linked is not None:
+            expected_retrieval_ids = {
+                linked.policy_retrieval_id,
+                linked.claim_history_retrieval_id,
+            }
+            if (
+                linked.customer_id != self.claim.customer_id
+                or linked.claim_id != self.claim.claim_id
+            ):
+                raise ValueError(
+                    'Linked MVP customer and claim identifiers must match Claim State.'
+                )
+            if expected_retrieval_ids != retrieval_ids:
+                raise ValueError('Linked MVP policy and history identifiers must be complete.')
+            if linked.policy_retrieval_id not in policy_retrieval_ids:
+                raise ValueError('Linked MVP policy identifier must reference a policy retrieval.')
+            if linked.claim_history_retrieval_id not in history_retrieval_ids:
+                raise ValueError(
+                    'Linked MVP history identifier must reference a claim-history retrieval.'
+                )
+            if set(linked.evidence_ids) != evidence_ids:
+                raise ValueError('Linked MVP evidence identifiers must be complete.')
+            if {linked.handoff_id} != handoff_ids:
+                raise ValueError('Linked MVP handoff identifier must select the scenario handoff.')
+            if set(linked.message_ids) != message_ids:
+                raise ValueError('Linked MVP message identifiers must be complete.')
+
+            linked_handoff = next(
+                handoff for handoff in self.handoffs if handoff.handoff_id == linked.handoff_id
+            )
+            if linked.policy_retrieval_id not in linked_handoff.packet.source_refs:
+                raise ValueError('Linked MVP handoff sources must reference the policy retrieval.')
+            if linked.claim_history_retrieval_id not in linked_handoff.packet.history_evidence_refs:
+                raise ValueError(
+                    'Linked MVP handoff history must reference the claim-history retrieval.'
+                )
+
+            policy_record = next(
+                record
+                for record in self.retrievals
+                if isinstance(record, PolicyRetrievalRecord)
+                and record.retrieval_id == linked.policy_retrieval_id
+            )
+            policy_field = self.claim.form.get('policy.policy_number')
+            if (
+                policy_field is None
+                or policy_field.value != policy_record.facts.policy_reference
+                or policy_field.source.value != 'policy'
+            ):
+                raise ValueError(
+                    'Linked MVP policy fact must reference the structured policy retrieval.'
+                )
+            if not any(
+                policy_record.facts.policy_reference in citation
+                for citation in linked_handoff.packet.policy_citation_refs
+            ):
+                raise ValueError('Linked MVP policy citation must identify the structured policy.')
         return self
 
 
@@ -208,12 +362,21 @@ class EvidenceLifecycleFixtureSet(ContractModel):
         return self
 
 
-class EvidenceBusinessPath(str, Enum):
-    FAST = 'fast'
-    PROFESSIONAL_REVIEW = 'professional_review'
-    URGENT = 'urgent'
-    HUMAN_REQUEST = 'human_request'
-    PENDING_EVIDENCE = 'pending_evidence'
+class ExpectedPathHandoff(ContractModel):
+    type: HandoffType
+    status: HandoffStatus
+    priority: HandoffPriority
+    queue: str = Field(min_length=1, max_length=100)
+    trigger: HandoffTrigger
+
+
+class ScenarioEntryBaseline(ContractModel):
+    workflow_state: WorkflowState
+    next_action: AgentAction
+    evidence_state: EvidenceState
+    customer_next_step_status: str = Field(min_length=1, max_length=100)
+    responsible_party: ResponsibleParty
+    handoff: ExpectedPathHandoff | None = None
 
 
 class VisibilityEvidenceFixture(ContractModel):
@@ -232,21 +395,66 @@ class EvidencePathEntry(ContractModel):
     claim_state: ClaimState
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
+    handoffs: list[HandoffRecord]
+    entry_baseline: ScenarioEntryBaseline
     evidence: list[VisibilityEvidenceFixture] = Field(min_length=1)
 
     @model_validator(mode='after')
     def validate_entry_state(self) -> 'EvidencePathEntry':
         expected_action = {
-            EvidenceBusinessPath.FAST: AgentAction.CREATE_CLAIM,
-            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.CLEAR: AgentAction.CREATE_CLAIM,
+            EvidenceBusinessPath.PENDING: AgentAction.PROCEED,
             EvidenceBusinessPath.URGENT: AgentAction.URGENT_HANDOFF,
-            EvidenceBusinessPath.HUMAN_REQUEST: AgentAction.HANDOFF,
-            EvidenceBusinessPath.PENDING_EVIDENCE: AgentAction.PROCEED,
+            EvidenceBusinessPath.PROFESSIONAL_REVIEW: AgentAction.HANDOFF,
+            EvidenceBusinessPath.HANDOFF: AgentAction.HANDOFF,
         }
-        if self.claim_state.next_action is not expected_action[self.business_path]:
+        required_action = expected_action[self.business_path]
+        if self.entry_baseline.next_action is not required_action:
             raise ValueError(
-                f'{self.business_path.value} entry does not use its required next action.'
+                f'{self.business_path.value} baseline must use {required_action.value}.'
             )
+        if self.claim_state.next_action is not self.entry_baseline.next_action:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its next-action baseline.'
+            )
+        if self.claim_state.workflow_state is not self.entry_baseline.workflow_state:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its workflow baseline.'
+            )
+        if self.claim_state.evidence is not self.entry_baseline.evidence_state:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its evidence-state baseline.'
+            )
+        if self.customer_next_step.status != self.entry_baseline.customer_next_step_status:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its customer-status baseline.'
+            )
+        if self.customer_next_step.responsible_party is not self.entry_baseline.responsible_party:
+            raise ValueError(
+                f'{self.business_path.value} entry does not match its responsibility baseline.'
+            )
+
+        expected_handoff = self.entry_baseline.handoff
+        if expected_handoff is None:
+            if self.handoffs:
+                raise ValueError(f'{self.business_path.value} entry must not contain a handoff.')
+        else:
+            if len(self.handoffs) != 1:
+                raise ValueError(
+                    f'{self.business_path.value} entry must contain exactly one handoff.'
+                )
+            handoff = self.handoffs[0]
+            actual_handoff = ExpectedPathHandoff(
+                type=handoff.type,
+                status=handoff.status,
+                priority=handoff.priority,
+                queue=handoff.queue,
+                trigger=handoff.trigger,
+            )
+            if actual_handoff != expected_handoff:
+                raise ValueError(
+                    f'{self.business_path.value} entry does not match its handoff baseline.'
+                )
         fixture_ids = {fixture.fixture_id for fixture in self.evidence}
         if len(fixture_ids) != len(self.evidence):
             raise ValueError('Path evidence fixture identifiers must be unique.')
@@ -293,6 +501,32 @@ def load_scenarios(directory: Path) -> list[ScenarioFixture]:
     return [load_scenario(path) for path in sorted(directory.glob('AT-*.json'))]
 
 
+def load_mvp_journey_scenarios(
+    directory: Path = CANONICAL_SCENARIO_DIRECTORY,
+) -> list[ScenarioFixture]:
+    """Load the single canonical scenario assigned to every current MVP path."""
+
+    by_path: dict[EvidenceBusinessPath, ScenarioFixture] = {}
+    for scenario in load_scenarios(directory):
+        business_path = scenario.business_path
+        if business_path is None:
+            continue
+        if business_path in by_path:
+            raise ValueError(
+                f'MVP business path {business_path.value} must identify exactly one '
+                'canonical scenario.'
+            )
+        by_path[business_path] = scenario
+
+    missing = set(EvidenceBusinessPath) - set(by_path)
+    if missing:
+        raise ValueError(
+            'Canonical scenarios must cover every MVP business path; missing: '
+            f'{sorted(path.value for path in missing)}.'
+        )
+    return [by_path[path] for path in EvidenceBusinessPath]
+
+
 def load_evidence_lifecycle_fixtures(path: Path) -> EvidenceLifecycleFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     return EvidenceLifecycleFixtureSet.model_validate(payload)
@@ -304,7 +538,8 @@ def load_evidence_path_fixtures(
 ) -> EvidencePathFixtureSet:
     payload = json.loads(path.read_text(encoding='utf-8'))
     canonical_scenarios = {
-        scenario.scenario_id: scenario for scenario in load_scenarios(scenario_directory)
+        scenario.scenario_id: scenario
+        for scenario in load_mvp_journey_scenarios(scenario_directory)
     }
     for entry in payload.get('entries', []):
         duplicate_fields = SCENARIO_DERIVED_ENTRY_FIELDS.intersection(entry)
@@ -318,6 +553,10 @@ def load_evidence_path_fixtures(
         scenario = canonical_scenarios.get(scenario_id)
         if scenario is None:
             raise ValueError(f'Unknown canonical scenario: {scenario_id}.')
+        business_path = scenario.business_path
+        if business_path is None:
+            raise ValueError(f'Canonical MVP scenario {scenario_id} requires a business path.')
+        entry['business_path'] = business_path.value
 
         canonical_evidence = {record.evidence_id: record for record in scenario.evidence}
         raw_fixtures = entry.get('evidence', [])
@@ -354,6 +593,7 @@ def load_evidence_path_fixtures(
         entry['claim_state'] = scenario.claim.claim_state.model_dump(mode='json')
         entry['evidence_summary'] = scenario.claim.evidence_summary.model_dump(mode='json')
         entry['customer_next_step'] = scenario.claim.customer_next_step.model_dump(mode='json')
+        entry['handoffs'] = [handoff.model_dump(mode='json') for handoff in scenario.handoffs]
     return EvidencePathFixtureSet.model_validate(payload)
 
 
@@ -384,7 +624,19 @@ def seed_scenario(
         for session in scenario.sessions
         if session.session_id == scenario.claim.active_session_id
     )
-    repository.create_claim(scenario.claim, active_session)
+    staff_history_count = len(scenario.staff_actions) + len(scenario.customer_updates)
+    starting_revision = scenario.claim.revision - staff_history_count
+    if starting_revision < 1:
+        raise ValueError(
+            f'{scenario.scenario_id}: final claim revision {scenario.claim.revision} cannot replay '
+            f'{staff_history_count} material staff history records.'
+        )
+
+    seed_claim = scenario.claim.model_copy(update={'revision': starting_revision})
+    seed_active_session = active_session.model_copy(
+        update={'context_revision': min(active_session.context_revision, starting_revision)}
+    )
+    repository.create_claim(seed_claim, seed_active_session)
     for session in scenario.sessions:
         if session.session_id != active_session.session_id:
             repository.save_session(session)
@@ -396,34 +648,57 @@ def seed_scenario(
         repository.save_message(message, scenario.claim.customer_id)
     for handoff in scenario.handoffs:
         repository.save_handoff(handoff, scenario.claim.customer_id)
-    # Scenario records represent already-audited staff history.  They are seeded
-    # without changing the fixture claim revision, while retaining ordinary
-    # repository ownership and idempotency checks.
+
+    current_revision = starting_revision
+    # Canonical scenarios store a final-state claim plus already-audited staff history.
+    # Replay each material history record through the same N -> N+1 boundary so fixture
+    # hydration does not require a special repository bypass.
     for action in scenario.staff_actions:
+        next_revision = current_revision + 1
+        updated_claim = scenario.claim.model_copy(
+            update={
+                'revision': next_revision,
+                'updated_at': action.completed_at or action.created_at,
+            }
+        )
         repository.save_staff_mutation(
-            scenario.claim,
-            scenario.claim.revision,
+            updated_claim,
+            current_revision,
             IdempotencyRecord(
                 actor_id=action.completed_by or action.assigned_to,
                 route='fixture://staff-actions',
                 key=action.action_id,
                 request_fingerprint=f'fixture-staff-action:{action.action_id}',
                 claim_id=scenario.claim.claim_id,
-                session_id=scenario.claim.active_session_id or '',
+                session_id='',
             ),
             staff_action=action,
         )
+        current_revision = next_revision
+
     for update in scenario.customer_updates:
+        next_revision = current_revision + 1
+        updated_claim = scenario.claim.model_copy(
+            update={'revision': next_revision, 'updated_at': update.created_at}
+        )
         repository.save_staff_mutation(
-            scenario.claim,
-            scenario.claim.revision,
+            updated_claim,
+            current_revision,
             IdempotencyRecord(
                 actor_id=update.created_by,
                 route='fixture://customer-updates',
                 key=update.update_id,
                 request_fingerprint=f'fixture-customer-update:{update.update_id}',
                 claim_id=scenario.claim.claim_id,
-                session_id=scenario.claim.active_session_id or '',
+                session_id='',
             ),
             customer_update=update,
         )
+        current_revision = next_revision
+
+    if current_revision != scenario.claim.revision:
+        raise ValueError(
+            f'{scenario.scenario_id}: seeded revision {current_revision} does not match '
+            f'final fixture revision {scenario.claim.revision}.'
+        )
+    repository.save_session(active_session)

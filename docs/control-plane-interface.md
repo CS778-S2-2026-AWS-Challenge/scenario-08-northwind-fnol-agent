@@ -200,12 +200,8 @@ Expected results:
 - The boundary commands find both the provider-access prohibition and Claim State
   administration prohibition.
 
-Before a pull request is pushed or review is requested, also run the complete repository
-quality gate and record its exact result:
-
-```powershell
-./scripts/check.ps1
-```
+Before review is requested, record the focused checks above and confirm that the configured
+CircleCI documentation and pull-request policy checks pass against the exact pull-request head.
 
 ### #240 implementation record
 

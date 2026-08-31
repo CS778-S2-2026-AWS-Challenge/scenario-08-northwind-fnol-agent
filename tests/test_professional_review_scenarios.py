@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenarios, seed_scenario
 from scripts.run_scenarios import run_scenarios
@@ -66,7 +66,10 @@ def test_review_reasons_are_visible_to_staff_but_not_claimants() -> None:
     for scenario in load_scenarios(FIXTURE_DIRECTORY):
         repository = FixtureRepository()
         seed_scenario(repository, scenario)
-        app = create_app(Settings(), repository)
+        app = create_app(
+            Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+            repository,
+        )
         session_id = scenario.claim.active_session_id
         assert session_id is not None
 
