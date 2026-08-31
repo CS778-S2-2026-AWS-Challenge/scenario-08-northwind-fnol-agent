@@ -20,7 +20,7 @@
 ## 栈级分工
 
 | 成员 | 主要责任栈 |
-|---|---|
+| --- | --- |
 | `Ysoseri1224` | Claimant frontend + Agent behaviour |
 | `liyang6620` | Backend API + AWS integration |
 | `jxu316-arch` | Persistence/session + policy/history data |
@@ -36,7 +36,7 @@ Day 1 不先完成一份庞大设计。每个栈直接在相关路径中确认�
 独立运行的 contract、adapter 或 fixture 基线。
 
 | 序号 | 路径 | 拟议任务 | 分配 | 前置条件 | 交付物 | 验收结果 |
-|---:|---|---|---|---|---|---|
+| ---: | --- | --- | --- | --- | --- | --- |
 | 1 | Clear claim | 建立 claimant 与 Agent 的清晰报案基线 | `Ysoseri1224 4h` | 现有 SPEC 和 API contract | describe、confirm、correct、proceed 的 customer/Agent fixture | 无需 backend 即可重复展示输入、确认和下一步状态变化 |
 | 2 | Clear claim | 建立 claim creation API 与 AWS 边界 | `liyang6620 4h` | 现有 API contract | create/route 接口、AWS service boundary 和 fallback 约定 | fixture 请求返回 claim 状态、route、next step 和来源标记 |
 | 3 | Pending evidence and resume | 建立 session、resume 与 revision 模型 | `jxu316-arch 4h` | 现有 persistence schema | session snapshot、unresolved work、revision 和恢复规则 | 同一 fixture claim 可跨 session 恢复，旧 revision 不覆盖新状态 |
@@ -55,7 +55,7 @@ Day 1 不先完成一份庞大设计。每个栈直接在相关路径中确认�
 ## Day 2：推进 Clear Claim 与 Pending Evidence/Resume
 
 | 序号 | 路径 | 拟议任务 | 分配 | 前置条件 | 交付物 | 验收结果 |
-|---:|---|---|---|---|---|---|
+| ---: | --- | --- | --- | --- | --- | --- |
 | 1 | Clear claim | 实现 claimant 对话、表单和确认路径 | `Ysoseri1224 4h` | Clear claim claimant/Agent 基线 | conversation、visible form、confirmation 和 correction UI | 页面由 Claim State 驱动；修改 proposed fact 后显示新值和来源 |
 | 2 | Clear claim | 实现 claim creation 与 routing API | `liyang6620 4h` | claim creation API 边界 | fixture-backed create/route API、错误和 retry 结果 | 重试不会重复创建 claim；响应包含 route、next step 和 known timing |
 | 3 | Clear claim | 实现 claim 与 session repository | `jxu316-arch 4h` | session/revision 模型 | claim/session save、read、update 和 revision check | claim 可保存并在新 session 读取；revision conflict 返回明确错误 |
@@ -74,7 +74,7 @@ Day 1 不先完成一份庞大设计。每个栈直接在相关路径中确认�
 ## Day 3：推进 Handoff、Professional Review 与 Write-Back
 
 | 序号 | 路径 | 拟议任务 | 分配 | 前置条件 | 交付物 | 验收结果 |
-|---:|---|---|---|---|---|---|
+| ---: | --- | --- | --- | --- | --- | --- |
 | 1 | Human request and urgent handoff | 实现 claimant 人工请求与紧急中断体验 | `Ysoseri1224 4h` | Agent handoff fixture | first request、repeat request、urgent interruption 和 transfer UI | Agent 不重复阻止人工请求；urgent signal 中断普通提问并显示明确下一步 |
 | 2 | Policy/history and professional review | 实现 policy ambiguity 与 review Agent 行为 | `Ysoseri1224 4h` | policy/history mapping 基线 | evidence-grounded clarification、review reason 和 authority boundary | Agent 显示依据和不确定性，不自行作 coverage/fraud 结论 |
 | 3 | Human request and urgent handoff | 实现 handoff API 与 AWS/service fallback | `liyang6620 4h` | handoff contract；AWS boundary | create/read/accept handoff、priority、error 和 fallback API | handoff 保存结构化 context；外部服务失败时仍能保留请求和状态 |
@@ -96,7 +96,7 @@ Day 4 继续在各栈内部连接五条路径，不把 Week 4 才能完成的跨
 为 Done。
 
 | 序号 | 路径 | 拟议任务 | 分配 | 前置条件 | 交付物 | 验收结果 |
-|---:|---|---|---|---|---|---|
+| ---: | --- | --- | --- | --- | --- | --- |
 | 1 | Clear claim + Pending evidence | 连接 claimant UI 与 Agent controller | `Ysoseri1224 4h` | Day 2 claimant/Agent 实现 | describe、confirm、pending、resume 的 claimant-to-Agent 本地路径 | 页面状态来自统一 Claim State fixture，不使用静态跳页或隐藏状态 |
 | 2 | Handoff + Professional review | 连接 claimant handoff 与 Agent authority boundary | `Ysoseri1224 4h` | Day 3 Agent 实现 | human、urgent、policy ambiguity 和 review 的本地路径 | 每条路径显示正确 reason、priority、authority result 和 next step |
 | 3 | Clear claim + Pending evidence | 连接 API、claim creation 与可用 AWS adapter | `liyang6620 4h` | Day 2 API；AWS boundary | API-to-adapter 本地路径和来源标记 | 已确认 AWS 能力直接调用；未确认部分使用同契约 fixture 并明确标记 |
@@ -118,7 +118,7 @@ Day 5 由非实现者参与验收。每张 card 仍由栈负责人修复和说�
 只由实现者本人确认。
 
 | 序号 | 路径 | 拟议任务 | 分配 | 前置条件 | 交付物 | 验收结果 |
-|---:|---|---|---|---|---|---|
+| ---: | --- | --- | --- | --- | --- | --- |
 | 1 | Clear claim | 验收 claimant 与 Agent 清晰报案路径 | `Ysoseri1224 3h` 修复/演示；`bdfa123 1h` evidence 独立检查 | Clear claim claimant/Agent 输出 | describe、confirm、correct、proceed 演示和问题记录 | 给定 fixture 可重复完成；事实来源、确认状态和下一步正确 |
 | 2 | Clear claim | 验收 API、claim creation 与 persistence | `liyang6620 3h` API/AWS；`jxu316-arch 1h` persistence 检查 | Clear claim backend/data 输出 | create/route、repository、retry 和 source 演示 | 不重复创建 claim；route、revision、source 和 fallback 可追溯 |
 | 3 | Pending evidence and resume | 验收 claimant/Agent pending 与恢复路径 | `Ysoseri1224 3h` 修复/演示；`LLL263 1h` staff status 检查 | Pending/resume UI 与 Agent 输出 | pending evidence、resume 和 next step 演示 | 材料未生成不阻塞无关步骤；返回后不重复已确认事实 |
@@ -133,18 +133,18 @@ Day 5 由非实现者参与验收。每张 card 仍由栈负责人修复和说�
 ### Day 5 工时核对
 
 | 成员 | 分配 | 合计 |
-|---|---|---:|
+| --- | --- | ---: |
 | `Ysoseri1224` | Clear 3h + Pending/resume 3h + Handoff claimant 检查 1h + Agent boundary 1h | 8h |
 | `liyang6620` | Clear API 3h + Handoff API 3h + AWS/API 检查 1h + Week 4 输入 1h | 8h |
 | `jxu316-arch` | Clear persistence 1h + Pending/resume 3h + review data 3h + write-back revision 1h | 8h |
 | `LLL263` | Pending staff 检查 1h + handoff staff 3h + review staff 1h + write-back 3h | 8h |
 | `bdfa123` | Clear evidence 1h + pending evidence 1h + handoff evidence 1h + review evidence 2h + Week 4 fixture 3h | 8h |
-| **总计** |  | **40h** |
+| **总计** | | **40h** |
 
 ## 全周工时核对
 
 | 成员 | Day 1 | Day 2 | Day 3 | Day 4 | Day 5 | 周合计 |
-|---|---:|---:|---:|---:|---:|---:|
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `Ysoseri1224` | 8h | 8h | 8h | 8h | 8h | 40h |
 | `liyang6620` | 8h | 8h | 8h | 8h | 8h | 40h |
 | `jxu316-arch` | 8h | 8h | 8h | 8h | 8h | 40h |

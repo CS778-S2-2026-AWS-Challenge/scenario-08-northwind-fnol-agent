@@ -18,7 +18,7 @@
 人员按栈负责，不把一条完整业务路径交给单个人。
 
 | 成员 | 主要责任栈 | 栈内范围 |
-|---|---|---|
+| --- | --- | --- |
 | `Ysoseri1224` | Claimant frontend + Agent behaviour | claimant 对话、表单、恢复、人工请求、Agent action、路径选择和 authority boundary |
 | `liyang6620` | Backend API + AWS integration | API、domain action、AWS access/service 接入、claim creation/routing 和 fallback boundary |
 | `jxu316-arch` | Persistence + session + policy/history data | Claim State 持久化、revision、resume、policy/history mapping 和 backend/AWS 协作 |
@@ -72,7 +72,7 @@ Week 3 的任务按以下路径组织，每条路径由多个栈负责人同时�
 ## 第一周推进顺序
 
 | 日期 | 重点 |
-|---|---|
+| --- | --- |
 | Day 1 | 在五条路径中确认各栈输入输出，并建立可独立运行的 fixture 基线 |
 | Day 2 | 推进 clear claim 与 pending evidence/resume 的各栈实现 |
 | Day 3 | 推进 human/urgent handoff、policy/history review 和 staff write-back |

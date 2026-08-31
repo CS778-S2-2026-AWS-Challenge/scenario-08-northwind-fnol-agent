@@ -9,7 +9,7 @@ Week 5（2026 年 8 月 31 日至 9 月 4 日）以功能实现为中心，在�
 ## 2. 栈级责任
 
 | 成员 | 本周主要负责的栈级工作 |
-|---|---|
+| --- | --- |
 | `Ysoseri1224` | 独立负责 Agent 行为与提示词、分支判断和动作选择；claimant 前端调性、UX 和 UI 重构；动态表单与 claimant 状态/隐私展示；负责状态机的 Agent 行为部分；额外完成 #363（8h）和 #364（1h） |
 | `liyang6620` | 数据层、RAG、结构化业务数据、provider adapter 和 AWS/云端连接；定义 Control Plane 管理的数据和配置，并实现对应 API/配置入口 |
 | `jxu316-arch` | 后端 domain、Claim Context、session/evidence/handoff 持久化与恢复；消费已批准的 Agent action contract，实现后端状态、revision 和事件；定义第三方 stakeholder 能力与服务契约；负责状态机的后端执行部分 |

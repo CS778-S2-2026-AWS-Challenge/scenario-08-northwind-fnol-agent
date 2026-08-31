@@ -44,7 +44,7 @@ Week 4 需要完成：
 ## Week 4 并行推进内容
 
 | 技术栈 | 第二周目标 |
-|---|---|
+| --- | --- |
 | Claimant frontend | 自然叙述、最少必要确认、材料补充、恢复和人工接管形成连续体验 |
 | Agent and model API | Agent 只接收有界上下文；模型提供方可替换；模型输出继续受确定性 authority 检查 |
 | Backend API | 旧接口与修订后的产品和数据契约一致；成功、失败、timeout 和 unavailable 行为清楚 |
@@ -84,7 +84,7 @@ Week 4 需要完成：
 ## 建议的五天推进
 
 | 日期 | 重点 |
-|---|---|
+| --- | --- |
 | Day 1 | 修改与新契约冲突的旧代码；建立 runtime profile、模型 gateway、逻辑 schema 和知识 ingestion 的可测试骨架 |
 | Day 2 | 跑通至少一套真实数据库配置；完成首批模型 API 比较；把自然对话和最少确认接入 claimant 路径 |
 | Day 3 | 接入首批知识文档和带引用检索；连接 staff review、handoff、evidence 和共享 Claim State |

@@ -175,7 +175,7 @@ Do not create a separate physical table for every user. Use shared data models p
 ## 8. Acceptance Scenarios
 
 | ID | Scenario | Required observable result |
-|---|---|---|
+| --- | --- | --- |
 | AT-01 | Clear minor motor accident | A small number of targeted questions, form confirmation, fast progression, and mock claim creation |
 | AT-02 | Policy wording or event applicability is unclear | Show the basis and uncertainty, then hand off the context to a Claims Professional |
 | AT-03 | Complex event or conflicting evidence | Record the conflict, avoid an overconfident conclusion, and request professional judgement |

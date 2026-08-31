@@ -12,7 +12,6 @@
 ## 2. Sprint Goal
 
 > **中文：在 Sprint 1 结束前，构建并演示一个路径覆盖完整、实现深度受控的自适应 FNOL Prototype。它应从客户自然语言报案开始，维护可确认的结构化 claim form，使用 AWS 提供的数据处理 policy、材料和历史 claim，并在快速、复杂、紧急、人工请求、待补材料和跨会话场景中选择安全的下一步，最终创建或正确转交 claim；系统同时维护内部 claim state、tag 和 Claim Operations Workbench，并记录 token 与人工 effort。**
-
 > **English: By the end of Sprint 1, build and demonstrate a breadth-complete, depth-limited adaptive FNOL prototype that turns a claimant's natural-language report into a confirmable structured claim form, uses AWS-provided policy, evidence and claim-history data, selects a safe next action across fast, complex, urgent, human-requested, pending-evidence and resumed-session paths, and either creates or correctly hands off the claim while maintaining internal claim state, tags and a Claim Operations Workbench and recording model and human effort.**
 
 ## 3. Prototype 定义
@@ -177,7 +176,7 @@ Prototype 至少需要：
 ## 8. Acceptance Scenarios
 
 | ID | 场景 | 必须观察到的结果 |
-|---|---|---|
+| --- | --- | --- |
 | AT-01 | 明确的轻微 motor 事故 | 少量针对性问题、form 确认、快速推进并创建 mock claim |
 | AT-02 | Policy wording 或事件适用性模糊 | 展示依据和不确定性，携带上下文转交 Claims Professional |
 | AT-03 | 复杂事件或证据冲突 | 记录冲突、避免武断结论、请求专业判断 |
