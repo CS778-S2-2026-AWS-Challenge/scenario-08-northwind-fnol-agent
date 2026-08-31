@@ -18,6 +18,16 @@ time-bound commitments belong in `sprint/`.
 Historical records must not override the current specification, API, data contracts, authority
 rules, or sprint commitments.
 
+## Current Sprint Planning
+
+The current time-bound direction and weekly execution records are maintained under `sprint/`:
+
+- [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
+- [Sprint 3 Week 5 Plan](../sprint/week5/sprint3-week5-plan.md)
+- [Sprint 3 Week 5 Kanban Draft](../sprint/week5/sprint3-week5-kanban-draft.md)
+- [Sprint 2 Week 3 Parallel Plan](../sprint/week3/sprint2-week1-parallel-plan.md)
+- [Sprint 2 Week 4 Integration Plan](../sprint/week4/sprint2-week2-integration-plan.md)
+
 ## Stable Entry Points
 
 These paths remain stable because repository instructions and contributor workflows depend on
