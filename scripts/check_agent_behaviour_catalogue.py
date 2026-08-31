@@ -6,6 +6,13 @@ import re
 import sys
 from pathlib import Path
 
+# Keep the documented direct-script invocation importable from any working directory.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from backend.domain.agent_action_registry import AGENT_ACTION_REGISTRY  # noqa: E402
+
 CATALOGUE_PATH = Path(__file__).resolve().parents[1] / 'docs' / 'agent-behaviour-catalogue.md'
 
 REQUIRED_BEHAVIOURS = (
@@ -122,8 +129,19 @@ def validate_catalogue(path: Path = CATALOGUE_PATH) -> None:
                 f'{behaviour} missing or empty fields: {", ".join(missing_fields)}'
             )
         target_actions = _field_value(section_lines, 'Target actions')
-        if target_actions is None or not TARGET_ACTION_PATTERN.search(target_actions):
+        action_tokens = TARGET_ACTION_PATTERN.findall(target_actions or '')
+        if not action_tokens:
             raise CatalogueError(f'{behaviour} Target actions has no valid namespaced action')
+        unknown_actions = [
+            action.strip('`')
+            for action in action_tokens
+            if action.strip('`') not in AGENT_ACTION_REGISTRY
+        ]
+        if unknown_actions:
+            raise CatalogueError(
+                f'{behaviour} Target actions contains unregistered actions: '
+                f'{", ".join(unknown_actions)}'
+            )
 
     contracts = _cross_cutting_contracts(lines)
     missing_contracts = [

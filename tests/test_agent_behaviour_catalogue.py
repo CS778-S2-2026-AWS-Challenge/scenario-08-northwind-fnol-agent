@@ -66,6 +66,27 @@ def test_agent_behaviour_catalogue_rejects_invalid_target_actions_field(
         validate_catalogue(path)
 
 
+def test_agent_behaviour_catalogue_rejects_unregistered_target_action(
+    tmp_path: Path,
+) -> None:
+    text = CATALOGUE_PATH.read_text(encoding='utf-8')
+    text = text.replace(
+        '- **Target actions:** `conversation.answer` and `runtime.continue`.',
+        ('- **Target actions:** `conversation.invented_action` and `runtime.continue`.'),
+        1,
+    )
+    path = _catalogue_copy(tmp_path, text)
+
+    with pytest.raises(
+        CatalogueError,
+        match=(
+            'status_query Target actions contains unregistered actions: '
+            'conversation.invented_action'
+        ),
+    ):
+        validate_catalogue(path)
+
+
 def test_agent_behaviour_catalogue_rejects_missing_cross_cutting_contract(
     tmp_path: Path,
 ) -> None:
