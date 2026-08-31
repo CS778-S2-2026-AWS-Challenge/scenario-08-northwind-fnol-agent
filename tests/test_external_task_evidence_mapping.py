@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.domain.external_services import (
+    ConflictingEvidenceOriginError,
     ExternalTaskClaimMismatchError,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
@@ -240,6 +241,38 @@ def test_external_evidence_without_a_link_is_rejected() -> None:
 
     with pytest.raises(UntraceableExternalEvidenceError, match='names no originating task'):
         external_task_for_evidence(_evidence(), [_link(evidence_id='evd_other')])
+
+
+def test_resolver_rejects_two_origins_for_one_record() -> None:
+    """Provenance must not depend on which link happens to come first."""
+
+    links = [_link(task_id='ext_task_1'), _link(task_id='ext_task_2')]
+
+    with pytest.raises(ConflictingEvidenceOriginError, match='more than one external task'):
+        external_task_for_evidence(_evidence(), links)
+
+    with pytest.raises(ConflictingEvidenceOriginError, match='more than one external task'):
+        external_task_for_evidence(_evidence(), list(reversed(links)))
+
+
+def test_resolver_accepts_a_repeated_link_to_the_same_task() -> None:
+    """The blocker is conflicting provenance, not a duplicated identical link."""
+
+    assert external_task_for_evidence(_evidence(), [_link(), _link()]) == 'ext_task_1'
+
+
+def test_mapping_rejects_two_origins_for_one_record() -> None:
+    tasks = [_task(), _task(task_id='ext_task_2')]
+    links = [_link(task_id='ext_task_1'), _link(task_id='ext_task_2')]
+
+    with pytest.raises(ConflictingEvidenceOriginError, match='more than one external task'):
+        map_external_task_evidence(tasks, links)
+
+
+def test_mapping_lists_a_repeated_link_once() -> None:
+    views = map_external_task_evidence([_task()], [_link(), _link()])
+
+    assert views[0].evidence_ids == ['evd_1']
 
 
 def test_mapping_groups_evidence_per_task_in_order() -> None:

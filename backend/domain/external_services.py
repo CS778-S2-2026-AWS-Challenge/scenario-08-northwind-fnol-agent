@@ -273,6 +273,10 @@ class ExternalTaskClaimMismatchError(ValueError):
     """A link joins an evidence record and a task that belong to different claims."""
 
 
+class ConflictingEvidenceOriginError(ValueError):
+    """One evidence record is linked to more than one external task on its own claim."""
+
+
 def external_task_for_evidence(
     record: EvidenceRecord,
     links: Sequence[ExternalTaskEvidenceLink],
@@ -290,6 +294,13 @@ def external_task_for_evidence(
     is rejected rather than skipped: treating it as absent would report a claim
     isolation failure as ordinary missing provenance.
 
+    A record has one origin or none. Every same-claim link is read before an
+    answer is given, so two links naming different tasks fail closed instead of
+    letting whichever appears first decide. Returning on the first match would
+    make provenance depend on list order, which is the opposite of what a
+    traceability boundary is for. Repeated links naming the same task are one
+    origin and are accepted.
+
     Args:
         record: The evidence record to resolve.
         links: The evidence-to-task links known for the record's claim.
@@ -299,6 +310,8 @@ def external_task_for_evidence(
         origin.
 
     Raises:
+        ConflictingEvidenceOriginError: Same-claim links name more than one
+            originating task for this record.
         ExternalTaskClaimMismatchError: A link names this evidence record under a
             different claim.
         UntraceableExternalEvidenceError: The record is external-system sourced and no
@@ -307,14 +320,24 @@ def external_task_for_evidence(
 
     if record.source is not EvidenceSource.EXTERNAL_SYSTEM:
         return None
+    origins: list[str] = []
     mismatched: ExternalTaskEvidenceLink | None = None
     for link in links:
         if link.evidence_id != record.evidence_id:
             continue
-        if link.claim_id == record.claim_id:
-            return link.task_id
-        if mismatched is None:
-            mismatched = link
+        if link.claim_id != record.claim_id:
+            if mismatched is None:
+                mismatched = link
+            continue
+        if link.task_id not in origins:
+            origins.append(link.task_id)
+    if len(origins) > 1:
+        raise ConflictingEvidenceOriginError(
+            f'{record.evidence_id}: linked to more than one external task on claim '
+            f'{record.claim_id}: {", ".join(sorted(origins))}.'
+        )
+    if origins:
+        return origins[0]
     if mismatched is not None:
         raise ExternalTaskClaimMismatchError(
             f'{record.evidence_id}: link claim {mismatched.claim_id} does not match evidence '
@@ -335,17 +358,30 @@ def map_external_task_evidence(
         tasks: The external task records to project.
         links: The evidence-to-task links to apply.
 
+    One evidence record belongs to one task within a claim. Projecting the same
+    record under two tasks would show a reader two origins for one document and
+    let reconciliation settle the wrong external operation, so that input is
+    rejected rather than rendered. A repeated link to the same task is one
+    membership and appears once.
+
+    Args:
+        tasks: The external task records to project.
+        links: The evidence-to-task links to apply.
+
     Returns:
         One view per task, in the order given, each carrying the linked evidence
-        identifiers in link order.
+        identifiers in link order, without repeats.
 
     Raises:
+        ConflictingEvidenceOriginError: One evidence record is linked to more than
+            one task on the same claim.
         ExternalTaskClaimMismatchError: A link names a task whose claim differs from
             the link's own claim.
     """
 
     grouped: dict[str, list[str]] = {task.task_id: [] for task in tasks}
     claims = {task.task_id: task.claim_id for task in tasks}
+    origins: dict[tuple[str, str], str] = {}
     for link in links:
         if link.task_id not in grouped:
             continue
@@ -354,7 +390,16 @@ def map_external_task_evidence(
                 f'{link.evidence_id}: link claim {link.claim_id} does not match task '
                 f'{link.task_id} claim {claims[link.task_id]}.'
             )
-        grouped[link.task_id].append(link.evidence_id)
+        key = (link.claim_id, link.evidence_id)
+        held = origins.get(key)
+        if held is None:
+            origins[key] = link.task_id
+            grouped[link.task_id].append(link.evidence_id)
+        elif held != link.task_id:
+            raise ConflictingEvidenceOriginError(
+                f'{link.evidence_id}: linked to more than one external task on claim '
+                f'{link.claim_id}: {", ".join(sorted((held, link.task_id)))}.'
+            )
     return [
         ExternalTaskEvidenceView(task=task, evidence_ids=grouped[task.task_id]) for task in tasks
     ]
