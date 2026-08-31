@@ -284,6 +284,12 @@ def external_task_for_evidence(
     record's provenance cannot be checked against the provider result, so it is
     rejected rather than treated as unattributed.
 
+    A link must agree with the record on the claim it belongs to. Matching on the
+    evidence identifier alone would let material on one claim take its provenance
+    from a link declared against another, so a link that names a different claim
+    is rejected rather than skipped: treating it as absent would report a claim
+    isolation failure as ordinary missing provenance.
+
     Args:
         record: The evidence record to resolve.
         links: The evidence-to-task links known for the record's claim.
@@ -293,15 +299,27 @@ def external_task_for_evidence(
         origin.
 
     Raises:
+        ExternalTaskClaimMismatch: A link names this evidence record under a
+            different claim.
         UntraceableExternalEvidence: The record is external-system sourced and no
             link names a task for it.
     """
 
     if record.source is not EvidenceSource.EXTERNAL_SYSTEM:
         return None
+    mismatched: ExternalTaskEvidenceLink | None = None
     for link in links:
-        if link.evidence_id == record.evidence_id:
+        if link.evidence_id != record.evidence_id:
+            continue
+        if link.claim_id == record.claim_id:
             return link.task_id
+        if mismatched is None:
+            mismatched = link
+    if mismatched is not None:
+        raise ExternalTaskClaimMismatch(
+            f'{record.evidence_id}: link claim {mismatched.claim_id} does not match evidence '
+            f'claim {record.claim_id}.'
+        )
     raise UntraceableExternalEvidence(
         f'{record.evidence_id}: external-system evidence names no originating task.'
     )

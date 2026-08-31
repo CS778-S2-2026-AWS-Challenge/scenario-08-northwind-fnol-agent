@@ -222,6 +222,19 @@ def test_external_evidence_resolves_to_its_task() -> None:
     assert external_task_for_evidence(_evidence(), [_link()]) == 'ext_task_1'
 
 
+def test_resolver_rejects_a_link_declared_under_another_claim() -> None:
+    """Matching on evidence id alone would let claim A borrow claim B's provenance."""
+
+    with pytest.raises(ExternalTaskClaimMismatch, match='does not match evidence claim'):
+        external_task_for_evidence(_evidence(), [_link(claim_id='clm_other')])
+
+
+def test_resolver_prefers_the_link_that_agrees_on_the_claim() -> None:
+    links = [_link(claim_id='clm_other', task_id='ext_task_wrong'), _link()]
+
+    assert external_task_for_evidence(_evidence(), links) == 'ext_task_1'
+
+
 def test_external_evidence_without_a_link_is_rejected() -> None:
     """Unattributed provider material must not pass as ordinary evidence."""
 
