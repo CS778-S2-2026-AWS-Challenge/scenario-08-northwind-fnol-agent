@@ -26,7 +26,7 @@ The service should:
 
 ## Current Stage
 
-The project is in Sprint 2 and is advancing the full-path prototype into a repeatable MVP. Current work includes natural claimant interaction, provider-neutral model and data boundaries, persistent shared claim state, cited knowledge retrieval, and staff review. Control Plane implementation is product-direction work tracked separately as extra backlog, not a committed Sprint 2 capacity item.
+The project is in Sprint 3 and is advancing the MVP into a repeatable Validation Prototype. Current work validates the Agent, claimant and staff experiences, shared Claim Context, knowledge retrieval, data runtime profiles, Control Plane, third-party service boundaries, and confirmed AWS capabilities across representative motor, home, and contents paths.
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
