@@ -138,14 +138,33 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
             return 'unavailable'
         try:
             for source in self._sources:
-                key = self._chunks_key(source)
-                if self._store.read(key) is None:
-                    return 'unavailable'
-                if self._store.read(self._ingestion_state_key(source)) is None:
-                    return 'unavailable'
-        except KnowledgeObjectStoreUnavailable:
+                self._validated_chunks(source)
+        except (
+            KnowledgeObjectStoreUnavailable,
+            KnowledgeRetrievalUnavailable,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
             return 'unavailable'
         return 'configured_service'
+
+    def get_chunk(self, chunk_id: str) -> KnowledgeChunk | None:
+        """Return one governed chunk without bypassing ingestion-state validation."""
+
+        try:
+            for source in self._sources:
+                for chunk in self._validated_chunks(source):
+                    if chunk.chunk_id == chunk_id:
+                        return chunk
+        except KnowledgeObjectStoreUnavailable as error:
+            raise KnowledgeRetrievalUnavailable('The knowledge service is unavailable.') from error
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise KnowledgeRetrievalUnavailable(
+                'The knowledge index is invalid or unavailable.'
+            ) from error
+        return None
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         if (
@@ -171,36 +190,7 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
         scored: list[tuple[int, int, KnowledgeChunk]] = []
         try:
             for source in applicable_sources:
-                payload = self._store.read(self._chunks_key(source))
-                if payload is None:
-                    raise KnowledgeRetrievalUnavailable(
-                        'The applicable knowledge index is incomplete or unavailable.'
-                    )
-                state_payload = self._store.read(self._ingestion_state_key(source))
-                if state_payload is None:
-                    raise KnowledgeRetrievalUnavailable(
-                        'The applicable knowledge index has no trusted ingestion state.'
-                    )
-                state = json.loads(state_payload)
-                if (
-                    not isinstance(state, dict)
-                    or state.get('document_id') != source.document_id
-                    or state.get('version') != source.version
-                    or state.get('source_checksum') != source.expected_checksum
-                    or state.get('chunks_checksum') != sha256(payload).hexdigest()
-                    or state.get('source_metadata_fingerprint')
-                    != _source_metadata_fingerprint(source)
-                    or state.get('pipeline_identity') != INGESTION_PIPELINE_IDENTITY
-                ):
-                    raise KnowledgeRetrievalUnavailable(
-                        'The knowledge index does not match its governed ingestion state.'
-                    )
-                for line in payload.splitlines():
-                    chunk = _chunk(json.loads(line))
-                    if not self._chunk_matches_source(chunk, source):
-                        raise KnowledgeRetrievalUnavailable(
-                            'The knowledge index does not match its governed source.'
-                        )
+                for chunk in self._validated_chunks(source):
                     if not self._applicable(chunk, request):
                         continue
                     heading_terms = _terms(chunk.section_path)
@@ -217,6 +207,37 @@ class S3CompatibleKnowledgeRetriever(KnowledgeRetriever):
             ) from error
         scored.sort(key=lambda item: (-item[1], -item[0], item[2].chunk_id))
         return [chunk for _, _, chunk in scored[: request.limit]]
+
+    def _validated_chunks(self, source: KnowledgeSource) -> list[KnowledgeChunk]:
+        payload = self._store.read(self._chunks_key(source))
+        if payload is None:
+            raise KnowledgeRetrievalUnavailable(
+                'The applicable knowledge index is incomplete or unavailable.'
+            )
+        state_payload = self._store.read(self._ingestion_state_key(source))
+        if state_payload is None:
+            raise KnowledgeRetrievalUnavailable(
+                'The applicable knowledge index has no trusted ingestion state.'
+            )
+        state = json.loads(state_payload)
+        if (
+            not isinstance(state, dict)
+            or state.get('document_id') != source.document_id
+            or state.get('version') != source.version
+            or state.get('source_checksum') != source.expected_checksum
+            or state.get('chunks_checksum') != sha256(payload).hexdigest()
+            or state.get('source_metadata_fingerprint') != _source_metadata_fingerprint(source)
+            or state.get('pipeline_identity') != INGESTION_PIPELINE_IDENTITY
+        ):
+            raise KnowledgeRetrievalUnavailable(
+                'The knowledge index does not match its governed ingestion state.'
+            )
+        chunks = [_chunk(json.loads(line)) for line in payload.splitlines()]
+        if any(not self._chunk_matches_source(chunk, source) for chunk in chunks):
+            raise KnowledgeRetrievalUnavailable(
+                'The knowledge index does not match its governed source.'
+            )
+        return chunks
 
     @staticmethod
     def _chunks_key(source: KnowledgeSource) -> str:

@@ -8,22 +8,41 @@ import mongomock
 import pytest
 from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 
+from backend.adapters.claims_service import MockAssessorServiceAdapter
+from backend.domain.external_services import (
+    ASSESSOR_CONSENT_FIELDS,
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+)
 from backend.domain.models import (
+    ActorReference,
     ActorType,
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorLocation,
+    AssessorRoutingFailureCode,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
+    AssessorRoutingResult,
+    AssessorRoutingStatus,
     AuthorityOutcome,
     Channel,
+    ClaimCreationStatus,
     ClaimState,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
     EvidenceStatus,
+    ExternalClaimResult,
+    ExternalServiceConsent,
+    ExternalServiceConsentStatus,
+    IntegrationSource,
     MessageRecord,
     MessageVisibility,
     ResponsibleParty,
+    RouteAssessorRequest,
     SessionRecord,
     SessionStatus,
     StaffActionRecord,
@@ -49,6 +68,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.integrations import assessor_operation_id, route_assessor
 
 
 def _assert_persistence_contract(repository: MongoDBRepository) -> PersistenceRepository:
@@ -280,6 +300,280 @@ def test_mongodb_connectivity_probe_pings_and_closes_without_repository_initiali
     assert status == 'verified'
     assert client.admin.calls == ['ping']
     assert client.closed is True
+
+
+def test_assessor_routing_persistence_is_provider_backed_and_idempotent(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_mongo_001',
+                claim_number='NW-001',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    decision = _decision(claim, session, message).model_copy(
+        update={
+            'decision_id': 'dec_assessor_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+            'resulting_revision': claim.revision,
+        }
+    )
+    operation = AssessorRoutingOperation(
+        operation_id='aro_mongo_001',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_mongo_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref='consent_mongo_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint='fingerprint_mongo_001',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+
+    repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == operation
+    assert repository.get_agent_decision_internal(claim.claim_id, decision.decision_id) == decision
+    stored_operation = repository._collection.find_one(
+        {'_id': repository._record_id('assessor_routing_operation', operation.operation_id)}
+    )
+    assert stored_operation is not None
+    assert stored_operation['claim_id'] == claim.claim_id
+
+    repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    accepted = operation.model_copy(
+        update={
+            'status': AssessorRoutingOperationStatus.ACCEPTED,
+            'result': AssessorRoutingResult(
+                routing_status=AssessorRoutingStatus.ASSIGNED,
+                assessor_reference='asr_mongo_001',
+                next_step='await_assessor',
+            ),
+            'updated_at': operation.created_at,
+        }
+    )
+    repository.save_assessor_routing_operation(accepted)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == accepted
+    repository.save_assessor_routing_operation(accepted)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_operation(
+            accepted.model_copy(update={'request_fingerprint': 'different'})
+        )
+    assert accepted.result is not None
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_operation(
+            accepted.model_copy(
+                update={
+                    'result': accepted.result.model_copy(
+                        update={'assessor_reference': 'asr_mongo_changed'}
+                    )
+                }
+            )
+        )
+
+
+def test_assessor_routing_service_executes_with_mongodb_repository(
+    repository: MongoDBRepository,
+) -> None:
+    timestamp = _claim().created_at
+    consent = ExternalServiceConsent(
+        consent_ref='consent_service_001',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        permitted_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        status=ExternalServiceConsentStatus.GRANTED,
+        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_mongo_001'),
+        granted_at=timestamp,
+    )
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_service_001',
+                claim_number='NW-SERVICE',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=timestamp,
+            ),
+            'external_service_consents': [consent],
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    decision = _decision(claim, session, _message(claim, session)).model_copy(
+        update={
+            'decision_id': 'dec_service_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    payload = RouteAssessorRequest(
+        claim_id=claim.claim_id,
+        external_claim_id='ext_service_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref=consent.consent_ref,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        location=AssessorLocation(region='Auckland'),
+    )
+
+    result, replayed = route_assessor(
+        repository,
+        MockAssessorServiceAdapter(),
+        payload,
+        authorisation_decision=decision,
+    )
+
+    assert replayed is False
+    assert result.routing_status is AssessorRoutingStatus.ASSIGNED
+    operation = repository.get_assessor_routing_operation(assessor_operation_id(payload))
+    assert operation is not None
+    assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
+    assert operation.result == result
+    stored_claim = repository.get_claim_internal(claim.claim_id)
+    assert stored_claim is not None
+    assert stored_claim.assessor_routing == result
+
+
+@pytest.mark.parametrize(
+    ('status', 'failure_code'),
+    [
+        (
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingFailureCode.TIMEOUT,
+        ),
+        (
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingFailureCode.ACCESS_DENIED,
+        ),
+    ],
+)
+def test_assessor_routing_mongodb_persists_failure_transitions_and_terminal_immutability(
+    repository: MongoDBRepository,
+    status: AssessorRoutingOperationStatus,
+    failure_code: AssessorRoutingFailureCode,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_failure_001',
+                claim_number='NW-FAILURE',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    repository.create_claim(claim, _session(claim))
+    operation = AssessorRoutingOperation(
+        operation_id=f'aro_{status.value}',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_failure_001',
+        authorisation_ref='dec_failure_001',
+        claimant_consent_ref='consent_failure_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint=f'fingerprint_{status.value}',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+    repository.save_assessor_routing_operation(operation)
+    failed = operation.model_copy(
+        update={
+            'status': status,
+            'failure_code': failure_code,
+            'updated_at': operation.created_at,
+        }
+    )
+    repository.save_assessor_routing_operation(failed)
+    assert repository.get_assessor_routing_operation(operation.operation_id) == failed
+    if status is AssessorRoutingOperationStatus.RETRYABLE_FAILURE:
+        accepted = failed.model_copy(
+            update={
+                'status': AssessorRoutingOperationStatus.ACCEPTED,
+                'failure_code': None,
+                'result': AssessorRoutingResult(
+                    routing_status=AssessorRoutingStatus.ASSIGNED,
+                    assessor_reference='asr_retryable_001',
+                    next_step='await_assessor',
+                ),
+            }
+        )
+        repository.save_assessor_routing_operation(accepted)
+        assert repository.get_assessor_routing_operation(operation.operation_id) == accepted
+    if status is AssessorRoutingOperationStatus.TERMINAL_FAILURE:
+        with pytest.raises(IdempotencyConflict):
+            repository.save_assessor_routing_operation(
+                failed.model_copy(
+                    update={
+                        'failure_code': AssessorRoutingFailureCode.MALFORMED,
+                        'updated_at': failed.updated_at,
+                    }
+                )
+            )
+
+
+def test_assessor_routing_mongodb_preparation_is_atomic_on_conflicting_decision(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_atomic_001',
+                claim_number='NW-ATOMIC',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=_claim().created_at,
+            )
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    message = _message(claim, session)
+    decision = _decision(claim, session, message).model_copy(
+        update={
+            'decision_id': 'dec_atomic_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    conflicting_decision = decision.model_copy(update={'customer_response': 'conflicting decision'})
+    repository.save_agent_decision(conflicting_decision, claim.customer_id)
+    operation = AssessorRoutingOperation(
+        operation_id='aro_atomic_001',
+        claim_id=claim.claim_id,
+        external_claim_id='ext_atomic_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref='consent_atomic_001',
+        requested_action='route_to_assessor',
+        authorised_revision=claim.revision,
+        request_fingerprint='fingerprint_atomic_001',
+        status=AssessorRoutingOperationStatus.PREPARED,
+        created_at=claim.created_at,
+        updated_at=claim.created_at,
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_assessor_routing_preparation(operation, decision, claim.customer_id)
+    assert repository.get_assessor_routing_operation(operation.operation_id) is None
+    assert (
+        repository.get_agent_decision_internal(claim.claim_id, decision.decision_id)
+        == conflicting_decision
+    )
 
 
 def test_mongodb_connectivity_probe_bounds_failure_and_closes_client(
