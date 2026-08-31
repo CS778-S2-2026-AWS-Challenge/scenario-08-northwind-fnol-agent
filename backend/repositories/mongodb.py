@@ -624,7 +624,12 @@ class MongoDBRepository:
         if existing is None:
             if operation.status is not AssessorRoutingOperationStatus.PREPARED:
                 raise IdempotencyConflict(operation.operation_id)
-            self._put('assessor_routing_operation', operation.operation_id, operation)
+            self._put(
+                'assessor_routing_operation',
+                operation.operation_id,
+                operation,
+                claim_id=operation.claim_id,
+            )
             return
 
         immutable_identity = (
@@ -657,7 +662,12 @@ class MongoDBRepository:
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
-        self._put('assessor_routing_operation', operation.operation_id, operation)
+        self._put(
+            'assessor_routing_operation',
+            operation.operation_id,
+            operation,
+            claim_id=operation.claim_id,
+        )
 
     def save_assessor_routing_preparation(
         self,
@@ -712,6 +722,7 @@ class MongoDBRepository:
                 'assessor_routing_operation',
                 operation.operation_id,
                 operation,
+                claim_id=operation.claim_id,
                 session=mongo_session,
             )
 
