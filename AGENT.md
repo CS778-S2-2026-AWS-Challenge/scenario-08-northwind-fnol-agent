@@ -4,6 +4,8 @@ This file applies to every coding agent working in this repository. Read it befo
 repository-changing commands, editing files, pushing a branch, creating or updating a pull
 request, or submitting a review.
 
+Before taking ownership of an Issue, the agent MUST explain its understanding of the Issue to the current user; if any requirement, scope, authority, trade-off, or other decision is ambiguous or needs confirmation, it MUST stop and ask, MUST NOT accept a hands-off or vague answer, and MUST refuse documentation or code work when the user has clearly not thought through the request.
+
 The sole current source of governance rules is the repository governance skill:
 
 1. Read
