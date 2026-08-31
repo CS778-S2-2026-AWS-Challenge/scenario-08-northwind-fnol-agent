@@ -9,7 +9,7 @@ APIs remain authoritative; transient browser states do not create a second persi
 ## Message State Contract
 
 | Message | Sender | Audience | Delivery states | Failure and retry | Staff draft |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Claimant intake | Claimant | Shared claim conversation | `sending`, then persisted `delivered` | A known rejection is `rejected_before_delivery`; a lost response is `delivery_outcome_unknown`. Retain text and reuse the same claim, turn, and client-message idempotency keys on `retrying` so replay reconciles a committed message. | Agent response is a separate persisted message, never attributed to the claimant |
 | Claimant continuation during handoff | Claimant | Assigned staff through the shared claim | `sending`, then persisted `delivered` | Keep the draft and retry with the same identifiers. Do not claim non-delivery when a network failure leaves the outcome unknown. | No draft is silently sent |
 | Staff reply | Authenticated staff member assigned to the accepted handoff | Claimant | `sending`, then persisted `delivered` | A known rejection is `rejected_before_delivery`; a lost response is `delivery_outcome_unknown`. Keep the text and reuse the same staff-message idempotency key on `retrying`. | The current prototype offers a deterministic reply template, not Agent or AI generation. Template states remain internal until staff explicitly sends the composer text. |
@@ -56,7 +56,7 @@ Follow the rows in order and use one test claim throughout. “Customer page” 
 website on port `8001`; “employee page” means the Workbench on port `8002`.
 
 | Step | Where and what to do | What you should see | Result / checker / date |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | Customer page: start a claim and send a message | The message briefly shows `Sending`, identifies the claimant as sender, and then shows `Delivered` | Automated component check passed, 2026-08-24 |
 | 2 | Customer page: use browser developer tools to drop one response after the server accepts the message, then select retry | The original text remains visible as `Delivery outcome unknown`; retry uses the same safe request keys, discovers the saved result, and shows only one delivered message | Automated component check passed, 2026-08-25 |
 | 3 | Customer page: ask for help from a staff member | The page confirms that the claim was handed to staff; the same claim appears in the employee queue with its saved details | Existing API and component checks passed, 2026-08-24 |
@@ -80,10 +80,11 @@ journey check.
 
 ## Automated Checks
 
-Run:
+Run the focused checks while developing; CircleCI supplies the authoritative exact-head result:
 
 ```text
-./scripts/check.ps1 -SkipInstall
+py -3.12 -m pytest tests/test_handoff_api.py tests/test_staff_actions_api.py tests/test_employee_workbench_static.py
+npm test --prefix customer -- --run src/App.test.jsx src/EmployeeWorkbench.test.js
 ```
 
 Focused checks are `customer/src/App.test.jsx`, `customer/src/EmployeeWorkbench.test.js`,

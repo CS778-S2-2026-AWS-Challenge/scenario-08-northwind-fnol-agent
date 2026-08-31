@@ -36,15 +36,10 @@ The product direction is summarised in [Northwind FNOL Product Soul](docs/produc
 
 All contributors and coding agents must follow the
 [repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
-Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its
-file index. Install the versioned local quality hook once per clone:
-
-```powershell
-./scripts/install-git-hooks.ps1
-```
-
-Every pull request must reference a repository issue and pass the required GitHub checks. Coding
-agents must not merge pull requests or change Draft status without explicit current authorisation.
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its file index.
+Every pull request must reference a repository issue and pass the configured remote quality
+checks. Coding agents must not merge pull requests or change Draft status without explicit current
+authorisation.
 
 ## Repository Layout
 
@@ -116,15 +111,22 @@ Copy the non-secret values from `.env.example` into the process environment when
 
 ## Verification
 
-Run the complete repository quality gate before pushing and before requesting review:
+CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
+linting, types, tests and coverage, PR policy, GitHub automation, documentation, and the claimant
+client for every pull request.
+
+For focused local backend verification while developing, run the checks affected by the change:
 
 ```powershell
-./scripts/check.ps1
+py -3.12 -m ruff format --check .
+py -3.12 -m ruff check .
+py -3.12 -m mypy backend tests
+py -3.12 -m pytest
 ```
 
-After dependencies are installed, use `./scripts/check.ps1 -SkipInstall` for a faster repeat run.
-The command checks backend formatting, linting, types, tests and coverage, the pull-request policy
-validator, the external GitHub automation Worker, and then checks and builds the claimant client.
+The claimant and GitHub automation packages retain their own `npm` verification commands. Local
+focused checks shorten feedback time but do not replace the exact-head CircleCI result required for
+review and merge.
 
 Run the synthetic integration fixtures from the repository root with:
 
