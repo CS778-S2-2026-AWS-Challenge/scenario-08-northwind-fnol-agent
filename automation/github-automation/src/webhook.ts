@@ -76,7 +76,7 @@ export async function handleWebhookRequest(
   if (eventName === "ping") {
     return jsonResponse({ status: "ok" });
   }
-  if (eventName !== "pull_request") {
+  if (eventName !== "pull_request" && eventName !== "issues") {
     return jsonResponse({ status: "ignored", event: eventName }, 202);
   }
 

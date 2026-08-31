@@ -4,41 +4,27 @@ This file applies to every coding agent working in this repository. Read it befo
 repository-changing commands, editing files, pushing a branch, creating or updating a pull
 request, or submitting a review.
 
-1. Read [the repository operation rules](docs/repo_rule.md) in full and follow them.
-2. Inspect `git status --short --branch` and preserve all existing worktree changes.
-3. Read `README.md`, `SPEC/README.md`, the relevant files in `SPEC/`,
-   `docs/development-conventions.md`, `docs/api.md`, the current sprint document, and the
-   source and tests affected by the task.
-4. Read the additional contract document selected by the change matrix in
-   `docs/repo_rule.md`. Do not treat a historical prototype or presentation record as the
-   current contract.
+The sole current source of governance rules is the repository governance skill:
+
+1. Read
+   [docs/skills/repo-governance-for-novice/SKILL.md](docs/skills/repo-governance-for-novice/SKILL.md)
+   in full. It defines the general principles and indexes the twelve chapter files covering
+   authority boundaries, required reading, task entry, branching, commit and PR rules, review
+   and merge, documentation sync, credentials, CI checks, and frontend and backend design
+   standards.
+2. Follow the skill's "Scenario quick reference" to select the chapter files your task
+   requires, and read them before acting. Required reading and the change-area contract matrix
+   live in the skill's `before-work.md`.
+
+For product-direction or user-behaviour work, read [Northwind FNOL Product Soul](docs/product-soul.md)
+before the relevant files in `SPEC/`. It is the concise product-direction index; `SPEC/` remains
+the normative requirement and acceptance source.
+
+The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
+archived under [docs/archive/governance/](docs/archive/governance/) and are historical
+reference only. Where an archived document disagrees with the skill, the skill prevails
+without exception. Do not maintain a separate or conflicting rule set in this file.
 
 If an instruction conflicts with the current user's explicit authorisation, or if the required
 source of truth is unavailable or contradictory, stop before changing repository or GitHub
 state and ask for direction.
-
-## Mandatory Ownership And Remote-Action Check
-
-GitHub credentials prove that an account can perform an operation; they do not prove that the
-current user authorised a person or agent to perform it. Before editing files or running a remote
-mutation, identify the current issue, its owner, the branch and pull request being changed, the
-declared non-goals, and any active issue or pull request that owns overlapping behaviour.
-
-Finding a defect, reviewing a change, possessing repository permission, receiving approval, or
-having performed a similar operation earlier does not transfer implementation ownership. Record an
-out-of-scope defect as a review finding or follow-up issue. Do not implement it, push to the other
-owner's branch, change their issue or pull-request metadata, resolve their review conversation, or
-expand the current deliverable without explicit agreement from the affected owner and current user.
-
-Unless the current user explicitly authorises the exact action, do not run or cause an equivalent
-of:
-
-- `gh pr merge`, auto-merge, merge-queue enqueue, or a direct push to `main`;
-- `git push --force`, `--force-with-lease`, branch deletion, or shared-history rewriting;
-- `gh pr ready`, close, reopen, or base retargeting;
-- `gh issue edit`, `gh pr edit`, or `gh project` against another contributor's work;
-- ruleset, branch-protection, workflow-permission, secret, environment, or deployment mutation.
-
-Do not infer authority from an issue assignment, broad instructions such as "finish the PR", a
-passing check, an approval, an available `gh` session, or an earlier authorisation. If ownership,
-scope, or authority is unclear, stop before the mutation and ask the current user.

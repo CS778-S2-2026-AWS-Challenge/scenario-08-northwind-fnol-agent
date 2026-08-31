@@ -89,7 +89,25 @@ function validateIssueBody({ body }) {
   return { errors, fields };
 }
 
+function validateDiscussionApproval({ body, creator, maintainer }) {
+  const errors = [];
+  if (!maintainer || (creator || '').toLowerCase() === maintainer.toLowerCase()) {
+    return { errors };
+  }
+  const approval = fieldContent(body || '', 'Discussion approval');
+  const threadUrl = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/discussions\/\d+\b/i;
+  if (!approval || !threadUrl.test(approval)) {
+    errors.push(
+      'Issues created by contributors other than the maintainer require prior approval: ' +
+        'post in the `Issue requests` Discussions category, wait for the maintainer\'s ' +
+        'explicit approval reply, and record the thread URL in `### Discussion approval`.',
+    );
+  }
+  return { errors };
+}
+
 module.exports = {
   fieldContent,
+  validateDiscussionApproval,
   validateIssueBody,
 };

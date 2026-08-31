@@ -30,13 +30,14 @@ The project is in Sprint 2 and is advancing the full-path prototype into a repea
 
 Controlled scenarios and fixture adapters remain valid development tools, but they must be labelled honestly. Cloud services, Northwind data, provider schemas, permissions, production rules, and deployment readiness are not claimed until verified.
 
-Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
+The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
 ## Repository Operation Rules
 
-All contributors and coding agents must follow [the repository operation rules](docs/repo_rule.md).
-Coding agents enter through [AGENT.md](AGENT.md), which defines the mandatory reading order and
-authority boundary. Install the versioned local quality hook once per clone:
+All contributors and coding agents must follow the
+[repository governance skill](docs/skills/repo-governance-for-novice/SKILL.md).
+Coding agents enter through [AGENT.md](AGENT.md), which routes to the skill and its
+file index. Install the versioned local quality hook once per clone:
 
 ```powershell
 ./scripts/install-git-hooks.ps1
@@ -57,7 +58,7 @@ agents must not merge pull requests or change Draft status without explicit curr
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
-| `docs/` | API contract, engineering conventions, and research material |
+| `docs/` | Product direction, API contract, engineering conventions, and research material |
 | `sprint/` | Time-bound sprint commitments and delivery flow |
 | `scripts/` | Repository-level development and verification commands |
 
