@@ -120,7 +120,7 @@ def test_employee_workbench_renders_complete_handoff_outcome_and_never_auto_seed
     page = WORKBENCH.read_text(encoding='utf-8')
 
     render_handoff = page[
-        page.index('function renderHandoff') : page.index('function communicationHistory')
+        page.index('function renderHandoff') : page.index('function acceptHandoff')
     ]
     render_context = page[
         page.index('function renderContext') : page.index('function renderHandoff')
@@ -185,7 +185,9 @@ def test_employee_workbench_groups_detail_with_progressive_disclosure() -> None:
     assert 'id="detailReview"' in page
     assert 'Handoffs and internal review' in page
     assert 'id="detailHistory"' in page
-    assert 'History and continuity' in page
+    assert '>History</button>' in page
+    assert '<summary>History <span class="detail-section-hint">' in page
+    assert "contextBlock('Claim continuity', bulletList(continuityItems))" in page
     assert (
         '<details class="detail-section integrated-review-controls" id="detailStaffActions"' in page
     )
@@ -204,12 +206,37 @@ def test_employee_workbench_uses_accessible_claim_detail_tabs() -> None:
     assert 'data-detail-page="evidence"' in page
     assert 'data-detail-page="review"' in page
     assert 'data-detail-page="history"' in page
-    assert 'id="detailNextStep" data-detail-page="history"' in page
+    tab_panel_pairs = {
+        'claimDetailOverviewTab': 'detailSummary',
+        'claimDetailEvidenceTab': 'detailEvidence',
+        'claimDetailReviewTab': 'detailReview',
+        'claimDetailConversationTab': 'detailConversation',
+        'claimDetailHistoryTab': 'detailHistory',
+    }
+    for tab_id, panel_id in tab_panel_pairs.items():
+        assert page.count(f'id="{tab_id}"') == 1
+        assert page.count(f'aria-controls="{panel_id}"') == 1
+        panel_markup = page[
+            page.index(f'id="{panel_id}"') : page.index('>', page.index(f'id="{panel_id}"'))
+        ]
+        assert 'role="tabpanel"' in panel_markup
+        assert f'aria-labelledby="{tab_id}"' in panel_markup
+    assert 'id="detailNextStep"' not in page
     assert 'function selectClaimDetailTab(tab, focus = false)' in page
     assert 'section.inert = section.hidden' in page
     assert "section.setAttribute('aria-hidden', String(section.hidden))" in page
     assert '.claim-detail-tabs { position:sticky;' in page
     assert "['ArrowLeft', 'ArrowRight', 'Home', 'End']" in page
+
+
+def test_employee_conversation_layout_does_not_add_absolute_track_sizes() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert (
+        '.customer-chat-content { min-height:0; display:grid; '
+        'grid-template-columns:minmax(0,1fr) minmax(0,2fr); }'
+    ) in page
+    assert 'grid-template-columns:minmax(280px,340px) 1fr' not in page
 
 
 def test_employee_workbench_exposes_pending_queue_and_demo_recovery() -> None:
@@ -294,15 +321,19 @@ def test_employee_workbench_explains_when_the_local_api_cannot_be_reached() -> N
     assert 'Start the backend and keep it running, then refresh this page.' in page
 
 
-def test_employee_workbench_prevents_duplicate_updates_and_restores_back_navigation() -> None:
+def test_employee_workbench_prevents_duplicate_updates_and_keeps_chat_in_claim_detail() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     assert 'This claimant update has already been recorded.' in page
     assert 'pendingCustomerMessage' in page
-    assert "window.location.hash !== '#customer-chat'" in page
-    assert "window.addEventListener('popstate', restoreViewFromHistory)" in page
-    assert "window.addEventListener('hashchange', restoreViewFromHistory)" in page
-    assert 'customerChatHistoryEntryCreated' in page
+    assert 'data-detail-tab="conversation"' in page
+    assert 'data-detail-page="conversation"' in page
+    assert "selectClaimDetailTab('conversation')" in page
+    assert 'id="customerChatView"' not in page
+    assert 'id="customerChatContext"' in page
+    assert '>Accept handoff to reply</button>' in page
+    assert "button.textContent = 'Accepting…'" in page
+    assert 'const accepted = await acceptHandoff(activeClaimDetail, handoff, button)' in page
 
 
 def test_employee_messaging_defines_delivery_retry_and_template_states() -> None:
