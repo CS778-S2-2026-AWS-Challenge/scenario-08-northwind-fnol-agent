@@ -508,7 +508,14 @@ class FixtureRepository(PersistenceRepository):
             for decision in self._decisions.values()
             if decision.claim_id == claim_id
         ]
-        return sorted(decisions, key=lambda decision: (decision.created_at, decision.decision_id))
+        return sorted(
+            decisions,
+            key=lambda decision: (
+                decision.resulting_revision,
+                decision.created_at,
+                decision.decision_id,
+            ),
+        )
 
     def save_agent_turn(
         self,
