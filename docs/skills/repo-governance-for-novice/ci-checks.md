@@ -5,8 +5,8 @@ it.
 
 Quality-profile mechanism: the `github` profile uses the GitHub Actions checks
 `Backend quality`, `Customer quality`, and `Northwind PR policy`; the
-`circleci` profile uses the CircleCI equivalents; the `none` profile uses
-`Northwind PR policy` to verify the required local quality-gate evidence.
+`circleci` profile uses the CircleCI equivalents. The `none` profile means no remote
+code-quality provider is configured and cannot supply merge evidence.
 `Kanban Sync` only manages Project status rules — it must not merge PRs, must
 not change Draft status, and must not substitute Project status for acceptance
 evidence.

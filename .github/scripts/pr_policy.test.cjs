@@ -13,7 +13,7 @@ const {
 const owner = 'CS778-S2-2026-AWS-Challenge';
 const repo = 'scenario-08-northwind-fnol-agent';
 
-function readyBody({ localValidation = '- Command: `./scripts/check.ps1 -SkipInstall`\n- Result: PASS' } = {}) {
+function readyBody({ localValidation = '- Command: `py -3.12 -m pytest tests/test_agent.py`\n- Result: PASS' } = {}) {
   return `## Linked issue
 
 Closes #192
@@ -82,7 +82,7 @@ ${localValidation}
 
 ## Governance confirmation
 
-- [x] I have read AGENT.md and the governance skill in full. Version read: v1.0
+- [x] I have read AGENT.md and the governance skill in full. Version read: v1.1
 
 ## Documentation sync check
 
@@ -188,15 +188,11 @@ test('accepts a complete ready-for-review pull request', () => {
   assert.deepEqual(result, { errors: [], warnings: [], references: [192] });
 });
 
-test('accepts a ready pull request without local evidence when a remote provider is active', () => {
-  const body = readyBody({ localValidation: '- Remote provider: CircleCI' });
-  const result = validatePullRequestBody({
-    body,
-    isDraft: false,
-    owner,
-    repo,
-    requireLocalQualityEvidence: false,
+test('accepts a ready pull request when focused local checks were not run for a stated reason', () => {
+  const body = readyBody({
+    localValidation: '- Command: Not run - documentation-only change\n- Result: CircleCI required',
   });
+  const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
   assert.deepEqual(result, { errors: [], warnings: [], references: [192] });
 });
 
@@ -221,7 +217,7 @@ Refs #192
   const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
   assert.ok(result.errors.some((error) => error.includes('Summary')));
   assert.ok(result.errors.some((error) => error.includes('Acceptance evidence')));
-  assert.ok(result.errors.some((error) => error.includes('Result: PASS')));
+  assert.ok(result.errors.some((error) => error.includes('Command:')));
   assert.ok(result.errors.some((error) => error.includes('API contract:')));
   assert.ok(result.errors.some((error) => error.includes('Dependencies:')));
 });
@@ -241,7 +237,7 @@ Adds repository guardrails.
 
 ## Local validation
 
-- Command: \`./scripts/check.ps1\`
+- Command: \`node --test .github/scripts/pr_policy.test.cjs\`
 - Result: PASS
 
 ## Contract and data impact
@@ -425,15 +421,15 @@ test('rejects unresolved main movement on a path changed by the PR', async () =>
 
 test('rejects a ready pull request whose governance confirmation box is unchecked', () => {
   const body = readyBody().replace(
-    '- [x] I have read AGENT.md and the governance skill in full. Version read: v1.0',
-    '- [ ] I have read AGENT.md and the governance skill in full. Version read: v1.0',
+    '- [x] I have read AGENT.md and the governance skill in full. Version read: v1.1',
+    '- [ ] I have read AGENT.md and the governance skill in full. Version read: v1.1',
   );
   const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
   assert.ok(result.errors.some((error) => error.includes('Governance confirmation')));
 });
 
 test('rejects a ready pull request that omits the governance skill version read', () => {
-  const body = readyBody().replace(' Version read: v1.0', '');
+  const body = readyBody().replace(' Version read: v1.1', '');
   const result = validatePullRequestBody({ body, isDraft: false, owner, repo });
   assert.ok(result.errors.some((error) => error.includes('version read (vX.Y)')));
 });

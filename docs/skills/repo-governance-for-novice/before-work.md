@@ -38,19 +38,17 @@ before requesting review. Do not develop on or pull into local `main`; create a
 short-lived branch from the latest `origin/main` (see `branching.md`). Before
 switching or updating local `main`, check for associated worktrees.
 
-## 2.3 Local quality gate
+## 2.3 Validation
 
-Before the first push, install dependencies from the repository root and run
-`./scripts/check.ps1` (once dependencies are ready, rerun with `-SkipInstall`).
-A failed or interrupted check is not a pass; fix the problem and rerun the full
-gate before pushing or requesting review. Install the versioned pre-push hook
-with `./scripts/install-git-hooks.ps1`.
+Run focused local checks for the code being changed so defects are found before a push. Use the
+commands documented by the affected package or the equivalent commands in the configured CircleCI
+jobs. A failed or interrupted focused check is not a pass.
 
-`NORTHWIND_REMOTE_CI_PROVIDER` selects the quality profile (`none` / `github` /
-`circleci`). `NORTHWIND_QUALITY_GATE_MODE=off` is an explicit maintenance
-escape hatch and must not be used as an everyday development configuration.
-When the full quality gate cannot run, keep the PR as Draft, record the
-blocking reason, and do not request approval.
+CircleCI is the authoritative repository quality provider. Before requesting review, confirm its
+backend, claimant, GitHub automation, documentation, and PR-policy checks have run against the
+current exact head. A PR without the configured remote checks, or with any failed or pending
+required check, remains Draft and must not be approved or merged. Local output cannot substitute
+for missing remote exact-head evidence.
 
 ## 2.4 Context management
 
