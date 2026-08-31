@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.external_services import (
@@ -140,6 +141,66 @@ def test_an_unavailable_entry_accepts_no_task_at_all(
 
     with pytest.raises(ForgedIntegrationSource, match='produces no result'):
         assert_task_matches_entry(_task(integration_source), decision)
+
+
+@pytest.mark.parametrize(
+    ('entry', 'integration_source'),
+    [
+        (ExternalServiceEntry.LIVE, IntegrationSource.FIXTURE),
+        (ExternalServiceEntry.TEST_FIXTURE, IntegrationSource.CONFIGURED_SERVICE),
+        (ExternalServiceEntry.UNAVAILABLE, IntegrationSource.FIXTURE),
+        (ExternalServiceEntry.UNAVAILABLE, IntegrationSource.CONFIGURED_SERVICE),
+    ],
+)
+def test_a_contradictory_decision_cannot_be_constructed(
+    entry: ExternalServiceEntry,
+    integration_source: IntegrationSource,
+) -> None:
+    """The guard trusted this pair, so the pair must not be constructible."""
+
+    with pytest.raises(ValidationError, match='provides'):
+        ExternalServiceEntryDecision(
+            entry=entry,
+            integration_source=integration_source,
+            limitation='contradictory' if entry is ExternalServiceEntry.UNAVAILABLE else None,
+        )
+
+
+def test_a_resultless_decision_must_explain_itself() -> None:
+    with pytest.raises(ValidationError, match='must say why'):
+        ExternalServiceEntryDecision(entry=ExternalServiceEntry.UNAVAILABLE)
+
+
+@pytest.mark.parametrize(
+    ('entry', 'integration_source'),
+    [
+        (ExternalServiceEntry.LIVE, IntegrationSource.CONFIGURED_SERVICE),
+        (ExternalServiceEntry.TEST_FIXTURE, IntegrationSource.FIXTURE),
+    ],
+)
+def test_a_result_bearing_decision_carries_no_limitation(
+    entry: ExternalServiceEntry,
+    integration_source: IntegrationSource,
+) -> None:
+    with pytest.raises(ValidationError, match='carries no limitation'):
+        ExternalServiceEntryDecision(
+            entry=entry,
+            integration_source=integration_source,
+            limitation='should not be here',
+        )
+
+
+def test_the_guard_derives_the_permitted_source_from_the_entry() -> None:
+    """A decision built past validation must not be able to widen the guard."""
+
+    forged = ExternalServiceEntryDecision.model_construct(
+        entry=ExternalServiceEntry.TEST_FIXTURE,
+        integration_source=IntegrationSource.CONFIGURED_SERVICE,
+        limitation=None,
+    )
+
+    with pytest.raises(ForgedIntegrationSource, match='provides fixture'):
+        assert_task_matches_entry(_task(IntegrationSource.CONFIGURED_SERVICE), forged)
 
 
 def test_matching_source_and_entry_pass() -> None:

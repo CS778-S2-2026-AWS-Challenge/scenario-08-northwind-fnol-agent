@@ -10,7 +10,7 @@ configured-service result.
 
 from enum import Enum
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.external_services import ExternalTaskRecord
@@ -34,12 +34,41 @@ class ForgedIntegrationSource(ValueError):
     """A task claims a source class the entry that produced it cannot provide."""
 
 
+_ENTRY_SOURCES: dict[ExternalServiceEntry, IntegrationSource | None] = {
+    ExternalServiceEntry.LIVE: IntegrationSource.CONFIGURED_SERVICE,
+    ExternalServiceEntry.TEST_FIXTURE: IntegrationSource.FIXTURE,
+    ExternalServiceEntry.UNAVAILABLE: None,
+}
+
+
 class ExternalServiceEntryDecision(ContractModel):
-    """Which entry serves a call, and the source class its results may carry."""
+    """Which entry serves a call, and the source class its results may carry.
+
+    The entry alone determines the source class. The validator refuses every
+    other combination, so a contradictory decision such as a live entry carrying
+    a fixture source cannot be constructed and then trusted by the guard.
+    """
 
     entry: ExternalServiceEntry
     integration_source: IntegrationSource | None = None
     limitation: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode='after')
+    def validate_entry_contract(self) -> 'ExternalServiceEntryDecision':
+        expected = _ENTRY_SOURCES[self.entry]
+        if self.integration_source is not expected:
+            raise ValueError(
+                f'Entry {self.entry.value} provides '
+                f'{expected.value if expected else "no result"}, '
+                f'not {self.integration_source.value if self.integration_source else "no result"}.'
+            )
+        if expected is None and self.limitation is None:
+            raise ValueError(f'Entry {self.entry.value} produces no result and must say why.')
+        if expected is not None and self.limitation is not None:
+            raise ValueError(
+                f'Entry {self.entry.value} produces a result and carries no limitation.'
+            )
+        return self
 
 
 _PENDING_LIMITATION = (
@@ -108,6 +137,12 @@ def assert_task_matches_entry(
 ) -> None:
     """Check that a task's recorded source is one the serving entry can provide.
 
+    The permitted source is derived from `decision.entry`, not read from
+    `decision.integration_source`. The model validator already refuses a
+    contradictory pair, so the two agree for any validated decision; deriving
+    here means the guard still holds for one built through a path that skips
+    validation.
+
     Args:
         task: The task record produced by the call.
         decision: The entry decision that authorised the call.
@@ -117,14 +152,14 @@ def assert_task_matches_entry(
             records a source class other than the one the entry provides.
     """
 
-    if decision.integration_source is None:
+    permitted = _ENTRY_SOURCES[decision.entry]
+    if permitted is None:
         raise ForgedIntegrationSource(
             f'{task.task_id}: entry {decision.entry.value} produces no result, so the task '
             f'cannot record source {task.integration_source.value}.'
         )
-    if task.integration_source is not decision.integration_source:
+    if task.integration_source is not permitted:
         raise ForgedIntegrationSource(
-            f'{task.task_id}: entry {decision.entry.value} provides '
-            f'{decision.integration_source.value}, but the task records '
-            f'{task.integration_source.value}.'
+            f'{task.task_id}: entry {decision.entry.value} provides {permitted.value}, '
+            f'but the task records {task.integration_source.value}.'
         )
