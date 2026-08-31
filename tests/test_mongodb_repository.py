@@ -371,6 +371,7 @@ def test_assessor_routing_persistence_is_provider_backed_and_idempotent(
         repository.save_assessor_routing_operation(
             accepted.model_copy(update={'request_fingerprint': 'different'})
         )
+    assert accepted.result is not None
     with pytest.raises(IdempotencyConflict):
         repository.save_assessor_routing_operation(
             accepted.model_copy(
