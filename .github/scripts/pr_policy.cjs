@@ -96,18 +96,11 @@ function issueReferences(content, owner, repo) {
  * @property {boolean} isDraft
  * @property {string} owner
  * @property {string} repo
- * @property {boolean} [requireLocalQualityEvidence]
  */
 
 /** @param {PullRequestPolicyInput} input */
 function validatePullRequestBody(input) {
-  const {
-    body,
-    isDraft,
-    owner,
-    repo,
-    requireLocalQualityEvidence = true,
-  } = input;
+  const { body, isDraft, owner, repo } = input;
   const errors = [];
   const warnings = [];
   const linkedIssue = sectionContent(body, 'Linked issue');
@@ -167,13 +160,12 @@ function validatePullRequestBody(input) {
       }
     }
 
-    if (requireLocalQualityEvidence) {
-      const validation = sectionContent(body, 'Local validation') || '';
-      if (!/[.\\/]scripts[\\/]check\.ps1(?:\s|`|$)/i.test(validation)) {
-        errors.push('Record `./scripts/check.ps1` in `Local validation`.');
-      }
-      if (!/Result:\s*PASS\b/i.test(validation)) {
-        errors.push('Record `Result: PASS` only after the complete local quality gate passes.');
+    const localValidation = sectionContent(body, 'Local validation') || '';
+    for (const label of ['Command', 'Result']) {
+      if (!labelledValue(localValidation, label)) {
+        errors.push(
+          `Complete \`${label}:\` in \`Local validation\` (use \`Not run - reason\` when applicable).`,
+        );
       }
     }
 
@@ -311,7 +303,7 @@ function changedPathOverlap(left, right) {
   return [...new Set(left.filter((path) => rightSet.has(path)))].sort();
 }
 
-async function run({ github, context, core, requireLocalQualityEvidence = true }) {
+async function run({ github, context, core }) {
   const pullRequest = context.payload.pull_request;
   const { owner, repo } = context.repo;
   const { errors, warnings, references } = validatePullRequestBody({
@@ -319,7 +311,6 @@ async function run({ github, context, core, requireLocalQualityEvidence = true }
     isDraft: pullRequest.draft,
     owner,
     repo,
-    requireLocalQualityEvidence,
   });
 
   const primaryIssueNumber = references[0];

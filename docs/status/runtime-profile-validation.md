@@ -9,7 +9,7 @@ deployment, AWS access, Cloudflare access, or a complete MongoDB runtime.
 
 The validation branch was synchronized with `main@4c90e2a` before the latest checks below. The temporary
 containers use one image built from the final reviewed branch head; the pull-request evidence names
-that exact head after the repository quality gate passes.
+that exact head after the configured remote quality checks pass.
 
 ## Results
 
