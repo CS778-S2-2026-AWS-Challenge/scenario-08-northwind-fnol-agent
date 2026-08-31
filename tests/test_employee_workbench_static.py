@@ -336,7 +336,7 @@ def test_employee_workbench_prevents_duplicate_updates_and_keeps_chat_in_claim_d
     assert 'const accepted = await acceptHandoff(activeClaimDetail, handoff, button)' in page
 
 
-def test_employee_messaging_defines_delivery_retry_and_template_states() -> None:
+def test_employee_messaging_keeps_deterministic_template_behind_staff_send_action() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 
     assert 'Sender: ${formatLabel(item.actor)} · Audience: Claimant · Delivered' in page
@@ -345,12 +345,49 @@ def test_employee_messaging_defines_delivery_retry_and_template_states() -> None
     assert "button.textContent = 'Retry message'" in page
     assert 'Retry with the same safe request key to reconcile' in page
     assert 'id="agentSuggestionStatus"' in page
-    for state in ('generating', 'suggested', 'accepted', 'edited', 'rejected', 'failed'):
-        assert f"setAgentSuggestionState('{state}'" in page
-    assert 'Internal draft only; nothing will be sent' in page
-    assert 'Copied for staff review; not sent' in page
+    for state in ('generating', 'suggested', 'failed'):
+        assert f"'{state}'," in page
+    assert "setAgentSuggestionState('not_requested', 'Draft stays internal')" in page
+    assert "setAgentSuggestionState('edited', 'Edited by staff; not sent')" in page
+    # The deterministic template and staff reply share one text box: no separate copy step.
+    assert 'id="agentSuggestionText"' not in page
+    assert 'id="useAgentSuggestion"' not in page
+    assert 'id="agentSuggestionResult"' not in page
+    assert '>Use this draft</button>' not in page
+    assert 'The deterministic template uses claimant-safe claim state · Nothing is sent' in page
     assert '>Reply template<' in page
-    assert '>Agent reply suggestion<' not in page
+    assert '>Build template</button>' in page
+    assert '@Agent' not in page
+    assert '>Refresh draft</button>' in page
+    assert 'function refreshAgentSuggestion()' in page
+    assert 'agentSuggestionVersion += 1;' in page
+    assert 'setTimeout(resolve, 180)' in page
+    assert 'Here is the latest update on your claim:' in page
+    assert 'id="customerChatContextPanel"' not in page
+    assert page.index('id="customerChatReplyTitle"') < page.index('id="agentSuggestionTitle"')
+    assert 'Draft in the reply box · Accept the handoff to edit or send' in page
+    assert 'reply.value = suggestion;' in page
+    assert "byId('customerChatHandoffAction').focus()" not in page
+    assert 'reply.focus({ preventScroll:true });' in page
+    assert '>Send to claimant</button>' in page
+    assert 'id="handoffRequiredDialog"' in page
+    assert '>Accept this handoff before replying<' in page
+    assert '>Keep as draft</button>' in page
+    assert '>Accept handoff</button>' in page
+    assert "if (activeHandoff?.status === 'queued')" in page
+    assert 'showHandoffRequiredDialog();' in page
+    assert (
+        "} else if (openHandoff.status === 'queued') {\n"
+        '          input.disabled = true;\n'
+        '          send.disabled = false;' in page
+    )
+    assert 'handoffRequiredDialogTrigger = document.activeElement;' in page
+    assert "byId('handoffRequiredCancel').focus({ preventScroll:true });" in page
+    assert "if (event.key === 'Escape')" in page
+    assert "if (event.key !== 'Tab') return;" in page
+    assert 'handoffRequiredDialogTrigger?.focus?.({ preventScroll:true });' in page
+    assert "setAgentSuggestionState('sent_by_staff', 'Sent only after staff action')" in page
+    assert "byId('customerChatText').addEventListener('keydown'" not in page
 
 
 def test_employee_workbench_ships_no_embedded_staff_credential() -> None:
