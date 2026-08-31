@@ -32,10 +32,10 @@ Day 1 的定义只做到能立即支持实现。每个栈当天都要交付代�
 | 重构 claimant 自然报案和确认/纠正界面 | `Ysoseri1224 3h` | 现有 claimant 页面 | 客户可提交自然语言、查看结构化理解并确认或纠正 |
 | 实现动态表单的字段显示和状态提示 | `Ysoseri1224 2h` | 已注册字段、动作结构 | 页面能显示 proposed/confirmed/missing/pending 字段，不使用未注册字段 |
 | 复现 Agent、claimant UI 和动态表单的首批路径 | `Ysoseri1224 1h` | 同日实现结果 | 一次 review 覆盖三个相关功能，记录可复现问题或通过结论 |
-| 确定数据 provider adapter 的接口边界，并完成连接状态模型 | `liyang6620 2h + bdfa123 2h` | 现有数据配置、服务接口 | `liyang6620` 交付 adapter/config 接口；`bdfa123` 交付 service status/error 映射 |
+| 确定数据 provider adapter 的接口边界，并完成连接状态模型 | `liyang6620 2h + bdfa123 2h` | 现有数据配置、服务接口 | `liyang6620` 牵头并交付 adapter/config 接口；`bdfa123` 独立交付 service status/error 映射，两部分可以分别评审 |
 | 建立 RAG/结构化查询的最小 API | `liyang6620 3h` | 数据边界 | 查询可返回结果、来源、时间和 unavailable/error 状态 |
 | 定义并实现 Control Plane 首批配置读写接口 | `liyang6620 2h` | provider/config 字段清单 | 可读取和更新 provider、版本、启用状态等首批配置 |
-| 复现 RAG、adapter 和 Control Plane 接口 | `liyang6620 1h` | 同日实现结果 | 一次 review 覆盖三个相关接口，记录来源、错误和配置问题 |
+| 复现 RAG、adapter 和 Control Plane 接口 | `Ysoseri1224 1h` | 同日实现结果 | 独立 review 覆盖三个相关接口，记录来源、错误和配置问题，不接手被评审功能的实现 |
 | 实现 Claim Context 的 claim/session/evidence 基础保存和读取 | `jxu316-arch 3h` | 现有 domain/schema | 三条线可以保存和读取同一份 claim context |
 | 实现 session resume 和 revision 基础接口 | `jxu316-arch 2h` | Claim Context repository | 新 session 能恢复未完成事项；旧 revision 不覆盖新状态 |
 | 复现 Claim Context、resume 和 revision 基础接口 | `jxu316-arch 1h` | 同日实现结果 | 一次 review 覆盖三个相关后端功能，记录状态丢失或版本冲突问题 |
@@ -98,7 +98,7 @@ Day 1 的定义只做到能立即支持实现。每个栈当天都要交付代�
 | 显示第三方任务责任方、结果和待处理事项 | `LLL263 2h` | third-party state | staff 能判断下一步由客户、外部 stakeholder 或内部人员负责 |
 | 加入 customer projection 和 internal signal 隔离 | `LLL263 2h` | visibility 规则 | 客户只看到适当状态，fraud/review 等内部 signal 不泄漏 |
 | 复现接手、写回和信息隔离 | `LLL263 1h` | 同日实现结果 | 一次 review 覆盖三个相关 Workbench 功能 |
-| 连接可用的真实第三方服务 | `bdfa123 3h` | provider/服务访问 | 可用服务真实发送请求并记录返回来源；不可用服务显示 unavailable/error |
+| 尝试连接已确认的第三方服务并实现对应 adapter | `bdfa123 3h` | 第三方 stakeholder、服务形式和访问条件的调研结论 | 有公开或测试访问条件时完成有限真实请求；没有企业访问权限时，按已确认的 form、请求字段、状态和结果形式实现明确标注来源的仿真，不伪装成真实连接 |
 | 验证第三方返回结果与 evidence/claim 的一致性 | `bdfa123 2h` | evidence/result model | 不一致结果保持 proposed 或 review_required，不直接确认 |
 | 完善 timeout、拒绝、未知结果和重试保护 | `bdfa123 2h` | request lifecycle | 未知结果保留上下文；重试不会重复产生业务动作 |
 | 复现第三方连接、验证和失败保护 | `bdfa123 1h` | 同日实现结果 | 一次 review 覆盖三个相关 service 功能 |
