@@ -337,6 +337,76 @@ it('paginates a large queue, resets on filter change, and keeps handoff facts vi
   dom.window.close()
 })
 
+it('proves the staff queue and claim-detail skeleton from shared Claim Context', async () => {
+  const item = queueItem(93, {
+    workflow_state: 'awaiting_evidence',
+    queue: 'awaiting_evidence',
+    priority: 'high',
+    route: 'pending_materials',
+    evidence_state: 'incomplete',
+    evidence_summary: { received: 1, pending: 1, needs_attention: 0 },
+    pending_evidence_count: 1,
+    pending_evidence: [{
+      kind: 'police_report',
+      wait_type: 'claimant',
+      expected_timing: 'Within 2 days',
+    }],
+    next_action: 'ASK',
+    next_action_summary: 'Upload the police report when it is available.',
+    responsible_party: 'claimant',
+    open_handoff_count: 1,
+    assignee_id: 'stf_queue_owner',
+  })
+  const detail = {
+    ...queueDetail(item),
+    claim_state: { workflow_state: item.workflow_state, evidence: item.evidence_state },
+    evidence_summary: item.evidence_summary,
+    form: {
+      'incident.location': {
+        value: 'Queen Street',
+        status: 'confirmed',
+        source: 'claimant',
+        source_refs: ['msg_claimant'],
+      },
+    },
+  }
+  const fetchMock = vi.fn((url) => String(url).endsWith(`/${item.claim_id}`)
+    ? response(detail)
+    : response({ items: [item], page: { next_cursor: null } }))
+  const dom = new JSDOM(employeeHtml, {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1:8002/',
+    beforeParse(window) { window.fetch = fetchMock },
+  })
+
+  await waitFor(() => expect(dom.window.document.querySelector('#claimList > button')).not.toBeNull())
+  const card = dom.window.document.querySelector('#claimList > button')
+  expect(card.textContent).toContain('Awaiting evidence')
+  expect(card.textContent).toContain('Assigned to stf_queue_owner')
+  expect(card.textContent).toContain('Priority: High')
+  expect(card.textContent).toContain('1 pending evidence')
+  expect(card.textContent).toContain('Waiting on claimant')
+  expect(card.textContent).toContain('Police Report · Within 2 days')
+  expect(card.textContent).toContain('Next · Claimant')
+  expect(card.textContent).toContain('Upload the police report when it is available.')
+
+  card.click()
+  await waitFor(() => expect(dom.window.document.querySelector('#detailContent').textContent)
+    .toContain(item.claim_id))
+  const summary = dom.window.document.querySelector('[aria-label="Operational summary"]')
+  expect(summary.textContent).toContain('Awaiting Evidence')
+  expect(summary.textContent).toContain('Pending Materials')
+  expect(summary.textContent).toContain('Claimant')
+  expect(summary.textContent).toContain('Upload the police report when it is available.')
+  expect(dom.window.document.querySelector('#detailEvidenceContext').textContent)
+    .toContain('Queen Street')
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining(`/claims/${item.claim_id}`),
+    expect.any(Object),
+  )
+  dom.window.close()
+})
+
 it('renders persisted claim context and uses the handoff accept endpoint', async () => {
   let handoffStatus = 'queued'
   let claimRevision = 4
