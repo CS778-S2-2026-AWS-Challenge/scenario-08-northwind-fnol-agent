@@ -234,7 +234,7 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: 'Motor' })).toBeChecked()
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
     expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
 
@@ -392,12 +392,20 @@ describe('claimant intake', () => {
 
     const description = screen.getByLabelText('Incident description')
     await user.type(description, 'Another vehicle hit my parked car.')
-    await user.click(screen.getByRole('tab', { name: 'Home' }))
+    const claimTypeGroup = screen.getByRole('group', { name: 'Claim type' })
+    const motor = screen.getByRole('radio', { name: 'Motor' })
+    const home = screen.getByRole('radio', { name: 'Home' })
+    expect(description.compareDocumentPosition(claimTypeGroup)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(motor).toBeChecked()
+
+    await user.click(home)
     expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
     expect(screen.getByText('Emergency work records')).toBeVisible()
     expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Motor' }))
+    await user.keyboard('{ArrowLeft}')
+    expect(motor).toBeChecked()
+    expect(motor).toHaveFocus()
     await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
     expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
     await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
