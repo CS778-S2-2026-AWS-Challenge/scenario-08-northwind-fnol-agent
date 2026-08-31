@@ -411,7 +411,6 @@
     .agent-suggestion-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
     .agent-suggestion-heading strong { margin-right:auto; color:#5b21b6; }
     .agent-suggestion-status { color:#6b7280; font-size:11px; }
-    .agent-suggestion-copy { width:100%; min-height:72px; margin-top:9px; padding:9px 10px; border:1px solid #ddd6fe; border-radius:9px; background:#fff; color:#312e81; font:inherit; resize:vertical; }
     .agent-suggestion-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
     .agent-suggestion-actions button { padding:7px 10px; border:1px solid #a78bfa; border-radius:8px; background:#fff; color:#5b21b6; font-weight:700; cursor:pointer; }
     .agent-suggestion-actions button:disabled { opacity:.5; cursor:not-allowed; }
@@ -613,25 +612,34 @@
                   <div><strong id="customerChatHeader">Select a claim</strong><div class="customer-chat-status">Persisted messages in the active claim session</div></div>
                 </div>
                 <div id="customerChatHistory" class="customer-chat-history" aria-live="polite" aria-relevant="additions text"></div>
-                <section class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
-                  <div class="agent-suggestion-heading">
-                    <strong id="agentSuggestionTitle">Reply template</strong>
-                    <span id="agentSuggestionStatus" class="agent-suggestion-status">Not requested · Internal draft only</span>
+                <section class="customer-chat-composer" aria-labelledby="customerChatReplyTitle">
+                  <div class="customer-chat-title">
+                    <div>
+                      <strong id="customerChatReplyTitle">Reply to claimant</strong>
+                      <div class="customer-chat-status">
+                        Write your own reply or build a deterministic template from the current claim context.
+                      </div>
+                    </div>
                   </div>
-                  <textarea id="agentSuggestionText" class="agent-suggestion-copy" aria-label="Deterministic reply template" placeholder="Build a claimant-safe template from the current next step." readonly></textarea>
-                  <div class="agent-suggestion-actions">
-                    <button id="generateAgentSuggestion" type="button">Generate suggestion</button>
-                    <button id="useAgentSuggestion" type="button" disabled>Use for editing</button>
-                    <button id="rejectAgentSuggestion" type="button" disabled>Reject</button>
+
+                  <div class="customer-chat-input">
+                    <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a claimant-safe reply or build a template here…"></textarea>
+                    <button id="customerChatSend" class="customer-chat-button" type="button">Send to claimant</button>
                   </div>
+                  <section id="agentSuggestionPanel" class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
+                    <div class="agent-suggestion-heading">
+                      <strong id="agentSuggestionTitle">Reply template</strong>
+                      <span id="agentSuggestionStatus" class="agent-suggestion-status" aria-live="polite">Not requested · Draft stays internal</span>
+                    </div>
+                    <div class="agent-suggestion-footer">
+                      <p id="agentSuggestionReason" class="customer-chat-status">The deterministic template uses claimant-safe claim state · Nothing is sent until you press Send to claimant</p>
+                      <div class="agent-suggestion-actions">
+                        <button id="generateAgentSuggestion" type="button">Build template</button>
+                        <button id="refreshAgentSuggestion" type="button" disabled>Refresh draft</button>
+                      </div>
+                    </div>
+                  </section>
                 </section>
-                <div class="customer-chat-title">
-                  <div><strong>Reply to claimant</strong><div class="customer-chat-status">Press Enter to send · Shift+Enter for a new line</div></div>
-                </div>
-                <div class="customer-chat-input">
-                  <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a claimant-safe reply…"></textarea>
-                  <button id="customerChatSend" class="customer-chat-button" type="button">Send message</button>
-                </div>
               </div>
             </div>
           </section>
@@ -699,6 +707,17 @@
       <div class="evidence-preview-body">
         <img id="evidencePreviewImage" alt="" hidden>
         <iframe id="evidencePreviewDocument" title="Evidence document preview" hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="handoffRequiredDialog" class="handoff-required-dialog" aria-labelledby="handoffRequiredTitle" aria-describedby="handoffRequiredDescription">
+    <div class="handoff-required-content">
+      <h2 id="handoffRequiredTitle">Accept this handoff before replying</h2>
+      <p id="handoffRequiredDescription">This reply is still saved as a draft. Accept the handoff first so Northwind records you as responsible before anything is sent to the claimant.</p>
+      <div class="handoff-required-actions">
+        <button id="handoffRequiredCancel" type="button">Keep as draft</button>
+        <button id="handoffRequiredAccept" class="handoff-required-accept" type="button">Accept handoff</button>
       </div>
     </div>
   </dialog>
@@ -850,6 +869,9 @@
     let agentSuggestionState = 'not_requested';
     let agentSuggestionClaimId = null;
     let acceptedSuggestionText = '';
+    let agentSuggestionVersion = 0;
+    let refreshingAgentSuggestion = false;
+    let handoffRequiredDialogTrigger = null;
     const CLAIMS_PER_PAGE = 3;
     let queuePage = 1;
 
@@ -2341,15 +2363,17 @@
       if (pendingCustomerMessage?.claimId !== claim.claim_id) {
         pendingCustomerMessage = null;
         byId('customerChatText').value = '';
-        byId('customerChatSend').textContent = 'Send message';
+        byId('customerChatSend').textContent = 'Send to claimant';
       }
       activeCustomerChatId = claim.claim_id;
       byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
       if (agentSuggestionClaimId !== claim.claim_id) {
         agentSuggestionClaimId = claim.claim_id;
         acceptedSuggestionText = '';
-        byId('agentSuggestionText').value = '';
-        setAgentSuggestionState('not_requested', 'Internal draft only');
+        agentSuggestionVersion = 0;
+        byId('agentSuggestionReason').textContent =
+          'The deterministic template uses claimant-safe claim state · Nothing is sent until you press Send to claimant';
+        setAgentSuggestionState('not_requested', 'Draft stays internal');
       }
       byId('customerChatStatus').textContent = `Status: ${stateMap[claim.queue] || claim.queue}`;
       const history = byId('customerChatHistory');
@@ -2410,7 +2434,7 @@
           byId('customerChatStatus').textContent = 'No open handoff. Communication history is read-only.';
         } else if (openHandoff.status === 'queued') {
           input.disabled = true;
-          send.disabled = true;
+          send.disabled = false;
           handoffAction.disabled = false;
           handoffAction.hidden = false;
           handoffAction.textContent = 'Accept handoff to reply';
@@ -2444,42 +2468,102 @@
       agentSuggestionState = state;
       byId('agentSuggestionStatus').textContent = `${formatLabel(state)} · ${message}`;
       const ready = ['suggested', 'edited', 'accepted'].includes(state);
-      byId('useAgentSuggestion').disabled = !ready;
-      byId('rejectAgentSuggestion').disabled = !ready;
+      byId('refreshAgentSuggestion').disabled = !ready;
+      byId('refreshAgentSuggestion').textContent = state === 'generating' && refreshingAgentSuggestion
+        ? 'Refreshing draft…'
+        : 'Refresh draft';
       byId('generateAgentSuggestion').disabled = state === 'generating';
+      byId('generateAgentSuggestion').textContent = state === 'generating' ? 'Building…' : 'Build template';
+      byId('agentSuggestionPanel').setAttribute('aria-busy', String(state === 'generating'));
     }
 
-    async function generateAgentSuggestion() {
-      setAgentSuggestionState('generating', 'Internal draft only; nothing will be sent');
+    async function generateAgentSuggestion({ refreshing = false } = {}) {
+      refreshingAgentSuggestion = refreshing;
+      const reply = byId('customerChatText');
+      const currentText = reply.value.trim();
+      const draftIsInBox = currentText && reply.value === acceptedSuggestionText;
+
+      if (currentText && !draftIsInBox && !refreshing) {
+        refreshingAgentSuggestion = false;
+        setAgentSuggestionState(
+          agentSuggestionState === 'generating' ? 'not_requested' : agentSuggestionState,
+          'The reply box already has your text · Clear it first to build a template',
+        );
+        return;
+      }
+
+      setAgentSuggestionState(
+        'generating',
+        refreshing
+          ? 'Refreshing draft · Nothing will be sent'
+          : 'Creating draft · Nothing will be sent',
+      );
+
       try {
         const claim = currentCustomerClaim();
-        if (!claim) throw new Error('Select a claim before generating a suggestion.');
-        const detail = detailCache.get(claim.claim_id) || await fetchClaimDetail(claim.claim_id);
-        const nextStep = detail.customer_next_step?.summary || 'We are reviewing your report.';
-        const suggestion = `${nextStep} If you have any questions or additional information, reply here and I will add it to your claim.`;
-        byId('agentSuggestionText').value = suggestion;
+
+        if (!claim) {
+          throw new Error(
+            'A reply draft could not be created because no claim is selected.'
+          );
+        }
+
+        const detail =
+          detailCache.get(claim.claim_id) ||
+          await fetchClaimDetail(claim.claim_id);
+
+        const nextStep =
+          detail.customer_next_step?.summary ||
+          'We are reviewing your report.';
+
+        await new Promise(resolve => setTimeout(resolve, 180));
+
+        const suggestion =
+          agentSuggestionVersion % 2 === 0
+            ? `${nextStep} If you have any questions or additional information, reply here and I will add it to your claim.`
+            : `Here is the latest update on your claim: ${nextStep} You can reply here if you have a question or need to add anything.`;
+
+        reply.value = suggestion;
+        acceptedSuggestionText = suggestion;
         agentSuggestionClaimId = claim.claim_id;
-        acceptedSuggestionText = '';
-        setAgentSuggestionState('suggested', 'Review required; not sent');
+
+        byId('agentSuggestionReason').textContent =
+          'Draft written into the reply box from the current claimant-safe next step. Review and edit it before sending.';
+
+        setAgentSuggestionState(
+          'suggested',
+          reply.disabled
+            ? 'Draft in the reply box · Accept the handoff to edit or send'
+            : 'Draft in the reply box · Review before sending',
+        );
+        if (!reply.disabled) reply.focus({ preventScroll:true });
+
       } catch (error) {
-        byId('agentSuggestionText').value = '';
-        setAgentSuggestionState('failed', error.message || 'Suggestion unavailable; write the reply manually');
+        byId('agentSuggestionReason').textContent =
+          error.message || 'Draft could not be created.';
+
+        setAgentSuggestionState(
+          'failed',
+          'Draft could not be created'
+        );
+      } finally {
+        refreshingAgentSuggestion = false;
       }
     }
 
-    function useAgentSuggestion() {
-      const suggestion = byId('agentSuggestionText').value.trim();
-      if (!suggestion) return;
-      byId('customerChatText').value = suggestion;
-      acceptedSuggestionText = suggestion;
-      setAgentSuggestionState('accepted', 'Copied for staff review; not sent');
-      byId('customerChatText').focus();
+    function refreshAgentSuggestion() {
+      if (agentSuggestionState === 'generating') return;
+      acceptedSuggestionText = '';
+      agentSuggestionVersion += 1;
+      return generateAgentSuggestion({ refreshing: true });
     }
 
-    function rejectAgentSuggestion() {
-      byId('agentSuggestionText').value = '';
-      acceptedSuggestionText = '';
-      setAgentSuggestionState('rejected', 'Discarded; nothing was sent');
+    function showHandoffRequiredDialog() {
+      const dialog = byId('handoffRequiredDialog');
+      if (dialog.open) return;
+      handoffRequiredDialogTrigger = document.activeElement;
+      dialog.showModal();
+      byId('handoffRequiredCancel').focus({ preventScroll:true });
     }
 
     function renderTransientStaffMessage(text, state) {
@@ -2515,11 +2599,18 @@
       const input = byId('customerChatText');
       const text = input.value.trim();
       const claim = currentCustomerClaim();
-      if (!text) return;
       if (!claim) {
         byId('customerChatStatus').textContent = 'Select a claim before sending a customer message.';
         return;
       }
+      const activeHandoff = (activeClaimDetail?.handoffs || []).find(
+        item => !['resolved', 'cancelled'].includes(item.status)
+      );
+      if (activeHandoff?.status === 'queued') {
+        showHandoffRequiredDialog();
+        return;
+      }
+      if (!text) return;
       const button = byId('customerChatSend');
       if (button.disabled) return;
       button.disabled = true;
@@ -2554,7 +2645,10 @@
         });
         input.value = '';
         pendingCustomerMessage = null;
-        button.textContent = 'Send message';
+        button.textContent = 'Send to claimant';
+        if (['suggested', 'accepted', 'edited'].includes(agentSuggestionState)) {
+          setAgentSuggestionState('sent_by_staff', 'Sent only after staff action');
+        }
         detailCache.delete(claim.claim_id);
         await refreshQueue();
         await refreshDetail(claim.claim_id);
@@ -2687,23 +2781,45 @@
     byId('pendingEvidenceNav').addEventListener('click', () => selectQueue('awaiting_evidence'));
     byId('evidencePreviewClose').addEventListener('click', () => byId('evidencePreviewDialog').close());
     byId('evidencePreviewDialog').addEventListener('close', clearEvidencePreview);
-    byId('generateAgentSuggestion').addEventListener('click', generateAgentSuggestion);
-    byId('useAgentSuggestion').addEventListener('click', useAgentSuggestion);
-    byId('rejectAgentSuggestion').addEventListener('click', rejectAgentSuggestion);
+    byId('handoffRequiredCancel').addEventListener('click', () => byId('handoffRequiredDialog').close());
+    byId('handoffRequiredAccept').addEventListener('click', async () => {
+      byId('handoffRequiredDialog').close();
+      await handleCustomerHandoffAction();
+    });
+    byId('handoffRequiredDialog').addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        byId('handoffRequiredDialog').close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const first = byId('handoffRequiredCancel');
+      const last = byId('handoffRequiredAccept');
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    byId('handoffRequiredDialog').addEventListener('close', () => {
+      handoffRequiredDialogTrigger?.focus?.({ preventScroll:true });
+      handoffRequiredDialogTrigger = null;
+    });
+    byId('generateAgentSuggestion').addEventListener('click', () => generateAgentSuggestion());
+    byId('refreshAgentSuggestion').addEventListener('click', refreshAgentSuggestion);
     byId('customerChatText').addEventListener('input', event => {
-      if (agentSuggestionState === 'accepted' && event.target.value !== acceptedSuggestionText) {
+      if (
+        ['suggested', 'accepted'].includes(agentSuggestionState)
+        && event.target.value !== acceptedSuggestionText
+      ) {
         setAgentSuggestionState('edited', 'Edited by staff; not sent');
       }
     });
     byId('customerChatNav').addEventListener('click', () => openCustomerChat(activeClaimId || claims[0]?.claim_id));
     byId('customerChatSend').addEventListener('click', sendCustomerChatMessage);
     byId('customerChatHandoffAction').addEventListener('click', handleCustomerHandoffAction);
-    byId('customerChatText').addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendCustomerChatMessage();
-      }
-    });
   </script>
 </body>
 </html>
