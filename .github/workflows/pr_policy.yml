@@ -35,7 +35,20 @@ jobs:
           node-version: "22"
 
       - name: Test repository policy validators
-        run: node --test .github/scripts/pr_policy.test.cjs .github/scripts/issue_policy.test.cjs
+        run: >-
+          node --test
+          .github/scripts/pr_policy.test.cjs
+          .github/scripts/issue_policy.test.cjs
+          .github/scripts/review_policy.test.cjs
+          .github/scripts/governance_audit.test.cjs
+
+      - name: Validate commit message format
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash .github/scripts/check_commit_format.sh
+          "${{ github.repository }}"
+          "${{ github.event.pull_request.number }}"
 
       - name: Validate pull request
         uses: actions/github-script@v7
@@ -46,5 +59,4 @@ jobs:
               github,
               context,
               core,
-              requireLocalQualityEvidence: false,
             });

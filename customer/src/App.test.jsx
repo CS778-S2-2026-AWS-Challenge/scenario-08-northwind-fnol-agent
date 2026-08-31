@@ -234,7 +234,7 @@ describe('claimant intake', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('tab', { name: 'Motor' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radio', { name: 'Motor' })).toBeChecked()
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
     expect(screen.queryByRole('link', { name: 'Employee access' })).not.toBeInTheDocument()
 
@@ -245,17 +245,128 @@ describe('claimant intake', () => {
       'href',
       'http://127.0.0.1:8002/',
     )
-    expect(screen.getByRole('button', { name: 'Log in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
+    expect(screen.getByRole('note')).toHaveTextContent(/anonymous and synthetic/i)
 
     await user.click(screen.getByRole('button', { name: 'Start a claim without logging in' }))
     expect(screen.getByLabelText('Incident description')).toBeEnabled()
+  })
+
+  it('uses an in-memory authenticated session for account updates and logout', async () => {
+    const user = userEvent.setup()
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', access_token: 'opaque-session-token',
+        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', development_identity: true,
+        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
+        preferences: { email: true, sms: false },
+      }))
+      .mockResolvedValueOnce({ ok: true, status: 204, json: async () => null })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('heading', { name: 'Your account' })).toBeVisible()
+    expect(screen.getByRole('note')).toHaveTextContent(/not a production Northwind identity/i)
+    expect(fetch.mock.calls[1][1].headers.Authorization).toBe('Bearer opaque-session-token')
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    expect(await screen.findByRole('heading', { name: /get back on track/i })).toBeVisible()
+    expect(fetch.mock.calls[2][1].headers.Authorization).toBe('Bearer opaque-session-token')
+  })
+
+  it('loads an authenticated claimant saved claim and its shared conversation', async () => {
+    const user = userEvent.setup()
+    fetch
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', access_token: 'opaque-session-token',
+        token_type: 'Bearer', expires_at: '2026-08-27T05:00:00Z', development_identity: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        customer_id: 'cus_demo', development_identity: true,
+        profile: { display_name: 'Demo Claimant One', email: 'claimant.one@example.invalid', phone: '' },
+        preferences: { email: true, sms: false },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{
+          claim_id: 'clm_saved', revision: 6, incident_type: 'motor',
+          workflow_state: 'collecting', external_claim: null,
+          customer_next_step: nextStep, created_at: '2026-08-27T01:00:00Z',
+          updated_at: '2026-08-27T02:00:00Z', can_resume: true,
+        }],
+        page: { next_cursor: null },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        session_id: 'ses_saved', claim_id: 'clm_saved', status: 'active',
+        resume: { summary: 'Rear-end Motor report.', pending_items: [], prior_commitments: [], customer_next_step: nextStep },
+        started_at: '2026-08-27T01:00:00Z', last_active_at: '2026-08-27T02:00:00Z', closed_at: null,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ...createdClaim().claim, claim_id: 'clm_saved', revision: 6, incident_type: 'motor',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{
+          message_id: 'msg_saved_staff', actor: 'staff',
+          content: { type: 'text', text: 'I have your earlier report and can continue from here.' },
+          evidence_refs: [], in_reply_to: null, created_at: '2026-08-27T02:00:00Z',
+        }],
+        page: { next_cursor: null },
+      }))
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.type(screen.getByLabelText('Email address'), 'claimant.one@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'northwind-demo-one')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    await user.click(await screen.findByRole('button', { name: 'View saved claims' }))
+    await user.click(await screen.findByRole('button', { name: 'Resume report' }))
+
+    expect(await screen.findByText('I have your earlier report and can continue from here.')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Continue where you left off' })).toBeVisible()
+    expect(fetch.mock.calls[5][1].headers.Authorization).toBe('Bearer opaque-session-token')
+  })
+
+  it('keeps entered login details available after an authentication failure', async () => {
+    const user = userEvent.setup()
+    fetch.mockResolvedValueOnce(jsonResponse({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'The email or password was not recognised.',
+        request_id: 'req-login-failure',
+      },
+    }, 401))
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    const email = screen.getByLabelText('Email address')
+    const password = screen.getByLabelText('Password')
+    await user.type(email, 'claimant.one@example.invalid')
+    await user.type(password, 'incorrect-password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not recognised/i)
+    expect(email).toHaveValue('claimant.one@example.invalid')
+    expect(password).toHaveValue('incorrect-password')
+    expect(screen.getByRole('button', { name: 'Log in' })).toBeEnabled()
   })
 
   it('offers a three-step guided Motor claim without replacing conversational intake', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    const description = screen.getByLabelText('Incident description')
+    const guidedStart = screen.getByRole('button', { name: /Start guided Motor claim/ })
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(description.compareDocumentPosition(guidedStart)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getByText(/These items are useful, not required/)).toBeVisible()
+
+    await user.click(guidedStart)
 
     expect(screen.getByText('1 Details')).toBeVisible()
     expect(screen.getByText('2 Materials')).toBeVisible()
@@ -273,6 +384,55 @@ describe('claimant intake', () => {
     expect(screen.getByRole('button', { name: 'Incident date' })).toHaveFocus()
     expect(screen.getByLabelText('Vehicle registration plate number')).toHaveAttribute('placeholder', 'For example, ABC123')
     expect(screen.getByText(/letters and numbers shown on your vehicle's licence plate/i)).toBeVisible()
+  })
+
+  it('shows optional preparation by claim type and preserves the description through guided Motor', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const description = screen.getByLabelText('Incident description')
+    await user.type(description, 'Another vehicle hit my parked car.')
+    const claimTypeGroup = screen.getByRole('group', { name: 'Claim type' })
+    const motor = screen.getByRole('radio', { name: 'Motor' })
+    const home = screen.getByRole('radio', { name: 'Home' })
+    expect(description.compareDocumentPosition(claimTypeGroup)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(motor).toBeChecked()
+
+    await user.click(home)
+    expect(screen.getByRole('heading', { name: 'Helpful to have ready for your home claim' })).toBeVisible()
+    expect(screen.getByText('Emergency work records')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Start guided Motor claim/ })).not.toBeInTheDocument()
+
+    await user.keyboard('{ArrowLeft}')
+    expect(motor).toBeChecked()
+    expect(motor).toHaveFocus()
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+    expect(screen.getByLabelText('What happened')).toHaveValue('Another vehicle hit my parked car.')
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('Another vehicle hit my parked car.')
+  })
+
+  it('keeps a new homepage description when restoring an older guided Motor draft', async () => {
+    localStorage.setItem('northwind-guided-motor-draft', JSON.stringify({
+      step: 1,
+      draft: {
+        policyNumber: 'NW-123456',
+        description: 'An older saved incident description.',
+      },
+      claimRef: null,
+      uploaded: [],
+    }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'A cyclist hit my parked car today.')
+    await user.click(screen.getByRole('button', { name: /Start guided Motor claim/ }))
+
+    expect(screen.getByLabelText('Client Number')).toHaveValue('NW-123456')
+    expect(screen.getByLabelText('What happened')).toHaveValue('A cyclist hit my parked car today.')
+
+    await user.click(screen.getByRole('button', { name: /Back to claim options/ }))
+    expect(screen.getByLabelText('Incident description')).toHaveValue('A cyclist hit my parked car today.')
   })
 
   it('returns to guided details and continues without overwriting confirmed fields', async () => {
@@ -329,7 +489,7 @@ describe('claimant intake', () => {
     expect(screen.getByText(/Sender: Northwind · Audience: Shared claim conversation · Delivered/)).toBeVisible()
     expect(screen.getByText('Check this')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Confirm details' })).toBeEnabled()
-    expect(screen.getByLabelText('Add more information')).toBeDisabled()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
     expect(fetch).toHaveBeenNthCalledWith(
       2,
       '/api/v1/claims/clm_test/sessions/ses_test/messages',
@@ -494,10 +654,6 @@ describe('claimant intake', () => {
     await user.tab() // Claims navigation
     await user.tab() // How it works navigation
     await user.tab() // Log in
-    await user.tab() // Motor
-    await user.tab() // Home
-    await user.tab() // Contents
-    await user.tab() // Guided Motor claim
     await user.tab()
     const description = screen.getByLabelText('Incident description')
     expect(description).toHaveFocus()
@@ -729,7 +885,7 @@ describe('claimant intake', () => {
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
-    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh conversation' }))
 
     expect(await screen.findByText('Your support request has been reviewed')).toBeVisible()
     expect(screen.getAllByText('A staff member reviewed your report and will contact you.')).toHaveLength(2)
@@ -784,11 +940,65 @@ describe('claimant intake', () => {
     await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
     await user.click(screen.getByRole('button', { name: 'Continue claim' }))
     await user.click(await screen.findByRole('button', { name: 'Request human support' }))
-    await user.click(await screen.findByRole('button', { name: 'Refresh status' }))
+    await user.click(await screen.findByRole('button', { name: 'Refresh conversation' }))
 
     expect(await screen.findByText('A Northwind staff member is now assisting you.')).toBeVisible()
     expect(screen.queryByText('Human support')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeEnabled()
+  })
+
+  it('refreshes the shared conversation when the claimant returns to the window', async () => {
+    const staffMessage = {
+      message_id: 'msg_staff_reply',
+      actor: 'staff',
+      content: { type: 'text', text: 'I have reviewed the saved details and can help from here.' },
+      evidence_refs: [],
+      in_reply_to: null,
+      created_at: '2026-08-12T00:03:00Z',
+    }
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        handoff: {
+          handoff_id: 'hnd_test', status: 'queued', priority: 'standard',
+          support_need: 'human_requested', summary: 'Support is queued.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        revision: 3,
+        customer_next_step: { ...nextStep, status: 'human_support_queued' },
+      }, 201),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({
+        ...createdClaim().claim,
+        revision: 5,
+        handoff: {
+          handoff_id: 'hnd_test', status: 'in_progress', priority: 'standard',
+          support_need: 'human_requested', summary: 'Support is in progress.',
+          created_at: '2026-08-12T00:02:00Z',
+        },
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_in_progress',
+          summary: 'A Northwind staff member is now assisting you.',
+          responsible_party: 'northwind',
+        },
+      }),
+    )
+    fetch.mockImplementationOnce(() =>
+      jsonResponse({ items: [staffMessage], page: { next_cursor: null } }),
+    )
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'Another vehicle hit my car.')
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+    await user.click(await screen.findByRole('button', { name: 'Request human support' }))
+    act(() => window.dispatchEvent(new Event('focus')))
+
+    expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
+    expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
   })
 
   it('labels pending evidence fields without asking the claimant to confirm them', async () => {

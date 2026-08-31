@@ -17,6 +17,20 @@ export interface PullRequestEvent {
   previousBody: string | null;
 }
 
+export interface IssueEvent {
+  action: string;
+  repository: {
+    fullName: string;
+  };
+  issue: {
+    number: number;
+    body: string;
+    state: string;
+    creator: string;
+    htmlUrl: string;
+  };
+}
+
 export interface GitHubQueueMessage {
   deliveryId: string;
   eventName: string;
@@ -26,7 +40,7 @@ export interface GitHubQueueMessage {
 export type WorkerEnv = Env & {
   readonly GITHUB_TOKEN: string;
   readonly GITHUB_WEBHOOK_SECRET: string;
-  readonly REMOTE_CI_PROVIDER: string;
+  readonly MAINTAINER_LOGIN: string;
 };
 
 export type ProjectEnvironment = Pick<

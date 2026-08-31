@@ -18,13 +18,13 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import (
     CANONICAL_SCENARIO_DIRECTORY,
     EvidenceBusinessPath,
     ScenarioFixture,
-    load_scenarios,
+    load_mvp_journey_scenarios,
     seed_scenario,
 )
 from backend.services.evidence_fixtures import (
@@ -78,7 +78,8 @@ def _projections(scenario: ScenarioFixture) -> tuple[list[dict[str, Any]], list[
     repository = FixtureRepository()
     seed_scenario(repository, scenario)
     claim_id = scenario.claim.claim_id
-    with TestClient(create_app(Settings(), repository)) as client:
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    with TestClient(create_app(settings, repository)) as client:
         claimant = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
         staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
     claimant.raise_for_status()
@@ -95,7 +96,7 @@ def check_path_evidence(
     """Walk every business path and report declared/runtime differences."""
 
     resolved = service or EvidenceFixtureService()
-    scenarios = {item.scenario_id: item for item in load_scenarios(scenario_directory)}
+    scenarios = {item.scenario_id: item for item in load_mvp_journey_scenarios(scenario_directory)}
     defects: list[PathDefect] = []
 
     for entry in resolved.path_entries():

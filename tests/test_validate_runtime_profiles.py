@@ -23,6 +23,10 @@ def test_report_classifies_verified_partial_and_unavailable_profiles(
         'scripts.validate_runtime_profiles._local_minio_result',
         lambda _endpoint: _startup('startup_ready'),
     )
+    monkeypatch.setattr(
+        'scripts.validate_runtime_profiles._local_mvp_result',
+        lambda: _startup('startup_ready'),
+    )
 
     report, expected = build_validation_report(minio_endpoint='http://localhost:9000')
 
@@ -30,6 +34,7 @@ def test_report_classifies_verified_partial_and_unavailable_profiles(
     assert isinstance(profiles, dict)
     assert profiles['fixture']['classification'] == 'verified'
     assert profiles['local_minio']['classification'] == 'verified'
+    assert profiles['local_mvp']['classification'] == 'verified'
     assert profiles['mongodb']['classification'] == 'partial'
     assert profiles['cloudflare']['classification'] == 'unavailable'
     assert profiles['aws']['classification'] == 'unavailable'
@@ -49,6 +54,10 @@ def test_requested_minio_validation_fails_when_service_is_unavailable(
     monkeypatch.setattr(
         'scripts.validate_runtime_profiles._local_minio_result',
         lambda _endpoint: _startup('startup_refused'),
+    )
+    monkeypatch.setattr(
+        'scripts.validate_runtime_profiles._local_mvp_result',
+        lambda: _startup('startup_ready'),
     )
 
     report, expected = build_validation_report(minio_endpoint='http://localhost:9000')

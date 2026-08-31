@@ -2,10 +2,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 from backend.services.demo_seed import SCENARIO_DIRECTORY
+
+DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
 def _load(scenario_id: str) -> tuple[FixtureRepository, str]:
@@ -16,7 +18,7 @@ def _load(scenario_id: str) -> tuple[FixtureRepository, str]:
 
 
 def _staff_client(repository: FixtureRepository) -> TestClient:
-    return TestClient(create_app(Settings(), repository))
+    return TestClient(create_app(DEVELOPER_SETTINGS, repository))
 
 
 def _handoff_card(repository: FixtureRepository, claim_id: str) -> dict[str, object]:

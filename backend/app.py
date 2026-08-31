@@ -11,6 +11,7 @@ from backend.adapters.claims_service import (
 )
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
+from backend.adapters.identity import FixtureIdentityRepository
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.api.claims import router as claims_router
@@ -18,6 +19,7 @@ from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
 from backend.api.handoffs import router as handoffs_router
 from backend.api.health import router as health_router
+from backend.api.identity import router as identity_router
 from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
 from backend.api.workbench import router as workbench_router
@@ -33,8 +35,9 @@ from backend.core.runtime_profiles import (
 )
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
 from backend.repositories.handoff_guard import guarded_handoff_repository
+from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
-from backend.services.agent import AgentTurnProvider, ControlledAgent
+from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
 from backend.services.model_agent import GatewayAgent
 
 
@@ -49,6 +52,7 @@ def create_app(
     handoff_dispatch_adapter: HandoffDispatchAdapter | None = None,
     data_runtime_bundle: DataRuntimeBundle | None = None,
     model_gateway_registry: ModelGatewayRegistry | None = None,
+    identity_repository: IdentityRepository | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     injected_data_dependencies = any(
@@ -93,6 +97,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings
+    app.state.identity_repository = identity_repository or FixtureIdentityRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
     app.state.knowledge_retriever = bundle.knowledge_retrieval
@@ -109,11 +114,12 @@ def create_app(
         model_gateway = build_model_gateway(resolved_settings, model_gateway_registry)
         if not model_gateway.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        app.state.agent_turn_provider = GatewayAgent(model_gateway)
+        base_agent_turn_provider: AgentTurnProvider = GatewayAgent(model_gateway)
         app.state.agent_runtime_status = 'configured'
     else:
-        app.state.agent_turn_provider = agent_turn_provider or ControlledAgent()
+        base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
+    app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage
@@ -125,6 +131,7 @@ def create_app(
     register_exception_handlers(app)
 
     app.include_router(health_router)
+    app.include_router(identity_router)
     app.include_router(legacy_router)
     app.include_router(claims_router)
     app.include_router(integrations_router)
