@@ -5,7 +5,7 @@ description: Repository governance for the Northwind FNOL repository (scenario-0
 
 # Northwind FNOL repository governance
 
-Version: v1.0 · 2026-08-30
+Version: v1.1 · 2026-08-31
 
 This version line is incremented whenever a rule changes substantively. The
 "Governance confirmation" section of the PR template cites the version you read
@@ -69,10 +69,10 @@ messages, and test evidence must be written in English.
 | File | Scope |
 | --- | --- |
 | `authority-boundary.md` | §1 What the agent may and may not change; operations that require explicit authorization |
-| `before-work.md` | §2 Required reading, branch synchronization, local quality gate, context management |
+| `before-work.md` | §2 Required reading, branch synchronization, validation, context management |
 | `issue-kanban.md` | §3 Task entry: responsibilities of issues, Kanban, and PRs; issue-creation approval flow |
 | `branching.md` | §4 Branch creation, naming, discipline, and parallel development |
-| `pr-workflow.md` | §5 Commits, PR structure, quality gate, PR template, requesting review |
+| `pr-workflow.md` | §5 Commits, PR structure, validation, PR template, requesting review |
 | `review-merge.md` | §6 Review rules, merge conditions, CODEOWNERS, broken-main protocol |
 | `docs-contract.md` | §7 Which changes must update which documents; directories needing extra scrutiny |
 | `credentials-risk.md` | §8 Credentials, high-risk operations, data visibility |
@@ -104,7 +104,7 @@ reusable. To port it, edit these anchors:
 - The quoted CODEOWNERS block in `review-merge.md` section 6.3.
 - The Kanban project URL in `issue-kanban.md` section 3.1.
 - Repository-specific paths and commands: the contract documents
-  (`docs/api.md` and others), the quality-gate scripts
-  (`./scripts/check.ps1`), and the CI check names in `ci-checks.md`.
+  (`docs/api.md` and others), focused local checks, and the remote CI check names in
+  `ci-checks.md`.
 - The stack descriptions and stack-bound rules in `frontend-design.md` and
   `backend-design.md`.

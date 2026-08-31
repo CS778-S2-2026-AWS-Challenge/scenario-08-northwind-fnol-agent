@@ -20,9 +20,8 @@
 
 ## Local validation
 
-- Record the quality source selected by the active profile. For `none`, include the exact
-  `./scripts/check.ps1` command and `Result: PASS`; for `github` or `circleci`, name the remote
-  provider and its checks. Do not claim a local result that was not run.
+- Record focused commands that were actually run, or `Not run` with the reason. These results are
+  development evidence only; CircleCI supplies the authoritative exact-head quality result.
 - Command:
 - Result:
 
@@ -94,6 +93,7 @@ not proof; independent review remains the last line of defense. -->
 - [ ] Updated docs/api.md (API contract changes)
 - [ ] Updated docs/persistence-schema.md (persistence changes)
 - [ ] Updated docs/README.md (documents added, replaced, moved, or archived)
+- [ ] Updated other affected current documentation
 
 ## Impact statement
 
