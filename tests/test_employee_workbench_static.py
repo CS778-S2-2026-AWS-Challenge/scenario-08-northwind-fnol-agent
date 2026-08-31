@@ -206,12 +206,37 @@ def test_employee_workbench_uses_accessible_claim_detail_tabs() -> None:
     assert 'data-detail-page="evidence"' in page
     assert 'data-detail-page="review"' in page
     assert 'data-detail-page="history"' in page
+    tab_panel_pairs = {
+        'claimDetailOverviewTab': 'detailSummary',
+        'claimDetailEvidenceTab': 'detailEvidence',
+        'claimDetailReviewTab': 'detailReview',
+        'claimDetailConversationTab': 'detailConversation',
+        'claimDetailHistoryTab': 'detailHistory',
+    }
+    for tab_id, panel_id in tab_panel_pairs.items():
+        assert f'id="{tab_id}"' in page
+        assert f'aria-controls="{panel_id}"' in page
+        panel_markup = page[
+            page.index(f'id="{panel_id}"') : page.index('>', page.index(f'id="{panel_id}"'))
+        ]
+        assert 'role="tabpanel"' in panel_markup
+        assert f'aria-labelledby="{tab_id}"' in panel_markup
     assert 'id="detailNextStep"' not in page
     assert 'function selectClaimDetailTab(tab, focus = false)' in page
     assert 'section.inert = section.hidden' in page
     assert "section.setAttribute('aria-hidden', String(section.hidden))" in page
     assert '.claim-detail-tabs { position:sticky;' in page
     assert "['ArrowLeft', 'ArrowRight', 'Home', 'End']" in page
+
+
+def test_employee_conversation_layout_does_not_add_absolute_track_sizes() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert (
+        '.customer-chat-content { min-height:0; display:grid; '
+        'grid-template-columns:minmax(0,1fr) minmax(0,2fr); }'
+    ) in page
+    assert 'grid-template-columns:minmax(280px,340px) 1fr' not in page
 
 
 def test_employee_workbench_exposes_pending_queue_and_demo_recovery() -> None:
