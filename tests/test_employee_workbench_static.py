@@ -214,8 +214,8 @@ def test_employee_workbench_uses_accessible_claim_detail_tabs() -> None:
         'claimDetailHistoryTab': 'detailHistory',
     }
     for tab_id, panel_id in tab_panel_pairs.items():
-        assert f'id="{tab_id}"' in page
-        assert f'aria-controls="{panel_id}"' in page
+        assert page.count(f'id="{tab_id}"') == 1
+        assert page.count(f'aria-controls="{panel_id}"') == 1
         panel_markup = page[
             page.index(f'id="{panel_id}"') : page.index('>', page.index(f'id="{panel_id}"'))
         ]
