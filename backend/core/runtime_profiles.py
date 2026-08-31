@@ -201,6 +201,7 @@ def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) 
         raise RuntimeProfileConfigurationError(
             'The data runtime bundle does not match NORTHWIND_OBJECT_STORAGE_ADAPTER.'
         )
+    _require_start_capable_bundle(bundle)
 
 
 def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
@@ -215,7 +216,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             )
         else:
             evidence_storage = MockEvidenceStorage()
-        return DataRuntimeBundle(
+        bundle = DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
             repository=FixtureRepository(),
             evidence_storage=evidence_storage,
@@ -223,6 +224,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
+        return _require_start_capable_bundle(bundle)
 
     if settings.data_runtime_profile is DataRuntimeProfile.LOCAL_MVP:
         if settings.object_storage_adapter is not ObjectStorageAdapter.S3_COMPATIBLE:

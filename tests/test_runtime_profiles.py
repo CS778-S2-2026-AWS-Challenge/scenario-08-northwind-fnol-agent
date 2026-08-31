@@ -20,6 +20,7 @@ from backend.core.runtime_profiles import (
     build_data_runtime_bundle,
     missing_runtime_capabilities,
     runtime_capability_statuses,
+    validate_data_runtime_bundle,
 )
 from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.repositories.fixture import FixtureRepository
@@ -290,6 +291,49 @@ def test_local_mvp_fails_closed_when_a_selected_provider_is_unavailable(
         )
 
     assert repository.closed
+
+
+def test_fixture_profile_fails_closed_when_explicit_s3_storage_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnavailableEvidenceStorage:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'unavailable'
+
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.MinioEvidenceStorage', UnavailableEvidenceStorage
+    )
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
+
+    with pytest.raises(RuntimeProfileConfigurationError, match='unavailable capabilities'):
+        build_data_runtime_bundle(
+            Settings(object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE)
+        )
+
+
+def test_injected_bundle_is_readiness_checked_before_application_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_bundle = build_data_runtime_bundle(Settings())
+
+    class UnavailableEvidenceStorage(MockEvidenceStorage):
+        @staticmethod
+        def connection_status() -> str:
+            return 'unavailable'
+
+    unavailable_bundle = replace(
+        fixture_bundle,
+        evidence_storage=UnavailableEvidenceStorage(),
+    )
+
+    with pytest.raises(RuntimeProfileConfigurationError, match='unavailable capabilities'):
+        validate_data_runtime_bundle(Settings(), unavailable_bundle)
 
 
 def test_local_mvp_allows_only_explicit_start_capable_provider_states() -> None:
