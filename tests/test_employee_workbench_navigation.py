@@ -1,7 +1,7 @@
 import subprocess
 
 
-def test_direct_customer_chat_url_returns_to_workbench_without_leaving_page() -> None:
+def test_customer_chat_stays_inside_claim_detail() -> None:
     completed = subprocess.run(
         ['node', 'tests/employee_navigation.test.mjs'],
         capture_output=True,
