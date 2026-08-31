@@ -3,8 +3,8 @@
 ## Status and Purpose
 
 This document defines the bounded information architecture and screen inventory for the
-first Northwind Control Plane frontend deliverable. It is the interface input for issues
-#250, #258, and #260; it does not claim that an Admin Console or Admin API is currently
+first Northwind Control Plane frontend deliverable. Issues #250, #258, and #260 consume
+this interface input. The document does not claim that an Admin Console or Admin API is
 implemented.
 
 The first implementation slice covers navigation and honest capability status for
