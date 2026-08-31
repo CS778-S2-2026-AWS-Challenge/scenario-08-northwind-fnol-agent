@@ -224,6 +224,80 @@ def test_local_mvp_requires_explicit_minio_selection(
         build_data_runtime_bundle(Settings(data_runtime_profile=DataRuntimeProfile.LOCAL_MVP))
 
 
+def test_local_mvp_fails_closed_when_a_selected_provider_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConnectedRepository(FixtureRepository):
+        closed = False
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'verified'
+
+        def close(self) -> None:
+            self.closed = True
+
+    class UnavailableEvidenceStorage:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'unavailable'
+
+    class AvailableKnowledge:
+        def __init__(self, _store: object, _sources: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'configured_service'
+
+        @staticmethod
+        def get_chunk(_chunk_id: str) -> None:
+            return None
+
+        @staticmethod
+        def search(_request: KnowledgeSearch) -> list[KnowledgeChunk]:
+            return []
+
+    repository = ConnectedRepository()
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.connect_mongodb_repository', lambda _config: repository
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.MinioEvidenceStorage', UnavailableEvidenceStorage
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeObjectStore.from_config',
+        lambda _config: object(),
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeRetriever', AvailableKnowledge
+    )
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://unused')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
+
+    with pytest.raises(RuntimeProfileConfigurationError, match='unavailable capabilities'):
+        build_data_runtime_bundle(
+            Settings(
+                data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
+                object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
+            )
+        )
+
+    assert repository.closed
+
+
+def test_local_mvp_allows_only_explicit_start_capable_provider_states() -> None:
+    from backend.core.runtime_profiles import _START_CAPABLE_CONNECTION_STATES
+
+    assert {'using_fixture', 'verified', 'configured_service'} == (_START_CAPABLE_CONNECTION_STATES)
+
+
 def test_capability_status_table_is_returned_as_a_copy() -> None:
     statuses = runtime_capability_statuses(DataRuntimeProfile.FIXTURE)
     statuses['persistence'] = 'tampered'
