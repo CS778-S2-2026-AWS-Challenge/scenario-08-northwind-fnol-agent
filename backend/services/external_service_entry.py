@@ -30,7 +30,7 @@ class ExternalServiceEntry(str, Enum):
     UNAVAILABLE = 'unavailable'
 
 
-class ForgedIntegrationSource(ValueError):
+class ForgedIntegrationSourceError(ValueError):
     """A task claims a source class the entry that produced it cannot provide."""
 
 
@@ -62,9 +62,13 @@ class ExternalServiceEntryDecision(ContractModel):
                 f'{expected.value if expected else "no result"}, '
                 f'not {self.integration_source.value if self.integration_source else "no result"}.'
             )
-        if expected is None and self.limitation is None:
-            raise ValueError(f'Entry {self.entry.value} produces no result and must say why.')
-        if expected is not None and self.limitation is not None:
+        if expected is None:
+            if self.limitation is None or not self.limitation.strip():
+                raise ValueError(
+                    f'Entry {self.entry.value} produces no result and must say why in '
+                    f'readable text.'
+                )
+        elif self.limitation is not None:
             raise ValueError(
                 f'Entry {self.entry.value} produces a result and carries no limitation.'
             )
@@ -148,18 +152,18 @@ def assert_task_matches_entry(
         decision: The entry decision that authorised the call.
 
     Raises:
-        ForgedIntegrationSource: The entry produced no result at all, or the task
+        ForgedIntegrationSourceError: The entry produced no result at all, or the task
             records a source class other than the one the entry provides.
     """
 
     permitted = _ENTRY_SOURCES[decision.entry]
     if permitted is None:
-        raise ForgedIntegrationSource(
+        raise ForgedIntegrationSourceError(
             f'{task.task_id}: entry {decision.entry.value} produces no result, so the task '
             f'cannot record source {task.integration_source.value}.'
         )
     if task.integration_source is not permitted:
-        raise ForgedIntegrationSource(
+        raise ForgedIntegrationSourceError(
             f'{task.task_id}: entry {decision.entry.value} provides {permitted.value}, '
             f'but the task records {task.integration_source.value}.'
         )

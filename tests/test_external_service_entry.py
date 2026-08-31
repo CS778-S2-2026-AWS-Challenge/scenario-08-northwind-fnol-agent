@@ -13,7 +13,7 @@ from backend.domain.models import IntegrationSource
 from backend.services.external_service_entry import (
     ExternalServiceEntry,
     ExternalServiceEntryDecision,
-    ForgedIntegrationSource,
+    ForgedIntegrationSourceError,
     assert_task_matches_entry,
     resolve_external_service_entry,
 )
@@ -116,7 +116,7 @@ def test_fixture_entry_cannot_produce_a_configured_service_task() -> None:
         allow_test_fixture=True,
     )
 
-    with pytest.raises(ForgedIntegrationSource, match='provides fixture'):
+    with pytest.raises(ForgedIntegrationSourceError, match='provides fixture'):
         assert_task_matches_entry(_task(IntegrationSource.CONFIGURED_SERVICE), decision)
 
 
@@ -126,7 +126,7 @@ def test_live_entry_cannot_produce_a_fixture_task() -> None:
         allow_test_fixture=False,
     )
 
-    with pytest.raises(ForgedIntegrationSource, match='provides configured_service'):
+    with pytest.raises(ForgedIntegrationSourceError, match='provides configured_service'):
         assert_task_matches_entry(_task(IntegrationSource.FIXTURE), decision)
 
 
@@ -139,7 +139,7 @@ def test_an_unavailable_entry_accepts_no_task_at_all(
         limitation='unavailable',
     )
 
-    with pytest.raises(ForgedIntegrationSource, match='produces no result'):
+    with pytest.raises(ForgedIntegrationSourceError, match='produces no result'):
         assert_task_matches_entry(_task(integration_source), decision)
 
 
@@ -166,9 +166,15 @@ def test_a_contradictory_decision_cannot_be_constructed(
         )
 
 
-def test_a_resultless_decision_must_explain_itself() -> None:
+@pytest.mark.parametrize('limitation', [None, '', '   ', '\n\t'])
+def test_a_resultless_decision_must_explain_itself(limitation: str | None) -> None:
+    """A blank limitation is as unreadable to a claimant or staff user as none at all."""
+
     with pytest.raises(ValidationError, match='must say why'):
-        ExternalServiceEntryDecision(entry=ExternalServiceEntry.UNAVAILABLE)
+        ExternalServiceEntryDecision(
+            entry=ExternalServiceEntry.UNAVAILABLE,
+            limitation=limitation,
+        )
 
 
 @pytest.mark.parametrize(
@@ -199,7 +205,7 @@ def test_the_guard_derives_the_permitted_source_from_the_entry() -> None:
         limitation=None,
     )
 
-    with pytest.raises(ForgedIntegrationSource, match='provides fixture'):
+    with pytest.raises(ForgedIntegrationSourceError, match='provides fixture'):
         assert_task_matches_entry(_task(IntegrationSource.CONFIGURED_SERVICE), forged)
 
 
