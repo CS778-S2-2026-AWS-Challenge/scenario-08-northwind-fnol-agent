@@ -1,5 +1,7 @@
 from enum import Enum
 
+from pydantic import model_validator
+
 from backend.domain.models import ContractModel
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
@@ -26,9 +28,9 @@ ASSESSOR_SHARED_DATA_SUMMARY = (
 class ExternalTaskDelivery(str, Enum):
     """Whether one external task request reached the provider before it failed.
 
-    This is the discriminator the recovery rules turn on: a failure that never
-    left Northwind can be retried, while a failure after submission leaves the
-    provider's state unknown and must be reconciled first.
+    Delivery is one input to recovery classification. Only failures whose
+    canonical contract treats post-submission state as ambiguous become an
+    unknown outcome.
     """
 
     NOT_SUBMITTED = 'not_submitted'
@@ -84,6 +86,27 @@ class ExternalTaskFailureClassification(ContractModel):
     recovery: ExternalTaskRecovery
     retryable: bool
 
+    @model_validator(mode='after')
+    def validate_recovery_contract(self) -> 'ExternalTaskFailureClassification':
+        expected = {
+            ExternalTaskRecovery.RETRY_SAME_OPERATION: (
+                ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+                True,
+            ),
+            ExternalTaskRecovery.RECONCILE_BEFORE_RETRY: (
+                ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+                False,
+            ),
+            ExternalTaskRecovery.REVIEW_REQUIRED: (
+                ExternalTaskOperationStatus.TERMINAL_FAILURE,
+                False,
+            ),
+        }
+        expected_status, expected_retryable = expected[self.recovery]
+        if self.operation_status is not expected_status or self.retryable is not expected_retryable:
+            raise ValueError('External task failure status, recovery, and retryable must agree.')
+        return self
+
 
 _REVIEW_REQUIRED_CODES = frozenset(
     {
@@ -93,12 +116,7 @@ _REVIEW_REQUIRED_CODES = frozenset(
     }
 )
 
-_DELIVERY_SENSITIVE_CODES = frozenset(
-    {
-        ExternalTaskFailureCode.TIMEOUT,
-        ExternalTaskFailureCode.UNAVAILABLE,
-    }
-)
+_UNKNOWN_AFTER_SUBMISSION_CODES = frozenset({ExternalTaskFailureCode.TIMEOUT})
 
 
 def classify_external_task_failure(
@@ -111,10 +129,9 @@ def classify_external_task_failure(
     `docs/claim-creation-boundary.md` states the timeout case explicitly: a
     timeout after submission may be an unknown outcome rather than an ordinary
     failure, and must be reconciled through the operation identity, idempotency
-    key, or provider reference before another attempt. This function applies the
-    same escalation to `UNAVAILABLE`, because a request that has already been
-    submitted leaves the provider's state equally unknown; the widening is the
-    safe direction and is called out here so a reviewer can challenge it.
+    key, or provider reference before another attempt. `UNAVAILABLE` retains the
+    current assessor contract: it is retryable with the same operation identity
+    even when the failed invocation reached the provider.
 
     `PARTIAL` is always an unknown outcome: a partial side effect exists
     regardless of how the request was delivered.
@@ -138,7 +155,7 @@ def classify_external_task_failure(
 
     submitted = delivery is ExternalTaskDelivery.SUBMITTED
     unknown = failure_code is ExternalTaskFailureCode.PARTIAL or (
-        submitted and failure_code in _DELIVERY_SENSITIVE_CODES
+        submitted and failure_code in _UNKNOWN_AFTER_SUBMISSION_CODES
     )
     if unknown:
         return ExternalTaskFailureClassification(
