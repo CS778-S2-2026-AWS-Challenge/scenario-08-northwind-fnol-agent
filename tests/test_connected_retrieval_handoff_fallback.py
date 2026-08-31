@@ -9,7 +9,7 @@ from backend.adapters.handoff_dispatch import (
 )
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, RetrievalUnavailable
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -23,7 +23,7 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
     retrieval = MockPolicyHistoryAdapter()
     dispatch = MockHandoffDispatchAdapter()
     app = create_app(
-        Settings(),
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
         repository,
         policy_history_adapter=retrieval,
         handoff_dispatch_adapter=dispatch,
