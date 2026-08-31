@@ -715,9 +715,10 @@ def test_message_turn_rejects_a_non_current_session_and_cross_session_client_id(
         key='non-current-session',
         client_message_id='new-client-id',
     )
-    repository.save_claim(
-        claim.model_copy(update={'active_session_id': second_session.session_id, 'revision': 2}),
-        expected_revision=claim.revision,
+    # Fixture seeding: this precondition is outside the save_claim() transaction
+    # boundary (pointer change or revision-neutral write), so it is stored directly.
+    repository._claims[claim.claim_id] = claim.model_copy(
+        update={'active_session_id': second_session.session_id, 'revision': 2}
     )
     cross_session_replay = submit_message(
         client,
@@ -817,11 +818,10 @@ def test_claim_collection_filters_ownership_and_paginates_updated_claims(
     assert owned_claim is not None
     updated_claim = repository.get_claim(first['claim_id'], 'cus_demo')
     assert updated_claim is not None
-    repository.save_claim(
-        updated_claim.model_copy(
-            update={'updated_at': owned_claim.updated_at + timedelta(seconds=1)}
-        ),
-        expected_revision=updated_claim.revision,
+    # Fixture seeding: this precondition is outside the save_claim() transaction
+    # boundary (pointer change or revision-neutral write), so it is stored directly.
+    repository._claims[updated_claim.claim_id] = updated_claim.model_copy(
+        update={'updated_at': owned_claim.updated_at + timedelta(seconds=1)}
     )
     other_claim = owned_claim.model_copy(
         update={
@@ -917,15 +917,14 @@ def test_claim_remains_readable_across_multiple_persisted_sessions(
         last_active_at=first_session.last_active_at + timedelta(seconds=1),
     )
     repository.save_session(second_session)
-    repository.save_claim(
-        claim.model_copy(
-            update={
-                'active_session_id': second_session.session_id,
-                'revision': claim.revision + 1,
-                'updated_at': second_session.started_at,
-            }
-        ),
-        expected_revision=claim.revision,
+    # Fixture seeding: this precondition is outside the save_claim() transaction
+    # boundary (pointer change or revision-neutral write), so it is stored directly.
+    repository._claims[claim.claim_id] = claim.model_copy(
+        update={
+            'active_session_id': second_session.session_id,
+            'revision': claim.revision + 1,
+            'updated_at': second_session.started_at,
+        }
     )
 
     first_read = client.get(

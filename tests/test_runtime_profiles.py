@@ -108,12 +108,13 @@ def test_bundle_reports_repository_connection_status() -> None:
     assert bundle.readiness_checks()['persistence'] == 'verified'
 
 
-def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_profile() -> None:
+def test_capability_table_is_complete_and_local_mvp_is_explicitly_hybrid() -> None:
     for profile in DataRuntimeProfile:
         statuses = runtime_capability_statuses(profile)
         assert tuple(statuses) == RUNTIME_CAPABILITIES
 
     assert set(missing_runtime_capabilities(DataRuntimeProfile.FIXTURE)) == set()
+    assert set(missing_runtime_capabilities(DataRuntimeProfile.LOCAL_MVP)) == set()
     assert set(missing_runtime_capabilities(DataRuntimeProfile.MONGODB)) == set(
         RUNTIME_CAPABILITIES
     )
@@ -124,6 +125,103 @@ def test_capability_table_is_complete_and_fixture_is_the_only_start_capable_prof
     assert runtime_capability_statuses(DataRuntimeProfile.MONGODB)['persistence'] == (
         'pending_confirmation'
     )
+    assert runtime_capability_statuses(DataRuntimeProfile.LOCAL_MVP) == {
+        'persistence': 'verified',
+        'evidence_storage': 'verified',
+        'policy': 'using_fixture',
+        'claim_history': 'using_fixture',
+        'knowledge_documents': 'verified',
+        'knowledge_retrieval': 'verified',
+    }
+
+
+def test_local_mvp_builds_mongodb_minio_and_synthetic_lookup_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConnectedRepository(FixtureRepository):
+        closed = False
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'verified'
+
+        def close(self) -> None:
+            self.closed = True
+
+    class AvailableEvidenceStorage:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'configured_service'
+
+    class AvailableKnowledge:
+        def __init__(self, _store: object, _sources: object) -> None:
+            pass
+
+        @staticmethod
+        def connection_status() -> str:
+            return 'configured_service'
+
+        @staticmethod
+        def get_chunk(_chunk_id: str) -> None:
+            return None
+
+        @staticmethod
+        def search(_request: KnowledgeSearch) -> list[KnowledgeChunk]:
+            return []
+
+    repository = ConnectedRepository()
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.connect_mongodb_repository', lambda _config: repository
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.MinioEvidenceStorage', AvailableEvidenceStorage
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeObjectStore.from_config',
+        lambda _config: object(),
+    )
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.S3CompatibleKnowledgeRetriever', AvailableKnowledge
+    )
+    monkeypatch.setenv('NORTHWIND_MONGODB_URI', 'mongodb://unused')
+    monkeypatch.setenv('NORTHWIND_MONGODB_DATABASE', 'northwind_test')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ENDPOINT', 'http://minio:9000')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_ACCESS_KEY_ID', 'local-access')
+    monkeypatch.setenv('NORTHWIND_OBJECT_STORAGE_SECRET_ACCESS_KEY', 'local-secret')
+
+    bundle = build_data_runtime_bundle(
+        Settings(
+            data_runtime_profile=DataRuntimeProfile.LOCAL_MVP,
+            object_storage_adapter=ObjectStorageAdapter.S3_COMPATIBLE,
+        )
+    )
+
+    assert bundle.repository is repository
+    assert isinstance(bundle.policy_history, MockPolicyHistoryAdapter)
+    assert id(bundle.knowledge_documents) == id(bundle.knowledge_retrieval)
+    assert bundle.readiness_checks() == {
+        'persistence': 'verified',
+        'evidence_storage': 'configured_service',
+        'policy': 'using_fixture',
+        'claim_history': 'using_fixture',
+        'knowledge_documents': 'configured_service',
+        'knowledge_retrieval': 'configured_service',
+    }
+
+
+def test_local_mvp_requires_explicit_minio_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.connect_mongodb_repository',
+        lambda _config: pytest.fail('MongoDB must not connect for an invalid local bundle.'),
+    )
+
+    with pytest.raises(RuntimeProfileConfigurationError, match='requires'):
+        build_data_runtime_bundle(Settings(data_runtime_profile=DataRuntimeProfile.LOCAL_MVP))
 
 
 def test_capability_status_table_is_returned_as_a_copy() -> None:

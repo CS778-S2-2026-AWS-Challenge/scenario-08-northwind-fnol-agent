@@ -3,8 +3,8 @@
 ## Purpose
 
 This document records the verified local object-storage contract for Sprint 2. It
-defines the S3-compatible settings and evidence-object behaviour used by
-`MinioEvidenceStorage`. It does not enable the MongoDB runtime profile or claim
+defines the S3-compatible settings and evidence/knowledge-object behaviour used by the local
+runtime. It does not enable the provider-specific MongoDB profile or claim
 that AWS access is configured.
 
 ## Local service
@@ -12,13 +12,13 @@ that AWS access is configured.
 Start the packaged MinIO server with Docker from the repository root:
 
 ```powershell
-docker compose up -d minio
+docker compose up -d minio minio-init
 ```
 
 The local API is available at `http://localhost:9000` and the MinIO console at
-`http://localhost:9001`. The repeatable smoke command below creates the
-`northwind-evidence` bucket when it is absent. The default values in `.env.example`
-are synthetic local credentials only.
+`http://localhost:9001`. The idempotent init service creates `northwind-evidence` and
+`northwind-knowledge` when absent and never clears existing objects. The default values in
+`.env.example` are synthetic local credentials only.
 
 ## Environment contract
 
@@ -42,7 +42,9 @@ source.
 The default adapter is `fixture`. Endpoint or credential variables alone do not switch
 the running application. Selecting `s3_compatible` is explicit and fails startup when
 the required connection values are incomplete; it never falls back to fixture storage.
-This object-store selection does not enable the MongoDB, Cloudflare, or AWS data profile.
+This object-store selection alone does not enable the MongoDB, Cloudflare, AWS, or local MVP data
+profile. `DATA_RUNTIME_PROFILE=local_mvp` additionally requires the complete MongoDB and governed
+knowledge configuration in `deploy/runtime/local-mvp.env.example`.
 
 For a local PowerShell process:
 
@@ -112,11 +114,10 @@ The script removes both staging and final objects for its own synthetic Evidence
 
 ## Current limitation
 
-The local composition uses fixture transactional, policy, and knowledge adapters with
-configured MinIO evidence bytes. MinIO is an explicitly selected local object-store
-adapter, not a complete data runtime profile. The MongoDB `DataRuntimeBundle` remains
-intentionally unselected until its complete transaction and provider-conformance
-acceptance criteria are met.
+The `fixture` + MinIO composition remains the stable fallback. The explicit `local_mvp`
+composition adds MongoDB persistence and governed MinIO knowledge retrieval while retaining
+synthetic policy/history lookups. The provider-specific `mongodb` profile remains unselected until
+its complete provider-conformance acceptance criteria are met.
 
 The demo reset endpoint intentionally returns `DEMO_RESET_UNAVAILABLE` while MinIO is
 selected. It does not clear a whole shared bucket. The smoke command provides bounded

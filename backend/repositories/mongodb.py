@@ -19,6 +19,9 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
+    AssessorRoutingOperation,
+    AssessorRoutingOperationStatus,
+    AuthorityOutcome,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -137,6 +140,10 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
     finally:
         if client is not None:
             client.close()
+
+
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+"""Child records whose identity may never be rebound or rewritten once persisted."""
 
 
 class MongoDBRepository:
@@ -331,6 +338,9 @@ class MongoDBRepository:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
     def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -591,6 +601,133 @@ class MongoDBRepository:
             'created_at',
         )
 
+    def get_assessor_routing_operation(
+        self,
+        operation_id: str,
+    ) -> AssessorRoutingOperation | None:
+        return self._get('assessor_routing_operation', operation_id, AssessorRoutingOperation)
+
+    def save_assessor_routing_operation(
+        self,
+        operation: AssessorRoutingOperation,
+    ) -> None:
+        claim = self.get_claim_internal(operation.claim_id)
+        if (
+            claim is None
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.authorised_revision > claim.revision
+        ):
+            raise KeyError(operation.claim_id)
+
+        existing = self.get_assessor_routing_operation(operation.operation_id)
+        if existing is None:
+            if operation.status is not AssessorRoutingOperationStatus.PREPARED:
+                raise IdempotencyConflict(operation.operation_id)
+            self._put(
+                'assessor_routing_operation',
+                operation.operation_id,
+                operation,
+                claim_id=operation.claim_id,
+            )
+            return
+
+        immutable_identity = (
+            'claim_id',
+            'external_claim_id',
+            'authorisation_ref',
+            'claimant_consent_ref',
+            'requested_action',
+            'authorised_revision',
+            'request_fingerprint',
+            'created_at',
+        )
+        if any(getattr(existing, name) != getattr(operation, name) for name in immutable_identity):
+            raise IdempotencyConflict(operation.operation_id)
+        if operation.updated_at < existing.updated_at:
+            raise IdempotencyConflict(operation.operation_id)
+        if existing.status in {
+            AssessorRoutingOperationStatus.ACCEPTED,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+        }:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        allowed_statuses = {
+            AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
+            AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.ACCEPTED,
+        }
+        if operation.status not in allowed_statuses:
+            if existing != operation:
+                raise IdempotencyConflict(operation.operation_id)
+            return
+        self._put(
+            'assessor_routing_operation',
+            operation.operation_id,
+            operation,
+            claim_id=operation.claim_id,
+        )
+
+    def save_assessor_routing_preparation(
+        self,
+        operation: AssessorRoutingOperation,
+        decision: AgentDecisionRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self.get_claim(operation.claim_id, customer_id)
+        session = self.get_session(operation.claim_id, decision.session_id, customer_id)
+        if (
+            claim is None
+            or session is None
+            or claim.active_session_id != decision.session_id
+            or claim.external_claim is None
+            or claim.external_claim.external_claim_id != operation.external_claim_id
+            or operation.status is not AssessorRoutingOperationStatus.PREPARED
+            or operation.authorised_revision != claim.revision
+            or decision.claim_id != claim.claim_id
+            or decision.decision_id != operation.authorisation_ref
+            or decision.resulting_revision != operation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+            or 'ASSESSOR_RULE_AUTHORISED' not in decision.reason_codes
+        ):
+            raise KeyError(operation.claim_id)
+
+        def persist(mongo_session: Any) -> None:
+            existing_operation = self._get(
+                'assessor_routing_operation',
+                operation.operation_id,
+                AssessorRoutingOperation,
+                session=mongo_session,
+            )
+            existing_decision = self._get(
+                'agent_decision',
+                decision.decision_id,
+                AgentDecisionRecord,
+                session=mongo_session,
+            )
+            if existing_operation is not None or existing_decision is not None:
+                if existing_operation == operation and existing_decision == decision:
+                    return
+                raise IdempotencyConflict(operation.operation_id)
+            self._put(
+                'agent_decision',
+                decision.decision_id,
+                decision,
+                customer_id=customer_id,
+                claim_id=decision.claim_id,
+                session=mongo_session,
+            )
+            self._put(
+                'assessor_routing_operation',
+                operation.operation_id,
+                operation,
+                claim_id=operation.claim_id,
+                session=mongo_session,
+            )
+
+        self._atomic(persist)
+
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if not self._claim_owned(evidence.claim_id, customer_id):
             raise KeyError(evidence.claim_id)
@@ -850,11 +987,14 @@ class MongoDBRepository:
     ) -> None:
         if (
             claim.revision != expected_revision + 1
+            or claim.active_session_id != session.session_id
             or session.claim_id != claim.claim_id
             or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
             or session.context_revision != claim.revision
             or message.claim_id != claim.claim_id
             or message.session_id != session.session_id
+            or message.actor is not ActorType.CLAIMANT
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
@@ -1042,7 +1182,13 @@ class MongoDBRepository:
                 customer_id=claim.customer_id,
                 session=mongo_session,
             )
-            if stored_session is None or stored_session.claim_id != claim.claim_id:
+            if (
+                stored_session is None
+                or stored_session.claim_id != claim.claim_id
+                or stored_session.status is not SessionStatus.ACTIVE
+                or session.status is not SessionStatus.ACTIVE
+                or claim.active_session_id != session.session_id
+            ):
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
             if kind == 'message':
@@ -1058,6 +1204,8 @@ class MongoDBRepository:
                 if (
                     message_session is None
                     or message_session.claim_id != claim.claim_id
+                    or message_session.status is not SessionStatus.ACTIVE
+                    or claim.active_session_id != record.session_id
                     or idempotency.session_id != record.session_id
                     or record.message_id
                     not in {idempotency.message_id, idempotency.agent_message_id}
@@ -1080,6 +1228,7 @@ class MongoDBRepository:
             if existing is not None and (
                 existing.get('claim_id') != claim.claim_id
                 or existing.get('customer_id') != claim.customer_id
+                or kind in IMMUTABLE_CHILD_RECORD_KINDS
             ):
                 raise IdempotencyConflict(identifier)
             self._reject_client_message_conflict(document, session=mongo_session)
@@ -1120,11 +1269,14 @@ class MongoDBRepository:
                 'customer_id': claim.customer_id,
                 'revision': expected_revision,
             },
-            projection={'revision': 1},
+            projection={'revision': 1, 'active_session_id': 1},
             session=mongo_session,
         )
         if current is None:
             self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+            return
+        if current.get('active_session_id') != claim.active_session_id:
+            raise KeyError(claim.claim_id)
 
     def _replace_claim_revision(
         self,

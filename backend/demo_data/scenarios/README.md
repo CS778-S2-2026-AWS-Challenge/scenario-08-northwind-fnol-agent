@@ -1,13 +1,14 @@
 # Day 3 Runtime Demo Scenarios
 
 These canonical runtime demo-data records contain synthetic data only and
-exercise the stable scenario identifiers from `docs/day3-implementation-map.md`.
+exercise the stable scenario identifiers from
+`docs/archive/sprint-1/planning/day3-implementation-map.md`.
 They are the source used by the development/test demo seeding workflow.
 
 | Scenario | Coverage |
 |---|---|
-| `AT-01-clear-motor.json` | Fast journey with confirmed material facts |
-| `AT-02-coverage-ambiguity.json` | Ambiguous coverage routed to a professional-review handoff card |
+| `AT-01-clear-motor.json` | Clear journey with confirmed material facts |
+| `AT-02-coverage-ambiguity.json` | Ambiguous coverage with linked policy/history data routed to a typed professional-review handoff card |
 | `AT-04-urgent.json` | Injury/danger report with an urgent handoff card |
 | `AT-05-human-request.json` | Explicit human-support request with a standard-priority handoff card |
 | `AT-06-pending-evidence.json` | Claimant-owned future evidence, expected timing, and non-blocking work |
@@ -25,3 +26,31 @@ python scripts/run_scenarios.py
 The loader rejects broken claim/session links. Claimant API tests also verify
 that storage provenance and internal-only messages do not cross the claimant
 visibility boundary.
+
+## Connected MVP Journey
+
+The canonical `business_path` field assigns exactly one scenario to each current
+MVP path: clear, pending, urgent, professional review, and handoff.
+`load_mvp_journey_scenarios()` rejects a missing or duplicate path and is the
+shared loading boundary used by the Workbench demo queue and the live evidence
+visibility check. The Workbench queue also loads AT-10 as an additional bounded
+external-service demonstration; it does not replace any of the five MVP paths.
+
+Path entry fixtures retain only expected entry baselines and visibility
+classifications. They derive business path, Claim State, evidence, customer next
+step, and handoffs from these canonical records.
+
+## Linked MVP Record Graph
+
+AT-02 is the bounded structured-data example for issue #251. Its synthetic
+`linked_records` baseline connects one customer and Working Claim to two typed
+retrieval records (policy and relevant claim history), the complete evidence set,
+one handoff, and the complete scenario message set. The loader rejects missing,
+duplicate, cross-claim, or wrong-type identifiers and requires the handoff packet
+to reference the same policy, history, and evidence records.
+
+The staff Workbench receives policy/history detail only from the claim-detail API.
+Claimant projections do not include retrieval records, provider references, claim
+history, internal messages, or the staff handoff packet. Neither page embeds the
+fixture identifiers or record payloads; they discover claims and details through
+the existing list/detail APIs.

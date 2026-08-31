@@ -62,11 +62,71 @@ body:
       required: true
 
   - type: textarea
+    id: discussion-approval
+    attributes:
+      label: Discussion approval
+      description: Issues created by anyone other than the maintainer require prior approval in the `Issue requests` Discussions category. Paste the URL of the approved thread. The maintainer may write None.
+      placeholder: "https://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/123, or None - maintainer-created issue."
+    validations:
+      required: true
+
+  - type: textarea
     id: dependencies
     attributes:
       label: Dependencies
       description: List repository issues, contracts, or inputs that must exist first. Write None when there are no dependencies.
       placeholder: "- #123: documented response fields, or None."
+    validations:
+      required: true
+
+  - type: textarea
+    id: owned-behavior
+    attributes:
+      label: Owned behavior
+      description: Define the behaviour this issue owns. Do not claim adjacent active work.
+      placeholder: State the bounded user, system, contract, test, or governance outcome owned here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact-area
+    attributes:
+      label: Expected impact area
+      description: List likely modules, paths, or contracts. This is an impact forecast, not a rigid file allowlist.
+      placeholder: "For example: backend API and contract tests; docs/api.md when the contract changes."
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: State adjacent work that remains outside this issue.
+      placeholder: "For example: no UI redesign and no provider deployment."
+    validations:
+      required: true
+
+  - type: textarea
+    id: shared-contracts
+    attributes:
+      label: Shared contracts
+      description: List affected product, API, persistence, fixture, authority, or workflow contracts. Write None when unaffected.
+      placeholder: "docs/api.md and Claim State revision rules, or None."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk-class
+    attributes:
+      label: Risk class
+      description: Choose the highest material risk introduced or verified by this issue.
+      options:
+        - Standard
+        - Shared contract
+        - Persistence or concurrency
+        - External side effect
+        - Identity, authority, security, or privacy
+        - Repository governance or deployment
     validations:
       required: true
 
