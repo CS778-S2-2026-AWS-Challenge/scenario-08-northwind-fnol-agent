@@ -3,13 +3,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.domain.external_services import (
-    ExternalTaskClaimMismatch,
+    ExternalTaskClaimMismatchError,
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
-    UntraceableExternalEvidence,
+    UntraceableExternalEvidenceError,
     external_task_for_evidence,
     map_external_task_evidence,
 )
@@ -225,7 +225,7 @@ def test_external_evidence_resolves_to_its_task() -> None:
 def test_resolver_rejects_a_link_declared_under_another_claim() -> None:
     """Matching on evidence id alone would let claim A borrow claim B's provenance."""
 
-    with pytest.raises(ExternalTaskClaimMismatch, match='does not match evidence claim'):
+    with pytest.raises(ExternalTaskClaimMismatchError, match='does not match evidence claim'):
         external_task_for_evidence(_evidence(), [_link(claim_id='clm_other')])
 
 
@@ -238,7 +238,7 @@ def test_resolver_prefers_the_link_that_agrees_on_the_claim() -> None:
 def test_external_evidence_without_a_link_is_rejected() -> None:
     """Unattributed provider material must not pass as ordinary evidence."""
 
-    with pytest.raises(UntraceableExternalEvidence, match='names no originating task'):
+    with pytest.raises(UntraceableExternalEvidenceError, match='names no originating task'):
         external_task_for_evidence(_evidence(), [_link(evidence_id='evd_other')])
 
 
@@ -264,7 +264,7 @@ def test_mapping_ignores_links_for_tasks_outside_the_projection() -> None:
 
 
 def test_mapping_rejects_a_link_that_crosses_claims() -> None:
-    with pytest.raises(ExternalTaskClaimMismatch, match='does not match task'):
+    with pytest.raises(ExternalTaskClaimMismatchError, match='does not match task'):
         map_external_task_evidence([_task()], [_link(claim_id='clm_other')])
 
 

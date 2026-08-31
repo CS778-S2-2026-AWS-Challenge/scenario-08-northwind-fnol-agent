@@ -265,11 +265,11 @@ class ExternalTaskEvidenceView(ContractModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
-class UntraceableExternalEvidence(ValueError):
+class UntraceableExternalEvidenceError(ValueError):
     """An externally sourced evidence record names no originating external task."""
 
 
-class ExternalTaskClaimMismatch(ValueError):
+class ExternalTaskClaimMismatchError(ValueError):
     """A link joins an evidence record and a task that belong to different claims."""
 
 
@@ -299,9 +299,9 @@ def external_task_for_evidence(
         origin.
 
     Raises:
-        ExternalTaskClaimMismatch: A link names this evidence record under a
+        ExternalTaskClaimMismatchError: A link names this evidence record under a
             different claim.
-        UntraceableExternalEvidence: The record is external-system sourced and no
+        UntraceableExternalEvidenceError: The record is external-system sourced and no
             link names a task for it.
     """
 
@@ -316,11 +316,11 @@ def external_task_for_evidence(
         if mismatched is None:
             mismatched = link
     if mismatched is not None:
-        raise ExternalTaskClaimMismatch(
+        raise ExternalTaskClaimMismatchError(
             f'{record.evidence_id}: link claim {mismatched.claim_id} does not match evidence '
             f'claim {record.claim_id}.'
         )
-    raise UntraceableExternalEvidence(
+    raise UntraceableExternalEvidenceError(
         f'{record.evidence_id}: external-system evidence names no originating task.'
     )
 
@@ -340,7 +340,7 @@ def map_external_task_evidence(
         identifiers in link order.
 
     Raises:
-        ExternalTaskClaimMismatch: A link names a task whose claim differs from
+        ExternalTaskClaimMismatchError: A link names a task whose claim differs from
             the link's own claim.
     """
 
@@ -350,7 +350,7 @@ def map_external_task_evidence(
         if link.task_id not in grouped:
             continue
         if claims[link.task_id] != link.claim_id:
-            raise ExternalTaskClaimMismatch(
+            raise ExternalTaskClaimMismatchError(
                 f'{link.evidence_id}: link claim {link.claim_id} does not match task '
                 f'{link.task_id} claim {claims[link.task_id]}.'
             )
