@@ -188,8 +188,10 @@ Validation accepts explicit results for each named scenario, including evidence.
 is recorded and returns `422 VALIDATION_FAILED` without changing the configuration state. A normal-
 impact draft publishes after all supplied scenarios pass; a high-impact draft moves to
 `awaiting_approval` and requires an explicit publish operation. Every transition, including a
-rejected transition, records actor, reason, outcome, revision, and timestamp in the audit
-collection. State-changing POST requests require `Idempotency-Key`; replaying the same request
+rejected transition, records actor, reason, outcome, revision, prior revision when applicable,
+top-level changed fields, and timestamp in the audit collection. Changed-field metadata names
+fields only and never copies configuration or secret values. State-changing POST requests require
+`Idempotency-Key`; replaying the same request
 returns the original response and reusing a key with different parameters returns `409
 IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 REVISION_CONFLICT` or
 `409 REVISION_REQUIRED`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
@@ -204,6 +206,11 @@ For the `data_profile` domain, `values` is a closed object containing exactly
 mongodb, and aws profiles may be retained as drafts for configuration review, but validation
 returns `422 PROVIDER_CONFIGURATION_UNAVAILABLE` and they cannot be published. Invalid fields or
 combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
+
+Runtime consumers use the provider-neutral configuration service to read the single active
+`published` record for a domain. Draft, awaiting-approval, withdrawn, superseded, and unverified
+provider records are never returned by that boundary; a domain without a publication fails with
+`ACTIVE_CONFIGURATION_NOT_FOUND` rather than falling back to another profile.
 
 ## Claimant Identity and Account API
 
