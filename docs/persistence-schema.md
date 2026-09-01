@@ -290,6 +290,18 @@ and checksums rather than embedding those bytes.
 
 ## Configuration and Control Plane Invariants
 
+The fixture configuration repository used by the bounded Admin API stores immutable revisions
+behind the same provider-neutral boundary that later profiles must implement. Configuration IDs
+use the `cfg_` prefix and audit event IDs use `aud_`; the physical partition and sort-key mapping
+is profile-specific and must preserve these access patterns.
+
+Each configuration revision contains `configuration_id`, `domain`, `revision`, `state`,
+`impact`, non-secret `values`, protected `secret_references`, `author`, `reason`, optional
+`validation_evidence`, `effective_time`, `previous_version`, `rollback_target`, and
+`updated_at`. Audit events contain `event_id`, `configuration_id`, `revision`, `actor`,
+`action`, `reason`, `outcome`, and `created_at`. Audit events are append-only and are not
+deleted or rewritten during withdrawal, supersession, or rollback.
+
 - Draft configuration is separate from the active published version.
 - Publication records author, reason, validation evidence, approver when required,
   effective time, previous version, and rollback target.
