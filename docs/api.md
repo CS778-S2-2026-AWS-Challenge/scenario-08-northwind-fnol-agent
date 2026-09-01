@@ -1399,6 +1399,7 @@ claimant routes:
   "staff_actions": [],
   "customer_updates": [],
   "external_claim": null,
+  "external_service_action": null,
   "assessor_routing": null,
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
@@ -1422,7 +1423,9 @@ specific to claimant support intent. Claimant routes return only the
 separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
 action, applied rule, assignment, source message, or packet. `external_claim` and
 `assessor_routing` use the shared typed creation and routing results, including their status,
-next step, and expected timing. Internal fields are never added to claimant projections unless
+next step, and expected timing. `external_service_action` reuses the claimant-safe service
+projection so staff see the same participant, purpose, consent state, result, and pending status
+without exposing an adapter payload. Internal fields are never added to claimant projections unless
 their claimant-safe contract explicitly includes them.
 
 The current repository has no separate persisted staff-action or customer-update records. Those

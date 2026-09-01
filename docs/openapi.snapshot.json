@@ -5162,6 +5162,16 @@
               }
             ]
           },
+          "external_service_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantExternalServiceAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "external_service_consents": {
             "items": {
               "$ref": "#/components/schemas/ExternalServiceConsent"

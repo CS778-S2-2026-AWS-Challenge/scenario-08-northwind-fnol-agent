@@ -326,6 +326,15 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         update={'form': {**stored_before_consent.form, 'incident.location': location}}
     )
     consent = _grant_consent(client, claim_id, revision, key='route-success')
+    pending_staff_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
+    assert pending_staff_detail.status_code == 200
+    pending_action = pending_staff_detail.json()['external_service_action']
+    assert pending_action['provider'] == 'Controlled assessment fixture'
+    assert pending_action['status'] == 'ready_to_request'
+    assert pending_action['routing'] is None
 
     first = client.post(
         f'/api/v1/claims/{claim_id}/assessor-routing',
@@ -364,6 +373,15 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     assert body['action']['routing']['routing_status'] == 'assigned'
     assert body['action']['routing']['assessor_reference'].startswith('asr_fixture_')
     assert body['customer_next_step']['responsible_party'] == 'external_party'
+    staff_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
+    assert staff_detail.status_code == 200
+    staff_action = staff_detail.json()['external_service_action']
+    assert staff_action['provider'] == 'Controlled assessment fixture'
+    assert staff_action['status'] == 'assigned'
+    assert staff_action['routing'] == body['action']['routing']
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     decisions = repository.list_agent_decisions(claim_id, 'cus_demo')

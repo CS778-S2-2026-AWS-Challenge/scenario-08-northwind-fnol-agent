@@ -159,6 +159,18 @@ def test_employee_workbench_surfaces_created_and_routed_operational_summary() ->
     assert 'detail.assessor_routing.routing_status' in page
 
 
+def test_employee_workbench_shows_third_party_responsibility_results_and_pending_work() -> None:
+    page = WORKBENCH.read_text(encoding='utf-8')
+
+    assert 'detail.external_service_action' in page
+    assert "summaryCard('Third-party participant', thirdParty.provider" in page
+    assert "summaryCard('Third-party status', formatLabel(thirdParty.status)" in page
+    assert "'Claimant consent'" in page
+    assert "'Northwind submission'" in page
+    assert "'No verified provider result yet'" in page
+    assert "summaryCard(routing ? 'Third-party result' : 'Third-party work pending'" in page
+
+
 def test_employee_pending_evidence_surfaces_responsibility_timing_and_context() -> None:
     page = WORKBENCH.read_text(encoding='utf-8')
 

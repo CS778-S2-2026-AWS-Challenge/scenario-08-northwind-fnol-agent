@@ -1928,6 +1928,24 @@
         ),
       );
 
+      const thirdParty = detail.external_service_action;
+      if (thirdParty) {
+        const routing = thirdParty.routing;
+        const pendingOwner = thirdParty.status === 'consent_required'
+          ? 'Claimant consent'
+          : thirdParty.status === 'ready_to_request'
+            ? 'Northwind submission'
+            : thirdParty.provider;
+        const result = routing?.assessor_reference
+          || routing?.queue_reference
+          || (routing ? routing.next_step : 'No verified provider result yet');
+        grid.append(
+          summaryCard('Third-party participant', thirdParty.provider, thirdParty.service_name),
+          summaryCard('Third-party status', formatLabel(thirdParty.status), `Pending owner: ${pendingOwner}`),
+          summaryCard(routing ? 'Third-party result' : 'Third-party work pending', result),
+        );
+      }
+
       const supporting = [];
       if (detail.external_claim) {
         supporting.push(`Claim ${detail.external_claim.claim_number || detail.external_claim.external_claim_id || ''} is ${formatLabel(detail.external_claim.creation_status)}.`);

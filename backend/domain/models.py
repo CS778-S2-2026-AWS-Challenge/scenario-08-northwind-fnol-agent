@@ -769,6 +769,7 @@ class WorkbenchClaimDetail(ContractModel):
     customer_updates: list[dict[str, Any]]
     external_claim: ExternalClaimResult | None = None
     external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)
+    external_service_action: ClaimantExternalServiceAction | None = None
     assessor_routing: AssessorRoutingResult | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime

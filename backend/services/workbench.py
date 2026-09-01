@@ -18,6 +18,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.external_services import claimant_assessor_action
 
 _PRIORITY_RANK = {
     HandoffPriority.IMMEDIATE: 0,
@@ -307,6 +308,7 @@ def get_workbench_claim_detail(
         ],
         external_claim=claim.external_claim,
         external_service_consents=claim.external_service_consents,
+        external_service_action=claimant_assessor_action(repository, claim),
         assessor_routing=claim.assessor_routing,
         customer_next_step=claim.customer_next_step,
         created_at=claim.created_at,
