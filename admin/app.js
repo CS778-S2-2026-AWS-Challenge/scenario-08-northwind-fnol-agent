@@ -71,10 +71,16 @@ function recordName(record) {
   return record.values?.name || record.values?.label || record.configuration_id;
 }
 
+function validationSummary(record) {
+  const scenarios = record.validation_evidence?.scenarios;
+  if (!Array.isArray(scenarios) || !scenarios.length) return 'Not validated';
+  return `${scenarios.length} result${scenarios.length === 1 ? '' : 's'} recorded`;
+}
+
 function renderRecords(items) {
   if (!items.length) return `<div class="notice"><div><h2>No configuration records</h2><p>No records exist for this module. Configuration creation is not available in this console release.</p></div></div>`;
   return `<div class="table-wrap"><table><thead><tr><th scope="col">Configuration</th><th scope="col">Status</th><th scope="col">Revision</th><th scope="col">Validation</th><th scope="col">Publication / rollback</th></tr></thead><tbody>${items.map(record => {
-    const validation = record.validation_evidence?.length ? `${record.validation_evidence.length} result${record.validation_evidence.length === 1 ? '' : 's'} recorded` : 'Not validated';
+    const validation = validationSummary(record);
     const publication = record.state === 'published' ? `Active${record.effective_time ? ` since ${new Date(record.effective_time).toLocaleString()}` : ''}` : record.rollback_target ? `Rollback target: ${record.rollback_target}` : record.previous_version ? `Previous version: ${record.previous_version}` : 'Not published';
     return `<tr><td><span class="item-name">${escapeHtml(recordName(record))}</span><span class="item-id">${escapeHtml(record.configuration_id)}</span></td><td>${statusBadge(record.state)}</td><td>${escapeHtml(record.revision)}</td><td>${escapeHtml(validation)}</td><td>${escapeHtml(publication)}</td></tr>`;
   }).join('')}</tbody></table></div>`;
