@@ -72,9 +72,13 @@ function recordName(record) {
 }
 
 function validationSummary(record) {
-  const scenarios = record.validation_evidence?.scenarios;
-  if (!Array.isArray(scenarios) || !scenarios.length) return 'Not validated';
-  return `${scenarios.length} result${scenarios.length === 1 ? '' : 's'} recorded`;
+  const evidence = record.validation_evidence;
+  if (!evidence || typeof evidence !== 'object' || !Object.keys(evidence).length) return 'Not validated';
+  const scenarios = evidence.scenarios;
+  if (Array.isArray(scenarios) && scenarios.length) {
+    return `${scenarios.length} result${scenarios.length === 1 ? '' : 's'} recorded`;
+  }
+  return 'Validation evidence recorded';
 }
 
 function renderRecords(items) {

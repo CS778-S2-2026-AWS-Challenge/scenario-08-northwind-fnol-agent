@@ -55,10 +55,24 @@ test('a configuration with validation evidence is not labelled Not validated', (
     values: { name: 'Validated configuration' },
     validation_evidence: {
       result: 'passed',
-      scenarios: [{ scenario_id: 'motor-handoff', outcome: 'passed', evidence: '4 checks passed.' }],
     },
   }]);
 
-  assert.match(html, /1 result recorded/);
+  assert.match(html, /Validation evidence recorded/);
   assert.doesNotMatch(html, /Not validated/);
+});
+
+test('null and empty validation evidence are labelled Not validated', () => {
+  const context = loadConsole();
+  const records = [null, {}].map((validation_evidence, index) => ({
+    configuration_id: `cfg_unvalidated_${index}`,
+    revision: 1,
+    state: 'draft',
+    values: { name: `Unvalidated configuration ${index}` },
+    validation_evidence,
+  }));
+
+  const html = context.renderRecords(records);
+
+  assert.equal(html.match(/Not validated/g)?.length, 2);
 });
