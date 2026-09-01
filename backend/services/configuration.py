@@ -125,7 +125,11 @@ def validate(
         'scenarios': [item.model_dump() for item in payload.scenario_results],
         'result': 'passed',
     }
-    _validate_configuration_values(current.domain, current.values, for_validation=True)
+    try:
+        _validate_configuration_values(current.domain, current.values, for_validation=True)
+    except ApiError as error:
+        _audit(repo, current, actor, 'validate', error.message, 'rejected')
+        raise
     failed = [item for item in payload.scenario_results if item.outcome == 'failed']
     if failed:
         evidence['result'] = 'failed'

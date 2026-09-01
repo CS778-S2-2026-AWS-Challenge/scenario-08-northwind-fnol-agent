@@ -149,6 +149,11 @@ def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
         )
         assert draft.status_code == 201
         configuration_id = draft.json()['configuration_id']
+        read_back = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        )
+        assert read_back.status_code == 200
+        assert read_back.json()['values']['data_runtime_profile'] == 'mongodb'
         validation = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/validate',
             headers=_post_headers('data-profile-validate', 1),
@@ -164,6 +169,11 @@ def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
         )
         assert validation.status_code == 422
         assert validation.json()['error']['code'] == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        assert audits[-1]['action'] == 'validate'
+        assert audits[-1]['outcome'] == 'rejected'
 
 
 def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
