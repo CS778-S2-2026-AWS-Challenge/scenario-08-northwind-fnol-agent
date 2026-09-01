@@ -146,6 +146,42 @@ class DataRuntimeBundle:
             close_repository()
 
 
+_START_CAPABLE_CONNECTION_STATES = frozenset(
+    {
+        RuntimeCapabilityStatus.USING_FIXTURE.value,
+        RuntimeCapabilityStatus.VERIFIED.value,
+        'configured_service',
+    }
+)
+
+
+def _require_start_capable_bundle(bundle: DataRuntimeBundle) -> DataRuntimeBundle:
+    """Refuse a configured bundle when any selected provider is unavailable.
+
+    Construction alone is not evidence that an external adapter is usable.  The
+    composition root must perform the same provider-neutral readiness check for
+    every capability before exposing the bundle to application code.
+    """
+
+    readiness = bundle.readiness_checks()
+    unavailable = tuple(
+        capability
+        for capability, status in readiness.items()
+        if status not in _START_CAPABLE_CONNECTION_STATES
+    )
+    if unavailable:
+        bundle.close()
+        names = ', '.join(f'{capability}={readiness[capability]}' for capability in unavailable)
+        error = RuntimeProfileConfigurationError(
+            f'Data runtime profile {bundle.profile.value!r} cannot start; '
+            f'unavailable capabilities: {names}. Startup refused; no fixture or '
+            'second-provider fallback was assembled.'
+        )
+        error.readiness = readiness  # type: ignore[attr-defined]
+        raise error
+    return bundle
+
+
 def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) -> None:
     """Apply the independent composition guard for externally supplied bundles."""
 
@@ -167,6 +203,7 @@ def validate_data_runtime_bundle(settings: Settings, bundle: DataRuntimeBundle) 
         raise RuntimeProfileConfigurationError(
             'The data runtime bundle does not match NORTHWIND_OBJECT_STORAGE_ADAPTER.'
         )
+    _require_start_capable_bundle(bundle)
 
 
 def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
@@ -181,7 +218,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             )
         else:
             evidence_storage = MockEvidenceStorage()
-        return DataRuntimeBundle(
+        bundle = DataRuntimeBundle(
             profile=DataRuntimeProfile.FIXTURE,
             repository=FixtureRepository(),
             evidence_storage=evidence_storage,
@@ -189,6 +226,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             knowledge_documents=knowledge_documents,
             knowledge_retrieval=FixtureKnowledgeRetriever(knowledge_documents),
         )
+        return _require_start_capable_bundle(bundle)
 
     if settings.data_runtime_profile is DataRuntimeProfile.LOCAL_MVP:
         if settings.object_storage_adapter is not ObjectStorageAdapter.S3_COMPATIBLE:
@@ -211,7 +249,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
         except Exception:
             repository.close()
             raise
-        return DataRuntimeBundle(
+        bundle = DataRuntimeBundle(
             profile=DataRuntimeProfile.LOCAL_MVP,
             repository=repository,
             evidence_storage=evidence_storage,
@@ -219,6 +257,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
             knowledge_documents=knowledge_retrieval,
             knowledge_retrieval=knowledge_retrieval,
         )
+        return _require_start_capable_bundle(bundle)
 
     missing = ', '.join(missing_runtime_capabilities(settings.data_runtime_profile))
     raise RuntimeProfileConfigurationError(
