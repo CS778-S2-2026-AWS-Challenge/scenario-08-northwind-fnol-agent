@@ -1,5 +1,8 @@
 # Northwind FNOL API Contract
 
+<!-- Existing API tables use compact pipe formatting; preserve that contract while extending it. -->
+<!-- markdownlint-disable MD060 -->
+
 ## Document Status
 
 | Item | Value |
@@ -30,7 +33,7 @@ The API supports a trusted, adaptive first-notice-of-loss service. It must prese
 - an internal workbench derived from the same claim state;
 - measurement of claimant, agent, and staff effort.
 
-The broader product includes an Administration and Control Plane for versioned system configuration, but this version of the API contract does not yet define an Admin API. Administration must remain separate from claimant and staff claim operations.
+The broader product includes an Administration and Control Plane for versioned system configuration. The bounded Admin API below is restricted to configuration metadata and lifecycle operations; it remains separate from claimant and staff claim operations.
 
 The API does not authorise the agent to approve or reject claims, make an unreviewed high-impact coverage decision, determine fraud, diagnose injury, or claim that emergency services were contacted when they were not.
 
@@ -156,6 +159,51 @@ Collection response:
 | `500` | Unexpected server error |
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
+
+## Administration and Control Plane API
+
+The administration surface is available under `/internal/v1/admin` and requires an authenticated
+administrator principal with both `admin:read` and `admin:write` scopes. It never reads or writes
+Claim State, WorkItems, handoffs, or claimant messages.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/internal/v1/admin/configurations` | List current configuration revisions, optionally filtered by `domain` |
+| `POST` | `/internal/v1/admin/configurations` | Create a new draft configuration; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/configurations/{configuration_id}` | Read a configuration revision |
+| `PATCH` | `/internal/v1/admin/configurations/{configuration_id}` | Create a new draft revision; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/validate` | Validate a draft against supplied scenario results; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/publish` | Publish an approved high-impact draft; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/configurations/{configuration_id}/audit` | Read append-only lifecycle audit events |
+
+Configuration records contain an opaque `configuration_id`, monotonically increasing `revision`,
+`domain`, `impact`, lifecycle `state`, non-secret `values`, protected `secret_references`,
+`author`, `reason`, optional `validation_evidence`, `effective_time`, `previous_version`, and
+`rollback_target`. Secret values are rejected in `values` and are never returned.
+
+Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or `superseded`.
+Validation accepts explicit results for each named scenario, including evidence. A failed result
+is recorded and returns `422 VALIDATION_FAILED` without changing the configuration state. A normal-
+impact draft publishes after all supplied scenarios pass; a high-impact draft moves to
+`awaiting_approval` and requires an explicit publish operation. Every transition, including a
+rejected transition, records actor, reason, outcome, revision, and timestamp in the audit
+collection. State-changing POST requests require `Idempotency-Key`; replaying the same request
+returns the original response and reusing a key with different parameters returns `409
+IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 REVISION_CONFLICT` or
+`409 REVISION_REQUIRED`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
+changes return `400 INVALID_CONFIGURATION_TRANSITION`; plaintext secrets return
+`422 SECRET_VALUE_FORBIDDEN`.
+
+For the `data_profile` domain, `values` is a closed object containing exactly
+`data_runtime_profile` (`fixture`, `local_mvp`, `cloudflare`, `mongodb`, or `aws`) and
+`object_storage_adapter` (`fixture` or `s3_compatible`). The compatibility matrix is:
+`fixture` → `fixture` or `s3_compatible`; `local_mvp`, `cloudflare`, `mongodb`, and `aws` →
+`s3_compatible`. This prevents incoherent mixed-provider bundles. Unverified cloudflare,
+mongodb, and aws profiles may be retained as drafts for configuration review, but validation
+returns `422 PROVIDER_CONFIGURATION_UNAVAILABLE` and they cannot be published. Invalid fields or
+combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 
 ## Claimant Identity and Account API
 
@@ -2070,6 +2118,8 @@ All errors use one envelope:
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
+| `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
+| `SECRET_VALUE_FORBIDDEN` | `422` | Secret values must use protected references |
 | `ACTIVE_SESSION_EXISTS` | `409` | A conflicting active session exists |
 | `UNSUPPORTED_MEDIA_TYPE` | `415` | File type is not allowed |
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |

@@ -82,6 +82,21 @@ The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
 configured model failure does not silently fall back to the controlled fixture.
 
+## Enforced Model Profile
+
+Each configured gateway has one `ModelProfile` that binds the profile identifier, protocol,
+provider label, model identifier, credential reference, purpose, privacy class, declared
+capabilities, timeout, prompt version, and evaluation status. The composition root rejects
+transport configuration that disagrees with the profile's model, credential reference,
+capabilities, or timeout. The registry also rejects a selected protocol that differs from the
+profile protocol.
+
+Before an adapter reads credentials or opens a network connection, it requires the profile status
+to be `configured` and checks the request purpose, privacy class, prompt version, and explicit
+capability requirements against the selected profile. A `degraded` or `unavailable` profile fails
+closed. This boundary does not discover provider capabilities remotely; a capability declaration
+must still be supported by repeatable adapter tests and the selected endpoint.
+
 ## Implemented Adapters
 
 ### OpenAI-Compatible
@@ -98,9 +113,15 @@ This is a transport transformation only: the returned object must still pass the
 model and Runtime authority validation before it can affect Claim State.
 
 | Variable | Meaning |
-|---|---|
+| --- | --- |
 | `AGENT_RUNTIME_PROFILE` | `controlled` or `model_gateway` |
 | `MODEL_PROTOCOL_ADAPTER` | Registered adapter name; currently `openai_compatible` by default |
+| `MODEL_PROFILE_ID` | Identifier of the selected model profile |
+| `MODEL_PROVIDER` | Provider label used for internal profile audit context |
+| `MODEL_PURPOSE` | Allowed request purpose; `agent_turn` for the claimant Agent |
+| `MODEL_PRIVACY_CLASS` | Allowed data classification for requests |
+| `MODEL_PROMPT_VERSION` | Exact executable prompt identifier allowed by the profile |
+| `MODEL_EVALUATION_STATUS` | `configured`, `degraded`, or `unavailable`; only `configured` can call transport |
 | `MODEL_BASE_URL` | Endpoint root, including a compatible version prefix when required |
 | `MODEL_IDENTIFIER` | Model identifier sent to the endpoint |
 | `MODEL_API_KEY_ENV` | Name of the environment variable containing the credential, not the credential |
@@ -143,6 +164,17 @@ Changing the prompt requires a new prompt identifier and regression evidence.
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
 successful local composition is not proof of Runtime access.
+
+Run the repeatable synthetic live verifier only in an authorised, budgeted environment after
+injecting the configured credential through the environment variable named by
+`MODEL_API_KEY_ENV`:
+
+```powershell
+py -3.12 -m scripts.verify_model_gateway_live
+```
+
+The verifier requires a complete structured response and reports only bounded metadata,
+capabilities, and usage. It never prints the credential or full provider output.
 
 ## Custom Protocols
 
@@ -200,9 +232,10 @@ idempotency records unchanged.
 The implemented Gateway is the first provider-neutral transport and validation layer. It
 does not yet implement the complete target Agent Runtime contract:
 
-- the current `ModelRequest` carries messages, response schema, and tool declarations;
-  the target request also binds purpose, actor, Claim scope, policy and Registry versions,
-  privacy class, budgets, trace context, and the exact actions and tools allowed;
+- the current `ModelRequest` binds purpose, privacy class, prompt version, capability requirements,
+  messages, response schema, and tool declarations; the target request also binds actor, Claim
+  scope, policy and Registry versions, budgets, trace context, and the exact actions and tools
+  allowed;
 - the current `ModelResponse` normalises transport output; the target Runtime additionally
   distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
   and final `TurnResult`;

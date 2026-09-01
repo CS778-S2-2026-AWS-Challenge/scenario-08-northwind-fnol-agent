@@ -76,6 +76,9 @@ def inspect_environment(values: dict[str, str]) -> tuple[dict[str, object], int]
         try:
             bundle = build_data_runtime_bundle(settings)
         except (RuntimeProfileConfigurationError, ValueError) as error:
+            readiness = getattr(error, 'readiness', None)
+            if isinstance(readiness, dict):
+                result['readiness'] = readiness
             result.update(status='startup_refused', reason=str(error))
             return result, 2
         try:
