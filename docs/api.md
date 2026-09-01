@@ -196,6 +196,15 @@ IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 RE
 changes return `400 INVALID_CONFIGURATION_TRANSITION`; plaintext secrets return
 `422 SECRET_VALUE_FORBIDDEN`.
 
+For the `data_profile` domain, `values` is a closed object containing exactly
+`data_runtime_profile` (`fixture`, `local_mvp`, `cloudflare`, `mongodb`, or `aws`) and
+`object_storage_adapter` (`fixture` or `s3_compatible`). The compatibility matrix is:
+`fixture` → `fixture` or `s3_compatible`; `local_mvp`, `cloudflare`, `mongodb`, and `aws` →
+`s3_compatible`. This prevents incoherent mixed-provider bundles. Unverified cloudflare,
+mongodb, and aws profiles may be retained as drafts for configuration review, but validation
+returns `422 PROVIDER_CONFIGURATION_UNAVAILABLE` and they cannot be published. Invalid fields or
+combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
+
 ## Claimant Identity and Account API
 
 | Method | Route | Purpose |
