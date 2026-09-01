@@ -385,6 +385,13 @@
             "title": "Actor",
             "type": "string"
           },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Fields",
+            "type": "array"
+          },
           "configuration_id": {
             "title": "Configuration Id",
             "type": "string"
@@ -401,6 +408,17 @@
           "outcome": {
             "title": "Outcome",
             "type": "string"
+          },
+          "previous_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Revision"
           },
           "reason": {
             "title": "Reason",
