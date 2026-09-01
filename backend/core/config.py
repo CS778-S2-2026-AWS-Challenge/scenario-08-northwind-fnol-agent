@@ -73,6 +73,12 @@ class Settings:
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
+    model_profile_id: str = 'default'
+    model_provider: str = 'unconfigured'
+    model_purpose: str = 'agent_turn'
+    model_privacy_class: str = 'synthetic_fnol'
+    model_prompt_version: str = 'northwind-fnol-motor-claimant-v2'
+    model_evaluation_status: str = 'configured'
     model_base_url: str = ''
     model_identifier: str = ''
     model_api_key_env: str | None = None
@@ -121,6 +127,14 @@ class Settings:
                 raise ValueError('MODEL_IDENTIFIER must not be empty.')
             if self.model_timeout_seconds <= 0:
                 raise ValueError('MODEL_TIMEOUT_SECONDS must be greater than zero.')
+            if self.model_evaluation_status not in {
+                'configured',
+                'degraded',
+                'unavailable',
+            }:
+                raise ValueError(
+                    'MODEL_EVALUATION_STATUS must be configured, degraded, or unavailable.'
+                )
 
     @property
     def developer_mode(self) -> bool:
@@ -195,6 +209,18 @@ class Settings:
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip(),
+            model_profile_id=os.getenv('MODEL_PROFILE_ID', 'default').strip(),
+            model_provider=os.getenv('MODEL_PROVIDER', 'unconfigured').strip(),
+            model_purpose=os.getenv('MODEL_PURPOSE', 'agent_turn').strip(),
+            model_privacy_class=os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip(),
+            model_prompt_version=os.getenv(
+                'MODEL_PROMPT_VERSION',
+                'northwind-fnol-motor-claimant-v2',
+            ).strip(),
+            model_evaluation_status=os.getenv(
+                'MODEL_EVALUATION_STATUS',
+                'configured',
+            ).strip(),
             model_base_url=os.getenv('MODEL_BASE_URL', '').strip(),
             model_identifier=os.getenv('MODEL_IDENTIFIER', '').strip(),
             model_api_key_env=credential_environment_variable,

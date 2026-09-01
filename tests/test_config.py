@@ -123,6 +123,12 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     monkeypatch.setenv('MODEL_BASE_URL', 'http://127.0.0.1:11434/v1')
     monkeypatch.setenv('MODEL_IDENTIFIER', 'local-model')
     monkeypatch.setenv('MODEL_API_KEY_ENV', 'LOCAL_MODEL_API_KEY')
+    monkeypatch.setenv('MODEL_PROFILE_ID', 'local-agent-turn')
+    monkeypatch.setenv('MODEL_PROVIDER', 'local-runtime')
+    monkeypatch.setenv('MODEL_PURPOSE', 'agent_turn')
+    monkeypatch.setenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol')
+    monkeypatch.setenv('MODEL_PROMPT_VERSION', 'northwind-fnol-motor-claimant-v2')
+    monkeypatch.setenv('MODEL_EVALUATION_STATUS', 'configured')
     monkeypatch.setenv('MODEL_TIMEOUT_SECONDS', '12.5')
     monkeypatch.setenv('MODEL_SUPPORTS_STRUCTURED_OUTPUT', 'true')
     monkeypatch.setenv('MODEL_SUPPORTS_TOOLS', 'false')
@@ -133,6 +139,12 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     assert settings.model_base_url == 'http://127.0.0.1:11434/v1'
     assert settings.model_identifier == 'local-model'
     assert settings.model_api_key_env == 'LOCAL_MODEL_API_KEY'
+    assert settings.model_profile_id == 'local-agent-turn'
+    assert settings.model_provider == 'local-runtime'
+    assert settings.model_purpose == 'agent_turn'
+    assert settings.model_privacy_class == 'synthetic_fnol'
+    assert settings.model_prompt_version == 'northwind-fnol-motor-claimant-v2'
+    assert settings.model_evaluation_status == 'configured'
     assert settings.model_timeout_seconds == 12.5
     assert settings.model_supports_structured_output is True
     assert settings.model_supports_tools is False
@@ -162,6 +174,16 @@ def test_model_gateway_runtime_requires_adapter_model_and_positive_timeout() -> 
             model_base_url='http://127.0.0.1:11434/v1',
             model_identifier='local-model',
             model_timeout_seconds=0,
+        )
+
+
+def test_model_gateway_runtime_rejects_unknown_evaluation_status() -> None:
+    with pytest.raises(ValueError, match='MODEL_EVALUATION_STATUS'):
+        Settings(
+            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_base_url='http://127.0.0.1:11434/v1',
+            model_identifier='local-model',
+            model_evaluation_status='untested',
         )
 
 

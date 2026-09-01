@@ -4,6 +4,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.model_gateway import (
     ModelAgentProposal,
+    ModelCapabilities,
     ModelClaimContext,
     ModelClaimStateContext,
     ModelCompletionStatus,
@@ -129,6 +130,10 @@ class GatewayAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         request = ModelRequest(
+            purpose='agent_turn',
+            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            privacy_class='synthetic_fnol',
+            required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
                 ModelMessage(role=ModelRole.SYSTEM, content=_SYSTEM_INSTRUCTION),
                 ModelMessage(
