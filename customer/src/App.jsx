@@ -136,6 +136,25 @@ function mergeFields(current, changes) {
   )
 }
 
+function claimProgress(nextStep, form) {
+  const status = nextStep?.status
+  const stages = {
+    describe_incident: { current: 1, total: 3, label: 'Describe the incident' },
+    provide_incident_location: { current: 2, total: 3, label: 'Add the key details' },
+    confirmation_required: { current: 2, total: 3, label: 'Check the details' },
+    ready_to_create: { current: 3, total: 3, label: 'Ready to create' },
+    claim_created: { current: 3, total: 3, label: 'Claim submitted' },
+  }
+  const fallback = Object.keys(form).length > 0
+    ? { current: 2, total: 3, label: 'Add the key details' }
+    : stages.describe_incident
+  const stage = stages[status] || fallback
+  return {
+    ...stage,
+    saved: Object.values(form).filter((field) => field.status === 'confirmed').length,
+  }
+}
+
 function App() {
   const [page, setPage] = useState('home')
   const [account, setAccount] = useState(null)
@@ -231,6 +250,7 @@ function App() {
   )
   const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
+  const progress = useMemo(() => claimProgress(nextStep, form), [nextStep, form])
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -1052,6 +1072,23 @@ function App() {
               {handoff?.status !== 'in_progress' && <p>{nextStep?.summary}</p>}
             </div>
 
+            <section
+              className="journey-progress"
+              aria-label={`Claim progress: Step ${progress.current} of ${progress.total}, ${progress.label}`}
+            >
+              <div className="journey-progress-heading">
+                <span>Step {progress.current} of {progress.total}</span>
+                <strong>{progress.label}</strong>
+              </div>
+              <div className="progress-track" aria-hidden="true">
+                <span
+                  className="progress-fill"
+                  style={{ '--progress-width': `${(progress.current / progress.total) * 100}%` }}
+                />
+              </div>
+              <p>{progress.saved} {progress.saved === 1 ? 'detail' : 'details'} saved from your conversation.</p>
+            </section>
+
             <div className="message-list" ref={messageListRef} onScroll={trackConversationScroll} aria-live="polite" aria-label="Claim conversation messages">
               {messages.map((message) => (
                 <article className={`message message-${message.actor}`} key={message.message_id}>
@@ -1177,6 +1214,9 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
+              hint={proposedFields.length > 0
+                ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
+                : null}
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
             />
@@ -1258,8 +1298,15 @@ function App() {
             )}
 
             {proposedFields.length > 0 && editingField === null && (
-              <div className="confirmation-bar">
-                <p>Check the highlighted details before continuing.</p>
+              <section className="confirmation-bar" aria-labelledby="confirmation-title">
+                <p className="confirmation-kicker">Review before we continue</p>
+                <h2 id="confirmation-title">Check these details</h2>
+                <ul className="confirmation-list">
+                  {proposedFields.map(([fieldCode]) => (
+                    <li key={fieldCode}>{fieldLabel(fieldCode)} needs your review.</li>
+                  ))}
+                </ul>
+                <p>Use the conversation to correct anything in your own words, or edit a detail here.</p>
                 <button
                   className="primary-button"
                   type="button"
@@ -1268,7 +1315,7 @@ function App() {
                 >
                   {status === 'confirming' ? 'Confirming...' : 'Confirm details'}
                 </button>
-              </div>
+              </section>
             )}
 
             {confirmedFields.length > 0 && proposedFields.length === 0 && (
@@ -1422,6 +1469,7 @@ function MessageComposer({
   busy,
   disabled = false,
   disabledNote = 'Confirm or correct the details before continuing.',
+  hint = null,
   buttonLabel,
   error,
   placeholder = 'Write the details you know...',
@@ -1439,6 +1487,7 @@ function MessageComposer({
         disabled={busy || disabled}
       />
       {disabled && <p className="composer-note">{disabledNote}</p>}
+      {hint && !disabled && <p className="composer-note">{hint}</p>}
       {error && (
         <div className="backend-status is-error" role="alert">
           <span className="status-dot" />
