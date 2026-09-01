@@ -14,13 +14,23 @@ from backend.domain.external_services import (
     ExternalTaskResult,
     ExternalTaskResultVerification,
     ResultAlreadyVerifiedError,
-    StaleVerificationError,
     TaskCannotHaveResultError,
+    UnsettledResultError,
     UntraceableExternalEvidenceError,
     assert_result_may_settle_fact,
     verify_external_task_result,
 )
-from backend.domain.models import ClaimState, EvidenceState, IntegrationSource, WorkflowState
+from backend.domain.models import (
+    Channel,
+    CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
+    IntegrationSource,
+    ResponsibleParty,
+    WorkingClaim,
+)
 from backend.domain.retrieval import RetrievalSource
 
 RECEIVED_AT = datetime(2026, 9, 2, 10, 0, tzinfo=UTC)
@@ -114,12 +124,39 @@ def _link(
     )
 
 
-def _state(
+def _evidence(
     *,
-    evidence: EvidenceState = EvidenceState.RECEIVED,
-    workflow_state: WorkflowState = WorkflowState.COLLECTING,
-) -> ClaimState:
-    return ClaimState(evidence=evidence, workflow_state=workflow_state)
+    evidence_id: str = 'evd_1',
+    claim_id: str = CLAIM,
+    status: EvidenceStatus = EvidenceStatus.RECEIVED,
+) -> EvidenceRecord:
+    return EvidenceRecord(
+        evidence_id=evidence_id,
+        claim_id=claim_id,
+        kind='assessment_report',
+        status=status,
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.EXTERNAL_SYSTEM,
+        created_at=RECEIVED_AT,
+        updated_at=RECEIVED_AT,
+    )
+
+
+def _claim(*, claim_id: str = CLAIM, revision: int = REVISION) -> WorkingClaim:
+    return WorkingClaim(
+        claim_id=claim_id,
+        customer_id='cus_1',
+        revision=revision,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        customer_next_step=CustomerNextStep(
+            status='awaiting_assessment',
+            summary='An assessor has been requested.',
+            responsible_party=ResponsibleParty.EXTERNAL_PARTY,
+        ),
+        created_at=RECEIVED_AT,
+        updated_at=RECEIVED_AT,
+    )
 
 
 def _verify(
@@ -127,151 +164,138 @@ def _verify(
     *,
     task: ExternalTaskRecord | None = None,
     links: list[ExternalTaskEvidenceLink] | None = None,
-    claim_id: str = CLAIM,
-    claim_state: ClaimState | None = None,
-    claim_revision: int = REVISION,
+    claim: WorkingClaim | None = None,
+    evidence: list[EvidenceRecord] | None = None,
     checked_at: datetime = CHECKED_AT,
 ) -> ExternalTaskResult:
     return verify_external_task_result(
         result,
         task=task if task is not None else _task(),
         links=links if links is not None else [],
-        claim_id=claim_id,
-        claim_state=claim_state if claim_state is not None else _state(),
-        claim_revision=claim_revision,
+        claim=claim if claim is not None else _claim(),
+        evidence=evidence if evidence is not None else [],
         checked_at=checked_at,
     )
 
 
-def test_accepted_task_with_its_material_named_is_consistent() -> None:
-    checked = _verify(_result(evidence_ids=['evd_1']), links=[_link()])
+def test_a_placed_and_attributed_answer_is_not_agreement() -> None:
+    """Structural checks place a result; they do not compare it, so it needs review."""
 
-    assert checked.verification is ExternalTaskResultVerification.CONSISTENT
+    checked = _verify(_result(evidence_ids=['evd_1']), links=[_link()], evidence=[_evidence()])
+
+    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
     assert checked.verified_at == CHECKED_AT
     assert checked.verified_against_revision == REVISION
 
 
-def test_answer_without_material_is_still_answerable() -> None:
-    """A provider reporting no record found produces an answer and no material."""
+def test_consistent_is_never_produced() -> None:
+    """No input reaches agreement, because no comparison of content can be evidenced."""
 
-    checked = _verify(_result(), links=[])
+    inputs = [
+        _verify(_result()),
+        _verify(_result(evidence_ids=['evd_1']), links=[_link()], evidence=[_evidence()]),
+        _verify(
+            _result(evidence_ids=['evd_1']),
+            links=[_link()],
+            evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+        ),
+        _verify(
+            _result(evidence_ids=['evd_1']),
+            task=_task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME),
+            links=[_link()],
+            evidence=[_evidence()],
+        ),
+    ]
 
-    assert checked.verification is ExternalTaskResultVerification.CONSISTENT
-
-
-def test_result_naming_none_of_its_own_task_material_needs_review() -> None:
-    checked = _verify(_result(), links=[_link(), _link(evidence_id='evd_2')])
-
-    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
-
-
-def test_result_naming_some_of_its_own_task_material_is_consistent() -> None:
-    checked = _verify(
-        _result(evidence_ids=['evd_1']),
-        links=[_link(), _link(evidence_id='evd_2')],
+    assert all(
+        checked.verification is not ExternalTaskResultVerification.CONSISTENT for checked in inputs
     )
 
-    assert checked.verification is ExternalTaskResultVerification.CONSISTENT
+
+def test_nothing_this_produces_can_settle_a_claim_fact() -> None:
+    """The refusal in assert_result_may_settle_fact is the point, not an accident."""
+
+    checked = _verify(_result(evidence_ids=['evd_1']), links=[_link()], evidence=[_evidence()])
+
+    with pytest.raises(UnsettledResultError):
+        assert_result_may_settle_fact(checked, claim_revision=REVISION)
 
 
-def test_material_on_another_task_does_not_count_as_this_task_material() -> None:
-    """Links for a different task leave this task holding none, so absence stays answerable."""
-
-    checked = _verify(_result(), links=[_link(evidence_id='evd_9', task_id='ext_task_2')])
-
-    assert checked.verification is ExternalTaskResultVerification.CONSISTENT
-
-
-def test_unknown_outcome_task_can_never_be_consistent() -> None:
-    checked = _verify(
-        _result(evidence_ids=['evd_1']),
-        task=_task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME),
-        links=[_link()],
-    )
-
-    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
-
-
-def test_unknown_outcome_outranks_an_inconsistent_claim() -> None:
-    """An unreconciled delivery cannot support the stronger claim of a conflict."""
-
-    checked = _verify(
-        _result(evidence_ids=['evd_1']),
-        task=_task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME),
-        links=[_link()],
-        claim_state=_state(evidence=EvidenceState.INCONSISTENT),
-    )
-
-    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
-
-
-def test_inconsistent_claim_evidence_makes_the_result_inconsistent() -> None:
+def test_material_the_result_names_being_inconsistent_makes_it_inconsistent() -> None:
     checked = _verify(
         _result(evidence_ids=['evd_1']),
         links=[_link()],
-        claim_state=_state(evidence=EvidenceState.INCONSISTENT),
+        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
     )
 
     assert checked.verification is ExternalTaskResultVerification.INCONSISTENT
 
 
-def test_claim_already_in_professional_review_needs_review() -> None:
-    """A result must not settle a fact underneath the person the claim was escalated to."""
+def test_a_conflict_in_material_this_result_does_not_name_is_not_attributed_to_it() -> None:
+    """A conflict elsewhere on the claim is not this provider's conflict."""
 
     checked = _verify(
         _result(evidence_ids=['evd_1']),
         links=[_link()],
-        claim_state=_state(workflow_state=WorkflowState.PROFESSIONAL_REVIEW),
+        evidence=[
+            _evidence(),
+            _evidence(evidence_id='evd_unrelated', status=EvidenceStatus.INCONSISTENT),
+        ],
     )
 
     assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
 
 
-def test_every_decided_verification_is_reachable() -> None:
-    """The vocabulary carries no value the check cannot produce."""
+def test_a_result_naming_no_material_cannot_be_inconsistent() -> None:
+    checked = _verify(
+        _result(),
+        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+    )
 
-    decided = {
-        _verify(_result(evidence_ids=['evd_1']), links=[_link()]).verification,
-        _verify(
-            _result(evidence_ids=['evd_1']),
-            links=[_link()],
-            claim_state=_state(evidence=EvidenceState.INCONSISTENT),
-        ).verification,
-        _verify(
-            _result(),
-            links=[_link()],
-        ).verification,
-    }
-
-    assert decided == {
-        ExternalTaskResultVerification.CONSISTENT,
-        ExternalTaskResultVerification.INCONSISTENT,
-        ExternalTaskResultVerification.REVIEW_REQUIRED,
-    }
+    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
 
 
-def test_link_order_does_not_change_the_answer() -> None:
-    """Two links for one task must resolve the same way whichever order they arrive in."""
+def test_unknown_outcome_outranks_a_conflict_in_named_material() -> None:
+    """An unreconciled delivery cannot support attributing a conflict to the provider."""
 
-    first = _link(evidence_id='evd_1')
-    second = _link(evidence_id='evd_2')
+    checked = _verify(
+        _result(evidence_ids=['evd_1']),
+        task=_task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME),
+        links=[_link()],
+        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+    )
 
-    forward = _verify(_result(evidence_ids=['evd_2']), links=[first, second])
-    reverse = _verify(_result(evidence_ids=['evd_2']), links=[second, first])
+    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
+
+
+def test_evidence_order_does_not_change_the_answer() -> None:
+    """Two records for one claim must resolve the same way whichever order they arrive in."""
+
+    clean = _evidence(evidence_id='evd_2')
+    conflicting = _evidence(status=EvidenceStatus.INCONSISTENT)
+
+    forward = _verify(
+        _result(evidence_ids=['evd_1']), links=[_link()], evidence=[clean, conflicting]
+    )
+    reverse = _verify(
+        _result(evidence_ids=['evd_1']), links=[_link()], evidence=[conflicting, clean]
+    )
 
     assert forward.verification is reverse.verification
-    assert forward.verification is ExternalTaskResultVerification.CONSISTENT
+    assert forward.verification is ExternalTaskResultVerification.INCONSISTENT
 
 
-def test_repeated_links_for_one_material_resolve_the_same_way() -> None:
-    duplicated = _verify(_result(evidence_ids=['evd_1']), links=[_link(), _link()])
+def test_the_revision_recorded_comes_from_the_claim_snapshot() -> None:
+    """State and revision cannot disagree, because only one snapshot is accepted."""
 
-    assert duplicated.verification is ExternalTaskResultVerification.CONSISTENT
+    checked = _verify(_result(), claim=_claim(revision=REVISION + 3))
+
+    assert checked.verified_against_revision == REVISION + 3
 
 
 def test_an_already_verified_result_is_refused() -> None:
     already = _result(
-        verification=ExternalTaskResultVerification.CONSISTENT,
+        verification=ExternalTaskResultVerification.INCONSISTENT,
         verified_at=CHECKED_AT,
         verified_against_revision=REVISION,
     )
@@ -280,9 +304,9 @@ def test_an_already_verified_result_is_refused() -> None:
         _verify(already)
 
 
-def test_state_from_another_claim_is_refused() -> None:
+def test_a_snapshot_of_another_claim_is_refused() -> None:
     with pytest.raises(ExternalTaskClaimMismatchError):
-        _verify(_result(), claim_id='clm_2')
+        _verify(_result(), claim=_claim(claim_id='clm_2'))
 
 
 def test_result_for_another_task_is_refused() -> None:
@@ -323,21 +347,8 @@ def test_a_check_cannot_predate_the_answer() -> None:
 def test_the_argument_is_left_unchanged() -> None:
     original = _result(evidence_ids=['evd_1'])
 
-    _verify(original, links=[_link()])
+    _verify(original, links=[_link()], evidence=[_evidence()])
 
     assert original.verification is ExternalTaskResultVerification.UNVERIFIED
     assert original.verified_at is None
     assert original.verified_against_revision is None
-
-
-def test_a_consistent_result_may_then_settle_a_fact_at_that_revision() -> None:
-    checked = _verify(_result(evidence_ids=['evd_1']), links=[_link()])
-
-    assert_result_may_settle_fact(checked, claim_revision=REVISION)
-
-
-def test_a_consistent_result_goes_stale_when_the_claim_moves() -> None:
-    checked = _verify(_result(evidence_ids=['evd_1']), links=[_link()])
-
-    with pytest.raises(StaleVerificationError):
-        assert_result_may_settle_fact(checked, claim_revision=REVISION + 1)
