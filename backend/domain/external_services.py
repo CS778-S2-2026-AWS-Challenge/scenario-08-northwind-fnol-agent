@@ -6,12 +6,15 @@ from pydantic import Field, model_validator
 
 from backend.domain.models import (
     ActorType,
+    ClaimState,
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
+    EvidenceState,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     IntegrationSource,
+    WorkflowState,
 )
 from backend.domain.retrieval import RetrievalSource
 
@@ -595,10 +598,10 @@ class ExternalTaskResultVerification(str, Enum):
 
     There is deliberately no value meaning "this is now a confirmed claim fact".
     A provider answer is evidence about the claim, never the claim's own record
-    of what is true, and `docs/claim-creation-boundary.md` requires an
-    inconsistent result to stay proposed or review-required rather than settle
-    anything. Promotion to a confirmed fact is a claim-level decision made
-    elsewhere, so this enum cannot express it and no caller can shortcut to it.
+    of what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts
+    proposed until the claim's own confirmation path accepts them. Promotion to a
+    confirmed fact is a claim-level decision made elsewhere, so this enum cannot
+    express it and no caller can shortcut to it.
     """
 
     UNVERIFIED = 'unverified'
@@ -992,3 +995,148 @@ def assert_retry_is_permitted(
             f'{request.request_id}: attempt {latest.attempt_number} ended '
             f'{latest.outcome.value}, whose recovery is {recovery.value}, not a retry.'
         )
+
+
+class ResultAlreadyVerifiedError(ValueError):
+    """A result that already carries a verification cannot be checked again."""
+
+
+def _linked_evidence_for_task(
+    result: ExternalTaskResult,
+    links: Sequence[ExternalTaskEvidenceLink],
+) -> set[str]:
+    """Collect the material attributed to this result's own task and claim."""
+
+    attributed: set[str] = set()
+    for link in links:
+        if link.task_id != result.task_id:
+            continue
+        if link.claim_id != result.claim_id:
+            continue
+        attributed.add(link.evidence_id)
+    return attributed
+
+
+def _decide_result_verification(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    links: Sequence[ExternalTaskEvidenceLink],
+    claim_state: ClaimState,
+) -> ExternalTaskResultVerification:
+    """Choose the verification an already-validated result earns."""
+
+    if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        return ExternalTaskResultVerification.REVIEW_REQUIRED
+    if claim_state.evidence is EvidenceState.INCONSISTENT:
+        return ExternalTaskResultVerification.INCONSISTENT
+    if claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW:
+        return ExternalTaskResultVerification.REVIEW_REQUIRED
+    attributed = _linked_evidence_for_task(result, links)
+    if attributed and not attributed & set(result.evidence_ids):
+        return ExternalTaskResultVerification.REVIEW_REQUIRED
+    return ExternalTaskResultVerification.CONSISTENT
+
+
+def verify_external_task_result(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    links: Sequence[ExternalTaskEvidenceLink],
+    claim_id: str,
+    claim_state: ClaimState,
+    claim_revision: int,
+    checked_at: datetime,
+) -> ExternalTaskResult:
+    """Check a provider result against its evidence and the claim, and record the answer.
+
+    `assert_result_may_settle_fact` refuses a result that has not been checked but
+    says nothing about how the check is made. This is that check. It reads only
+    what this repository can evidence: the state of the task that produced the
+    answer, the material already attributed to that task, and the claim's own
+    recorded evidence and workflow state. It deliberately does not compare the
+    provider's prose against the claim, because nothing here models the claim's
+    facts in a form such a comparison could be made against, and a check that
+    cannot be evidenced must not be presented as one that was.
+
+    `CONSISTENT` is the narrowest outcome and is reachable only from an `accepted`
+    task. An `unknown_outcome` task is one whose delivery is still unreconciled, so
+    its answer cannot be read as agreeing with anything, whatever the answer says.
+    This is stricter than `assert_result_matches_task`, which admits both states,
+    and deliberately so: carrying a result is a weaker claim than agreeing with one.
+
+    A result that accounts for none of the material already linked to its own task
+    is not treated as agreement either. Material reaches a result only through a
+    link, so a task holding links whose result names none of them is an answer and
+    a body of material that do not refer to each other, which a person must
+    resolve. A task holding no links at all is a different case and stays
+    answerable: a provider reporting no record found produces an answer and no
+    material, and refusing that would make an absent answer indistinguishable from
+    a withheld one.
+
+    A claim already in professional review reaches the same outcome. Marking a
+    result consistent there would let it settle a fact underneath the person the
+    claim was escalated to, so the answer is routed to that review instead.
+
+    The decision is made against one revision of the claim and records it, so
+    `assert_result_may_settle_fact` can later tell that a moved claim has left the
+    check behind.
+
+    Args:
+        result: The unverified provider result to check.
+        task: The external task record the result names.
+        links: The evidence-to-task links known for this claim.
+        claim_id: The claim whose state is offered for the check.
+        claim_state: That claim's current recorded state.
+        claim_revision: That claim's current revision, recorded with the decision.
+        checked_at: When the check was performed.
+
+    Returns:
+        A new `ExternalTaskResult` carrying the decided verification, the time of
+        the check, and the revision it was made against. The argument is left
+        unchanged.
+
+    Raises:
+        ResultAlreadyVerifiedError: The result already carries a verification, so
+            checking it would replace a decision rather than make one.
+        ExternalTaskClaimMismatchError: The state offered belongs to a different
+            claim than the result.
+        ExternalRequestTaskMismatchError: The result names a different task, or a
+            different claim than the task it names.
+        TaskCannotHaveResultError: The task is in a state that received no answer.
+        ConflictingEvidenceOriginError: A link attributes the result's material to
+            a different task.
+        UntraceableExternalEvidenceError: The result names material no link
+            accounts for.
+        ValueError: The check is dated before the result arrived.
+    """
+
+    if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
+        raise ResultAlreadyVerifiedError(
+            f'{result.result_id}: is already recorded as {result.verification.value}, so '
+            'checking it again would replace a decision rather than make one.'
+        )
+    if result.claim_id != claim_id:
+        raise ExternalTaskClaimMismatchError(
+            f'{result.result_id}: belongs to claim {result.claim_id}, and the check was '
+            f'offered the state of claim {claim_id}.'
+        )
+    assert_result_matches_task(result, task)
+    assert_result_evidence_is_linked(result, links)
+    if checked_at < result.received_at:
+        raise ValueError(
+            f'{result.result_id}: cannot be checked at {checked_at.isoformat()}, which is '
+            f'before it arrived at {result.received_at.isoformat()}.'
+        )
+
+    verification = _decide_result_verification(
+        result,
+        task=task,
+        links=links,
+        claim_state=claim_state,
+    )
+    fields = result.model_dump()
+    fields['verification'] = verification
+    fields['verified_at'] = checked_at
+    fields['verified_against_revision'] = claim_revision
+    return ExternalTaskResult(**fields)
