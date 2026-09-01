@@ -70,6 +70,33 @@ reference before retrying. The claimant is told only the real known state and re
 path; the system must not create a duplicate formal Claim because acknowledgement was
 lost.
 
+The provider-neutral external-task recovery matrix is:
+
+| Failure | Delivery | Operation status | Recovery | Retryable |
+| --- | --- | --- | --- | --- |
+| `timeout` | `not_submitted` | `retryable_failure` | `retry_same_operation` | Yes |
+| `timeout` | `submitted` | `unknown_outcome` | `reconcile_before_retry` | No |
+| `unavailable` | Any | `retryable_failure` | `retry_same_operation` | Yes |
+| `partial` | Any | `unknown_outcome` | `reconcile_before_retry` | No |
+| `access_denied` | Any | `terminal_failure` | `review_required` | No |
+| `malformed` | Any | `terminal_failure` | `review_required` | No |
+| `conflicting` | Any | `terminal_failure` | `review_required` | No |
+
+`unavailable` retains the controlled assessor contract: an unchanged attempt may retry with
+the same operation identity even when the failed invocation reached the provider. This is not
+permission to create a new operation or to retry automatically. `partial` records an observed
+side effect whose completion is uncertain, so Runtime reconciles it before another attempt.
+The `recovery` value determines both operation status and retryability; implementations must
+reject combinations that disagree with this matrix.
+
+The current assessor runtime remains a compatibility model. It records `prepared`,
+`retryable_failure`, `terminal_failure`, and `accepted`, but it does not record delivery or
+represent `unknown_outcome`, `partial`, or `conflicting`. The provider-neutral model is therefore
+not a drop-in enum replacement. A later integration must supply trustworthy delivery evidence
+before classifying a timeout as `submitted`; until that migration updates the assessor runtime,
+API contract, persistence, and tests together, its documented timeout and unavailable behaviour
+remains unchanged.
+
 An explicitly configured fixture adapter may be used for controlled development. It is
 not a silent production fallback and its result remains labelled `fixture`.
 
