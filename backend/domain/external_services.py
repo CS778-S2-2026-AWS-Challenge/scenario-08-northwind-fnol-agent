@@ -587,3 +587,126 @@ def assert_disclosure_within_consent(
             f'{request.request_id}: consent {consent.consent_ref} does not permit '
             f'{", ".join(beyond)}.'
         )
+
+
+class ExternalTaskAttempt(ContractModel):
+    """One recorded attempt at an external task, kept whether it succeeded or not.
+
+    A failure that leaves nothing behind is the same as one that never happened,
+    and the claim then cannot explain why it is waiting. Each attempt records its
+    place in the sequence, when it ran, the claim revision it ran against, and
+    what came back, so a claimant or staff reader can see the history rather than
+    only the current state.
+
+    The operation identity is the same across every attempt for one request. That
+    is what makes a retry the same request rather than a second one, so it is
+    recorded here as well and checked before another attempt is permitted.
+    """
+
+    attempt_id: str = Field(min_length=1, max_length=100)
+    task_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    operation_id: str = Field(min_length=1, max_length=100)
+    attempt_number: int = Field(ge=1)
+    claim_revision: int = Field(ge=1)
+    started_at: datetime
+    outcome: ExternalTaskOperationStatus
+    failure_code: ExternalTaskFailureCode | None = None
+    delivery: ExternalTaskDelivery = ExternalTaskDelivery.NOT_SUBMITTED
+
+    @model_validator(mode='after')
+    def validate_attempt_state(self) -> 'ExternalTaskAttempt':
+        if self.outcome is ExternalTaskOperationStatus.PREPARED:
+            raise ValueError('An attempt that ran cannot record the prepared state.')
+        if self.outcome is ExternalTaskOperationStatus.ACCEPTED:
+            if self.failure_code is not None:
+                raise ValueError('An accepted attempt cannot record a failure code.')
+            return self
+        if self.failure_code is None:
+            raise ValueError(
+                f'An attempt that ended {self.outcome.value} must record a failure code.'
+            )
+        expected = classify_external_task_failure(
+            failure_code=self.failure_code,
+            delivery=self.delivery,
+        )
+        if expected.operation_status is not self.outcome:
+            raise ValueError(
+                f'Attempt failure {self.failure_code.value} delivered as '
+                f'{self.delivery.value} is {expected.operation_status.value}, '
+                f'not {self.outcome.value}.'
+            )
+        return self
+
+
+class DuplicateExternalRequestError(ValueError):
+    """Another attempt would send a second request rather than repeat the first."""
+
+
+class RetryNotPermittedError(ValueError):
+    """The recovery path for the last attempt does not allow another attempt."""
+
+
+def assert_retry_is_permitted(
+    request: ExternalTaskRequest,
+    attempts: Sequence[ExternalTaskAttempt],
+) -> None:
+    """Check that retrying this request repeats it rather than duplicating it.
+
+    Two separate things can go wrong. A retry can carry a new operation identity,
+    which the provider sees as a second request rather than the same one; that is
+    the duplicate this card exists to prevent. And a retry can be attempted after
+    an outcome whose recovery path forbids it: an unknown outcome must be
+    reconciled first, and a terminal failure needs review, because in both cases
+    another send may repeat a side effect that already happened.
+
+    An accepted attempt is not retryable either. The request succeeded, so a
+    further attempt would be a second request by definition.
+
+    Args:
+        request: The sent request being retried.
+        attempts: Every recorded attempt for this request, in any order.
+
+    Raises:
+        DuplicateExternalRequestError: The request holds no operation identity, or
+            an attempt carries a different one.
+        RetryNotPermittedError: There are no attempts to retry, or the latest
+            outcome does not permit another attempt.
+    """
+
+    if request.operation_id is None:
+        raise DuplicateExternalRequestError(
+            f'{request.request_id}: has not been sent, so there is nothing to retry and a '
+            'send would need its own operation identity.'
+        )
+    mismatched = [a for a in attempts if a.operation_id != request.operation_id]
+    if mismatched:
+        raise DuplicateExternalRequestError(
+            f'{request.request_id}: attempt {mismatched[0].attempt_id} carries operation '
+            f'{mismatched[0].operation_id}, not {request.operation_id}, so retrying it would '
+            'send a second request.'
+        )
+    if not attempts:
+        raise RetryNotPermittedError(
+            f'{request.request_id}: no attempt has been recorded, so there is nothing to retry.'
+        )
+    latest = max(attempts, key=lambda attempt: attempt.attempt_number)
+    if latest.outcome is ExternalTaskOperationStatus.ACCEPTED:
+        raise RetryNotPermittedError(
+            f'{request.request_id}: attempt {latest.attempt_number} was accepted, so another '
+            'attempt would be a second request.'
+        )
+    if latest.failure_code is None:
+        raise RetryNotPermittedError(
+            f'{request.request_id}: attempt {latest.attempt_number} recorded no failure code, '
+            'so no recovery path can be derived.'
+        )
+    recovery = classify_external_task_failure(
+        failure_code=latest.failure_code,
+        delivery=latest.delivery,
+    ).recovery
+    if recovery is not ExternalTaskRecovery.RETRY_SAME_OPERATION:
+        raise RetryNotPermittedError(
+            f'{request.request_id}: attempt {latest.attempt_number} ended '
+            f'{latest.outcome.value}, whose recovery is {recovery.value}, not a retry.'
+        )
