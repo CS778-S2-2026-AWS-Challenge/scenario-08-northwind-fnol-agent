@@ -12,6 +12,8 @@ from backend.domain.model_gateway import (
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
+    ModelProfile,
+    ModelProfileStatus,
     ModelRequest,
     ModelResponse,
     ModelRole,
@@ -27,6 +29,7 @@ class ModelGatewayConfig:
     credential_environment_variable: str | None
     timeout_seconds: float
     capabilities: ModelCapabilities
+    profile: ModelProfile
 
     def __post_init__(self) -> None:
         try:
@@ -36,6 +39,13 @@ class ModelGatewayConfig:
         if url.scheme not in {'http', 'https'} or not url.host or url.userinfo:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         if not self.model.strip() or self.timeout_seconds <= 0:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if (
+            self.profile.model_identifier != self.model
+            or self.profile.credential_reference != self.credential_environment_variable
+            or self.profile.capabilities != self.capabilities
+            or self.profile.timeout_seconds != self.timeout_seconds
+        ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
 
 
@@ -53,10 +63,30 @@ class ModelGatewayRegistry:
         self._factories[normalized] = factory
 
     def create(self, protocol: str, config: ModelGatewayConfig) -> ModelGateway:
-        factory = self._factories.get(protocol.strip().lower())
+        normalized = protocol.strip().lower()
+        if normalized != config.profile.protocol.strip().lower():
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        factory = self._factories.get(normalized)
         if factory is None:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return factory(config)
+
+
+def _validate_request_profile(config: ModelGatewayConfig, request: ModelRequest) -> None:
+    profile = config.profile
+    if profile.evaluation_status is not ModelProfileStatus.CONFIGURED:
+        raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+    if (
+        request.purpose != profile.purpose
+        or request.privacy_class != profile.privacy_class
+        or request.prompt_version != profile.prompt_version
+    ):
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    required = request.required_capabilities
+    if required.structured_output and not profile.capabilities.structured_output:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+    if required.tools and not profile.capabilities.tools:
+        raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
 
 class OpenAICompatibleModelGateway:
@@ -104,6 +134,7 @@ class OpenAICompatibleModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
+        _validate_request_profile(self._config, request)
         if request.response_schema is not None and not self.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
         if request.tools and not self.capabilities.tools:
@@ -386,6 +417,7 @@ class BedrockConverseModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
 
     def _validate_capabilities(self, request: ModelRequest) -> None:
+        _validate_request_profile(self._config, request)
         if request.response_schema is not None and not self.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
         if request.tools:

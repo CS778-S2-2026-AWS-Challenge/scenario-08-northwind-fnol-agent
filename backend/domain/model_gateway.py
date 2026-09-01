@@ -65,10 +65,40 @@ class ModelCapabilities(ModelContract):
     tools: bool = False
 
 
+class ModelProfileStatus(str, Enum):
+    CONFIGURED = 'configured'
+    DEGRADED = 'degraded'
+    UNAVAILABLE = 'unavailable'
+
+
+class ModelProfile(ModelContract):
+    """Provider-neutral model selection metadata.
+
+    The profile contains references and capabilities only. Credentials and provider
+    SDK configuration remain outside the domain contract.
+    """
+
+    profile_id: str = Field(min_length=1, max_length=100)
+    protocol: str = Field(min_length=1, max_length=50)
+    provider: str = Field(min_length=1, max_length=100)
+    model_identifier: str = Field(min_length=1, max_length=300)
+    credential_reference: str | None = Field(default=None, max_length=200)
+    purpose: str = Field(min_length=1, max_length=100)
+    privacy_class: str = Field(min_length=1, max_length=100)
+    capabilities: ModelCapabilities
+    timeout_seconds: float = Field(gt=0)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED
+
+
 class ModelRequest(ModelContract):
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
+    purpose: str = Field(default='agent_turn', min_length=1, max_length=100)
+    prompt_version: str = Field(default='current', min_length=1, max_length=100)
+    privacy_class: str = Field(default='synthetic_fnol', min_length=1, max_length=100)
+    required_capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 
 class ModelResponse(ModelContract):

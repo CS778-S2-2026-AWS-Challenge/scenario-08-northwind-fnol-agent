@@ -13,6 +13,7 @@ from backend.domain.models import (
     ExternalServiceConsentStatus,
     IntegrationSource,
 )
+from backend.domain.retrieval import RetrievalSource
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
 ASSESSOR_REQUESTED_ACTION = 'vehicle_damage_assessment'
@@ -586,4 +587,236 @@ def assert_disclosure_within_consent(
         raise UnauthorisedDisclosureError(
             f'{request.request_id}: consent {consent.consent_ref} does not permit '
             f'{", ".join(beyond)}.'
+        )
+
+
+class ExternalTaskResultVerification(str, Enum):
+    """How far a provider result has been checked against the claim.
+
+    There is deliberately no value meaning "this is now a confirmed claim fact".
+    A provider answer is evidence about the claim, never the claim's own record
+    of what is true, and `docs/claim-creation-boundary.md` requires an
+    inconsistent result to stay proposed or review-required rather than settle
+    anything. Promotion to a confirmed fact is a claim-level decision made
+    elsewhere, so this enum cannot express it and no caller can shortcut to it.
+    """
+
+    UNVERIFIED = 'unverified'
+    CONSISTENT = 'consistent'
+    INCONSISTENT = 'inconsistent'
+    REVIEW_REQUIRED = 'review_required'
+
+
+class ExternalTaskResult(ContractModel):
+    """What a third-party returned for one task, and how far it has been checked.
+
+    A result is separate from the material it may have produced. A task can
+    return an answer and no material at all, such as a provider reporting no
+    record found, and it can return material whose consistency with the claim is
+    still unknown. Collapsing the two would make an absent answer and an
+    unverified one indistinguishable.
+
+    Verification starts at `UNVERIFIED` and a checked result must say when it was
+    checked, so an unchecked result cannot be presented as a checked one.
+    """
+
+    result_id: str = Field(min_length=1, max_length=100)
+    task_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    source: RetrievalSource
+    summary: str = Field(min_length=1, max_length=500)
+    verification: ExternalTaskResultVerification = ExternalTaskResultVerification.UNVERIFIED
+    verified_at: datetime | None = None
+    verified_against_revision: int | None = Field(default=None, ge=1)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=50)
+    received_at: datetime
+
+    @model_validator(mode='after')
+    def validate_result_state(self) -> 'ExternalTaskResult':
+        if not self.summary.strip():
+            raise ValueError('An external task result must say something readable.')
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError('Result evidence identifiers must be unique.')
+        if any(not evidence_id.strip() for evidence_id in self.evidence_ids):
+            raise ValueError('A result evidence identifier must name something.')
+        unverified = self.verification is ExternalTaskResultVerification.UNVERIFIED
+        if unverified and self.verified_at is not None:
+            raise ValueError('An unverified result cannot record a verification time.')
+        if not unverified and self.verified_at is None:
+            raise ValueError(
+                f'A result verified as {self.verification.value} must record when it was checked.'
+            )
+        if self.verified_at is not None and self.verified_at < self.received_at:
+            raise ValueError('A result cannot be verified before it was received.')
+        if unverified and self.verified_against_revision is not None:
+            raise ValueError('An unverified result cannot name a revision it was checked against.')
+        if not unverified and self.verified_against_revision is None:
+            raise ValueError(
+                f'A result verified as {self.verification.value} must name the claim revision '
+                'it was checked against, so a later revision can tell the check is stale.'
+            )
+        return self
+
+
+_RESULT_BEARING_TASK_STATES = frozenset(
+    {
+        ExternalTaskOperationStatus.ACCEPTED,
+        ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+    }
+)
+
+
+class TaskCannotHaveResultError(ValueError):
+    """A task in this state cannot have received a provider answer."""
+
+
+class StaleVerificationError(ValueError):
+    """A result was checked against an earlier revision of the claim."""
+
+
+class UnsettledResultError(ValueError):
+    """A result that has not been checked as consistent cannot settle a claim fact."""
+
+
+def assert_result_matches_task(
+    result: ExternalTaskResult,
+    task: ExternalTaskRecord,
+) -> None:
+    """Check that a result belongs to a task that could have produced one.
+
+    Identity is not enough. A task still `prepared` has not been submitted, and a
+    task that failed retryably or terminally received no answer, so recording a
+    provider result against any of them would assert an answer that cannot exist.
+    Only two states can carry one: `accepted`, where the provider took the request
+    and may respond, and `unknown_outcome`, which is precisely the state
+    reconciliation resolves when a late answer arrives.
+
+    Args:
+        result: The recorded provider result.
+        task: The external task record the result names.
+
+    Returns:
+        None. The result is left unchanged; this raises or returns quietly.
+
+    Raises:
+        ExternalRequestTaskMismatchError: The result names a different task, or
+            belongs to a different claim than the task it names.
+        TaskCannotHaveResultError: The task is in a state that received no answer.
+    """
+
+    if result.task_id != task.task_id:
+        raise ExternalRequestTaskMismatchError(
+            f'{result.result_id}: names task {result.task_id}, not {task.task_id}.'
+        )
+    if result.claim_id != task.claim_id:
+        raise ExternalRequestTaskMismatchError(
+            f'{result.result_id}: claim {result.claim_id} does not match task '
+            f'{task.task_id} claim {task.claim_id}.'
+        )
+    if task.status not in _RESULT_BEARING_TASK_STATES:
+        raise TaskCannotHaveResultError(
+            f'{result.result_id}: task {task.task_id} is {task.status.value}, which received '
+            'no provider answer, so it cannot carry a result.'
+        )
+
+
+def assert_result_evidence_is_linked(
+    result: ExternalTaskResult,
+    links: Sequence[ExternalTaskEvidenceLink],
+) -> None:
+    """Check that every material a result claims reaches it through a link.
+
+    Holding evidence identifiers directly would reopen the boundary the
+    evidence-to-task link already closes: a result on one claim could name
+    material belonging to another, or material produced by a different task. The
+    links are the only route by which material is attributed, so a result's
+    evidence must be present in them, on this result's task and claim.
+
+    Every link for a given identifier is read before an answer is given. Keeping
+    only one of them, however chosen, would let the order of the list decide
+    whether conflicting attribution is noticed. Repeated links naming the same
+    task and claim are one origin and are accepted; two different tasks are a
+    conflict whichever order they arrive in.
+
+    Args:
+        result: The recorded provider result.
+        links: The evidence-to-task links known for this claim.
+
+    Returns:
+        None. The result is left unchanged; this raises or returns quietly.
+
+    Raises:
+        ExternalTaskClaimMismatchError: A link for this material names another
+            claim.
+        ConflictingEvidenceOriginError: A link attributes this material to a
+            different task.
+        UntraceableExternalEvidenceError: The result names material no link
+            accounts for.
+    """
+
+    for evidence_id in result.evidence_ids:
+        matching = [link for link in links if link.evidence_id == evidence_id]
+        if not matching:
+            raise UntraceableExternalEvidenceError(
+                f'{result.result_id}: names evidence {evidence_id}, which no link attributes '
+                'to any task.'
+            )
+        claims = sorted({link.claim_id for link in matching})
+        if claims != [result.claim_id]:
+            raise ExternalTaskClaimMismatchError(
+                f'{result.result_id}: evidence {evidence_id} is linked under claim '
+                f'{", ".join(claims)}, not {result.claim_id} alone.'
+            )
+        tasks = sorted({link.task_id for link in matching})
+        if len(tasks) > 1:
+            raise ConflictingEvidenceOriginError(
+                f'{result.result_id}: evidence {evidence_id} is linked to more than one task '
+                f'on claim {result.claim_id}: {", ".join(tasks)}.'
+            )
+        if tasks != [result.task_id]:
+            raise ConflictingEvidenceOriginError(
+                f'{result.result_id}: evidence {evidence_id} is linked to task {tasks[0]}, '
+                f'not {result.task_id}.'
+            )
+
+
+def assert_result_may_settle_fact(
+    result: ExternalTaskResult,
+    *,
+    claim_revision: int,
+) -> None:
+    """Check that a result was checked, agreed, and was checked against this claim.
+
+    Being marked consistent is not sufficient on its own. A check is made against
+    a particular revision of the claim, and a later revision may have changed the
+    facts it agreed with, so the revision is compared rather than trusted. What
+    made the result consistent is decided elsewhere; this only refuses to let a
+    stale or unchecked answer settle anything.
+
+    Args:
+        result: The recorded provider result.
+        claim_revision: The current revision of the claim it would inform.
+
+    Returns:
+        None. Nothing is settled here; this raises or returns quietly.
+
+    Raises:
+        UnsettledResultError: The result has not been checked, or was checked and
+            did not agree.
+        StaleVerificationError: The result agreed with an earlier revision of the
+            claim than the one it would now inform.
+    """
+
+    if result.verification is not ExternalTaskResultVerification.CONSISTENT:
+        reasons = {
+            ExternalTaskResultVerification.UNVERIFIED: 'has not been checked against the claim',
+            ExternalTaskResultVerification.INCONSISTENT: 'conflicts with the claim',
+            ExternalTaskResultVerification.REVIEW_REQUIRED: 'needs review before it can be used',
+        }
+        raise UnsettledResultError(f'{result.result_id}: {reasons[result.verification]}.')
+    if result.verified_against_revision != claim_revision:
+        raise StaleVerificationError(
+            f'{result.result_id}: was checked against claim revision '
+            f'{result.verified_against_revision}, and the claim is now at {claim_revision}, '
+            'so the check no longer covers it.'
         )

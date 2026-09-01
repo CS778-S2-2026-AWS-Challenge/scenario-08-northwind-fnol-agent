@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 
@@ -22,6 +23,8 @@ from backend.domain.model_gateway import (
     ModelGatewayError,
     ModelGatewayErrorCode,
     ModelMessage,
+    ModelProfile,
+    ModelProfileStatus,
     ModelRequest,
     ModelResponse,
     ModelRole,
@@ -61,13 +64,32 @@ def gateway_config(
     credential_environment_variable: str | None = None,
     structured_output: bool = True,
     tools: bool = True,
+    protocol: str = 'openai_compatible',
+    purpose: str = 'agent_turn',
+    privacy_class: str = 'synthetic_fnol',
+    prompt_version: str = 'current',
+    evaluation_status: ModelProfileStatus = ModelProfileStatus.CONFIGURED,
 ) -> ModelGatewayConfig:
+    capabilities = ModelCapabilities(structured_output=structured_output, tools=tools)
     return ModelGatewayConfig(
         base_url=base_url,
         model=model,
         credential_environment_variable=credential_environment_variable,
         timeout_seconds=5.0,
-        capabilities=ModelCapabilities(structured_output=structured_output, tools=tools),
+        capabilities=capabilities,
+        profile=ModelProfile(
+            profile_id='test-profile',
+            protocol=protocol,
+            provider='synthetic-provider',
+            model_identifier=model,
+            credential_reference=credential_environment_variable,
+            purpose=purpose,
+            privacy_class=privacy_class,
+            capabilities=capabilities,
+            timeout_seconds=5.0,
+            prompt_version=prompt_version,
+            evaluation_status=evaluation_status,
+        ),
     )
 
 
@@ -660,6 +682,118 @@ def test_capability_failures_are_explicit_and_happen_before_transport(
 
 
 @pytest.mark.parametrize(
+    ('request_update', 'config_update'),
+    [
+        ({'purpose': 'evaluation'}, {}),
+        ({'privacy_class': 'restricted_fnol'}, {}),
+        ({'prompt_version': 'different-prompt'}, {}),
+        (
+            {'required_capabilities': ModelCapabilities(structured_output=True)},
+            {'structured_output': False},
+        ),
+        (
+            {'required_capabilities': ModelCapabilities(tools=True)},
+            {'tools': False},
+        ),
+    ],
+    ids=['purpose', 'privacy', 'prompt', 'explicit-structured-output', 'explicit-tools'],
+)
+def test_request_profile_mismatches_fail_before_transport(
+    request_update: dict[str, object],
+    config_update: dict[str, object],
+) -> None:
+    transport_called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal transport_called
+        transport_called = True
+        return httpx.Response(500)
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(**config_update),  # type: ignore[arg-type]
+        transport=httpx.MockTransport(handler),
+    )
+    request = ModelRequest(messages=[]).model_copy(update=request_update)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(request)
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert transport_called is False
+
+
+@pytest.mark.parametrize(
+    'evaluation_status',
+    [ModelProfileStatus.DEGRADED, ModelProfileStatus.UNAVAILABLE],
+)
+def test_non_configured_model_profiles_fail_before_transport(
+    evaluation_status: ModelProfileStatus,
+) -> None:
+    transport_called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal transport_called
+        transport_called = True
+        return httpx.Response(500)
+
+    gateway = OpenAICompatibleModelGateway(
+        gateway_config(evaluation_status=evaluation_status),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(messages=[]))
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert transport_called is False
+
+
+@pytest.mark.parametrize(
+    ('field_name', 'field_value'),
+    [
+        ('model', 'different-model'),
+        ('credential_environment_variable', 'DIFFERENT_CREDENTIAL'),
+        ('capabilities', ModelCapabilities(structured_output=False, tools=False)),
+        ('timeout_seconds', 9.0),
+    ],
+    ids=['model', 'credential-reference', 'capabilities', 'timeout'],
+)
+def test_transport_configuration_cannot_drift_from_model_profile(
+    field_name: str,
+    field_value: object,
+) -> None:
+    config = gateway_config()
+
+    with pytest.raises(ModelGatewayError) as captured:
+        if field_name == 'model':
+            replace(config, model=cast(str, field_value))
+        elif field_name == 'credential_environment_variable':
+            replace(
+                config,
+                credential_environment_variable=cast(str, field_value),
+            )
+        elif field_name == 'capabilities':
+            replace(config, capabilities=cast(ModelCapabilities, field_value))
+        else:
+            replace(config, timeout_seconds=cast(float, field_value))
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
+def test_registry_protocol_must_match_model_profile() -> None:
+    registry = ModelGatewayRegistry()
+    registry.register('openai_compatible', OpenAICompatibleModelGateway)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        registry.create(
+            'openai_compatible',
+            gateway_config(protocol='different_protocol'),
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
+@pytest.mark.parametrize(
     ('status_code', 'expected_code', 'retryable'),
     [
         (401, ModelGatewayErrorCode.AUTHENTICATION, False),
@@ -882,7 +1016,10 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             )
         )
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
-            gateway_config(tools=False),
+            gateway_config(
+                tools=False,
+                prompt_version='northwind-fnol-motor-claimant-v2',
+            ),
             transport=transport,
         )
     else:
@@ -905,6 +1042,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
+                prompt_version='northwind-fnol-motor-claimant-v2',
             ),
             transport=transport,
         )
