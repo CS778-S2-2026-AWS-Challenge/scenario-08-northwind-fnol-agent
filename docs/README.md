@@ -46,6 +46,7 @@ them:
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
+- [First Control Plane Interface Contract](control-plane-interface.md)
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
