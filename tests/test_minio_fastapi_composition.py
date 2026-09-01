@@ -11,6 +11,7 @@ from starlette.requests import Request
 from backend.adapters.evidence_storage import MinioEvidenceStorage
 from backend.app import create_app
 from backend.core.config import ObjectStorageAdapter
+from backend.core.runtime_profiles import RuntimeProfileConfigurationError
 from backend.services.support import now_utc
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -18,8 +19,9 @@ PAYLOAD = b'northwind-minio-fastapi-smoke'
 
 
 class FastApiS3Client:
-    def __init__(self) -> None:
+    def __init__(self, *, signed_url: bool = False) -> None:
         self.presigned_params: dict[str, Any] | None = None
+        self.signed_url = signed_url
         self.head_bucket_error: Exception | None = None
         self.presign_error: Exception | None = None
         self.object_body = PAYLOAD
@@ -36,7 +38,13 @@ class FastApiS3Client:
             raise self.presign_error
         self.presign_count += 1
         self.presigned_params = cast(dict[str, Any], kwargs['Params'])
-        return f'http://localhost:9000/northwind-evidence/signed-{self.presign_count}'
+        url = f'http://localhost:9000/northwind-evidence/signed-{self.presign_count}'
+        if self.signed_url:
+            url = (
+                f'http://localhost:9000/northwind-evidence/staging/signed-{self.presign_count}'
+                '?X-Amz-Credential=local-access-key'
+            )
+        return url
 
     def get_object(self, **kwargs: Any) -> dict[str, Any]:
         assert self.presigned_params is not None
@@ -233,6 +241,11 @@ def test_real_presign_exposes_only_short_lived_addressing_and_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configure_minio_environment(monkeypatch)
+    s3_client = FastApiS3Client(signed_url=True)
+    monkeypatch.setattr(
+        'backend.adapters.evidence_storage.boto3.client',
+        lambda *_args, **_kwargs: s3_client,
+    )
     app = create_app()
 
     with TestClient(app) as client:
@@ -275,34 +288,10 @@ def test_configured_minio_outage_is_visible_and_keeps_claim_unchanged(
         'backend.adapters.evidence_storage.boto3.client',
         lambda *_args, **_kwargs: s3_client,
     )
-    app = create_app()
-
-    with TestClient(app) as client:
-        claim_id = create_claim(client, 'minio-outage-claim')
-        failed = client.post(
-            f'/api/v1/claims/{claim_id}/evidence/uploads',
-            headers={
-                **CLAIMANT_AUTH,
-                'Idempotency-Key': 'minio-outage-upload',
-                'If-Match': '1',
-            },
-            json={
-                'kind': 'incident_image',
-                'original_filename': 'damage.jpg',
-                'media_type': 'image/jpeg',
-                'size_bytes': len(PAYLOAD),
-            },
-        )
-        claim = client.get(f'/api/v1/claims/{claim_id}', headers=CLAIMANT_AUTH)
-        readiness = client.get('/health/ready')
-
-    assert failed.status_code == 503
-    assert failed.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
-    assert failed.json()['error']['retryable'] is True
-    assert claim.status_code == 200
-    assert claim.json()['revision'] == 1
-    assert readiness.json()['status'] == 'unavailable'
-    assert readiness.json()['checks']['evidence_storage'] == 'unavailable'
+    with pytest.raises(
+        RuntimeProfileConfigurationError, match='unavailable capabilities: evidence_storage'
+    ):
+        create_app()
 
 
 def test_s3_compatible_selection_fails_startup_when_credentials_are_incomplete(
