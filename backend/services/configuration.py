@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from backend.core.errors import ApiError
 from backend.domain.configuration import (
     AuditEvent,
@@ -38,16 +40,21 @@ def _audit(
     action: str,
     reason: str,
     outcome: str,
+    *,
+    previous_revision: int | None = None,
+    changed_fields: Sequence[str] = (),
 ) -> None:
     repo.add_audit(
         AuditEvent(
             event_id=repo.new_event_id(),
             configuration_id=record.configuration_id,
             revision=record.revision,
+            previous_revision=previous_revision,
             actor=actor,
             action=action,
             reason=reason,
             outcome=outcome,
+            changed_fields=sorted(set(changed_fields)),
             created_at=now_utc(),
         )
     )
@@ -68,7 +75,15 @@ def create(
     _validate_secret_references(record.secret_references)
     _validate_configuration_values(record.domain, record.values, for_validation=False)
     saved = repo.create(record)
-    _audit(repo, saved, actor, 'create_draft', payload.reason, 'succeeded')
+    _audit(
+        repo,
+        saved,
+        actor,
+        'create_draft',
+        payload.reason,
+        'succeeded',
+        changed_fields=('domain', 'impact', 'values', 'secret_references', 'state'),
+    )
     return saved
 
 
@@ -78,6 +93,29 @@ def read(
     record = repo.get(configuration_id, revision)
     if record is None:
         raise _error(404, 'CONFIGURATION_NOT_FOUND', 'The configuration was not found.')
+    return record
+
+
+def read_active(repo: ConfigurationRepository, domain: str) -> ConfigurationRecord:
+    """Return the single published configuration available to runtime consumers.
+
+    Args:
+        repo: Provider-neutral configuration repository.
+        domain: Configuration domain requested by the runtime.
+
+    Returns:
+        The active immutable published configuration.
+
+    Raises:
+        ApiError: If the domain has no published configuration.
+    """
+    record = repo.active(domain)
+    if record is None:
+        raise _error(
+            404,
+            'ACTIVE_CONFIGURATION_NOT_FOUND',
+            'No published configuration is available for the requested domain.',
+        )
     return record
 
 
@@ -114,7 +152,24 @@ def patch(
         }
     )
     saved = repo.save(updated, expected_revision)
-    _audit(repo, saved, actor, 'update_draft', payload.reason, 'succeeded')
+    changed_fields = ['reason']
+    if payload.values is not None and payload.values != current.values:
+        changed_fields.append('values')
+    if (
+        payload.secret_references is not None
+        and payload.secret_references != current.secret_references
+    ):
+        changed_fields.append('secret_references')
+    _audit(
+        repo,
+        saved,
+        actor,
+        'update_draft',
+        payload.reason,
+        'succeeded',
+        previous_revision=current.revision,
+        changed_fields=changed_fields,
+    )
     return saved
 
 
@@ -175,10 +230,12 @@ def validate(
             event_id=repo.new_event_id(),
             configuration_id=superseded.configuration_id,
             revision=superseded.revision,
+            previous_revision=previous.revision,
             actor=actor,
             action='supersede',
             reason='Replaced by a newer publication.',
             outcome='succeeded',
+            changed_fields=['state'],
             created_at=now_utc(),
         )
         validate_event_record = updated
@@ -186,10 +243,17 @@ def validate(
             event_id=repo.new_event_id(),
             configuration_id=validate_event_record.configuration_id,
             revision=validate_event_record.revision,
+            previous_revision=current.revision,
             actor=actor,
             action='validate',
             reason='Validation completed.',
             outcome='succeeded',
+            changed_fields=[
+                'effective_time',
+                'previous_version',
+                'state',
+                'validation_evidence',
+            ],
             created_at=now_utc(),
         )
         saved = repo.replace_active(
@@ -201,7 +265,16 @@ def validate(
         )
     else:
         saved = repo.save(updated, expected_revision)
-        _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
+        _audit(
+            repo,
+            saved,
+            actor,
+            'validate',
+            'Validation completed.',
+            'succeeded',
+            previous_revision=current.revision,
+            changed_fields=('effective_time', 'state', 'validation_evidence'),
+        )
     return saved
 
 
@@ -244,18 +317,57 @@ def publish(
     previous = repo.active(current.domain)
     if previous is not None:
         updated = updated.model_copy(update={'previous_version': previous.configuration_id})
-        repo.save(
-            previous.model_copy(
-                update={
-                    'state': ConfigurationState.SUPERSEDED,
-                    'revision': previous.revision + 1,
-                    'updated_at': now_utc(),
-                }
-            ),
-            previous.revision,
+        superseded = previous.model_copy(
+            update={
+                'state': ConfigurationState.SUPERSEDED,
+                'revision': previous.revision + 1,
+                'updated_at': now_utc(),
+            }
         )
-    saved = repo.save(updated, expected_revision)
-    _audit(repo, saved, actor, 'publish', payload.reason, 'succeeded')
+        saved = repo.replace_active(
+            previous,
+            superseded,
+            updated,
+            expected_revision,
+            (
+                AuditEvent(
+                    event_id=repo.new_event_id(),
+                    configuration_id=superseded.configuration_id,
+                    revision=superseded.revision,
+                    previous_revision=previous.revision,
+                    actor=actor,
+                    action='supersede',
+                    reason='Replaced by a newer publication.',
+                    outcome='succeeded',
+                    changed_fields=['state'],
+                    created_at=now_utc(),
+                ),
+                AuditEvent(
+                    event_id=repo.new_event_id(),
+                    configuration_id=updated.configuration_id,
+                    revision=updated.revision,
+                    previous_revision=current.revision,
+                    actor=actor,
+                    action='publish',
+                    reason=payload.reason,
+                    outcome='succeeded',
+                    changed_fields=['effective_time', 'previous_version', 'state'],
+                    created_at=now_utc(),
+                ),
+            ),
+        )
+    else:
+        saved = repo.save(updated, expected_revision)
+        _audit(
+            repo,
+            saved,
+            actor,
+            'publish',
+            payload.reason,
+            'succeeded',
+            previous_revision=current.revision,
+            changed_fields=('effective_time', 'state'),
+        )
     return saved
 
 
@@ -297,7 +409,16 @@ def withdraw(
         }
     )
     saved = repo.save(updated, expected_revision)
-    _audit(repo, saved, actor, 'withdraw', payload.reason, 'succeeded')
+    _audit(
+        repo,
+        saved,
+        actor,
+        'withdraw',
+        payload.reason,
+        'succeeded',
+        previous_revision=current.revision,
+        changed_fields=('reason', 'state'),
+    )
     return saved
 
 
@@ -354,8 +475,49 @@ def rollback(
             'updated_at': now_utc(),
         }
     )
-    saved = repo.create(new)
-    _audit(repo, saved, actor, 'rollback', payload.reason, 'succeeded')
+    superseded = current.model_copy(
+        update={
+            'state': ConfigurationState.SUPERSEDED,
+            'revision': current.revision + 1,
+            'updated_at': now_utc(),
+        }
+    )
+    saved = repo.replace_active_with_new(
+        current,
+        superseded,
+        new,
+        (
+            AuditEvent(
+                event_id=repo.new_event_id(),
+                configuration_id=superseded.configuration_id,
+                revision=superseded.revision,
+                previous_revision=current.revision,
+                actor=actor,
+                action='supersede',
+                reason='Replaced by a rollback publication.',
+                outcome='succeeded',
+                changed_fields=['state'],
+                created_at=now_utc(),
+            ),
+            AuditEvent(
+                event_id=repo.new_event_id(),
+                configuration_id=new.configuration_id,
+                revision=new.revision,
+                previous_revision=current.revision,
+                actor=actor,
+                action='rollback',
+                reason=payload.reason,
+                outcome='succeeded',
+                changed_fields=[
+                    'effective_time',
+                    'previous_version',
+                    'rollback_target',
+                    'state',
+                ],
+                created_at=now_utc(),
+            ),
+        ),
+    )
     return saved
 
 

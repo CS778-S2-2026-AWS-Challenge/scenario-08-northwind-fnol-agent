@@ -101,10 +101,12 @@ class AuditEvent(BaseModel):
     event_id: str
     configuration_id: str
     revision: int
+    previous_revision: int | None = None
     actor: str
     action: str
     reason: str
     outcome: str
+    changed_fields: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
