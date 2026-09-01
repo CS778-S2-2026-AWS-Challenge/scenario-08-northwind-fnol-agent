@@ -19,6 +19,26 @@ class ConfigurationImpact(StrEnum):
     HIGH = 'high'
 
 
+class DataRuntimeProfileValue(StrEnum):
+    FIXTURE = 'fixture'
+    LOCAL_MVP = 'local_mvp'
+    CLOUDFLARE = 'cloudflare'
+    MONGODB = 'mongodb'
+    AWS = 'aws'
+
+
+class ObjectStorageAdapterValue(StrEnum):
+    FIXTURE = 'fixture'
+    S3_COMPATIBLE = 's3_compatible'
+
+
+class DataProfileConfiguration(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    data_runtime_profile: DataRuntimeProfileValue
+    object_storage_adapter: ObjectStorageAdapterValue
+
+
 class ConfigurationRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -118,6 +118,79 @@ def test_plaintext_secret_is_rejected() -> None:
         assert response.json()['error']['code'] == 'SECRET_VALUE_FORBIDDEN'
 
 
+def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
+    with _client() as client:
+        invalid = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('data-profile-invalid'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'local_mvp',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject incoherent provider bundle.',
+            },
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
+        aws_fixture = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('data-profile-aws-fixture'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'aws',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject a mixed cloud and fixture bundle.',
+            },
+        )
+        assert aws_fixture.status_code == 422
+        assert aws_fixture.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
+        draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('data-profile-draft'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'mongodb',
+                    'object_storage_adapter': 's3_compatible',
+                },
+                'reason': 'Record an unverified provider for review.',
+            },
+        )
+        assert draft.status_code == 201
+        configuration_id = draft.json()['configuration_id']
+        read_back = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        )
+        assert read_back.status_code == 200
+        assert read_back.json()['values']['data_runtime_profile'] == 'mongodb'
+        validation = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers=_post_headers('data-profile-validate', 1),
+            json={
+                'scenario_results': [
+                    {
+                        'scenario_id': 'provider-readiness',
+                        'outcome': 'passed',
+                        'evidence': 'checked',
+                    }
+                ]
+            },
+        )
+        assert validation.status_code == 422
+        assert validation.json()['error']['code'] == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        assert audits[-1]['action'] == 'validate'
+        assert audits[-1]['outcome'] == 'rejected'
+
+
 def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
     with _client() as client:
         first = client.post(

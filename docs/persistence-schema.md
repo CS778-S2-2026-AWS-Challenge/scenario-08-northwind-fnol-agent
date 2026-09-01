@@ -311,6 +311,11 @@ deleted or rewritten during withdrawal, supersession, or rollback.
   secret reference and safe metadata.
 - Selecting a data runtime profile is a deployment-level configuration change. A process
   uses one complete profile and cannot mix provider stores silently.
+- A `data_profile` configuration revision stores only the closed provider-neutral fields
+  `data_runtime_profile` and `object_storage_adapter`. The compatibility matrix permits
+  `fixture` with either adapter and requires `s3_compatible` for `local_mvp`, `cloudflare`,
+  `mongodb`, and `aws`; unverified cloudflare, mongodb, and aws profiles remain draft-only
+  until their complete provider bundles are verified.
 - Administrative configuration must not provide unrestricted direct edits to production
   Claim State.
 - Retention and purge configuration is versioned policy, not an unreviewed database job
