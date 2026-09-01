@@ -8,6 +8,8 @@ from backend.domain.models import (
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
+    ExternalServiceConsent,
+    ExternalServiceConsentStatus,
     IntegrationSource,
 )
 
@@ -403,3 +405,122 @@ def map_external_task_evidence(
     return [
         ExternalTaskEvidenceView(task=task, evidence_ids=grouped[task.task_id]) for task in tasks
     ]
+
+
+class ExternalTaskAuthorisation(ContractModel):
+    """The two independent authorities one external request needs.
+
+    `docs/claim-creation-boundary.md` requires both a current Northwind rule or
+    staff decision and a matching active claimant-consent record, and states
+    that neither substitutes for the other. They are separate fields here for
+    that reason: a request holding only one of them is not authorised, and no
+    code path can satisfy the pair by supplying the same reference twice.
+    """
+
+    northwind_authority_ref: str = Field(min_length=1, max_length=100)
+    claimant_consent_ref: str = Field(min_length=1, max_length=100)
+    authorised_revision: int = Field(ge=1)
+
+    @model_validator(mode='after')
+    def validate_separate_authorities(self) -> 'ExternalTaskAuthorisation':
+        if self.northwind_authority_ref == self.claimant_consent_ref:
+            raise ValueError(
+                'Northwind authority and claimant consent are separate authorities and '
+                'cannot be the same reference.'
+            )
+        return self
+
+
+class ExternalTaskRequest(ContractModel):
+    """What one external task will disclose, to whom, under what authority, and why.
+
+    The five properties the card requires are each their own field rather than a
+    free-form payload: the stakeholder, the claim, the fields actually disclosed,
+    the authorisation, and the purpose a claimant can read. A request that cannot
+    say all five is not preparable.
+
+    Preparation and sending are separate states. An unsent request holds no
+    operation identity, because the identity is what makes a retry the same
+    request rather than a second one.
+    """
+
+    request_id: str = Field(min_length=1, max_length=100)
+    task_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    service_identity: str = Field(min_length=1, max_length=100)
+    requested_action: str = Field(min_length=1, max_length=100)
+    purpose: str = Field(min_length=1, max_length=300)
+    disclosed_fields: list[str] = Field(min_length=1, max_length=20)
+    authorisation: ExternalTaskAuthorisation
+    prepared_at: datetime
+    sent_at: datetime | None = None
+    operation_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode='after')
+    def validate_request_state(self) -> 'ExternalTaskRequest':
+        if len(self.disclosed_fields) != len(set(self.disclosed_fields)):
+            raise ValueError('Disclosed fields must be unique.')
+        if any(not field.strip() for field in self.disclosed_fields):
+            raise ValueError('A disclosed field must name something readable.')
+        if not self.purpose.strip():
+            raise ValueError('An external request must state a readable purpose.')
+        if (self.sent_at is None) != (self.operation_id is None):
+            raise ValueError(
+                'A sent external request records both a send time and an operation '
+                'identity; an unsent one records neither.'
+            )
+        if self.sent_at is not None and self.sent_at < self.prepared_at:
+            raise ValueError('An external request cannot be sent before it was prepared.')
+        return self
+
+
+class UnauthorisedDisclosureError(ValueError):
+    """A request would disclose more than the claimant's consent permits."""
+
+
+def assert_disclosure_within_consent(
+    request: ExternalTaskRequest,
+    consent: ExternalServiceConsent,
+) -> None:
+    """Check that a prepared request discloses only what its consent permits.
+
+    The consent must be the one this request names, still granted, and issued for
+    the same service and action. Matching on the reference alone would let a
+    withdrawn consent, or one granted for a different action, authorise a
+    disclosure it never covered.
+
+    Args:
+        request: The prepared request about to be sent.
+        consent: The claimant-consent record the request names.
+
+    Raises:
+        UnauthorisedDisclosureError: The consent does not cover this request, or
+            the request discloses a field the consent does not permit.
+    """
+
+    if consent.consent_ref != request.authorisation.claimant_consent_ref:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent {consent.consent_ref} is not the consent this '
+            f'request names ({request.authorisation.claimant_consent_ref}).'
+        )
+    if consent.status is not ExternalServiceConsentStatus.GRANTED:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent {consent.consent_ref} is '
+            f'{consent.status.value}, so it authorises no disclosure.'
+        )
+    if consent.service_identity != request.service_identity:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent covers service {consent.service_identity}, '
+            f'not {request.service_identity}.'
+        )
+    if consent.requested_action != request.requested_action:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent covers action {consent.requested_action}, '
+            f'not {request.requested_action}.'
+        )
+    beyond = sorted(set(request.disclosed_fields) - set(consent.permitted_fields))
+    if beyond:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent {consent.consent_ref} does not permit '
+            f'{", ".join(beyond)}.'
+        )
