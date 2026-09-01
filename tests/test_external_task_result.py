@@ -3,12 +3,21 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.domain.external_services import (
+    ConflictingEvidenceOriginError,
     ExternalRequestTaskMismatchError,
+    ExternalTaskClaimMismatchError,
+    ExternalTaskDelivery,
+    ExternalTaskEvidenceLink,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskResult,
     ExternalTaskResultVerification,
+    StaleVerificationError,
+    TaskCannotHaveResultError,
     UnsettledResultError,
+    UntraceableExternalEvidenceError,
+    assert_result_evidence_is_linked,
     assert_result_matches_task,
     assert_result_may_settle_fact,
 )
@@ -19,6 +28,7 @@ RECEIVED_AT = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 VERIFIED_AT = RECEIVED_AT + timedelta(minutes=5)
 SERVICE = 'vehicle_damage_assessment_routing'
 ACTION = 'vehicle_damage_assessment'
+REVISION = 4
 
 
 def _source() -> RetrievalSource:
@@ -37,6 +47,7 @@ def _result(
     summary: str = 'Assessor assigned for the recorded vehicle damage.',
     verification: ExternalTaskResultVerification = ExternalTaskResultVerification.UNVERIFIED,
     verified_at: datetime | None = None,
+    verified_against_revision: int | None = None,
     evidence_ids: list[str] | None = None,
 ) -> ExternalTaskResult:
     return ExternalTaskResult(
@@ -47,21 +58,64 @@ def _result(
         summary=summary,
         verification=verification,
         verified_at=verified_at,
+        verified_against_revision=(
+            verified_against_revision
+            if verified_against_revision is not None or verified_at is None
+            else REVISION
+        ),
         evidence_ids=evidence_ids if evidence_ids is not None else [],
         received_at=RECEIVED_AT,
     )
 
 
-def _task(*, task_id: str = 'ext_task_1', claim_id: str = 'clm_1') -> ExternalTaskRecord:
+def _failure_code_for(status: ExternalTaskOperationStatus) -> ExternalTaskFailureCode | None:
+    """The failure code the shared classification derives for each failed state."""
+
+    return {
+        ExternalTaskOperationStatus.UNKNOWN_OUTCOME: ExternalTaskFailureCode.TIMEOUT,
+        ExternalTaskOperationStatus.RETRYABLE_FAILURE: ExternalTaskFailureCode.UNAVAILABLE,
+        ExternalTaskOperationStatus.TERMINAL_FAILURE: ExternalTaskFailureCode.MALFORMED,
+    }.get(status)
+
+
+def _task(
+    *,
+    task_id: str = 'ext_task_1',
+    claim_id: str = 'clm_1',
+    status: ExternalTaskOperationStatus = ExternalTaskOperationStatus.ACCEPTED,
+) -> ExternalTaskRecord:
+    accepted = status is ExternalTaskOperationStatus.ACCEPTED
+    unknown = status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
     return ExternalTaskRecord(
         task_id=task_id,
         claim_id=claim_id,
         service_identity=SERVICE,
         requested_action=ACTION,
         integration_source=IntegrationSource.FIXTURE,
-        status=ExternalTaskOperationStatus.PREPARED,
+        status=status,
+        delivery=(
+            ExternalTaskDelivery.SUBMITTED
+            if accepted or unknown
+            else ExternalTaskDelivery.NOT_SUBMITTED
+        ),
+        delivery_evidence=('transport-receipt-1' if accepted or unknown else None),
+        failure_code=_failure_code_for(status),
         created_at=RECEIVED_AT,
         updated_at=RECEIVED_AT,
+    )
+
+
+def _link(
+    *,
+    evidence_id: str = 'evd_1',
+    task_id: str = 'ext_task_1',
+    claim_id: str = 'clm_1',
+) -> ExternalTaskEvidenceLink:
+    return ExternalTaskEvidenceLink(
+        task_id=task_id,
+        evidence_id=evidence_id,
+        claim_id=claim_id,
+        linked_at=RECEIVED_AT,
     )
 
 
@@ -156,7 +210,8 @@ def test_only_a_consistent_result_may_settle_a_fact() -> None:
         _result(
             verification=ExternalTaskResultVerification.CONSISTENT,
             verified_at=VERIFIED_AT,
-        )
+        ),
+        claim_revision=REVISION,
     )
 
 
@@ -176,4 +231,87 @@ def test_an_unsettled_result_is_refused_and_says_which_it_is(
     """The caller should learn which state it holds, not only that it cannot proceed."""
 
     with pytest.raises(UnsettledResultError, match=expected):
-        assert_result_may_settle_fact(_result(verification=verification, verified_at=verified_at))
+        assert_result_may_settle_fact(
+            _result(verification=verification, verified_at=verified_at),
+            claim_revision=REVISION,
+        )
+
+
+@pytest.mark.parametrize(
+    'status',
+    [
+        ExternalTaskOperationStatus.PREPARED,
+        ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+        ExternalTaskOperationStatus.TERMINAL_FAILURE,
+    ],
+)
+def test_a_task_that_received_no_answer_cannot_carry_a_result(
+    status: ExternalTaskOperationStatus,
+) -> None:
+    """A prepared task was never sent, and a failed one got nothing back."""
+
+    with pytest.raises(TaskCannotHaveResultError, match='received no provider answer'):
+        assert_result_matches_task(_result(), _task(status=status))
+
+
+def test_an_unknown_outcome_may_carry_a_late_answer() -> None:
+    """Reconciliation is exactly where a late provider answer arrives."""
+
+    assert_result_matches_task(_result(), _task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME))
+
+
+def test_result_evidence_must_reach_it_through_a_link() -> None:
+    assert_result_evidence_is_linked(_result(evidence_ids=['evd_1']), [_link()])
+
+
+def test_result_evidence_with_no_link_is_rejected() -> None:
+    with pytest.raises(UntraceableExternalEvidenceError, match='no link attributes'):
+        assert_result_evidence_is_linked(_result(evidence_ids=['evd_1']), [])
+
+
+def test_result_evidence_linked_under_another_claim_is_rejected() -> None:
+    """The bypass the evidence link boundary already closes."""
+
+    with pytest.raises(ExternalTaskClaimMismatchError, match='linked under claim'):
+        assert_result_evidence_is_linked(
+            _result(evidence_ids=['evd_1']), [_link(claim_id='clm_other')]
+        )
+
+
+def test_result_evidence_produced_by_another_task_is_rejected() -> None:
+    with pytest.raises(ConflictingEvidenceOriginError, match='linked to task'):
+        assert_result_evidence_is_linked(
+            _result(evidence_ids=['evd_1']), [_link(task_id='ext_task_other')]
+        )
+
+
+def test_a_checked_result_must_name_the_revision_it_was_checked_against() -> None:
+    with pytest.raises(ValueError, match='must name the claim revision'):
+        ExternalTaskResult(
+            result_id='ext_res_1',
+            task_id='ext_task_1',
+            claim_id='clm_1',
+            source=_source(),
+            summary='Assessor assigned.',
+            verification=ExternalTaskResultVerification.CONSISTENT,
+            verified_at=VERIFIED_AT,
+            verified_against_revision=None,
+            received_at=RECEIVED_AT,
+        )
+
+
+def test_an_unverified_result_cannot_name_a_revision() -> None:
+    with pytest.raises(ValueError, match='cannot name a revision'):
+        _result(verified_against_revision=REVISION)
+
+
+def test_a_consistent_result_cannot_settle_a_later_revision() -> None:
+    """A check made against an earlier claim no longer covers the current one."""
+
+    consistent = _result(
+        verification=ExternalTaskResultVerification.CONSISTENT,
+        verified_at=VERIFIED_AT,
+    )
+
+    with pytest.raises(StaleVerificationError, match='no longer covers it'):
+        assert_result_may_settle_fact(consistent, claim_revision=REVISION + 1)

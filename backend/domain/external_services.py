@@ -627,6 +627,7 @@ class ExternalTaskResult(ContractModel):
     summary: str = Field(min_length=1, max_length=500)
     verification: ExternalTaskResultVerification = ExternalTaskResultVerification.UNVERIFIED
     verified_at: datetime | None = None
+    verified_against_revision: int | None = Field(default=None, ge=1)
     evidence_ids: list[str] = Field(default_factory=list, max_length=50)
     received_at: datetime
 
@@ -647,7 +648,30 @@ class ExternalTaskResult(ContractModel):
             )
         if self.verified_at is not None and self.verified_at < self.received_at:
             raise ValueError('A result cannot be verified before it was received.')
+        if unverified and self.verified_against_revision is not None:
+            raise ValueError('An unverified result cannot name a revision it was checked against.')
+        if not unverified and self.verified_against_revision is None:
+            raise ValueError(
+                f'A result verified as {self.verification.value} must name the claim revision '
+                'it was checked against, so a later revision can tell the check is stale.'
+            )
         return self
+
+
+_RESULT_BEARING_TASK_STATES = frozenset(
+    {
+        ExternalTaskOperationStatus.ACCEPTED,
+        ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+    }
+)
+
+
+class TaskCannotHaveResultError(ValueError):
+    """A task in this state cannot have received a provider answer."""
+
+
+class StaleVerificationError(ValueError):
+    """A result was checked against an earlier revision of the claim."""
 
 
 class UnsettledResultError(ValueError):
@@ -658,15 +682,26 @@ def assert_result_matches_task(
     result: ExternalTaskResult,
     task: ExternalTaskRecord,
 ) -> None:
-    """Check that a result agrees with the task it names.
+    """Check that a result belongs to a task that could have produced one.
+
+    Identity is not enough. A task still `prepared` has not been submitted, and a
+    task that failed retryably or terminally received no answer, so recording a
+    provider result against any of them would assert an answer that cannot exist.
+    Only two states can carry one: `accepted`, where the provider took the request
+    and may respond, and `unknown_outcome`, which is precisely the state
+    reconciliation resolves when a late answer arrives.
 
     Args:
         result: The recorded provider result.
         task: The external task record the result names.
 
+    Returns:
+        None. The result is left unchanged; this raises or returns quietly.
+
     Raises:
-        ExternalRequestTaskMismatchError: The result names this task but belongs
-            to a different claim, or names a different task entirely.
+        ExternalRequestTaskMismatchError: The result names a different task, or
+            belongs to a different claim than the task it names.
+        TaskCannotHaveResultError: The task is in a state that received no answer.
     """
 
     if result.task_id != task.task_id:
@@ -678,29 +713,98 @@ def assert_result_matches_task(
             f'{result.result_id}: claim {result.claim_id} does not match task '
             f'{task.task_id} claim {task.claim_id}.'
         )
+    if task.status not in _RESULT_BEARING_TASK_STATES:
+        raise TaskCannotHaveResultError(
+            f'{result.result_id}: task {task.task_id} is {task.status.value}, which received '
+            'no provider answer, so it cannot carry a result.'
+        )
 
 
-def assert_result_may_settle_fact(result: ExternalTaskResult) -> None:
-    """Check that a result has been checked and agrees before it settles anything.
+def assert_result_evidence_is_linked(
+    result: ExternalTaskResult,
+    links: Sequence[ExternalTaskEvidenceLink],
+) -> None:
+    """Check that every material a result claims reaches it through a link.
 
-    Only a result verified as consistent may inform a claim fact. Unverified,
-    inconsistent, and review-required results are all refused, and they are
-    refused separately from one another so the caller learns which it is holding
-    rather than only that it cannot proceed.
+    Holding evidence identifiers directly would reopen the boundary the
+    evidence-to-task link already closes: a result on one claim could name
+    material belonging to another, or material produced by a different task. The
+    links are the only route by which material is attributed, so a result's
+    evidence must be present in them, on this result's task and claim.
 
     Args:
         result: The recorded provider result.
+        links: The evidence-to-task links known for this claim.
+
+    Returns:
+        None. The result is left unchanged; this raises or returns quietly.
+
+    Raises:
+        ExternalTaskClaimMismatchError: A link for this material names another
+            claim.
+        ConflictingEvidenceOriginError: A link attributes this material to a
+            different task.
+        UntraceableExternalEvidenceError: The result names material no link
+            accounts for.
+    """
+
+    by_evidence = {link.evidence_id: link for link in links}
+    for evidence_id in result.evidence_ids:
+        link = by_evidence.get(evidence_id)
+        if link is None:
+            raise UntraceableExternalEvidenceError(
+                f'{result.result_id}: names evidence {evidence_id}, which no link attributes '
+                'to any task.'
+            )
+        if link.claim_id != result.claim_id:
+            raise ExternalTaskClaimMismatchError(
+                f'{result.result_id}: evidence {evidence_id} is linked under claim '
+                f'{link.claim_id}, not {result.claim_id}.'
+            )
+        if link.task_id != result.task_id:
+            raise ConflictingEvidenceOriginError(
+                f'{result.result_id}: evidence {evidence_id} is linked to task '
+                f'{link.task_id}, not {result.task_id}.'
+            )
+
+
+def assert_result_may_settle_fact(
+    result: ExternalTaskResult,
+    *,
+    claim_revision: int,
+) -> None:
+    """Check that a result was checked, agreed, and was checked against this claim.
+
+    Being marked consistent is not sufficient on its own. A check is made against
+    a particular revision of the claim, and a later revision may have changed the
+    facts it agreed with, so the revision is compared rather than trusted. What
+    made the result consistent is decided elsewhere; this only refuses to let a
+    stale or unchecked answer settle anything.
+
+    Args:
+        result: The recorded provider result.
+        claim_revision: The current revision of the claim it would inform.
+
+    Returns:
+        None. Nothing is settled here; this raises or returns quietly.
 
     Raises:
         UnsettledResultError: The result has not been checked, or was checked and
             did not agree.
+        StaleVerificationError: The result agreed with an earlier revision of the
+            claim than the one it would now inform.
     """
 
-    if result.verification is ExternalTaskResultVerification.CONSISTENT:
-        return
-    reasons = {
-        ExternalTaskResultVerification.UNVERIFIED: 'has not been checked against the claim',
-        ExternalTaskResultVerification.INCONSISTENT: 'conflicts with the claim',
-        ExternalTaskResultVerification.REVIEW_REQUIRED: 'needs review before it can be used',
-    }
-    raise UnsettledResultError(f'{result.result_id}: {reasons[result.verification]}.')
+    if result.verification is not ExternalTaskResultVerification.CONSISTENT:
+        reasons = {
+            ExternalTaskResultVerification.UNVERIFIED: 'has not been checked against the claim',
+            ExternalTaskResultVerification.INCONSISTENT: 'conflicts with the claim',
+            ExternalTaskResultVerification.REVIEW_REQUIRED: 'needs review before it can be used',
+        }
+        raise UnsettledResultError(f'{result.result_id}: {reasons[result.verification]}.')
+    if result.verified_against_revision != claim_revision:
+        raise StaleVerificationError(
+            f'{result.result_id}: was checked against claim revision '
+            f'{result.verified_against_revision}, and the claim is now at {claim_revision}, '
+            'so the check no longer covers it.'
+        )
