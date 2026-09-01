@@ -45,6 +45,7 @@ them:
 - [FNOL Agent Behaviour Catalogue](agent-behaviour-catalogue.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
+- [First Control Plane Interface Contract](control-plane-interface.md)
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
@@ -152,6 +153,10 @@ Demonstration:
 - [External-Service Validation](archive/sprint-2/validation/day4-external-service-validation.md)
 - [Canonical Scenario Validation](archive/sprint-2/validation/day4-canonical-scenario-validation.md)
 - [Regression Entry Points](archive/sprint-2/validation/day5-regression-entrypoints.md)
+
+### Sprint 3
+
+- [Issue #371 RAG and Structured-Query Acceptance Evidence](archive/sprint-3/validation/issue-371-rag-structured-query-evidence.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
