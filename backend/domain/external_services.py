@@ -732,6 +732,12 @@ def assert_result_evidence_is_linked(
     links are the only route by which material is attributed, so a result's
     evidence must be present in them, on this result's task and claim.
 
+    Every link for a given identifier is read before an answer is given. Keeping
+    only one of them, however chosen, would let the order of the list decide
+    whether conflicting attribution is noticed. Repeated links naming the same
+    task and claim are one origin and are accepted; two different tasks are a
+    conflict whichever order they arrive in.
+
     Args:
         result: The recorded provider result.
         links: The evidence-to-task links known for this claim.
@@ -748,23 +754,29 @@ def assert_result_evidence_is_linked(
             accounts for.
     """
 
-    by_evidence = {link.evidence_id: link for link in links}
     for evidence_id in result.evidence_ids:
-        link = by_evidence.get(evidence_id)
-        if link is None:
+        matching = [link for link in links if link.evidence_id == evidence_id]
+        if not matching:
             raise UntraceableExternalEvidenceError(
                 f'{result.result_id}: names evidence {evidence_id}, which no link attributes '
                 'to any task.'
             )
-        if link.claim_id != result.claim_id:
+        claims = sorted({link.claim_id for link in matching})
+        if claims != [result.claim_id]:
             raise ExternalTaskClaimMismatchError(
                 f'{result.result_id}: evidence {evidence_id} is linked under claim '
-                f'{link.claim_id}, not {result.claim_id}.'
+                f'{", ".join(claims)}, not {result.claim_id} alone.'
             )
-        if link.task_id != result.task_id:
+        tasks = sorted({link.task_id for link in matching})
+        if len(tasks) > 1:
             raise ConflictingEvidenceOriginError(
-                f'{result.result_id}: evidence {evidence_id} is linked to task '
-                f'{link.task_id}, not {result.task_id}.'
+                f'{result.result_id}: evidence {evidence_id} is linked to more than one task '
+                f'on claim {result.claim_id}: {", ".join(tasks)}.'
+            )
+        if tasks != [result.task_id]:
+            raise ConflictingEvidenceOriginError(
+                f'{result.result_id}: evidence {evidence_id} is linked to task {tasks[0]}, '
+                f'not {result.task_id}.'
             )
 
 

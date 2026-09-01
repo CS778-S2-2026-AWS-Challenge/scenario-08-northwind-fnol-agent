@@ -315,3 +315,27 @@ def test_a_consistent_result_cannot_settle_a_later_revision() -> None:
 
     with pytest.raises(StaleVerificationError, match='no longer covers it'):
         assert_result_may_settle_fact(consistent, claim_revision=REVISION + 1)
+
+
+def test_conflicting_evidence_links_fail_closed_in_either_order() -> None:
+    """Keeping one link per identifier would let list order decide attribution."""
+
+    mine = _link(task_id='ext_task_1')
+    other = _link(task_id='ext_task_other')
+
+    for links in ([other, mine], [mine, other]):
+        with pytest.raises(ConflictingEvidenceOriginError, match='more than one task'):
+            assert_result_evidence_is_linked(_result(evidence_ids=['evd_1']), links)
+
+
+def test_a_repeated_identical_link_is_one_origin() -> None:
+    assert_result_evidence_is_linked(_result(evidence_ids=['evd_1']), [_link(), _link()])
+
+
+def test_a_cross_claim_link_fails_closed_in_either_order() -> None:
+    mine = _link(claim_id='clm_1')
+    other = _link(claim_id='clm_other')
+
+    for links in ([other, mine], [mine, other]):
+        with pytest.raises(ExternalTaskClaimMismatchError, match='not clm_1 alone'):
+            assert_result_evidence_is_linked(_result(evidence_ids=['evd_1']), links)
