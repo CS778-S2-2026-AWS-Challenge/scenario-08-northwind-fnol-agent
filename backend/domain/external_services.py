@@ -13,6 +13,7 @@ from backend.domain.models import (
     ExternalServiceConsentStatus,
     IntegrationSource,
 )
+from backend.domain.retrieval import RetrievalSource
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
 ASSESSOR_REQUESTED_ACTION = 'vehicle_damage_assessment'
@@ -587,3 +588,119 @@ def assert_disclosure_within_consent(
             f'{request.request_id}: consent {consent.consent_ref} does not permit '
             f'{", ".join(beyond)}.'
         )
+
+
+class ExternalTaskResultVerification(str, Enum):
+    """How far a provider result has been checked against the claim.
+
+    There is deliberately no value meaning "this is now a confirmed claim fact".
+    A provider answer is evidence about the claim, never the claim's own record
+    of what is true, and `docs/claim-creation-boundary.md` requires an
+    inconsistent result to stay proposed or review-required rather than settle
+    anything. Promotion to a confirmed fact is a claim-level decision made
+    elsewhere, so this enum cannot express it and no caller can shortcut to it.
+    """
+
+    UNVERIFIED = 'unverified'
+    CONSISTENT = 'consistent'
+    INCONSISTENT = 'inconsistent'
+    REVIEW_REQUIRED = 'review_required'
+
+
+class ExternalTaskResult(ContractModel):
+    """What a third-party returned for one task, and how far it has been checked.
+
+    A result is separate from the material it may have produced. A task can
+    return an answer and no material at all, such as a provider reporting no
+    record found, and it can return material whose consistency with the claim is
+    still unknown. Collapsing the two would make an absent answer and an
+    unverified one indistinguishable.
+
+    Verification starts at `UNVERIFIED` and a checked result must say when it was
+    checked, so an unchecked result cannot be presented as a checked one.
+    """
+
+    result_id: str = Field(min_length=1, max_length=100)
+    task_id: str = Field(min_length=1, max_length=100)
+    claim_id: str = Field(min_length=1, max_length=100)
+    source: RetrievalSource
+    summary: str = Field(min_length=1, max_length=500)
+    verification: ExternalTaskResultVerification = ExternalTaskResultVerification.UNVERIFIED
+    verified_at: datetime | None = None
+    evidence_ids: list[str] = Field(default_factory=list, max_length=50)
+    received_at: datetime
+
+    @model_validator(mode='after')
+    def validate_result_state(self) -> 'ExternalTaskResult':
+        if not self.summary.strip():
+            raise ValueError('An external task result must say something readable.')
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError('Result evidence identifiers must be unique.')
+        if any(not evidence_id.strip() for evidence_id in self.evidence_ids):
+            raise ValueError('A result evidence identifier must name something.')
+        unverified = self.verification is ExternalTaskResultVerification.UNVERIFIED
+        if unverified and self.verified_at is not None:
+            raise ValueError('An unverified result cannot record a verification time.')
+        if not unverified and self.verified_at is None:
+            raise ValueError(
+                f'A result verified as {self.verification.value} must record when it was checked.'
+            )
+        if self.verified_at is not None and self.verified_at < self.received_at:
+            raise ValueError('A result cannot be verified before it was received.')
+        return self
+
+
+class UnsettledResultError(ValueError):
+    """A result that has not been checked as consistent cannot settle a claim fact."""
+
+
+def assert_result_matches_task(
+    result: ExternalTaskResult,
+    task: ExternalTaskRecord,
+) -> None:
+    """Check that a result agrees with the task it names.
+
+    Args:
+        result: The recorded provider result.
+        task: The external task record the result names.
+
+    Raises:
+        ExternalRequestTaskMismatchError: The result names this task but belongs
+            to a different claim, or names a different task entirely.
+    """
+
+    if result.task_id != task.task_id:
+        raise ExternalRequestTaskMismatchError(
+            f'{result.result_id}: names task {result.task_id}, not {task.task_id}.'
+        )
+    if result.claim_id != task.claim_id:
+        raise ExternalRequestTaskMismatchError(
+            f'{result.result_id}: claim {result.claim_id} does not match task '
+            f'{task.task_id} claim {task.claim_id}.'
+        )
+
+
+def assert_result_may_settle_fact(result: ExternalTaskResult) -> None:
+    """Check that a result has been checked and agrees before it settles anything.
+
+    Only a result verified as consistent may inform a claim fact. Unverified,
+    inconsistent, and review-required results are all refused, and they are
+    refused separately from one another so the caller learns which it is holding
+    rather than only that it cannot proceed.
+
+    Args:
+        result: The recorded provider result.
+
+    Raises:
+        UnsettledResultError: The result has not been checked, or was checked and
+            did not agree.
+    """
+
+    if result.verification is ExternalTaskResultVerification.CONSISTENT:
+        return
+    reasons = {
+        ExternalTaskResultVerification.UNVERIFIED: 'has not been checked against the claim',
+        ExternalTaskResultVerification.INCONSISTENT: 'conflicts with the claim',
+        ExternalTaskResultVerification.REVIEW_REQUIRED: 'needs review before it can be used',
+    }
+    raise UnsettledResultError(f'{result.result_id}: {reasons[result.verification]}.')
