@@ -48,6 +48,7 @@ authorisation.
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
 | `customer/` | React and Vite claimant experience |
 | `employee/` | Static employee workbench backed by the shared Workbench API |
+| `admin/` | Static Admin Console backed only by the authenticated Admin API |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
@@ -118,6 +119,10 @@ npm run dev --prefix customer
 The Vite development server proxies `/api` requests to the local backend. To run the employee
 workbench, serve `employee/` on port 8002 as documented in `employee/README.md`; it reads and
 updates the same backend claim state.
+
+To run the separate Admin Console, serve `admin/` on port 8003 as documented in
+`admin/README.md`. It reads configuration status only through the Admin API and does not share
+Claimant or Staff Workbench credentials.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 

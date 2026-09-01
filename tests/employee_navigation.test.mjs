@@ -13,3 +13,8 @@ assert.match(
 );
 assert.doesNotMatch(normalizedPage, /id="customerChatView"/, 'Conversation must not create a separate page.');
 assert.doesNotMatch(normalizedPage, /window\.history\.(pushState|back)/, 'Conversation must not change page history.');
+assert.match(
+  normalizedPage,
+  /href="http:\/\/127\.0\.0\.1:8003\/"[^>]*aria-label="Open Admin Console/,
+  'Admin Console navigation must target its independently served local origin.',
+);

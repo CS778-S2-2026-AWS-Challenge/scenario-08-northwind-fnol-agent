@@ -40,9 +40,9 @@
     .filters select { color-scheme:dark; cursor:pointer; }
     .filters button { cursor: pointer; border-color: #38bdf8; background: #0f172a; }
     .sidebar-nav { display:grid; gap:4px; }
-    .sidebar-nav button { position:relative; width:100%; min-height:42px; display:flex; align-items:center; gap:9px; border:1px solid transparent; border-radius:9px; padding:6px 10px; background:transparent; color:#c9dcda; text-align:left; font-size:13px; font-weight:650; cursor:pointer; transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease; }
-    .sidebar-nav button::after { position:absolute; right:12px; color:#6e928e; content:'›'; font-size:20px; font-weight:400; }
-    .sidebar-nav button:hover { border-color:rgba(94,234,212,.18); background:rgba(50,125,117,.16); color:#fff; transform:translateX(2px); }
+    .sidebar-nav button, .sidebar-nav .workspace-link { position:relative; width:100%; min-height:42px; display:flex; align-items:center; gap:9px; border:1px solid transparent; border-radius:9px; padding:6px 10px; background:transparent; color:#c9dcda; text-align:left; font-size:13px; font-weight:650; cursor:pointer; transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease; }
+    .sidebar-nav button::after, .sidebar-nav .workspace-link::after { position:absolute; right:12px; color:#6e928e; content:'›'; font-size:20px; font-weight:400; }
+    .sidebar-nav button:hover, .sidebar-nav .workspace-link:hover { border-color:rgba(94,234,212,.18); background:rgba(50,125,117,.16); color:#fff; transform:translateX(2px); }
     .sidebar-nav button.active { border-color:rgba(94,234,212,.28); background:linear-gradient(90deg,rgba(36,155,143,.32),rgba(36,155,143,.12)); color:#fff; box-shadow:inset 3px 0 #52d6c5; }
     .nav-icon { display:grid; flex:0 0 27px; width:27px; height:27px; place-items:center; border-radius:7px; background:rgba(148,210,199,.1); color:#9cded4; font-size:13px; }
     .sidebar-nav button.active .nav-icon { background:#2b9b8f; color:#fff; box-shadow:0 5px 13px rgba(20,125,117,.28); }
@@ -65,8 +65,8 @@
     .page.sidebar-collapsed .sidebar-toggle { width:34px; height:34px; margin:0; border-color:rgba(140,229,214,.35); background:rgba(140,229,214,.12); }
     .page.sidebar-collapsed .toggle-chevron { transform:translateX(-2px) rotate(225deg); }
     .page.sidebar-collapsed .sidebar-nav { gap:7px; }
-    .page.sidebar-collapsed .sidebar-nav button { min-height:46px; justify-content:center; padding-inline:5px; border-radius:12px; }
-    .page.sidebar-collapsed .sidebar-nav button::after { display:none; }
+    .page.sidebar-collapsed .sidebar-nav button, .page.sidebar-collapsed .sidebar-nav .workspace-link { min-height:46px; justify-content:center; padding-inline:5px; border-radius:12px; }
+    .page.sidebar-collapsed .sidebar-nav button::after, .page.sidebar-collapsed .sidebar-nav .workspace-link::after { display:none; }
     .page.sidebar-collapsed .nav-icon { flex-basis:34px; width:34px; height:34px; border-radius:10px; font-size:15px; }
     .page.sidebar-collapsed .sidebar-nav button.active { border-color:rgba(140,229,214,.36); background:rgba(52,183,166,.2); box-shadow:none; }
     .page.sidebar-collapsed .refresh-claims { min-height:44px; margin-top:2px; padding:0; border-radius:12px; border-color:rgba(202,201,247,.2); font-size:0; }
@@ -446,8 +446,8 @@
       .page.sidebar-collapsed .sidebar-toggle { width:34px; height:34px; margin-left:auto; }
       .page.sidebar-collapsed .sidebar > :not(.brand-lockup) { display:contents; }
       .page.sidebar-collapsed .sidebar-nav { display:grid; gap:4px; }
-      .page.sidebar-collapsed .sidebar-nav button { min-height:42px; justify-content:flex-start; padding:6px 10px; }
-      .page.sidebar-collapsed .sidebar-nav button::after { display:block; }
+      .page.sidebar-collapsed .sidebar-nav button, .page.sidebar-collapsed .sidebar-nav .workspace-link { min-height:42px; justify-content:flex-start; padding:6px 10px; }
+      .page.sidebar-collapsed .sidebar-nav button::after, .page.sidebar-collapsed .sidebar-nav .workspace-link::after { display:block; }
       .page.sidebar-collapsed .nav-icon { flex-basis:27px; width:27px; height:27px; }
       .page.sidebar-collapsed .refresh-claims { min-height:40px; padding:0; font-size:13px; }
       .page.sidebar-collapsed .refresh-claims > [aria-hidden="true"] { font-size:inherit; }
@@ -508,6 +508,7 @@
             <button id="workbenchNav" class="active" type="button" title="Claim workbench"><span class="nav-icon" aria-hidden="true">▦</span><span class="nav-label">Claim workbench</span></button>
             <button id="pendingEvidenceNav" type="button" title="Pending evidence"><span class="nav-icon" aria-hidden="true">◷</span><span class="nav-label">Pending evidence</span></button>
             <button id="customerChatNav" type="button" title="Claim conversations"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-label">Claim conversations</span></button>
+            <a class="workspace-link" href="http://127.0.0.1:8003/" title="Admin Console — administrator access required" aria-label="Open Admin Console; administrator access required"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">Admin Console (admin access)</span></a>
           </nav>
         </div>
 

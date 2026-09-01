@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Northwind Admin Console</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Skip to content</a>
+  <div id="app" class="app-shell">
+    <header class="mobile-header">
+      <div><strong>Northwind</strong><span>Admin Console</span></div>
+      <button id="menuButton" type="button" aria-controls="sidebar" aria-expanded="false">Menu</button>
+    </header>
+
+    <aside id="sidebar" class="sidebar" aria-label="Admin Console">
+      <div class="brand"><strong>Northwind</strong><span>Admin Console</span></div>
+      <nav id="moduleNavigation" aria-label="Administration modules"></nav>
+      <div class="sidebar-footer">
+        <span id="accessStatus" class="access-status">Checking access</span>
+        <a href="../employee/">Staff Workbench</a>
+      </div>
+    </aside>
+    <button id="backdrop" class="backdrop" type="button" aria-label="Close menu" hidden></button>
+
+    <main id="mainContent" class="main-content" tabindex="-1">
+      <div id="liveRegion" class="sr-only" aria-live="polite"></div>
+      <section id="loadingState" class="state-panel" aria-busy="true">
+        <span class="spinner" aria-hidden="true"></span>
+        <div><h1>Checking Admin Console access</h1><p>Loading configuration status from the Admin API.</p></div>
+      </section>
+
+      <section id="unauthorisedState" class="state-panel state-panel--danger" hidden>
+        <span class="state-mark" aria-hidden="true">!</span>
+        <div>
+          <h1>Admin access required</h1>
+          <p id="unauthorisedMessage">Sign in with an authorised administrator account to use this console.</p>
+          <p class="state-detail">Claimant and Staff Workbench credentials cannot access administration routes.</p>
+        </div>
+      </section>
+
+      <section id="errorState" class="state-panel state-panel--danger" role="alert" hidden>
+        <span class="state-mark" aria-hidden="true">!</span>
+        <div>
+          <h1>Configuration status could not be loaded</h1>
+          <p id="errorMessage"></p>
+          <p id="requestId" class="state-detail"></p>
+          <button id="retryButton" class="button" type="button">Retry</button>
+        </div>
+      </section>
+
+      <section id="consoleView" hidden>
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Administration</p>
+            <h1 id="pageTitle">System</h1>
+            <p id="pageDescription" class="page-description"></p>
+          </div>
+          <button id="refreshButton" class="button button--secondary" type="button">Refresh status</button>
+        </header>
+        <div id="moduleContent"></div>
+      </section>
+    </main>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
