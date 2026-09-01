@@ -13,3 +13,13 @@ assert.match(
 );
 assert.doesNotMatch(normalizedPage, /id="customerChatView"/, 'Conversation must not create a separate page.');
 assert.doesNotMatch(normalizedPage, /window\.history\.(pushState|back)/, 'Conversation must not change page history.');
+assert.match(
+  normalizedPage,
+  /id="customerChatReplyTitle">Ask or reply to claimant</,
+  'The shared handoff composer must clearly support claimant questions.',
+);
+assert.match(
+  normalizedPage,
+  /id="customerChatText"[^>]+aria-label="Question or message to claimant"/,
+  'The claimant question control must have a clear accessible name.',
+);

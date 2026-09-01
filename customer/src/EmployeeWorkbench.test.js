@@ -1039,7 +1039,7 @@ it('announces queue failures and exposes named keyboard controls', async () => {
     expect(dom.window.document.querySelector('#refreshClaims').disabled).toBe(false)
     expect(dom.window.document.querySelector('#workbenchView').getAttribute('aria-busy')).toBe('false')
   })
-  expect(dom.window.document.querySelector('#customerChatText').getAttribute('aria-label')).toBe('Message to claimant')
+  expect(dom.window.document.querySelector('#customerChatText').getAttribute('aria-label')).toBe('Question or message to claimant')
   expect(dom.window.document.querySelector('#chatInput').getAttribute('aria-label')).toBe('Assistant question')
   expect(dom.window.document.querySelector('#chatFileBtn').getAttribute('aria-label')).toBe('Attach files')
   const attachmentInput = dom.window.document.querySelector('#chatFileInput')

@@ -228,3 +228,125 @@ def test_signal_decision_finds_claim_decision_without_trigger_message(
     assert response.status_code == 201
     assert response.json()['signal_decision']['signal_id'] == 'sig_without_trigger_message'
     assert len(repository.list_signal_decisions(claim_id)) == 1
+
+
+def test_staff_takeover_question_decision_and_writeback_share_claim_context(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim = create_claim(client, auth_headers)
+    claim_id = str(claim['claim_id'])
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.active_session_id is not None
+
+    support = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'issue-418-support',
+            'If-Match': '1',
+        },
+        json={
+            'reason': 'I need a staff member to help with the next step.',
+            'support_need': 'human_requested',
+        },
+    )
+    assert support.status_code == 201
+    handoff_id = support.json()['handoff']['handoff_id']
+
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'issue-418-takeover',
+            'If-Match': '2',
+        },
+        json={},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()['handoff']['status'] == 'accepted'
+    assert accepted.json()['handoff']['assigned_to'] == 'stf_demo'
+
+    question_text = 'Can you confirm whether the vehicle can still be driven safely?'
+    question = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'issue-418-question',
+            'If-Match': '3',
+        },
+        json={'content': {'type': 'text', 'text': question_text}},
+    )
+    assert question.status_code == 200
+    assert question.json()['message']['visibility'] == 'shared'
+    question_id = question.json()['message']['message_id']
+
+    action = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'issue-418-decision',
+            'If-Match': '4',
+        },
+        json={
+            'action_type': 'staff_review',
+            'requested_outcome': 'Record whether more claimant information is required.',
+            'source_refs': [handoff_id, question_id],
+        },
+    )
+    assert action.status_code == 201
+    action_id = action.json()['action']['action_id']
+
+    completed = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'issue-418-writeback',
+            'If-Match': '5',
+        },
+        json={
+            'status': 'completed',
+            'result': {
+                'outcome': 'more_information_required',
+                'summary': 'Vehicle usability must be confirmed before the next review step.',
+                'reason_codes': ['CLAIMANT_CONFIRMATION_REQUIRED'],
+                'source_refs': [handoff_id, question_id],
+            },
+            'state_changes': [{'path': 'claim_state.workflow_state', 'to': 'awaiting_evidence'}],
+            'customer_update': {
+                'summary': (
+                    'Northwind needs your answer about whether the vehicle can still be driven.'
+                ),
+                'responsible_party': 'claimant',
+                'related_refs': [question_id],
+            },
+        },
+    )
+    assert completed.status_code == 200
+    assert completed.json()['revision'] == 6
+
+    staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+    assert staff['revision'] == 6
+    assert staff['claim_state']['workflow_state'] == 'awaiting_evidence'
+    assert staff['handoffs'][0]['assigned_to'] == 'stf_demo'
+    assert staff['handoffs'][0]['status'] == 'in_progress'
+    assert staff['staff_actions'][0]['result']['reason_codes'] == ['CLAIMANT_CONFIRMATION_REQUIRED']
+    assert any(message['content'].get('text') == question_text for message in staff['messages'])
+
+    claimant_history = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{stored.active_session_id}/messages?limit=100',
+        headers=auth_headers,
+    ).json()
+    assert any(item['content'].get('text') == question_text for item in claimant_history['items'])
+
+    claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
+    assert claimant['workflow_state'] == 'awaiting_evidence'
+    assert claimant['customer_next_step']['responsible_party'] == 'claimant'
+    assert claimant['customer_next_step']['summary'].startswith('Northwind needs your answer')
+    assert 'staff_actions' not in claimant
+    assert 'handoffs' not in claimant
+    assert 'CLAIMANT_CONFIRMATION_REQUIRED' not in str(claimant)
+    assert 'Vehicle usability must be confirmed' not in str(claimant)

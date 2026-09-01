@@ -369,7 +369,7 @@ def test_employee_messaging_keeps_deterministic_template_behind_staff_send_actio
     assert 'reply.value = suggestion;' in page
     assert "byId('customerChatHandoffAction').focus()" not in page
     assert 'reply.focus({ preventScroll:true });' in page
-    assert '>Send to claimant</button>' in page
+    assert '>Send question or reply</button>' in page
     assert 'id="handoffRequiredDialog"' in page
     assert '>Accept this handoff before replying<' in page
     assert '>Keep as draft</button>' in page

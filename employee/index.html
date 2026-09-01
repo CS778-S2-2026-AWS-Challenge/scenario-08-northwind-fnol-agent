@@ -615,7 +615,7 @@
                 <section class="customer-chat-composer" aria-labelledby="customerChatReplyTitle">
                   <div class="customer-chat-title">
                     <div>
-                      <strong id="customerChatReplyTitle">Reply to claimant</strong>
+                      <strong id="customerChatReplyTitle">Ask or reply to claimant</strong>
                       <div class="customer-chat-status">
                         Write your own reply or build a deterministic template from the current claim context.
                       </div>
@@ -623,8 +623,8 @@
                   </div>
 
                   <div class="customer-chat-input">
-                    <textarea id="customerChatText" aria-label="Message to claimant" placeholder="Write a claimant-safe reply or build a template here…"></textarea>
-                    <button id="customerChatSend" class="customer-chat-button" type="button">Send to claimant</button>
+                    <textarea id="customerChatText" aria-label="Question or message to claimant" placeholder="Ask one claimant-safe question or write a reply here…"></textarea>
+                    <button id="customerChatSend" class="customer-chat-button" type="button">Send question or reply</button>
                   </div>
                   <section id="agentSuggestionPanel" class="agent-suggestion-panel" aria-labelledby="agentSuggestionTitle">
                     <div class="agent-suggestion-heading">
@@ -2363,7 +2363,7 @@
       if (pendingCustomerMessage?.claimId !== claim.claim_id) {
         pendingCustomerMessage = null;
         byId('customerChatText').value = '';
-        byId('customerChatSend').textContent = 'Send to claimant';
+        byId('customerChatSend').textContent = 'Send question or reply';
       }
       activeCustomerChatId = claim.claim_id;
       byId('customerChatHeader').textContent = `Claim ${claim.claim_id} · ${claim.customer_reference}`;
@@ -2645,7 +2645,7 @@
         });
         input.value = '';
         pendingCustomerMessage = null;
-        button.textContent = 'Send to claimant';
+        button.textContent = 'Send question or reply';
         if (['suggested', 'accepted', 'edited'].includes(agentSuggestionState)) {
           setAgentSuggestionState('sent_by_staff', 'Sent only after staff action');
         }
