@@ -15,6 +15,17 @@ from backend.domain.configuration import (
 )
 from backend.repositories.configuration import ConfigurationRepository
 
+_PROFILE_OBJECT_STORAGE_COMPATIBILITY = {
+    DataRuntimeProfileValue.FIXTURE: {
+        ObjectStorageAdapterValue.FIXTURE,
+        ObjectStorageAdapterValue.S3_COMPATIBLE,
+    },
+    DataRuntimeProfileValue.LOCAL_MVP: {ObjectStorageAdapterValue.S3_COMPATIBLE},
+    DataRuntimeProfileValue.CLOUDFLARE: {ObjectStorageAdapterValue.S3_COMPATIBLE},
+    DataRuntimeProfileValue.MONGODB: {ObjectStorageAdapterValue.S3_COMPATIBLE},
+    DataRuntimeProfileValue.AWS: {ObjectStorageAdapterValue.S3_COMPATIBLE},
+}
+
 
 def _error(status: int, code: str, message: str) -> ApiError:
     return ApiError(status_code=status, code=code, message=message)
@@ -388,13 +399,12 @@ def _validate_configuration_values(
             'PROVIDER_CONFIGURATION_INVALID',
             'data_profile requires one runtime profile and one object-storage adapter.',
         ) from error
-    if profile.data_runtime_profile is DataRuntimeProfileValue.LOCAL_MVP and (
-        profile.object_storage_adapter is not ObjectStorageAdapterValue.S3_COMPATIBLE
-    ):
+    compatible_adapters = _PROFILE_OBJECT_STORAGE_COMPATIBILITY[profile.data_runtime_profile]
+    if profile.object_storage_adapter not in compatible_adapters:
         raise _error(
             422,
             'PROVIDER_CONFIGURATION_INVALID',
-            'local_mvp requires the s3_compatible object-storage adapter.',
+            'The selected runtime profile is incompatible with the object-storage adapter.',
         )
     if (
         profile.data_runtime_profile

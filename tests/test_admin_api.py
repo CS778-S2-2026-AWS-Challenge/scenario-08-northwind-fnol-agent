@@ -135,6 +135,21 @@ def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
         assert invalid.status_code == 422
         assert invalid.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
 
+        aws_fixture = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('data-profile-aws-fixture'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'aws',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject a mixed cloud and fixture bundle.',
+            },
+        )
+        assert aws_fixture.status_code == 422
+        assert aws_fixture.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
         draft = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('data-profile-draft'),
