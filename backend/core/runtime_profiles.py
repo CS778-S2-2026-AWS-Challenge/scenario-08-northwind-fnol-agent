@@ -171,12 +171,14 @@ def _require_start_capable_bundle(bundle: DataRuntimeBundle) -> DataRuntimeBundl
     )
     if unavailable:
         bundle.close()
-        names = ', '.join(unavailable)
-        raise RuntimeProfileConfigurationError(
+        names = ', '.join(f'{capability}={readiness[capability]}' for capability in unavailable)
+        error = RuntimeProfileConfigurationError(
             f'Data runtime profile {bundle.profile.value!r} cannot start; '
             f'unavailable capabilities: {names}. Startup refused; no fixture or '
             'second-provider fallback was assembled.'
         )
+        error.readiness = readiness  # type: ignore[attr-defined]
+        raise error
     return bundle
 
 
