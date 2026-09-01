@@ -5,6 +5,7 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from backend.domain.models import (
+    ActorType,
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
@@ -478,24 +479,75 @@ class UnauthorisedDisclosureError(ValueError):
     """A request would disclose more than the claimant's consent permits."""
 
 
+class ExternalRequestTaskMismatchError(ValueError):
+    """A request and the external task it names disagree on what they describe."""
+
+
+def assert_request_matches_task(
+    request: ExternalTaskRequest,
+    task: ExternalTaskRecord,
+) -> None:
+    """Check that a request agrees with the task it names.
+
+    The request repeats the task's claim, service, and action so it can be read
+    on its own. Repetition without a check is a place for the two to drift, and a
+    request naming a task on another claim would carry one claim's authority into
+    another claim's work. That is the same failure the evidence-to-task resolver
+    already refuses.
+
+    Args:
+        request: The prepared request.
+        task: The external task record the request names.
+
+    Raises:
+        ExternalRequestTaskMismatchError: The request names this task but differs
+            from it on the claim, service, or action.
+    """
+
+    if request.task_id != task.task_id:
+        raise ExternalRequestTaskMismatchError(
+            f'{request.request_id}: names task {request.task_id}, not {task.task_id}.'
+        )
+    for label, on_request, on_task in (
+        ('claim', request.claim_id, task.claim_id),
+        ('service', request.service_identity, task.service_identity),
+        ('action', request.requested_action, task.requested_action),
+    ):
+        if on_request != on_task:
+            raise ExternalRequestTaskMismatchError(
+                f'{request.request_id}: {label} {on_request} does not match task '
+                f'{task.task_id} {label} {on_task}.'
+            )
+
+
 def assert_disclosure_within_consent(
     request: ExternalTaskRequest,
     consent: ExternalServiceConsent,
+    *,
+    claim_customer_id: str,
 ) -> None:
     """Check that a prepared request discloses only what its consent permits.
 
-    The consent must be the one this request names, still granted, and issued for
-    the same service and action. Matching on the reference alone would let a
-    withdrawn consent, or one granted for a different action, authorise a
+    The consent must be the one this request names, granted by the claimant this
+    claim belongs to, still granted, and issued for the same service and action.
+    Matching on the reference alone would let a withdrawn consent, one granted for
+    a different action, or one belonging to another customer entirely, authorise a
     disclosure it never covered.
+
+    `docs/claim-creation-boundary.md` requires the record to have been granted by
+    the claimant linked to the Working Claim, and states that
+    authorised-representative consent is unsupported. Both are enforced here:
+    the grantor must be a claimant, and must be this claim's customer.
 
     Args:
         request: The prepared request about to be sent.
         consent: The claimant-consent record the request names.
+        claim_customer_id: The customer the Working Claim belongs to.
 
     Raises:
-        UnauthorisedDisclosureError: The consent does not cover this request, or
-            the request discloses a field the consent does not permit.
+        UnauthorisedDisclosureError: The consent does not cover this request, was
+            not granted by this claim's claimant, or the request discloses a field
+            the consent does not permit.
     """
 
     if consent.consent_ref != request.authorisation.claimant_consent_ref:
@@ -507,6 +559,17 @@ def assert_disclosure_within_consent(
         raise UnauthorisedDisclosureError(
             f'{request.request_id}: consent {consent.consent_ref} is '
             f'{consent.status.value}, so it authorises no disclosure.'
+        )
+    if consent.granted_by.actor_type is not ActorType.CLAIMANT:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent {consent.consent_ref} was granted by '
+            f'{consent.granted_by.actor_type.value}, and only the claimant may consent to '
+            'a disclosure.'
+        )
+    if consent.granted_by.actor_id != claim_customer_id:
+        raise UnauthorisedDisclosureError(
+            f'{request.request_id}: consent {consent.consent_ref} was granted by another '
+            f'customer, so it authorises nothing on this claim.'
         )
     if consent.service_identity != request.service_identity:
         raise UnauthorisedDisclosureError(

@@ -3,16 +3,21 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.domain.external_services import (
+    ExternalRequestTaskMismatchError,
     ExternalTaskAuthorisation,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
     ExternalTaskRequest,
     UnauthorisedDisclosureError,
     assert_disclosure_within_consent,
+    assert_request_matches_task,
 )
 from backend.domain.models import (
     ActorReference,
     ActorType,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
+    IntegrationSource,
 )
 
 PREPARED_AT = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
@@ -20,6 +25,7 @@ SENT_AT = PREPARED_AT + timedelta(minutes=2)
 SERVICE = 'vehicle_damage_assessment_routing'
 ACTION = 'vehicle_damage_assessment'
 PERMITTED = ['claim_id', 'external_claim_id', 'location.region']
+CUSTOMER = 'cus_demo'
 
 
 def _authorisation(
@@ -67,6 +73,7 @@ def _consent(
     requested_action: str = ACTION,
     permitted: list[str] | None = None,
     status: ExternalServiceConsentStatus = ExternalServiceConsentStatus.GRANTED,
+    granted_by: ActorReference | None = None,
 ) -> ExternalServiceConsent:
     return ExternalServiceConsent(
         consent_ref=consent_ref,
@@ -74,7 +81,7 @@ def _consent(
         requested_action=requested_action,
         permitted_fields=permitted if permitted is not None else PERMITTED,
         status=status,
-        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_demo'),
+        granted_by=granted_by or ActorReference(actor_type=ActorType.CLAIMANT, actor_id=CUSTOMER),
         granted_at=PREPARED_AT,
         withdrawn_at=None if status is ExternalServiceConsentStatus.GRANTED else SENT_AT,
     )
@@ -128,7 +135,7 @@ def test_a_request_must_state_a_readable_purpose() -> None:
 
 
 def test_disclosure_within_consent_passes() -> None:
-    assert_disclosure_within_consent(_request(), _consent())
+    assert_disclosure_within_consent(_request(), _consent(), claim_customer_id=CUSTOMER)
 
 
 def test_disclosure_beyond_consent_is_rejected() -> None:
@@ -138,6 +145,7 @@ def test_disclosure_beyond_consent_is_rejected() -> None:
         assert_disclosure_within_consent(
             _request(disclosed=['claim_id', 'incident.description']),
             _consent(),
+            claim_customer_id=CUSTOMER,
         )
 
 
@@ -146,19 +154,100 @@ def test_a_withdrawn_consent_authorises_nothing() -> None:
         assert_disclosure_within_consent(
             _request(),
             _consent(status=ExternalServiceConsentStatus.WITHDRAWN),
+            claim_customer_id=CUSTOMER,
         )
 
 
 def test_a_consent_for_another_service_or_action_does_not_transfer() -> None:
     with pytest.raises(UnauthorisedDisclosureError, match='covers service'):
-        assert_disclosure_within_consent(_request(), _consent(service_identity='other_service'))
+        assert_disclosure_within_consent(
+            _request(), _consent(service_identity='other_service'), claim_customer_id=CUSTOMER
+        )
 
     with pytest.raises(UnauthorisedDisclosureError, match='covers action'):
-        assert_disclosure_within_consent(_request(), _consent(requested_action='other_action'))
+        assert_disclosure_within_consent(
+            _request(), _consent(requested_action='other_action'), claim_customer_id=CUSTOMER
+        )
 
 
 def test_a_consent_the_request_does_not_name_is_rejected() -> None:
     """Checking any granted consent would let an unrelated one authorise a send."""
 
     with pytest.raises(UnauthorisedDisclosureError, match='is not the consent this request names'):
-        assert_disclosure_within_consent(_request(), _consent(consent_ref='consent_other'))
+        assert_disclosure_within_consent(
+            _request(), _consent(consent_ref='consent_other'), claim_customer_id=CUSTOMER
+        )
+
+
+def test_a_consent_granted_by_another_customer_authorises_nothing() -> None:
+    """The consent must belong to the claimant this claim belongs to."""
+
+    other = ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_someone_else')
+
+    with pytest.raises(UnauthorisedDisclosureError, match='granted by another customer'):
+        assert_disclosure_within_consent(
+            _request(), _consent(granted_by=other), claim_customer_id=CUSTOMER
+        )
+
+
+@pytest.mark.parametrize('actor_type', [ActorType.STAFF, ActorType.AGENT, ActorType.SYSTEM])
+def test_only_a_claimant_may_consent_to_a_disclosure(actor_type: ActorType) -> None:
+    """Authorised-representative consent is unsupported until it is modelled explicitly."""
+
+    granted_by = ActorReference(actor_type=actor_type, actor_id=CUSTOMER)
+
+    with pytest.raises(UnauthorisedDisclosureError, match='only the claimant may consent'):
+        assert_disclosure_within_consent(
+            _request(), _consent(granted_by=granted_by), claim_customer_id=CUSTOMER
+        )
+
+
+def _task(
+    *,
+    task_id: str = 'ext_task_1',
+    claim_id: str = 'clm_1',
+    service_identity: str = SERVICE,
+    requested_action: str = ACTION,
+) -> ExternalTaskRecord:
+    return ExternalTaskRecord(
+        task_id=task_id,
+        claim_id=claim_id,
+        service_identity=service_identity,
+        requested_action=requested_action,
+        integration_source=IntegrationSource.FIXTURE,
+        status=ExternalTaskOperationStatus.PREPARED,
+        created_at=PREPARED_AT,
+        updated_at=PREPARED_AT,
+    )
+
+
+def test_a_request_agreeing_with_its_task_passes() -> None:
+    assert_request_matches_task(_request(), _task())
+
+
+def test_a_request_naming_another_task_is_rejected() -> None:
+    with pytest.raises(ExternalRequestTaskMismatchError, match='names task'):
+        assert_request_matches_task(_request(), _task(task_id='ext_task_other'))
+
+
+def test_a_request_on_another_claim_cannot_use_this_task() -> None:
+    """Same class as the cross-claim provenance defect fixed in #381."""
+
+    with pytest.raises(ExternalRequestTaskMismatchError, match='claim clm_1 does not match'):
+        assert_request_matches_task(_request(), _task(claim_id='clm_other'))
+
+
+@pytest.mark.parametrize(
+    ('field', 'kwargs', 'expected'),
+    [
+        ('service', {'service_identity': 'other_service'}, 'service'),
+        ('action', {'requested_action': 'other_action'}, 'action'),
+    ],
+)
+def test_a_request_disagreeing_with_its_task_is_rejected(
+    field: str,
+    kwargs: dict[str, str],
+    expected: str,
+) -> None:
+    with pytest.raises(ExternalRequestTaskMismatchError, match=f'{expected} '):
+        assert_request_matches_task(_request(), _task(**kwargs))
