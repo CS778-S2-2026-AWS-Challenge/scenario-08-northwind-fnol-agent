@@ -175,6 +175,51 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
         assert rolled_back.json()['rollback_target'] == first_id
 
 
+def test_normal_validation_supersedes_previous_publication() -> None:
+    with _client() as client:
+        first = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('normal-first-create'),
+            json={'domain': 'feature', 'reason': 'First normal config.'},
+        ).json()
+        first_id = first['configuration_id']
+        first_published = client.post(
+            f'/internal/v1/admin/configurations/{first_id}/validate',
+            headers=_post_headers('normal-first-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'feature-read', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert first_published.status_code == 200
+        assert first_published.json()['state'] == 'published'
+
+        second = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('normal-second-create'),
+            json={'domain': 'feature', 'reason': 'Second normal config.'},
+        ).json()
+        second_id = second['configuration_id']
+        second_published = client.post(
+            f'/internal/v1/admin/configurations/{second_id}/validate',
+            headers=_post_headers('normal-second-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'feature-read', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert second_published.status_code == 200
+        assert second_published.json()['previous_version'] == first_id
+        assert (
+            client.get(f'/internal/v1/admin/configurations/{first_id}', headers=_headers()).json()[
+                'state'
+            ]
+            == 'superseded'
+        )
+
+
 def test_admin_post_requires_idempotency_and_if_match_is_conflict() -> None:
     with _client() as client:
         missing_key = client.post(

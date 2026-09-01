@@ -129,6 +129,7 @@ def validate(
             'VALIDATION_FAILED',
             'One or more required validation scenarios failed.',
         )
+    previous = repo.active(current.domain) if current.impact is ConfigurationImpact.NORMAL else None
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -137,9 +138,22 @@ def validate(
             else ConfigurationState.PUBLISHED,
             'validation_evidence': evidence,
             'effective_time': now_utc() if current.impact is ConfigurationImpact.NORMAL else None,
+            'previous_version': previous.configuration_id if previous is not None else None,
             'updated_at': now_utc(),
         }
     )
+    if previous is not None:
+        superseded = previous.model_copy(
+            update={
+                'state': ConfigurationState.SUPERSEDED,
+                'revision': previous.revision + 1,
+                'updated_at': now_utc(),
+            }
+        )
+        repo.save(superseded, previous.revision)
+        _audit(
+            repo, superseded, actor, 'supersede', 'Replaced by a newer publication.', 'succeeded'
+        )
     saved = repo.save(updated, expected_revision)
     _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
     return saved
