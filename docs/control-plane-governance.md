@@ -57,11 +57,14 @@ Secret values never belong to a configuration item or its API response. A config
 only a protected secret reference and safe connection metadata. The secret manager and its
 access policy remain outside the Control Plane record.
 
-## Lifecycle states
+## Lifecycle states and operations
 
 The lifecycle applies independently to each versioned configuration item or knowledge version.
 Published versions are immutable. A change to a published item creates a new draft rather than
-editing the active version.
+editing the active version. `rollback` is an authorised operation that creates a new published
+version; it is not a long-lived configuration state. `audit_recorded` is an append-only event
+emitted alongside every accepted transition; it is not a configuration version or terminal
+state that a configuration repository should persist as its current state.
 
 | State | Owner | Entry condition | Exit condition | Approval and evidence |
 | --- | --- | --- | --- | --- |
@@ -71,13 +74,12 @@ editing the active version.
 | `published` | Release approver authorises; runtime consumes | A validated item has all required approvals and an effective time | `superseded` by a later publication, or a new approved version is published as rollback | Publication is atomic and records actor, reason, validation evidence, effective time, and previous version |
 | `withdrawn` | Domain owner or authorised approver | Draft is abandoned, or published knowledge/configuration is removed for a documented reason | A new draft may replace it; a withdrawn version is never silently reactivated | Withdrawal records actor, reason, time, affected scope, and any replacement or mitigation |
 | `superseded` | Release process | A newer version becomes active | Terminal for that version; it remains readable for audit and claim/version provenance | The successor and previous version are linked; history is retained |
-| `rollback` | Authorised release approver | A published version is unsafe, incompatible, or otherwise requires restoration of a known-good version | The selected prior version is published as a new active publication; the triggering version remains in history | Rollback target, reason, validation evidence, actor, effective time, and reconciliation steps are recorded |
-| `audit_recorded` | Audit and oversight | Any lifecycle or access transition is accepted by the service | Terminal event; it cannot mutate the configuration lifecycle | Append-only event includes actor, action, subject/version, reason, authority result, timestamp, and correlation reference |
+| `rollback` (operation) | Authorised release approver | A published version is unsafe, incompatible, or otherwise requires restoration of a known-good version | The selected prior version is published as a new active publication; the triggering version remains in history | Rollback target, reason, validation evidence, actor, effective time, and reconciliation steps are recorded |
+| `audit_recorded` (event) | Audit and oversight | Any lifecycle or access transition is accepted by the service | Append-only event; it cannot mutate the configuration lifecycle | Event includes actor, action, subject/version, reason, authority result, timestamp, and correlation reference |
 
-`rollback` describes a transition request and publication operation, not deletion. The restored
-version receives a new publication record so that intervening activity remains auditable.
-`audit_recorded` accompanies every transition; it is shown explicitly because an un-audited
-transition is invalid even when the underlying state change otherwise passes validation.
+The restored version receives a new publication record so that intervening activity remains
+auditable. An un-audited transition is invalid even when the underlying state change otherwise
+passes validation.
 
 ## Transition rules
 
@@ -91,9 +93,9 @@ awaiting_approval -> draft           (rejected or changes requested)
 awaiting_approval -> published       (approval complete)
 draft -> withdrawn                   (abandoned before validation)
 published -> superseded              (new version published)
-published -> rollback                (authorised rollback requested)
+published -> rollback                (authorised rollback operation requested)
 rollback -> published                (approved prior version published as a new record)
-any accepted transition -> audit_recorded
+any accepted transition -> audit_recorded (append-only event, not a configuration state)
 ```
 
 The service rejects transitions when the actor lacks the domain scope, the revision is stale,
@@ -133,6 +135,18 @@ the active version they used and never combine fields from drafts, superseded ve
 different data profiles. If a provider or connection check fails, the configuration remains
 unpublished and the failure is exposed as an operational result rather than silently selecting
 another profile.
+
+## Bounded implementation slices and Admin API boundary
+
+Issue #209 is the broader Control Plane/Admin backlog. Sprint 2 implementation slice #258 is
+the first bounded consumer: it may expose configuration read, draft revision, validation
+status, publication metadata, and audit metadata using this lifecycle, but it does not close
+the parent issue. Later slices such as #372 and #391 add further consumers and recording
+capabilities. They must not redefine these terms or claim the full #209 acceptance alone.
+
+Exact HTTP schemas, persistence fields, approval-role assignments, and revision/error semantics
+remain implementation responsibilities of #258 and subsequent Admin API issues. This document
+provides the lifecycle and authority boundary, not a complete wire or storage schema.
 
 ## Boundary with Claim State and later Admin API work
 
