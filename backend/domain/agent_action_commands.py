@@ -90,14 +90,23 @@ def _matches_type(value: object, value_type: ActionInputType) -> bool:
 
 def _freeze_payload_value(value: object) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze_payload_value(item) for key, item in value.items()})
+        frozen_mapping: dict[object, object] = {}
+        for key, item in value.items():
+            frozen_mapping[key] = _freeze_payload_value(item)
+        return MappingProxyType(frozen_mapping)
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        return tuple(_freeze_payload_value(item) for item in value)
+        frozen_items: list[object] = []
+        for item in value:
+            frozen_items.append(_freeze_payload_value(item))
+        return tuple(frozen_items)
     return value
 
 
 def _freeze_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
-    return MappingProxyType({key: _freeze_payload_value(value) for key, value in payload.items()})
+    frozen_payload: dict[str, object] = {}
+    for key, value in payload.items():
+        frozen_payload[key] = _freeze_payload_value(value)
+    return MappingProxyType(frozen_payload)
 
 
 def _validate_payload(schema: ActionInputSchema, payload: Mapping[str, object]) -> None:
