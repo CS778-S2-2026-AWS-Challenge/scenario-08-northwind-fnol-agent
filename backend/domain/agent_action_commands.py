@@ -118,28 +118,32 @@ def _validate_payload(schema: ActionInputSchema, payload: Mapping[str, object]) 
 
 def _revision(payload: Mapping[str, object], supplied: int | None) -> int | None:
     value = payload.get('expected_revision')
-    if value is not None:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise AgentActionCommandError('expected_revision must be an integer.')
+    if value is None:
+        revision = supplied
+    elif isinstance(value, int) and not isinstance(value, bool):
         if supplied is not None and supplied != value:
             raise AgentActionCommandError('expected_revision metadata does not match payload.')
-        supplied = value
-    if supplied is not None and supplied < 0:
+        revision = value
+    else:
+        raise AgentActionCommandError('expected_revision must be an integer.')
+    if revision is not None and revision < 0:
         raise AgentActionCommandError('expected_revision must not be negative.')
-    return supplied
+    return revision
 
 
 def _idempotency_key(payload: Mapping[str, object], supplied: str | None) -> str | None:
     value = payload.get('idempotency_key')
-    if value is not None:
-        if not isinstance(value, str):
-            raise AgentActionCommandError('idempotency_key must be a string.')
+    if value is None:
+        key = supplied
+    elif isinstance(value, str):
         if supplied is not None and supplied != value:
             raise AgentActionCommandError('idempotency_key metadata does not match payload.')
-        supplied = value
-    if supplied is not None and not supplied.strip():
+        key = value
+    else:
+        raise AgentActionCommandError('idempotency_key must be a string.')
+    if key is not None and not key.strip():
         raise AgentActionCommandError('idempotency_key must not be blank.')
-    return supplied
+    return key
 
 
 def build_claim_context_command(
