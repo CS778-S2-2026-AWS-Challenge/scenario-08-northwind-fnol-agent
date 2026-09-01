@@ -212,9 +212,12 @@ def test_normal_validation_supersedes_previous_publication() -> None:
         )
         assert second_published.status_code == 200
         assert second_published.json()['previous_version'] == first_id
-        assert client.get(
-            f'/internal/v1/admin/configurations/{first_id}', headers=_headers()
-        ).json()['state'] == 'superseded'
+        assert (
+            client.get(f'/internal/v1/admin/configurations/{first_id}', headers=_headers()).json()[
+                'state'
+            ]
+            == 'superseded'
+        )
 
 
 def test_admin_post_requires_idempotency_and_if_match_is_conflict() -> None:
