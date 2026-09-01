@@ -1,5 +1,8 @@
 # Northwind FNOL API Contract
 
+<!-- Existing API tables use compact pipe formatting; preserve that contract while extending it. -->
+<!-- markdownlint-disable MD060 -->
+
 ## Document Status
 
 | Item | Value |
@@ -30,7 +33,7 @@ The API supports a trusted, adaptive first-notice-of-loss service. It must prese
 - an internal workbench derived from the same claim state;
 - measurement of claimant, agent, and staff effort.
 
-The broader product includes an Administration and Control Plane for versioned system configuration, but this version of the API contract does not yet define an Admin API. Administration must remain separate from claimant and staff claim operations.
+The broader product includes an Administration and Control Plane for versioned system configuration. The bounded Admin API below is restricted to configuration metadata and lifecycle operations; it remains separate from claimant and staff claim operations.
 
 The API does not authorise the agent to approve or reject claims, make an unreviewed high-impact coverage decision, determine fraud, diagnose injury, or claim that emergency services were contacted when they were not.
 
@@ -156,6 +159,37 @@ Collection response:
 | `500` | Unexpected server error |
 | `502` | Required integration failed |
 | `503` | Service or required dependency unavailable |
+
+## Administration and Control Plane API
+
+The administration surface is available under `/internal/v1/admin` and requires an authenticated
+administrator principal with both `admin:read` and `admin:write` scopes. It never reads or writes
+Claim State, WorkItems, handoffs, or claimant messages.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/internal/v1/admin/configurations` | List current configuration revisions, optionally filtered by `domain` |
+| `POST` | `/internal/v1/admin/configurations` | Create a new draft configuration |
+| `GET` | `/internal/v1/admin/configurations/{configuration_id}` | Read a configuration revision |
+| `PATCH` | `/internal/v1/admin/configurations/{configuration_id}` | Create a new draft revision; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/validate` | Validate a draft against named scenarios; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/publish` | Publish an approved high-impact draft; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` |
+| `GET` | `/internal/v1/admin/configurations/{configuration_id}/audit` | Read append-only lifecycle audit events |
+
+Configuration records contain an opaque `configuration_id`, monotonically increasing `revision`,
+`domain`, `impact`, lifecycle `state`, non-secret `values`, protected `secret_references`,
+`author`, `reason`, optional `validation_evidence`, `effective_time`, `previous_version`, and
+`rollback_target`. Secret values are rejected in `values` and are never returned.
+
+Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or `superseded`.
+Validation moves a normal-impact draft directly to `published`; a high-impact draft moves to
+`awaiting_approval` and requires an explicit publish operation. Every transition records actor,
+reason, outcome, revision, and timestamp in the audit collection. Stale `If-Match` values return
+`409 REVISION_CONFLICT`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
+changes return `400 INVALID_CONFIGURATION_TRANSITION`; plaintext secrets return
+`422 SECRET_VALUE_FORBIDDEN`.
 
 ## Claimant Identity and Account API
 
