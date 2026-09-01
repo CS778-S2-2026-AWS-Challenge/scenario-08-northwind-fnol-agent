@@ -87,6 +87,40 @@ class ConfigurationRepository:
             self._audits = audits_snapshot
             raise
 
+    def replace_active_with_new(
+        self,
+        previous: ConfigurationRecord,
+        superseded: ConfigurationRecord,
+        published: ConfigurationRecord,
+        audit_events: Sequence[AuditEvent],
+    ) -> ConfigurationRecord:
+        """Atomically supersede an active record and create a new publication.
+
+        Args:
+            previous: The currently published record to supersede.
+            superseded: The next immutable revision for ``previous``.
+            published: The new publication with a new configuration identity.
+            audit_events: Events committed with the state transition.
+
+        Returns:
+            The committed new publication.
+
+        Raises:
+            Exception: Propagates a failed write after restoring all state.
+        """
+        records_snapshot = deepcopy(self._records)
+        audits_snapshot = deepcopy(self._audits)
+        try:
+            self.save(superseded, previous.revision)
+            saved = self.create(published)
+            for event in audit_events:
+                self.add_audit(event)
+            return saved
+        except Exception:
+            self._records = records_snapshot
+            self._audits = audits_snapshot
+            raise
+
     def add_audit(self, event: AuditEvent) -> None:
         self._audits.append(deepcopy(event))
 
