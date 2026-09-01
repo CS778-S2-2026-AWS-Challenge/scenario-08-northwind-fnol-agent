@@ -18,3 +18,9 @@ localStorage.setItem('northwind.adminToken', 'synthetic-admin')
 ```
 
 The token cannot enable developer mode or cross the claimant and Staff Workbench access boundaries. The console calls only `/internal/v1/admin`; modules without an implemented Admin API capability show an honest empty or unavailable state and no management controls.
+
+Repeat the console-to-API access-boundary check from the repository root:
+
+```powershell
+py -3.12 -m pytest tests/test_admin_console_contract.py
+```
