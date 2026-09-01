@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -49,6 +50,42 @@ class ConfigurationRepository:
             raise ValueError('stale_revision')
         self._records[record.configuration_id].append(deepcopy(record))
         return deepcopy(record)
+
+    def replace_active(
+        self,
+        previous: ConfigurationRecord,
+        superseded: ConfigurationRecord,
+        published: ConfigurationRecord,
+        expected_revision: int,
+        audit_events: Sequence[AuditEvent],
+    ) -> ConfigurationRecord:
+        """Atomically replace the active publication and append its audit events.
+
+        Args:
+            previous: The currently published record to supersede.
+            superseded: The next immutable revision for ``previous``.
+            published: The new published record.
+            expected_revision: Expected current revision for ``published``.
+            audit_events: Events committed with the state transition.
+
+        Returns:
+            The committed published record.
+
+        Raises:
+            Exception: Propagates a failed write after restoring all state.
+        """
+        records_snapshot = deepcopy(self._records)
+        audits_snapshot = deepcopy(self._audits)
+        try:
+            self.save(superseded, previous.revision)
+            saved = self.save(published, expected_revision)
+            for event in audit_events:
+                self.add_audit(event)
+            return saved
+        except Exception:
+            self._records = records_snapshot
+            self._audits = audits_snapshot
+            raise
 
     def add_audit(self, event: AuditEvent) -> None:
         self._audits.append(deepcopy(event))
