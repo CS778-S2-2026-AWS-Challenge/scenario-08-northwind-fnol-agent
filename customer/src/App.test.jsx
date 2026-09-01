@@ -497,6 +497,27 @@ describe('claimant intake', () => {
     )
   })
 
+  it('shows focused progress and keeps natural-language correction available during review', async () => {
+    fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
+    fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(
+      screen.getByLabelText('Incident description'),
+      'Another vehicle hit my parked car.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Continue claim' }))
+
+    expect(await screen.findByRole('region', {
+      name: 'Claim progress: Step 2 of 3, Check the details',
+    })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Check these details' })).toBeVisible()
+    expect(screen.getByText('What happened needs your review.')).toBeVisible()
+    expect(screen.getByLabelText('Add more information')).toBeEnabled()
+    expect(screen.getByText(/keep describing the incident or correct a detail/i)).toBeVisible()
+  })
+
   it('confirms the proposed field and moves to the next unanswered question', async () => {
     fetch.mockImplementationOnce(() => jsonResponse(createdClaim(), 201))
     fetch.mockImplementationOnce(() => jsonResponse(firstTurn()))
