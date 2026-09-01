@@ -150,12 +150,37 @@ def validate(
                 'updated_at': now_utc(),
             }
         )
-        repo.save(superseded, previous.revision)
-        _audit(
-            repo, superseded, actor, 'supersede', 'Replaced by a newer publication.', 'succeeded'
+        supersede_event = AuditEvent(
+            event_id=repo.new_event_id(),
+            configuration_id=superseded.configuration_id,
+            revision=superseded.revision,
+            actor=actor,
+            action='supersede',
+            reason='Replaced by a newer publication.',
+            outcome='succeeded',
+            created_at=now_utc(),
         )
-    saved = repo.save(updated, expected_revision)
-    _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
+        validate_event_record = updated
+        validate_event = AuditEvent(
+            event_id=repo.new_event_id(),
+            configuration_id=validate_event_record.configuration_id,
+            revision=validate_event_record.revision,
+            actor=actor,
+            action='validate',
+            reason='Validation completed.',
+            outcome='succeeded',
+            created_at=now_utc(),
+        )
+        saved = repo.replace_active(
+            previous,
+            superseded,
+            updated,
+            expected_revision,
+            (supersede_event, validate_event),
+        )
+    else:
+        saved = repo.save(updated, expected_revision)
+        _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
     return saved
 
 

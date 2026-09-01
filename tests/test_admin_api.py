@@ -1,7 +1,12 @@
+from typing import Any, cast
+
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.configuration import ValidationRequest
+from backend.services.configuration import validate
 
 
 def _client() -> TestClient:
@@ -218,6 +223,65 @@ def test_normal_validation_supersedes_previous_publication() -> None:
             ]
             == 'superseded'
         )
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{first_id}/audit', headers=_headers()
+        ).json()['items']
+        supersede = next(item for item in audits if item['action'] == 'supersede')
+        assert supersede['outcome'] == 'succeeded'
+        assert supersede['revision'] == 3
+
+
+def test_normal_publication_write_failure_restores_previous_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client() as client:
+        first = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('atomic-first-create'),
+            json={'domain': 'atomic', 'reason': 'First normal config.'},
+        ).json()
+        first_id = first['configuration_id']
+        client.post(
+            f'/internal/v1/admin/configurations/{first_id}/validate',
+            headers=_post_headers('atomic-first-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'atomic', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        repository = cast(Any, client.app).state.configuration_repository
+        original_save = repository.save
+
+        def fail_new_publication(record: object, expected_revision: int) -> object:
+            if getattr(record, 'configuration_id', None) != first_id:
+                raise RuntimeError('simulated publication write failure')
+            return original_save(record, expected_revision)
+
+        monkeypatch.setattr(repository, 'save', fail_new_publication)
+        second = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('atomic-second-create'),
+            json={'domain': 'atomic', 'reason': 'Second normal config.'},
+        ).json()
+        with pytest.raises(RuntimeError, match='simulated publication write failure'):
+            validate(
+                repository,
+                second['configuration_id'],
+                ValidationRequest(
+                    scenario_results=[
+                        {
+                            'scenario_id': 'atomic',
+                            'outcome': 'passed',
+                            'evidence': 'passed',
+                        }
+                    ]
+                ),
+                'synthetic-admin',
+                1,
+            )
+        assert repository.get(first_id).state.value == 'published'
+        assert not any(event.action == 'supersede' for event in repository.audits(first_id))
 
 
 def test_admin_post_requires_idempotency_and_if_match_is_conflict() -> None:
