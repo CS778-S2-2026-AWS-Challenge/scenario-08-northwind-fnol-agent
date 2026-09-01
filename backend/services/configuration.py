@@ -111,10 +111,24 @@ def validate(
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
+        _audit(repo, current, actor, 'validate', 'The configuration revision is stale.', 'rejected')
         raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
     if current.state is not ConfigurationState.DRAFT:
+        _audit(repo, current, actor, 'validate', 'Only a draft can enter validation.', 'rejected')
         raise _error(400, 'INVALID_CONFIGURATION_TRANSITION', 'Only a draft can enter validation.')
-    evidence = {'scenarios': payload.scenarios, 'result': 'passed'}
+    evidence = {
+        'scenarios': [item.model_dump() for item in payload.scenario_results],
+        'result': 'passed',
+    }
+    failed = [item for item in payload.scenario_results if item.outcome == 'failed']
+    if failed:
+        evidence['result'] = 'failed'
+        _audit(repo, current, actor, 'validate', 'Validation failed.', 'rejected')
+        raise _error(
+            422,
+            'VALIDATION_FAILED',
+            'One or more required validation scenarios failed.',
+        )
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -140,11 +154,20 @@ def publish(
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
+        _audit(repo, current, actor, 'publish', 'The configuration revision is stale.', 'rejected')
         raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
     if (
         current.state is not ConfigurationState.AWAITING_APPROVAL
         or current.validation_evidence is None
     ):
+        _audit(
+            repo,
+            current,
+            actor,
+            'publish',
+            'The configuration is not ready for publication.',
+            'rejected',
+        )
         raise _error(
             400,
             'INVALID_CONFIGURATION_TRANSITION',
@@ -185,12 +208,21 @@ def withdraw(
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
+        _audit(repo, current, actor, 'withdraw', 'The configuration revision is stale.', 'rejected')
         raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
     if current.state not in {
         ConfigurationState.DRAFT,
         ConfigurationState.PUBLISHED,
         ConfigurationState.AWAITING_APPROVAL,
     }:
+        _audit(
+            repo,
+            current,
+            actor,
+            'withdraw',
+            'The configuration cannot be withdrawn from its current state.',
+            'rejected',
+        )
         raise _error(
             400,
             'INVALID_CONFIGURATION_TRANSITION',
@@ -217,7 +249,18 @@ def rollback(
     expected_revision: int,
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
-    if current.revision != expected_revision or current.state is not ConfigurationState.PUBLISHED:
+    if current.revision != expected_revision:
+        _audit(repo, current, actor, 'rollback', 'The configuration revision is stale.', 'rejected')
+        raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
+    if current.state is not ConfigurationState.PUBLISHED:
+        _audit(
+            repo,
+            current,
+            actor,
+            'rollback',
+            'Only a published configuration can be rolled back.',
+            'rejected',
+        )
         raise _error(
             400,
             'INVALID_CONFIGURATION_TRANSITION',
@@ -225,12 +268,14 @@ def rollback(
         )
     target_id = payload.rollback_target or current.rollback_target or current.previous_version
     if target_id is None:
+        _audit(repo, current, actor, 'rollback', 'A rollback target is required.', 'rejected')
         raise _error(400, 'ROLLBACK_TARGET_REQUIRED', 'A rollback target is required.')
     target = read(repo, target_id)
     if target.validation_evidence is None or target.state not in {
         ConfigurationState.SUPERSEDED,
         ConfigurationState.PUBLISHED,
     }:
+        _audit(repo, current, actor, 'rollback', 'The rollback target is not approved.', 'rejected')
         raise _error(
             400,
             'INVALID_ROLLBACK_TARGET',

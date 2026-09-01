@@ -169,13 +169,13 @@ Claim State, WorkItems, handoffs, or claimant messages.
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/internal/v1/admin/configurations` | List current configuration revisions, optionally filtered by `domain` |
-| `POST` | `/internal/v1/admin/configurations` | Create a new draft configuration |
+| `POST` | `/internal/v1/admin/configurations` | Create a new draft configuration; requires `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/configurations/{configuration_id}` | Read a configuration revision |
 | `PATCH` | `/internal/v1/admin/configurations/{configuration_id}` | Create a new draft revision; requires `If-Match` |
-| `POST` | `/internal/v1/admin/configurations/{configuration_id}/validate` | Validate a draft against named scenarios; requires `If-Match` |
-| `POST` | `/internal/v1/admin/configurations/{configuration_id}/publish` | Publish an approved high-impact draft; requires `If-Match` |
-| `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` |
-| `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/validate` | Validate a draft against supplied scenario results; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/publish` | Publish an approved high-impact draft; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/configurations/{configuration_id}/audit` | Read append-only lifecycle audit events |
 
 Configuration records contain an opaque `configuration_id`, monotonically increasing `revision`,
@@ -184,10 +184,15 @@ Configuration records contain an opaque `configuration_id`, monotonically increa
 `rollback_target`. Secret values are rejected in `values` and are never returned.
 
 Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or `superseded`.
-Validation moves a normal-impact draft directly to `published`; a high-impact draft moves to
-`awaiting_approval` and requires an explicit publish operation. Every transition records actor,
-reason, outcome, revision, and timestamp in the audit collection. Stale `If-Match` values return
-`409 REVISION_CONFLICT`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
+Validation accepts explicit results for each named scenario, including evidence. A failed result
+is recorded and returns `422 VALIDATION_FAILED` without changing the configuration state. A normal-
+impact draft publishes after all supplied scenarios pass; a high-impact draft moves to
+`awaiting_approval` and requires an explicit publish operation. Every transition, including a
+rejected transition, records actor, reason, outcome, revision, and timestamp in the audit
+collection. State-changing POST requests require `Idempotency-Key`; replaying the same request
+returns the original response and reusing a key with different parameters returns `409
+IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 REVISION_CONFLICT` or
+`409 REVISION_REQUIRED`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
 changes return `400 INVALID_CONFIGURATION_TRANSITION`; plaintext secrets return
 `422 SECRET_VALUE_FORBIDDEN`.
 
@@ -2104,6 +2109,8 @@ All errors use one envelope:
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
+| `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
+| `SECRET_VALUE_FORBIDDEN` | `422` | Secret values must use protected references |
 | `ACTIVE_SESSION_EXISTS` | `409` | A conflicting active session exists |
 | `UNSUPPORTED_MEDIA_TYPE` | `415` | File type is not allowed |
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |

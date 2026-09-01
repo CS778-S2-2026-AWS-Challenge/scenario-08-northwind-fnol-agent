@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import dataclass
 
 from backend.domain.configuration import (
     AuditEvent,
@@ -8,12 +9,23 @@ from backend.domain.configuration import (
 from backend.domain.ids import new_id
 
 
+@dataclass(frozen=True, slots=True)
+class ConfigurationIdempotencyRecord:
+    actor: str
+    route: str
+    key: str
+    fingerprint: str
+    response: dict[str, object]
+    status_code: int
+
+
 class ConfigurationRepository:
     """Provider-neutral configuration repository used by the fixture profile."""
 
     def __init__(self) -> None:
         self._records: dict[str, list[ConfigurationRecord]] = {}
         self._audits: list[AuditEvent] = []
+        self._idempotency: dict[tuple[str, str, str], ConfigurationIdempotencyRecord] = {}
 
     def create(self, record: ConfigurationRecord) -> ConfigurationRecord:
         self._records.setdefault(record.configuration_id, []).append(deepcopy(record))
@@ -40,6 +52,18 @@ class ConfigurationRepository:
 
     def add_audit(self, event: AuditEvent) -> None:
         self._audits.append(deepcopy(event))
+
+    def find_idempotency(
+        self, actor: str, route: str, key: str
+    ) -> ConfigurationIdempotencyRecord | None:
+        return deepcopy(self._idempotency.get((actor, route, key)))
+
+    def save_idempotency(self, record: ConfigurationIdempotencyRecord) -> None:
+        lookup = (record.actor, record.route, record.key)
+        existing = self._idempotency.get(lookup)
+        if existing is not None and existing.fingerprint != record.fingerprint:
+            raise ValueError('idempotency_conflict')
+        self._idempotency[lookup] = deepcopy(record)
 
     def audits(self, configuration_id: str) -> list[AuditEvent]:
         return deepcopy(

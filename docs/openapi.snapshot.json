@@ -5015,20 +5015,52 @@
       "ValidationRequest": {
         "additionalProperties": false,
         "properties": {
-          "scenarios": {
+          "scenario_results": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ValidationScenarioResult"
             },
             "maxItems": 100,
             "minItems": 1,
-            "title": "Scenarios",
+            "title": "Scenario Results",
             "type": "array"
           }
         },
         "required": [
-          "scenarios"
+          "scenario_results"
         ],
         "title": "ValidationRequest",
+        "type": "object"
+      },
+      "ValidationScenarioResult": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "passed",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "scenario_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Scenario Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "outcome",
+          "evidence"
+        ],
+        "title": "ValidationScenarioResult",
         "type": "object"
       },
       "WorkbenchClaimDetail": {
@@ -8858,6 +8890,22 @@
         "parameters": [
           {
             "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -8994,6 +9042,22 @@
                 }
               ],
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           },
           {
@@ -9140,6 +9204,22 @@
           },
           {
             "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -9220,6 +9300,22 @@
                 }
               ],
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           },
           {
@@ -9308,6 +9404,22 @@
           },
           {
             "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
             "name": "authorization",
             "required": false,
             "schema": {
@@ -9388,6 +9500,22 @@
                 }
               ],
               "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           },
           {

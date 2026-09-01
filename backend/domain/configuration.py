@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,7 +59,15 @@ class ConfigurationPatch(BaseModel):
 class ValidationRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    scenarios: list[str] = Field(min_length=1, max_length=100)
+    scenario_results: list['ValidationScenarioResult'] = Field(min_length=1, max_length=100)
+
+
+class ValidationScenarioResult(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    scenario_id: str = Field(min_length=1, max_length=120)
+    outcome: Literal['passed', 'failed']
+    evidence: str = Field(min_length=1, max_length=500)
 
 
 class TransitionRequest(BaseModel):
