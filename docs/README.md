@@ -154,5 +154,9 @@ Demonstration:
 - [Canonical Scenario Validation](archive/sprint-2/validation/day4-canonical-scenario-validation.md)
 - [Regression Entry Points](archive/sprint-2/validation/day5-regression-entrypoints.md)
 
+### Sprint 3
+
+- [Issue #371 RAG and Structured-Query Acceptance Evidence](archive/sprint-3/validation/issue-371-rag-structured-query-evidence.md)
+
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
