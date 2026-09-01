@@ -301,6 +301,13 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
         ).json()['items']
         assert rollback_audits[-1]['action'] == 'rollback'
         assert rollback_audits[-1]['actor'] == 'adm_demo'
+        assert rollback_audits[-1]['previous_revision'] == 3
+        assert rollback_audits[-1]['changed_fields'] == [
+            'effective_time',
+            'previous_version',
+            'rollback_target',
+            'state',
+        ]
 
 
 def test_runtime_reads_only_the_active_published_configuration() -> None:

@@ -503,6 +503,7 @@ def rollback(
                 event_id=repo.new_event_id(),
                 configuration_id=new.configuration_id,
                 revision=new.revision,
+                previous_revision=current.revision,
                 actor=actor,
                 action='rollback',
                 reason=payload.reason,
