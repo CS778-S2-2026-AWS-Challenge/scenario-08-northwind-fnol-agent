@@ -8,6 +8,8 @@ import {
   getAuthenticatedAccount,
   getClaim,
   getClaimMessages,
+  hasClaimantAccessToken,
+  hasStartupClaimantAccessToken,
   listClaims,
   loginClaimant,
   logoutClaimant,
@@ -23,6 +25,7 @@ import {
 } from './api.js'
 import './App.css'
 import GuidedMotorClaim from './GuidedMotorClaim.jsx'
+import northwindValley from './assets/northwind-valley.jpg'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -101,6 +104,31 @@ function messageText(message) {
   return message?.content?.type === 'text' ? message.content.text : ''
 }
 
+function conversationTitle(form, incidentType) {
+  const description = form['incident.description']?.value
+  if (description) {
+    const text = String(description).trim()
+    return `Incident: ${text.length > 42 ? `${text.slice(0, 42).trim()}…` : text}`
+  }
+  return incidentType ? `${incidentType} claim` : 'New incident report'
+}
+
+function savedConversationTitle(report) {
+  const type = report.incident_type
+    ? `${report.incident_type[0].toUpperCase()}${report.incident_type.slice(1)} incident`
+    : 'Incident report'
+  const updatedAt = new Date(report.updated_at)
+  if (Number.isNaN(updatedAt.getTime())) return type
+  const date = new Intl.DateTimeFormat('en-NZ', {
+    day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+  }).format(updatedAt)
+  return `${type} · ${date}`
+}
+
+function shortClaimReference(claimId) {
+  return `Report ${String(claimId).split('_').pop().slice(-6).toUpperCase()}`
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -113,6 +141,7 @@ function App() {
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
+  const [authReturnToClaim, setAuthReturnToClaim] = useState(false)
   const [claimType, setClaimType] = useState('motor')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
@@ -140,6 +169,44 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const historyAutoLoadAttempted = useRef(false)
+  const messageListRef = useRef(null)
+  const followLatestMessage = useRef(true)
+
+  const navigateTo = useCallback((nextPage, { replace = false } = {}) => {
+    const method = replace ? 'replaceState' : 'pushState'
+    window.history[method]({ northwindPage: nextPage }, '', window.location.href)
+    setPage(nextPage)
+  }, [])
+
+  useEffect(() => {
+    if (!window.history.state?.northwindPage) {
+      window.history.replaceState({ northwindPage: 'home' }, '', window.location.href)
+    }
+    const handlePopState = (event) => {
+      const targetPage = event.state?.northwindPage || 'home'
+      if (targetPage === 'home') resetActiveReportState()
+      setPage(targetPage)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  function resetActiveReportState() {
+    setDraft('')
+    setClaim(null)
+    setSessionId(null)
+    setMessages([])
+    setForm({})
+    setNextStep(null)
+    setHandoff(null)
+    setResumeContext(null)
+    setError('')
+    setFailedMessage(null)
+    setPendingMessage(null)
+    setStatus('idle')
+    latestRevision.current = 0
+  }
 
   const isBusy = [
     'starting',
@@ -249,6 +316,18 @@ function App() {
     }
   }, [claim, sessionId, refreshClaimStatus])
 
+  useEffect(() => {
+    if (!hasStarted || !followLatestMessage.current) return
+    const list = messageListRef.current
+    if (!list) return
+    list.scrollTo?.({ top: list.scrollHeight, behavior: 'smooth' })
+  }, [hasStarted, messages.length, pendingMessage, failedMessage])
+
+  function trackConversationScroll(event) {
+    const list = event.currentTarget
+    followLatestMessage.current = list.scrollHeight - list.scrollTop - list.clientHeight < 96
+  }
+
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
       setError('Your report changed while this page was open. We refreshed it; review the latest details and try again.')
@@ -260,10 +339,18 @@ function App() {
   }
 
   async function sendMessage(event) {
-    event.preventDefault()
+    event?.preventDefault()
     const text = draft.trim()
     if (!text || isBusy) return
 
+    if (!hasClaimantAccessToken()) {
+      setAuthReturnToClaim(true)
+      setAuthError('Sign in to securely save your report and conversation.')
+      navigateTo('login')
+      return
+    }
+
+    followLatestMessage.current = true
     setError('')
     setFailedMessage(null)
     setStatus(hasStarted ? 'sending' : 'starting')
@@ -312,6 +399,11 @@ function App() {
       setPendingMessage(null)
       setFailedMessage(null)
       setStatus('idle')
+      if (account) {
+        setSavedReports(null)
+        historyAutoLoadAttempted.current = false
+      }
+      if (!hasStarted) navigateTo('conversation')
     } catch (requestError) {
       setPendingMessage(null)
       const knownRejection = requestError instanceof ApiRequestError
@@ -571,8 +663,23 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (
+      page !== 'home'
+      || (!account && !hasStartupClaimantAccessToken())
+      || savedReports !== null
+      || historyAutoLoadAttempted.current
+    ) return
+
+    historyAutoLoadAttempted.current = true
+    loadSavedReports()
+    // Loading is intentionally attempted once per signed-in homepage visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, page, savedReports])
+
   async function resumeSavedReport(claimId) {
     if (isBusy) return
+    followLatestMessage.current = true
     setError('')
     setStatus('resuming')
     try {
@@ -587,8 +694,8 @@ function App() {
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
       setResumeContext(session.resume)
-      setSavedReports(null)
       setStatus('idle')
+      navigateTo('conversation')
     } catch (requestError) {
       showError(requestError)
     }
@@ -604,8 +711,13 @@ function App() {
         password: formData.get('password'),
       })
       setClaimantAccessToken(session.access_token)
+      historyAutoLoadAttempted.current = false
       setAccount(await getAuthenticatedAccount())
-      setPage('account'); setAuthStatus('idle')
+      const shouldContinueClaim = authReturnToClaim
+      navigateTo(shouldContinueClaim ? 'home' : 'account', { replace: shouldContinueClaim })
+      setAuthReturnToClaim(false)
+      setAuthStatus('idle')
+      if (shouldContinueClaim) await sendMessage()
     } catch (requestError) {
       setClaimantAccessToken(null)
       setAuthError(requestError.message)
@@ -616,12 +728,19 @@ function App() {
   async function signOut() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
-    setAccount(null); setPage('home'); setAuthStatus('idle')
+    historyAutoLoadAttempted.current = false
+    setSavedReports(null)
+    setAccount(null); navigateTo('home', { replace: true }); setAuthStatus('idle')
   }
 
   async function openSavedClaims() {
-    setPage('home')
+    navigateTo('home')
     await loadSavedReports()
+  }
+
+  function startNewReport() {
+    navigateTo('home')
+    resetActiveReportState()
   }
 
   async function saveProfile(event) {
@@ -651,7 +770,7 @@ function App() {
   return (
     <div className="customer-app">
       <header className="product-header">
-        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); hasStarted ? startNewReport() : navigateTo('home') }} aria-label="Northwind home">
           <span className="brand-mark">N</span>
           <span>Northwind Insurance</span>
         </a>
@@ -659,13 +778,14 @@ function App() {
           <nav className="public-nav" aria-label="Main navigation">
             <a href="#claims">Claims</a>
             <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
+            <button className="login-button" type="button" onClick={() => navigateTo(account ? 'account' : 'login')}>
               {account ? 'My account' : 'Log in'}
             </button>
           </nav>
         )}
         {hasStarted && (
           <div className="header-actions">
+            <button className="conversation-back" type="button" onClick={startNewReport} aria-label="Back">← Back</button>
             <span className="draft-label">Draft report</span>
             <button
               className="support-button"
@@ -684,41 +804,92 @@ function App() {
           initialDescription={draft}
           onExit={(description) => {
             setDraft(description)
-            setPage('home')
+            navigateTo('home')
           }}
         />
       ) : !hasStarted && page === 'account' && account ? (
-        <main className="login-page">
-          <section className="login-card account-card" aria-labelledby="account-title">
-            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
-            <p className="eyebrow">Development account</p>
-            <h1 id="account-title">Your account</h1>
-            <p className="prototype-note" role="note">This authenticated account uses anonymous synthetic development data. It is not a production Northwind identity.</p>
-            <form className="login-form" onSubmit={saveProfile}>
-              <label htmlFor="account-name">Display name</label>
-              <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
-              <label htmlFor="account-email">Email address</label>
-              <input id="account-email" value={account.profile.email} readOnly />
-              <label htmlFor="account-phone">Phone</label>
-              <input id="account-phone" name="phone" defaultValue={account.profile.phone} />
-              <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
-            </form>
-            <form className="login-form" onSubmit={savePreferences}>
-              <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
-              <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
-              <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
-            </form>
-            {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
-            <button className="secondary-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
-              View saved claims
-            </button>
-            <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
-          </section>
+        <main className="account-page">
+          <div className="account-shell">
+            <button className="back-link account-back" type="button" onClick={() => navigateTo('home')}>← Back to claims</button>
+            <section className="account-hero" aria-labelledby="account-title">
+              <div className="account-avatar" aria-hidden="true">
+                {account.profile.display_name?.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'NW'}
+              </div>
+              <div className="account-identity">
+                <p className="eyebrow">Your Northwind space</p>
+                <h1 id="account-title">Your account</h1>
+                <p>Welcome back, <strong>{account.profile.display_name}</strong>.</p>
+                <span>{account.profile.email}</span>
+              </div>
+              <button className="account-claims-button" type="button" onClick={openSavedClaims} disabled={isBusy}>
+                <span aria-hidden="true">◇</span>
+                View claim conversations
+                <span aria-hidden="true">→</span>
+              </button>
+            </section>
+
+            <div className="development-banner" role="note">
+              <span className="development-icon" aria-hidden="true">i</span>
+              <span><strong>Development account</strong>This account contains anonymous synthetic data and is not a production Northwind identity.</span>
+            </div>
+
+            <div className="account-dashboard">
+              <section className="account-settings" aria-labelledby="profile-settings-title">
+                <div className="account-section-heading">
+                  <span className="account-section-icon" aria-hidden="true">○</span>
+                  <div><h2 id="profile-settings-title">Personal details</h2><p>Keep your contact information up to date.</p></div>
+                </div>
+                <form className="login-form account-form" onSubmit={saveProfile}>
+                  <div className="account-field-grid">
+                    <label htmlFor="account-name">Display name
+                      <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
+                    </label>
+                    <label htmlFor="account-email">Email address
+                      <input id="account-email" value={account.profile.email} readOnly />
+                    </label>
+                  </div>
+                  <label htmlFor="account-phone">Phone number
+                    <input id="account-phone" name="phone" defaultValue={account.profile.phone} placeholder="Add a phone number" />
+                  </label>
+                  <div className="account-form-actions">
+                    <span>Your email is connected to this development identity.</span>
+                    <button className="primary-button" disabled={authStatus !== 'idle'}>{authStatus === 'saving' ? 'Saving…' : 'Save profile'}</button>
+                  </div>
+                </form>
+              </section>
+
+              <aside className="account-side-column">
+                <section className="account-preferences" aria-labelledby="notification-settings-title">
+                  <div className="account-section-heading compact">
+                    <span className="account-section-icon" aria-hidden="true">◇</span>
+                    <div><h2 id="notification-settings-title">Notifications</h2><p>Choose how Northwind keeps you updated.</p></div>
+                  </div>
+                  <form className="login-form preference-form" onSubmit={savePreferences}>
+                    <label className="preference-row">
+                      <span><strong>Email updates</strong><small>Claim progress and important requests</small></span>
+                      <input name="email" type="checkbox" defaultChecked={account.preferences.email} />
+                    </label>
+                    <label className="preference-row">
+                      <span><strong>SMS updates</strong><small>Time-sensitive notifications</small></span>
+                      <input name="sms" type="checkbox" defaultChecked={account.preferences.sms} />
+                    </label>
+                    <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
+                  </form>
+                </section>
+                <section className="account-session" aria-labelledby="session-title">
+                  <div><span className="session-status" aria-hidden="true" /><h2 id="session-title">Signed in securely</h2></div>
+                  <p>Your current session gives access only to this development account&apos;s claims.</p>
+                  <button className="account-logout" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
+                </section>
+              </aside>
+            </div>
+            {authError && <p className="backend-status is-error account-error" role="alert">{authError}</p>}
+          </div>
         </main>
       ) : !hasStarted && page === 'login' ? (
         <main className="login-page">
           <section className="login-card" aria-labelledby="login-title">
-            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
+            <button className="back-link" type="button" onClick={() => navigateTo('home')}>← Back to claims</button>
             <p className="eyebrow">Your Northwind account</p>
             <h1 id="login-title">Welcome back</h1>
             <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
@@ -731,9 +902,11 @@ function App() {
               <p className="prototype-note" role="note">Development/test login only. Accounts and displayed data are anonymous and synthetic; no production identity provider is connected.</p>
               {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
             </form>
-            <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
-              Start a claim without logging in
-            </button>
+            {!authReturnToClaim && (
+              <button className="secondary-button start-without-login" type="button" onClick={() => navigateTo('home')}>
+                Back to claim information
+              </button>
+            )}
             <div className="employee-access">
               <span>Northwind team member?</span>
               <a href="http://127.0.0.1:8002/">Employee access</a>
@@ -742,15 +915,27 @@ function App() {
         </main>
       ) : !hasStarted ? (
         <main className="entry-page">
-          <section className="entry-main">
-            <div className="entry-content">
-              <p className="eyebrow">Claims, made a little easier</p>
-              <h1>We&apos;ll help you get back on track</h1>
-              <p className="entry-intro">
-                Start your claim online in a few minutes. No account or insurance jargon needed.
+          <section className="hero-section" aria-labelledby="hero-title">
+            <img className="hero-background" src={northwindValley} alt="" aria-hidden="true" fetchPriority="high" />
+            <div className="hero-content">
+              <p className="eyebrow">Northwind Insurance</p>
+              <h1 id="hero-title">When the unexpected happens, we&apos;re here.</h1>
+              <p className="hero-intro">
+                Tell us what happened and we&apos;ll guide you through your claim, one clear step at a time.
               </p>
+              <a className="hero-cta" href="#claims">
+                Start a claim <span aria-hidden="true">→</span>
+              </a>
+            </div>
+            <a className="hero-scroll" href="#claims">Claim online <span aria-hidden="true">↓</span></a>
+          </section>
+          <div className="claim-entry-layout">
+            <section className="entry-main">
+              <div className="entry-content">
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
+                <p className="eyebrow">Start your report</p>
                 <h2 id="claim-starter-title">Tell us what happened</h2>
+                <p className="claim-starter-intro">Describe the incident in your own words. We&apos;ll ask only what is needed and save your progress as you go.</p>
                 <MessageComposer
                   draft={draft}
                   setDraft={setDraft}
@@ -803,7 +988,7 @@ function App() {
                 </ul>
               </div>
               {claimType === 'motor' && (
-                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
+                <button className="guided-start-button" type="button" onClick={() => navigateTo('guided-motor')}>
                   Start guided Motor claim
                   <span>Three clear steps with draft saving</span>
                 </button>
@@ -812,54 +997,54 @@ function App() {
                 <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened above.</p>
               )}
               </section>
-              <div className="resume-entry">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={loadSavedReports}
-                  disabled={isBusy}
-                >
-                  {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
-                </button>
-                {savedReports !== null && (
-                  <section className="saved-reports" aria-labelledby="saved-reports-title">
-                    <h2 id="saved-reports-title">Saved reports</h2>
-                    {savedReports.length === 0 ? (
-                      <p>No saved reports are available to resume.</p>
-                    ) : (
-                      <ul>
-                        {savedReports.map((report) => (
-                          <li key={report.claim_id}>
-                            <div>
-                              <strong>{report.incident_type || 'Incident report'}</strong>
-                              <span>{report.customer_next_step.summary}</span>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => resumeSavedReport(report.claim_id)}
-                              disabled={isBusy}
-                            >
-                              {status === 'resuming' ? 'Resuming...' : 'Resume report'}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                )}
-              </div>
               <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
                 <span>Securely saved</span>
                 <span>Pause anytime</span>
                 <span>Human help available</span>
               </div>
-            </div>
-          </section>
-          <HelpfulDetails />
+              </div>
+            </section>
+            <SavedConversationHomePanel
+              reports={savedReports}
+              busy={isBusy}
+              onLoad={loadSavedReports}
+              onResume={resumeSavedReport}
+              signedIn={hasClaimantAccessToken()}
+              onSignIn={() => navigateTo('login')}
+              error={account && status === 'error' ? error : ''}
+            />
+          </div>
         </main>
       ) : (
         <main className="intake-page">
+          <aside className="conversation-history" aria-label="Saved conversations">
+            <div className="history-brand">
+              <span className="brand-mark">N</span>
+              <span><strong>Northwind</strong><small>Claims assistant</small></span>
+            </div>
+            <button className="new-report-button" type="button" onClick={startNewReport}>
+              <span aria-hidden="true">＋</span> New report
+            </button>
+            <div className="history-section-heading">
+              <span>Your conversations</span>
+              <button type="button" onClick={loadSavedReports} disabled={isBusy} aria-label="Refresh saved conversations">↻</button>
+            </div>
+            <nav className="history-list" aria-label="Claim conversations">
+              {claim && (
+                <button className="history-item is-active" type="button">
+                  <span className="history-item-title">{conversationTitle(form, claim.incident_type)}</span>
+                  <small><span className="saved-indicator" aria-hidden="true" /> Saved · Current conversation</small>
+                </button>
+              )}
+              {savedReports?.filter((report) => report.claim_id !== claim?.claim_id).map((report) => (
+                <button className="history-item" type="button" key={report.claim_id} onClick={() => resumeSavedReport(report.claim_id)} disabled={isBusy}>
+                  <span className="history-item-title">{report.incident_type ? `${report.incident_type} claim` : 'Incident report'}</span>
+                  <small>Saved report</small>
+                </button>
+              ))}
+            </nav>
+            <p className="history-note">Messages sent after your incident description are saved securely with this claim and restored when you resume.</p>
+          </aside>
           <section className="conversation-panel" aria-labelledby="conversation-title">
             <div className="conversation-heading">
               <p className="eyebrow">Your report</p>
@@ -867,7 +1052,7 @@ function App() {
               {handoff?.status !== 'in_progress' && <p>{nextStep?.summary}</p>}
             </div>
 
-            <div className="message-list" aria-live="polite">
+            <div className="message-list" ref={messageListRef} onScroll={trackConversationScroll} aria-live="polite" aria-label="Claim conversation messages">
               {messages.map((message) => (
                 <article className={`message message-${message.actor}`} key={message.message_id}>
                   <p className="message-author">{message.actor === 'claimant' ? 'You' : 'Northwind'}</p>
@@ -1273,17 +1458,58 @@ function MessageComposer({
   )
 }
 
-function HelpfulDetails() {
+function SavedConversationHomePanel({ reports, busy, onLoad, onResume, signedIn, onSignIn, error }) {
   return (
-    <aside className="entry-side" aria-labelledby="helpful-details-title">
+    <aside className="entry-side home-history" aria-labelledby="home-history-title">
       <div className="side-content">
-        <p className="side-label">When available</p>
-        <h2 id="helpful-details-title">Helpful details to include</h2>
-        <ul className="detail-list">
-          <li>When and where the incident happened</li>
-          <li>Who or what was involved</li>
-          <li>Any damage, injuries, or immediate safety concerns</li>
-        </ul>
+        <div className="home-history-header">
+          <div>
+            <p className="side-label">Claim history</p>
+            <h2 id="home-history-title">Your conversations</h2>
+          </div>
+          {signedIn && (
+            <button className="history-refresh" type="button" onClick={onLoad} disabled={busy} aria-label="Refresh conversation history">↻</button>
+          )}
+        </div>
+        {!signedIn ? (
+          <div className="history-signed-out">
+            <span className="history-bubble" aria-hidden="true">•••</span>
+            <p>Sign in to see and continue your securely saved claim conversations.</p>
+            <button className="history-sign-in" type="button" onClick={onSignIn}>Sign in <span aria-hidden="true">→</span></button>
+          </div>
+        ) : error && reports === null ? (
+          <div className="history-empty history-error" role="alert">
+            <p>{error}</p>
+            <button type="button" onClick={onLoad} disabled={busy}>Try again</button>
+          </div>
+        ) : reports === null ? (
+          <div className="history-loading" role="status" aria-label="Loading conversations">
+            <span /><span /><span />
+          </div>
+        ) : reports.length === 0 ? (
+          <div className="history-empty">
+            <span className="history-bubble" aria-hidden="true">＋</span>
+            <p>No conversations yet. Your first claim will appear here automatically.</p>
+          </div>
+        ) : (
+          <>
+            <p className="history-group-label">Recent</p>
+            <nav className="home-history-list" aria-label="Saved claim conversations">
+              {reports.map((report) => (
+                <button type="button" key={report.claim_id} onClick={() => onResume(report.claim_id)} disabled={busy} aria-label={`Resume ${savedConversationTitle(report)}`}>
+                  <span className="history-list-icon" aria-hidden="true">◇</span>
+                  <span className="history-list-copy">
+                    <strong>{savedConversationTitle(report)}</strong>
+                    <small>{report.customer_next_step.summary}</small>
+                    <small className="history-list-reference">{shortClaimReference(report.claim_id)}</small>
+                  </span>
+                  <span className="history-list-arrow" aria-hidden="true">›</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
+        <p className="history-privacy"><span aria-hidden="true">●</span> Conversations are saved securely</p>
       </div>
     </aside>
   )
