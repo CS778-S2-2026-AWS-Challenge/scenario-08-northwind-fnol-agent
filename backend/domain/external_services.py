@@ -601,6 +601,11 @@ class ExternalTaskAttempt(ContractModel):
     The operation identity is the same across every attempt for one request. That
     is what makes a retry the same request rather than a second one, so it is
     recorded here as well and checked before another attempt is permitted.
+
+    Delivery follows the same contract as the task record it belongs to: an
+    accepted attempt must have reached the provider, and reaching the provider
+    must be evidenced rather than asserted. Without that an attempt could record
+    a provider acceptance for a request that was never sent.
     """
 
     attempt_id: str = Field(min_length=1, max_length=100)
@@ -613,14 +618,28 @@ class ExternalTaskAttempt(ContractModel):
     outcome: ExternalTaskOperationStatus
     failure_code: ExternalTaskFailureCode | None = None
     delivery: ExternalTaskDelivery = ExternalTaskDelivery.NOT_SUBMITTED
+    delivery_evidence: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode='after')
     def validate_attempt_state(self) -> 'ExternalTaskAttempt':
+        if self.delivery is ExternalTaskDelivery.SUBMITTED:
+            if self.delivery_evidence is None:
+                raise ValueError(
+                    'A submitted attempt must name the evidence that the request reached the '
+                    'provider.'
+                )
+        elif self.delivery_evidence is not None:
+            raise ValueError('An unsubmitted attempt cannot hold delivery evidence.')
         if self.outcome is ExternalTaskOperationStatus.PREPARED:
             raise ValueError('An attempt that ran cannot record the prepared state.')
         if self.outcome is ExternalTaskOperationStatus.ACCEPTED:
             if self.failure_code is not None:
                 raise ValueError('An accepted attempt cannot record a failure code.')
+            if self.delivery is not ExternalTaskDelivery.SUBMITTED:
+                raise ValueError(
+                    'An accepted attempt must have reached the provider, so it must be '
+                    'submitted with evidence.'
+                )
             return self
         if self.failure_code is None:
             raise ValueError(
@@ -653,25 +672,38 @@ def assert_retry_is_permitted(
 ) -> None:
     """Check that retrying this request repeats it rather than duplicating it.
 
-    Two separate things can go wrong. A retry can carry a new operation identity,
-    which the provider sees as a second request rather than the same one; that is
-    the duplicate this card exists to prevent. And a retry can be attempted after
-    an outcome whose recovery path forbids it: an unknown outcome must be
-    reconciled first, and a terminal failure needs review, because in both cases
-    another send may repeat a side effect that already happened.
+    Three separate things can go wrong. An attempt can belong to another request
+    entirely, and deciding claim A's retry from claim B's history would spend one
+    claim's authority on another's work, so the task, claim, and operation
+    identity must all agree. A retry can carry a new operation identity, which
+    the provider sees as a second request rather than the same one. And a retry
+    can be attempted after an outcome whose recovery path forbids it: an unknown
+    outcome must be reconciled first, and a terminal failure needs review,
+    because in both cases another send may repeat a side effect that already
+    happened.
 
     An accepted attempt is not retryable either. The request succeeded, so a
     further attempt would be a second request by definition.
+
+    The latest attempt decides, chosen by sequence number rather than list
+    position. Two attempts sharing a number leave that undecidable, and guessing
+    would let a malformed history authorise a send, so an ambiguous history fails
+    closed.
 
     Args:
         request: The sent request being retried.
         attempts: Every recorded attempt for this request, in any order.
 
+    Returns:
+        None. Nothing is retried here; this raises or returns quietly.
+
     Raises:
+        ExternalRequestTaskMismatchError: An attempt belongs to a different task
+            or claim than the request.
         DuplicateExternalRequestError: The request holds no operation identity, or
             an attempt carries a different one.
-        RetryNotPermittedError: There are no attempts to retry, or the latest
-            outcome does not permit another attempt.
+        RetryNotPermittedError: There are no attempts to retry, the history is
+            ambiguous, or the latest outcome does not permit another attempt.
     """
 
     if request.operation_id is None:
@@ -679,16 +711,33 @@ def assert_retry_is_permitted(
             f'{request.request_id}: has not been sent, so there is nothing to retry and a '
             'send would need its own operation identity.'
         )
-    mismatched = [a for a in attempts if a.operation_id != request.operation_id]
-    if mismatched:
-        raise DuplicateExternalRequestError(
-            f'{request.request_id}: attempt {mismatched[0].attempt_id} carries operation '
-            f'{mismatched[0].operation_id}, not {request.operation_id}, so retrying it would '
-            'send a second request.'
-        )
+    for attempt in attempts:
+        for label, on_attempt, on_request in (
+            ('task', attempt.task_id, request.task_id),
+            ('claim', attempt.claim_id, request.claim_id),
+        ):
+            if on_attempt != on_request:
+                raise ExternalRequestTaskMismatchError(
+                    f'{request.request_id}: attempt {attempt.attempt_id} belongs to {label} '
+                    f'{on_attempt}, not {on_request}, so it says nothing about this request.'
+                )
+        if attempt.operation_id != request.operation_id:
+            raise DuplicateExternalRequestError(
+                f'{request.request_id}: attempt {attempt.attempt_id} carries operation '
+                f'{attempt.operation_id}, not {request.operation_id}, so retrying it would '
+                'send a second request.'
+            )
     if not attempts:
         raise RetryNotPermittedError(
             f'{request.request_id}: no attempt has been recorded, so there is nothing to retry.'
+        )
+    numbers = [attempt.attempt_number for attempt in attempts]
+    if len(numbers) != len(set(numbers)):
+        repeated = sorted({n for n in numbers if numbers.count(n) > 1})
+        raise RetryNotPermittedError(
+            f'{request.request_id}: attempt numbers '
+            f'{", ".join(str(n) for n in repeated)} appear more than once, so which attempt '
+            'is latest cannot be decided and another send is refused.'
         )
     latest = max(attempts, key=lambda attempt: attempt.attempt_number)
     if latest.outcome is ExternalTaskOperationStatus.ACCEPTED:
