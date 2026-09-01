@@ -8,6 +8,11 @@ environment. `DATA_RUNTIME_PROFILE` selects exactly one complete data bundle. Th
 adapter only where the data profile contract permits it; endpoint values alone never activate an
 adapter.
 
+Provider selection is a startup decision, not a hot-switch. Changing profiles requires a new
+process (or container) with a new environment example and a fresh readiness/preflight check. The
+running process exposes the selected `data_runtime_profile` and `object_storage_adapter` labels
+through `GET /health/ready`; it never reports credentials, endpoints, or physical provider keys.
+
 ## Environment examples
 
 | Example | Current startup result | Meaning |
@@ -24,6 +29,11 @@ secrets. Atlas, cloud, and production credentials must be supplied through prote
 configuration and must never be committed in an environment file.
 
 ## Startup preflight
+
+The preflight is the provider-selection gate: invalid or mixed profile/adapter combinations are
+rejected before adapter construction, and unverified profiles report their missing capabilities
+without borrowing fixture services. Provider-specific connection variables alone never select or
+activate a provider.
 
 Inspect one example before serving requests:
 
