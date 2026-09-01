@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.auth import (
+    require_administrator,
     require_claimant,
     require_claimant_session,
     require_integration_service,
@@ -48,6 +49,8 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
             expected = require_claimant_session
         elif route.path.startswith('/api/v1/claims'):
             expected = require_claimant
+        elif route.path.startswith('/internal/v1/admin/'):
+            expected = require_administrator
         elif route.path.startswith('/internal/v1/'):
             expected = require_integration_service
         else:
