@@ -6,6 +6,9 @@ from backend.domain.configuration import (
     ConfigurationPatch,
     ConfigurationRecord,
     ConfigurationState,
+    DataProfileConfiguration,
+    DataRuntimeProfileValue,
+    ObjectStorageAdapterValue,
     TransitionRequest,
     ValidationRequest,
     now_utc,
@@ -52,6 +55,7 @@ def create(
     )
     _reject_plaintext_secrets(record.values)
     _validate_secret_references(record.secret_references)
+    _validate_configuration_values(record.domain, record.values, for_validation=False)
     saved = repo.create(record)
     _audit(repo, saved, actor, 'create_draft', payload.reason, 'succeeded')
     return saved
@@ -88,6 +92,7 @@ def patch(
         else current.secret_references
     )
     _validate_secret_references(secret_references)
+    _validate_configuration_values(current.domain, values, for_validation=False)
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -120,6 +125,7 @@ def validate(
         'scenarios': [item.model_dump() for item in payload.scenario_results],
         'result': 'passed',
     }
+    _validate_configuration_values(current.domain, current.values, for_validation=True)
     failed = [item for item in payload.scenario_results if item.outcome == 'failed']
     if failed:
         evidence['result'] = 'failed'
@@ -361,4 +367,42 @@ def _validate_secret_references(references: dict[str, str]) -> None:
             422,
             'SECRET_REFERENCE_INVALID',
             'Secret references must use an approved protected-reference format.',
+        )
+
+
+def _validate_configuration_values(
+    domain: str, values: dict[str, object], *, for_validation: bool
+) -> None:
+    """Validate the structured provider configuration consumed by the runtime boundary."""
+    if domain != 'data_profile':
+        return
+    try:
+        profile = DataProfileConfiguration.model_validate(values)
+    except ValueError as error:
+        raise _error(
+            422,
+            'PROVIDER_CONFIGURATION_INVALID',
+            'data_profile requires one runtime profile and one object-storage adapter.',
+        ) from error
+    if profile.data_runtime_profile is DataRuntimeProfileValue.LOCAL_MVP and (
+        profile.object_storage_adapter is not ObjectStorageAdapterValue.S3_COMPATIBLE
+    ):
+        raise _error(
+            422,
+            'PROVIDER_CONFIGURATION_INVALID',
+            'local_mvp requires the s3_compatible object-storage adapter.',
+        )
+    if (
+        profile.data_runtime_profile
+        in {
+            DataRuntimeProfileValue.CLOUDFLARE,
+            DataRuntimeProfileValue.MONGODB,
+            DataRuntimeProfileValue.AWS,
+        }
+        and for_validation
+    ):
+        raise _error(
+            422,
+            'PROVIDER_CONFIGURATION_UNAVAILABLE',
+            'The selected provider profile is not verified and cannot be published.',
         )
