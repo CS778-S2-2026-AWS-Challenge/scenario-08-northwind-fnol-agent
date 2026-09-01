@@ -14,6 +14,7 @@ from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandof
 from backend.adapters.identity import FixtureIdentityRepository
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.adapters.policy_history import PolicyHistoryAdapter
+from backend.api.admin import router as admin_router
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
@@ -34,6 +35,7 @@ from backend.core.runtime_profiles import (
     validate_data_runtime_bundle,
 )
 from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
@@ -98,6 +100,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.identity_repository = identity_repository or FixtureIdentityRepository()
+    app.state.configuration_repository = ConfigurationRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
     app.state.knowledge_retriever = bundle.knowledge_retrieval
@@ -139,4 +142,5 @@ def create_app(
     app.include_router(workbench_router)
     app.include_router(demo_router)
     app.include_router(handoffs_router)
+    app.include_router(admin_router)
     return app
