@@ -129,6 +129,7 @@ def validate(
             'VALIDATION_FAILED',
             'One or more required validation scenarios failed.',
         )
+    previous = repo.active(current.domain) if current.impact is ConfigurationImpact.NORMAL else None
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -137,11 +138,49 @@ def validate(
             else ConfigurationState.PUBLISHED,
             'validation_evidence': evidence,
             'effective_time': now_utc() if current.impact is ConfigurationImpact.NORMAL else None,
+            'previous_version': previous.configuration_id if previous is not None else None,
             'updated_at': now_utc(),
         }
     )
-    saved = repo.save(updated, expected_revision)
-    _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
+    if previous is not None:
+        superseded = previous.model_copy(
+            update={
+                'state': ConfigurationState.SUPERSEDED,
+                'revision': previous.revision + 1,
+                'updated_at': now_utc(),
+            }
+        )
+        supersede_event = AuditEvent(
+            event_id=repo.new_event_id(),
+            configuration_id=superseded.configuration_id,
+            revision=superseded.revision,
+            actor=actor,
+            action='supersede',
+            reason='Replaced by a newer publication.',
+            outcome='succeeded',
+            created_at=now_utc(),
+        )
+        validate_event_record = updated
+        validate_event = AuditEvent(
+            event_id=repo.new_event_id(),
+            configuration_id=validate_event_record.configuration_id,
+            revision=validate_event_record.revision,
+            actor=actor,
+            action='validate',
+            reason='Validation completed.',
+            outcome='succeeded',
+            created_at=now_utc(),
+        )
+        saved = repo.replace_active(
+            previous,
+            superseded,
+            updated,
+            expected_revision,
+            (supersede_event, validate_event),
+        )
+    else:
+        saved = repo.save(updated, expected_revision)
+        _audit(repo, saved, actor, 'validate', 'Validation completed.', 'succeeded')
     return saved
 
 
