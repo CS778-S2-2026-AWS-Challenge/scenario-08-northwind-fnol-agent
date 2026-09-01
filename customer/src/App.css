@@ -2,6 +2,12 @@
   min-height: 100svh;
   color: #20312d;
   background: #f6fbf8;
+  --nw-space-2: 8px;
+  --nw-space-3: 12px;
+  --nw-space-4: 16px;
+  --nw-radius-control: 8px;
+  --nw-color-track: hsl(150 20% 88%);
+  --nw-color-progress: hsl(161 49% 35%);
 }
 
 .product-header {
@@ -680,6 +686,52 @@
   line-height: 1.55;
 }
 
+.journey-progress {
+  width: min(100%, 720px);
+  margin-top: var(--nw-space-4);
+  padding: var(--nw-space-3) var(--nw-space-4);
+  border: 1px solid #d4e3de;
+  border-radius: var(--nw-radius-control);
+  background: #ffffff;
+}
+
+.journey-progress-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--nw-space-3);
+  color: #50655e;
+  font-size: 12px;
+}
+
+.journey-progress-heading strong {
+  color: #20312d;
+  font-size: 13px;
+}
+
+.progress-track {
+  height: var(--nw-space-2);
+  margin-top: var(--nw-space-3);
+  overflow: hidden;
+  border-radius: var(--nw-radius-control);
+  background: var(--nw-color-track);
+}
+
+.progress-fill {
+  display: block;
+  width: var(--progress-width);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--nw-color-progress);
+  transition: width 180ms ease;
+}
+
+.journey-progress > p {
+  margin: var(--nw-space-2) 0 0;
+  color: #687b74;
+  font-size: 11px;
+}
+
 .message-list {
   width: min(100%, 720px);
   display: flex;
@@ -1106,6 +1158,29 @@
 
 .confirmation-bar {
   border: 1px solid #d8c488;
+}
+
+.confirmation-bar h2 {
+  margin: 0 0 var(--nw-space-2);
+  color: #5f5128;
+  font-size: 16px;
+}
+
+.confirmation-kicker {
+  margin-bottom: var(--nw-space-2) !important;
+  color: #79520e !important;
+  font-size: 11px !important;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.confirmation-list {
+  display: grid;
+  gap: var(--nw-space-2);
+  margin: 0 0 var(--nw-space-3);
+  padding-left: var(--nw-space-4);
+  color: #5f5128;
+  font-size: 13px;
 }
 
 .confirmation-bar p {
