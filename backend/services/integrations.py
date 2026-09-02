@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
     AssessorAdapterFailure,
@@ -211,6 +213,12 @@ def _record_external_acceptance(
     customer_id: str,
     provider_reference: str,
 ) -> None:
+    updated_at = now_utc()
+    # A provider response may be handled in the same clock tick as task
+    # preparation.  Persistence treats equal timestamps as stale, so advance
+    # the transition timestamp monotonically before writing the accepted state.
+    if updated_at <= task.updated_at:
+        updated_at = task.updated_at + timedelta(microseconds=1)
     accepted = task.model_copy(
         update={
             'status': ExternalTaskOperationStatus.ACCEPTED,
@@ -219,7 +227,7 @@ def _record_external_acceptance(
                 f'{task.integration_source.value} routing acknowledgement: {provider_reference}'
             ),
             'provider_reference': provider_reference,
-            'updated_at': now_utc(),
+            'updated_at': updated_at,
         }
     )
     try:
