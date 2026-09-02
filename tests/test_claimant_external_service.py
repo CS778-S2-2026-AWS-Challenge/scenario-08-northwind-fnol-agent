@@ -824,3 +824,49 @@ def test_an_unavailable_service_entry_is_reported_as_retryable() -> None:
     assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
     assert error['retryable'] is True
     assert error['details'][0]['reason'] == 'unavailable'
+
+
+def test_a_live_entry_records_the_configured_service_as_the_source() -> None:
+    """The recorded source follows the entry that served the call, not the adapter.
+
+    The unavailable and fixture entries are already covered on this path. This is the
+    third, and it is the one that carries the guarantee: a task served through `LIVE`
+    must record `configured_service`, so a reader can tell an answer that came through
+    the configured service from one produced by a fixture. The entry is what decides
+    that label, which is why the label cannot drift from the entry that produced it.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        claim_id, revision = _start_created_motor_claim(client, repository, key='entry-live')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        location = stored.form['incident.location'].model_copy(
+            update={'value': {'city': 'Auckland'}}
+        )
+        repository._claims[stored.claim_id] = stored.model_copy(
+            update={'form': {**stored.form, 'incident.location': location}}
+        )
+        consent = _grant_consent(client, claim_id, revision, key='entry-live')
+        cast(Any, client.app).state.assessor_service_entry = ExternalServiceEntryDecision(
+            entry=ExternalServiceEntry.LIVE,
+            integration_source=IntegrationSource.CONFIGURED_SERVICE,
+        )
+
+        routed = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': _idem('entry-live'),
+                'If-Match': str(consent['revision']),
+            },
+        )
+        operational = client.get(
+            f'/internal/v1/claims/{claim_id}/external-tasks',
+            headers={'Authorization': 'Bearer synthetic-integration'},
+        )
+
+    assert routed.status_code == 201
+    assert operational.status_code == 200
+    item = operational.json()['items'][0]
+    assert item['task']['integration_source'] == 'configured_service'
