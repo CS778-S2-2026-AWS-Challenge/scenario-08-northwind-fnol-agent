@@ -2718,6 +2718,36 @@
         "title": "ExternalServiceConsentStatus",
         "type": "string"
       },
+      "ExternalTaskAuthorisation": {
+        "additionalProperties": false,
+        "description": "The two independent authorities one external request needs.\n\n`docs/claim-creation-boundary.md` requires both a current Northwind rule or\nstaff decision and a matching active claimant-consent record, and states\nthat neither substitutes for the other. They are separate fields here for\nthat reason: a request holding only one of them is not authorised, and no\ncode path can satisfy the pair by supplying the same reference twice.",
+        "properties": {
+          "authorised_revision": {
+            "minimum": 1.0,
+            "title": "Authorised Revision",
+            "type": "integer"
+          },
+          "claimant_consent_ref": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claimant Consent Ref",
+            "type": "string"
+          },
+          "northwind_authority_ref": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Northwind Authority Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "northwind_authority_ref",
+          "claimant_consent_ref",
+          "authorised_revision"
+        ],
+        "title": "ExternalTaskAuthorisation",
+        "type": "object"
+      },
       "ExternalTaskDelivery": {
         "description": "Whether one external task request reached the provider before it failed.\n\nDelivery is one input to recovery classification. Only failures whose\ncanonical contract treats post-submission state as ambiguous become an\nunknown outcome.",
         "enum": [
@@ -2726,27 +2756,6 @@
         ],
         "title": "ExternalTaskDelivery",
         "type": "string"
-      },
-      "ExternalTaskEvidenceView": {
-        "additionalProperties": false,
-        "description": "One external task with the evidence records currently tied to it.",
-        "properties": {
-          "evidence_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Ids",
-            "type": "array"
-          },
-          "task": {
-            "$ref": "#/components/schemas/ExternalTaskRecord"
-          }
-        },
-        "required": [
-          "task"
-        ],
-        "title": "ExternalTaskEvidenceView",
-        "type": "object"
       },
       "ExternalTaskFailureCode": {
         "description": "Provider-neutral failure reasons for one external task invocation.\n\nThe six values are the failure classes named in the Failure Behaviour\nsection of `docs/claim-creation-boundary.md`.",
@@ -2761,6 +2770,38 @@
         "title": "ExternalTaskFailureCode",
         "type": "string"
       },
+      "ExternalTaskItem": {
+        "additionalProperties": false,
+        "description": "Operational task state with its request and material-origin links.",
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task": {
+            "$ref": "#/components/schemas/ExternalTaskRecord"
+          }
+        },
+        "required": [
+          "task",
+          "evidence_ids"
+        ],
+        "title": "ExternalTaskItem",
+        "type": "object"
+      },
       "ExternalTaskListResponse": {
         "additionalProperties": false,
         "description": "Internal projection of external tasks and their material links.",
@@ -2771,7 +2812,7 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ExternalTaskEvidenceView"
+              "$ref": "#/components/schemas/ExternalTaskItem"
             },
             "title": "Items",
             "type": "array"
@@ -2896,6 +2937,103 @@
           "updated_at"
         ],
         "title": "ExternalTaskRecord",
+        "type": "object"
+      },
+      "ExternalTaskRequest": {
+        "additionalProperties": false,
+        "description": "What one external task will disclose, to whom, under what authority, and why.\n\nThe five properties the card requires are each their own field rather than a\nfree-form payload: the stakeholder, the claim, the fields actually disclosed,\nthe authorisation, and the purpose a claimant can read. A request that cannot\nsay all five is not preparable.\n\nPreparation and sending are separate states. An unsent request holds no\noperation identity, because the identity is what makes a retry the same\nrequest rather than a second one.",
+        "properties": {
+          "authorisation": {
+            "$ref": "#/components/schemas/ExternalTaskAuthorisation"
+          },
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "disclosed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Disclosed Fields",
+            "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "prepared_at": {
+            "format": "date-time",
+            "title": "Prepared At",
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_action": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Requested Action",
+            "type": "string"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "service_identity": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Service Identity",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "claim_id",
+          "service_identity",
+          "requested_action",
+          "purpose",
+          "disclosed_fields",
+          "authorisation",
+          "prepared_at"
+        ],
+        "title": "ExternalTaskRequest",
         "type": "object"
       },
       "FormChange": {

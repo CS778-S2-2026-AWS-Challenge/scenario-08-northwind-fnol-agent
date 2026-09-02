@@ -9,6 +9,8 @@ import pytest
 from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 
 from backend.adapters.claims_service import MockAssessorServiceAdapter
+from backend.core.errors import ApiError
+from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -68,6 +70,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.external_service_entry import resolve_external_service_entry
 from backend.services.integrations import assessor_operation_id, route_assessor
 
 
@@ -428,9 +431,29 @@ def test_assessor_routing_service_executes_with_mongodb_repository(
         location=AssessorLocation(region='Auckland'),
     )
 
+    with pytest.raises(ApiError) as unavailable:
+        route_assessor(
+            repository,
+            MockAssessorServiceAdapter(),
+            resolve_external_service_entry(
+                capability_status=RuntimeCapabilityStatus.PENDING_CONFIRMATION,
+                allow_test_fixture=False,
+            ),
+            payload,
+            authorisation_decision=decision,
+        )
+    assert unavailable.value.status_code == 503
+    assert repository.get_assessor_routing_operation(assessor_operation_id(payload)) is None
+    assert repository.list_external_tasks_internal(claim.claim_id) == []
+    assert repository.list_external_task_requests_internal(claim.claim_id) == []
+
     result, replayed = route_assessor(
         repository,
         MockAssessorServiceAdapter(),
+        resolve_external_service_entry(
+            capability_status=RuntimeCapabilityStatus.USING_FIXTURE,
+            allow_test_fixture=True,
+        ),
         payload,
         authorisation_decision=decision,
     )
@@ -441,6 +464,27 @@ def test_assessor_routing_service_executes_with_mongodb_repository(
     assert operation is not None
     assert operation.status is AssessorRoutingOperationStatus.ACCEPTED
     assert operation.result == result
+    tasks = repository.list_external_tasks_internal(claim.claim_id)
+    requests = repository.list_external_task_requests_internal(claim.claim_id)
+    assert len(tasks) == len(requests) == 1
+    assert tasks[0].status.value == 'accepted'
+    assert tasks[0].integration_source is IntegrationSource.FIXTURE
+    assert requests[0].task_id == tasks[0].task_id
+    assert requests[0].operation_id == operation.operation_id
+    assert requests[0].sent_at is not None
+    repository.save_external_task_request(requests[0], claim.customer_id)
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_request(
+            requests[0].model_copy(update={'purpose': 'Changed after the send.'}),
+            claim.customer_id,
+        )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_request(
+            requests[0].model_copy(update={'request_id': 'erq_second_request'}),
+            claim.customer_id,
+        )
+    with pytest.raises(KeyError):
+        repository.save_external_task_request(requests[0], 'cus_another_customer')
     stored_claim = repository.get_claim_internal(claim.claim_id)
     assert stored_claim is not None
     assert stored_claim.assessor_routing == result

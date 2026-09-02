@@ -1,6 +1,6 @@
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.external_services import map_external_task_evidence
-from backend.domain.external_task_api import ExternalTaskListResponse
+from backend.domain.external_services import assert_request_matches_task, map_external_task_evidence
+from backend.domain.external_task_api import ExternalTaskItem, ExternalTaskListResponse
 from backend.domain.models import PageInfo
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.support import decode_cursor, encode_cursor
@@ -49,10 +49,38 @@ def list_external_tasks(
     tasks = repository.list_external_tasks_internal(claim_id)
     links = repository.list_external_task_evidence_links_internal(claim_id)
     views = map_external_task_evidence(tasks, links)
+    requests = repository.list_external_task_requests_internal(claim_id)
+    requests_by_task = {request.task_id: request for request in requests}
+    task_ids = {task.task_id for task in tasks}
+    if len(requests_by_task) != len(requests) or not set(requests_by_task).issubset(task_ids):
+        raise ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The external task request history is inconsistent.',
+        )
+    items: list[ExternalTaskItem] = []
+    for view in views:
+        request = requests_by_task.get(view.task.task_id)
+        if request is not None:
+            try:
+                assert_request_matches_task(request, view.task)
+            except ValueError as conflict:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='The external task request history is inconsistent.',
+                ) from conflict
+        items.append(
+            ExternalTaskItem(
+                task=view.task,
+                request=request,
+                evidence_ids=view.evidence_ids,
+            )
+        )
     offset = decode_cursor(cursor)
-    page_items = views[offset : offset + page_limit]
+    page_items = items[offset : offset + page_limit]
     next_offset = offset + len(page_items)
-    next_cursor = encode_cursor(next_offset) if next_offset < len(views) else None
+    next_cursor = encode_cursor(next_offset) if next_offset < len(items) else None
     return ExternalTaskListResponse(
         claim_id=claim_id,
         items=page_items,

@@ -16,7 +16,13 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
+from backend.domain.external_services import (
+    ExternalTaskEvidenceLink,
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+    assert_disclosure_within_consent,
+    assert_request_matches_task,
+)
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -833,6 +839,164 @@ class MongoDBRepository:
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
                 raise IdempotencyConflict(task.task_id)
+
+    def save_external_task_request(
+        self,
+        request: ExternalTaskRequest,
+        customer_id: str,
+    ) -> None:
+        """Persist a claim-owned request preparation or its first send record.
+
+        Args:
+            request: Request state to create or advance from prepared to sent.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, consent, or authority is unavailable.
+            IdempotencyConflict: Identity changes, a send is rewritten, or the
+                task already has another request.
+        """
+        claim = self.get_claim(request.claim_id, customer_id)
+        task = self._get(
+            'external_task',
+            request.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if claim is None or task is None or task.claim_id != request.claim_id:
+            raise KeyError(request.claim_id)
+        try:
+            assert_request_matches_task(request, task)
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+        consent = next(
+            (
+                record
+                for record in claim.external_service_consents
+                if record.consent_ref == request.authorisation.claimant_consent_ref
+            ),
+            None,
+        )
+        decision = self._get(
+            'agent_decision',
+            request.authorisation.northwind_authority_ref,
+            AgentDecisionRecord,
+            customer_id=customer_id,
+        )
+        if (
+            consent is None
+            or decision is None
+            or decision.claim_id != request.claim_id
+            or decision.resulting_revision != request.authorisation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        ):
+            raise KeyError(request.request_id)
+        try:
+            assert_disclosure_within_consent(
+                request,
+                consent,
+                claim_customer_id=customer_id,
+            )
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+
+        record_id = self._record_id('external_task_request', request.task_id)
+        document = {
+            **request.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_request',
+            'customer_id': customer_id,
+            'claim_id': request.claim_id,
+        }
+        stored = self._collection.find_one(
+            {'_id': record_id, 'record_type': 'external_task_request'}
+        )
+        if stored is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError:
+                stored = self._collection.find_one(
+                    {'_id': record_id, 'record_type': 'external_task_request'}
+                )
+        existing = self._model_from_document(stored, ExternalTaskRequest)
+        if (
+            stored is None
+            or stored.get('customer_id') != customer_id
+            or stored.get('claim_id') != request.claim_id
+            or existing is None
+        ):
+            raise IdempotencyConflict(request.request_id)
+        if existing == request:
+            return
+        immutable_identity = (
+            'request_id',
+            'task_id',
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'purpose',
+            'disclosed_fields',
+            'authorisation',
+            'prepared_at',
+        )
+        changed_identity = any(
+            getattr(existing, name) != getattr(request, name) for name in immutable_identity
+        )
+        first_send = (
+            existing.sent_at is None
+            and existing.operation_id is None
+            and request.sent_at is not None
+            and request.operation_id is not None
+        )
+        if changed_identity or not first_send:
+            raise IdempotencyConflict(request.request_id)
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': request.claim_id,
+                'sent_at': None,
+                'operation_id': None,
+            },
+            document,
+        )
+        if result.matched_count == 0:
+            current = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task_request'}
+            )
+            same_owner = current is not None and (
+                current.get('customer_id') == customer_id
+                and current.get('claim_id') == request.claim_id
+            )
+            if not same_owner or self._model_from_document(current, ExternalTaskRequest) != request:
+                raise IdempotencyConflict(request.request_id)
+
+    def list_external_task_requests_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskRequest]:
+        """List request records for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose requests are requested.
+
+        Returns:
+            Requests in stable preparation order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task_request',
+            ExternalTaskRequest,
+            {'claim_id': claim_id},
+            'prepared_at',
+        )
 
     def save_external_task_evidence_link(
         self,
