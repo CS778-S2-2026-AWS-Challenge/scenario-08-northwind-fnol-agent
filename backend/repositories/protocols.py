@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
+from backend.domain.external_services import (
+    ExternalTaskEvidenceLink,
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+)
 from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
@@ -269,6 +273,44 @@ class PersistenceRepository(ClaimRepository, Protocol):
         Raises:
             KeyError: The parent claim is missing or not owned by the customer.
             IdempotencyConflict: The write changes immutable identity or is stale.
+        """
+        raise NotImplementedError
+
+    def save_external_task_request(
+        self,
+        request: ExternalTaskRequest,
+        customer_id: str,
+    ) -> None:
+        """Persist preparation or the first send record for one external task.
+
+        Args:
+            request: Claim-bound request preparation or send record.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, consent, or authority is unavailable.
+            IdempotencyConflict: Identity changes, a send is rewritten, or the
+                task already has another request.
+        """
+        raise NotImplementedError
+
+    def list_external_task_requests_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskRequest]:
+        """List request records for an authorised internal claim projection.
+
+        Args:
+            claim_id: Working Claim whose request records are requested.
+
+        Returns:
+            Claim-scoped requests in stable preparation order.
+
+        Raises:
+            RuntimeError: A configured persistence provider cannot complete the read.
         """
         raise NotImplementedError
 

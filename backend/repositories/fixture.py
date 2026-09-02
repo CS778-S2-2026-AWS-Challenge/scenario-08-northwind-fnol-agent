@@ -1,6 +1,12 @@
 from copy import deepcopy
 
-from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
+from backend.domain.external_services import (
+    ExternalTaskEvidenceLink,
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+    assert_disclosure_within_consent,
+    assert_request_matches_task,
+)
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -38,6 +44,7 @@ class FixtureRepository(PersistenceRepository):
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
+        self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
@@ -61,6 +68,7 @@ class FixtureRepository(PersistenceRepository):
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'external_tasks': len(self._external_tasks),
+            'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
@@ -77,6 +85,7 @@ class FixtureRepository(PersistenceRepository):
         self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._external_tasks.clear()
+        self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
         self._retrievals.clear()
         self._review_signals.clear()
@@ -728,6 +737,109 @@ class FixtureRepository(PersistenceRepository):
             if changed_identity or task.updated_at <= existing.updated_at:
                 raise IdempotencyConflict(task.task_id)
         self._external_tasks[task.task_id] = deepcopy(task)
+
+    def save_external_task_request(
+        self,
+        request: ExternalTaskRequest,
+        customer_id: str,
+    ) -> None:
+        """Persist a claim-owned request preparation or its first send record.
+
+        Args:
+            request: Request state to create or advance from prepared to sent.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, consent, or authority is unavailable.
+            IdempotencyConflict: Identity changes, a send is rewritten, or the
+                task already has another request.
+        """
+        claim = self.get_claim(request.claim_id, customer_id)
+        task = self._external_tasks.get(request.task_id)
+        if claim is None or task is None or task.claim_id != request.claim_id:
+            raise KeyError(request.claim_id)
+        try:
+            assert_request_matches_task(request, task)
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+        consent = next(
+            (
+                record
+                for record in claim.external_service_consents
+                if record.consent_ref == request.authorisation.claimant_consent_ref
+            ),
+            None,
+        )
+        decision = self._decisions.get(request.authorisation.northwind_authority_ref)
+        if (
+            consent is None
+            or decision is None
+            or decision.claim_id != request.claim_id
+            or decision.resulting_revision != request.authorisation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        ):
+            raise KeyError(request.request_id)
+        try:
+            assert_disclosure_within_consent(
+                request,
+                consent,
+                claim_customer_id=customer_id,
+            )
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+        for held in self._external_task_requests.values():
+            if held.task_id == request.task_id and held.request_id != request.request_id:
+                raise IdempotencyConflict(request.task_id)
+        existing = self._external_task_requests.get(request.request_id)
+        if existing is not None and existing != request:
+            immutable_identity = (
+                'request_id',
+                'task_id',
+                'claim_id',
+                'service_identity',
+                'requested_action',
+                'purpose',
+                'disclosed_fields',
+                'authorisation',
+                'prepared_at',
+            )
+            changed_identity = any(
+                getattr(existing, name) != getattr(request, name) for name in immutable_identity
+            )
+            first_send = (
+                existing.sent_at is None
+                and existing.operation_id is None
+                and request.sent_at is not None
+                and request.operation_id is not None
+            )
+            if changed_identity or not first_send:
+                raise IdempotencyConflict(request.request_id)
+        self._external_task_requests[request.request_id] = deepcopy(request)
+
+    def list_external_task_requests_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskRequest]:
+        """List request records for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose requests are requested.
+
+        Returns:
+            Deep-copied requests in stable preparation order.
+
+        Raises:
+            RuntimeError: The in-memory fixture cannot complete the read.
+        """
+        requests = [
+            deepcopy(request)
+            for request in self._external_task_requests.values()
+            if request.claim_id == claim_id
+        ]
+        return sorted(requests, key=lambda request: (request.prepared_at, request.request_id))
 
     def save_external_task_evidence_link(
         self,

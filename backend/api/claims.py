@@ -36,6 +36,7 @@ from backend.services.claims import (
     start_claim,
     update_form,
 )
+from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_services import grant_assessor_consent, request_assessor_routing
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
@@ -58,6 +59,10 @@ def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
 
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
     return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
+
+
+def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
+    return cast(ExternalServiceEntryDecision, request.app.state.assessor_service_entry)
 
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
@@ -166,6 +171,7 @@ def create_assessor_routing(
     result, replayed = request_assessor_routing(
         repository_for(request),
         assessor_adapter_for(request),
+        _assessor_entry_for(request),
         principal,
         claim_id,
         idempotency_key,

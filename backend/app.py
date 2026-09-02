@@ -31,6 +31,7 @@ from backend.core.middleware import RequestIdMiddleware
 from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.core.runtime_profiles import (
     DataRuntimeBundle,
+    RuntimeCapabilityStatus,
     build_data_runtime_bundle,
     validate_data_runtime_bundle,
 )
@@ -41,6 +42,8 @@ from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
+from backend.services.external_service_entry import resolve_external_service_entry
+from backend.services.model_agent import GatewayAgent
 
 
 def create_app(
@@ -133,6 +136,15 @@ def create_app(
     app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
+    fixture_assessor = resolved_settings.data_runtime_profile is DataRuntimeProfile.FIXTURE
+    app.state.assessor_service_entry = resolve_external_service_entry(
+        capability_status=(
+            RuntimeCapabilityStatus.USING_FIXTURE
+            if fixture_assessor
+            else RuntimeCapabilityStatus.PENDING_CONFIRMATION
+        ),
+        allow_test_fixture=fixture_assessor,
+    )
     app.state.evidence_storage = bundle.evidence_storage
     app.state.policy_history_adapter = bundle.policy_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
