@@ -32,6 +32,13 @@ Tool Registry, Runtime requests, persistence, fixtures, and contract tests migra
 together. This mapping does not introduce a new HTTP route or claim current runtime
 support for the target tool identifiers.
 
+The current deterministic message path may execute a bounded legacy `policy_history`
+proposal for policy or claim-history lookup. Runtime validates the claim scope and
+allow-listed purpose before calling the adapter, persists only the mapped retrieval
+record, and reuses an existing record for the same claim-scoped reference. The model
+gateway path still rejects tool requests until model-tool capability is explicitly
+enabled and verified.
+
 ## Provider Boundary
 
 `ProviderLookupEnvelope` is an internal adapter input. It may contain provider-specific
