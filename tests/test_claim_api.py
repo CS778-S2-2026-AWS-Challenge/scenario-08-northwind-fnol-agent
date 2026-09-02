@@ -4,22 +4,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from backend.domain.models import MessageRecord, MessageVisibility, SessionRecord, SessionStatus
+from backend.domain.models import (
+    AgentAction,
+    CustomerNextStep,
+    FormStatus,
+    MessageRecord,
+    MessageVisibility,
+    ProposedFormChange,
+    ResponsibleParty,
+    SessionRecord,
+    SessionStatus,
+    StateChange,
+)
+from backend.domain.retrieval import ClaimHistoryRetrievalRecord
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
 
 
 class HighImpactAgent:
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        from backend.domain.models import (
-            AgentAction,
-            CustomerNextStep,
-            FormStatus,
-            ProposedFormChange,
-            ResponsibleParty,
-            StateChange,
-        )
-
         return AgentProposal(
             action=AgentAction.CREATE_CLAIM,
             reason_codes=['CLAIM_CREATION_AUTHORISED'],
@@ -40,6 +43,28 @@ class HighImpactAgent:
             state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
             proposed_signals=[],
             required_tools=[{'tool': 'claim_creation', 'status': 'requested'}],
+            next_action_requirements=[],
+        )
+
+
+class ClaimHistoryLookupAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['ADDITIONAL_CONTEXT_RECORDED'],
+            customer_reason='A history lookup is needed for this synthetic turn.',
+            customer_response='I will check the relevant claim history.',
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[
+                {
+                    'tool': 'claim_history',
+                    'operation': 'search_claim_history',
+                    'history_reference': 'synthetic-history-204',
+                }
+            ],
             next_action_requirements=[],
         )
 
@@ -389,6 +414,52 @@ def test_high_impact_agent_proposal_is_recorded_but_not_executed(
     assert claim is not None
     assert claim.claim_state.next_action.value == 'ASK'
     assert claim.external_claim is None
+
+
+def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    app.state.agent_turn_provider = ClaimHistoryLookupAgent()
+    created = create_claim(client, auth_headers, key='history-lookup-turn').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    response = submit_message(client, auth_headers, claim_id, session_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['claim_revision'] == 2
+    records = repository.list_retrieval_records(claim_id, 'cus_demo')
+    history_records = [
+        record for record in records if isinstance(record, ClaimHistoryRetrievalRecord)
+    ]
+    assert len(history_records) == 1
+    assert history_records[0].facts.history_reference == 'synthetic-history-204'
+    assert history_records[0].source.system == 'fixture_claims_history'
+
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=2,
+        key='history-lookup-replay',
+        client_message_id='history-lookup-replay',
+    )
+    assert replay.status_code == 200
+    assert (
+        len(
+            [
+                record
+                for record in repository.list_retrieval_records(claim_id, 'cus_demo')
+                if isinstance(record, ClaimHistoryRetrievalRecord)
+            ]
+        )
+        == 1
+    )
 
 
 def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(

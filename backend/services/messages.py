@@ -38,6 +38,8 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.domain.retrieval import (
+    ClaimHistoryRetrievalRecord,
+    ClaimHistorySearchRequest,
     PolicyRetrievalRecord,
     PolicySearchRequest,
     RetrievalStatus,
@@ -61,7 +63,7 @@ from backend.services.handoffs import (
     updated_claim_for_handoff,
 )
 from backend.services.professional_reviews import build_policy_review_handoff
-from backend.services.retrieval import search_policy
+from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -418,6 +420,8 @@ def _execute_policy_search(
     if tool is None:
         return None
     policy_reference = str(tool.get('policy_reference') or '')
+    if not policy_reference:
+        return None
     existing = next(
         (
             record
@@ -445,6 +449,69 @@ def _execute_policy_search(
             record
             for record in repository.list_retrieval_records(claim_id, customer_id)
             if isinstance(record, PolicyRetrievalRecord) and record.retrieval_id == result.result_id
+        ),
+        None,
+    )
+
+
+def _claim_history_search_tool(proposal: AgentProposal) -> dict[str, object] | None:
+    return next(
+        (
+            tool
+            for tool in proposal.required_tools
+            if tool.get('tool') in {'policy_history', 'claim_history'}
+            and tool.get('operation') in {'search_claim_history', 'lookup'}
+        ),
+        None,
+    )
+
+
+def _execute_claim_history_search(
+    repository: PersistenceRepository,
+    adapter: PolicyHistoryAdapter,
+    claim_id: str,
+    customer_id: str,
+    proposal: AgentProposal,
+) -> ClaimHistoryRetrievalRecord | None:
+    tool = _claim_history_search_tool(proposal)
+    if tool is None:
+        return None
+    history_reference = str(tool.get('history_reference') or '')
+    if not history_reference:
+        return None
+    raw_limit = tool.get('limit')
+    limit = raw_limit if isinstance(raw_limit, int) and not isinstance(raw_limit, bool) else 10
+    if not 1 <= limit <= 50:
+        return None
+    existing = next(
+        (
+            record
+            for record in reversed(repository.list_retrieval_records(claim_id, customer_id))
+            if isinstance(record, ClaimHistoryRetrievalRecord)
+            and record.facts.history_reference == history_reference
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing
+    result = search_claim_history(
+        repository,
+        adapter,
+        ClaimHistorySearchRequest(
+            claim_id=claim_id,
+            history_reference=history_reference,
+            purpose='relevant_history_review',
+            limit=limit,
+        ),
+    )
+    if result.status not in {RetrievalStatus.AMBIGUOUS, RetrievalStatus.EVIDENCE_FOUND}:
+        return None
+    return next(
+        (
+            record
+            for record in repository.list_retrieval_records(claim_id, customer_id)
+            if isinstance(record, ClaimHistoryRetrievalRecord)
+            and record.retrieval_id == result.result_id
         ),
         None,
     )
@@ -777,6 +844,13 @@ def submit_message(
         form_changes = {}
 
     policy_retrieval = _execute_policy_search(
+        repository,
+        policy_history_adapter,
+        claim_id,
+        principal.subject,
+        proposal,
+    )
+    _execute_claim_history_search(
         repository,
         policy_history_adapter,
         claim_id,
