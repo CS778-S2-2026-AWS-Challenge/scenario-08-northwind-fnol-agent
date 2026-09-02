@@ -1253,3 +1253,158 @@ def verify_external_task_result(
     fields['verified_at'] = checked_at
     fields['verified_against_revision'] = claim.revision
     return ExternalTaskResult(**fields)
+
+
+class TaskIdentityChangedError(ValueError):
+    """A proposed task record does not describe the same task as the current one."""
+
+
+class TaskTransitionNotPermittedError(ValueError):
+    """The lifecycle does not allow this task to move from its current state."""
+
+
+_SETTLED_TASK_STATES = frozenset(
+    {
+        ExternalTaskOperationStatus.ACCEPTED,
+        ExternalTaskOperationStatus.TERMINAL_FAILURE,
+    }
+)
+
+_TASK_IDENTITY_FIELDS = (
+    'task_id',
+    'claim_id',
+    'service_identity',
+    'requested_action',
+    'integration_source',
+    'created_at',
+)
+
+
+def _assert_same_task(
+    current: ExternalTaskRecord,
+    proposed: ExternalTaskRecord,
+) -> None:
+    """Check that a proposed record describes the task it claims to replace."""
+
+    for field in _TASK_IDENTITY_FIELDS:
+        held = getattr(current, field)
+        offered = getattr(proposed, field)
+        if held != offered:
+            raise TaskIdentityChangedError(
+                f'{current.task_id}: {field} would change from {held} to {offered}, so the '
+                'proposed record describes a different task rather than a later state of '
+                'this one.'
+            )
+
+
+def assert_task_transition_is_permitted(
+    current: ExternalTaskRecord,
+    proposed: ExternalTaskRecord,
+) -> None:
+    """Check that a task may move from the state it holds to the one proposed.
+
+    `ExternalTaskRecord` validates one record against itself: a snapshot cannot be
+    internally contradictory. Nothing checked the move between two snapshots, so a
+    task could be rewritten from `terminal_failure` back to `accepted`, or from
+    `submitted` back to `not_submitted`, and every individual record involved would
+    still validate. This closes that gap for the four paths the recovery matrix in
+    `docs/claim-creation-boundary.md` governs.
+
+    **Identity first.** A later state of a task must still be that task, so the
+    identifiers, the service and action it names, its source class, and its creation
+    time are all fixed. `integration_source` matters most: allowing it to change
+    would let a fixture task be rewritten as a configured-service one, which is the
+    distinction `assert_task_matches_entry` exists to protect at the other end.
+
+    **Delivery never regresses, which is the retry path.** `submitted` to
+    `not_submitted` would erase the record that the request may already have reached
+    the provider, and the matrix decides `retry_same_operation` against
+    `reconcile_before_retry` on exactly that field. The evidence naming the delivery
+    is fixed for the same reason: rewriting it rewrites what happened. A timeout that
+    was submitted therefore cannot be made to look retryable by lowering its
+    delivery.
+
+    **A settled task stays settled, which is the rejection path.** `terminal_failure`
+    recovers through `review_required`, not through another attempt, and `accepted`
+    is the outcome a retry must not be able to rewind. Neither may move to another
+    status here. What happens after review is a claim-level decision recorded
+    elsewhere, not a quiet transition on this record.
+
+    **An unknown outcome is reconciled, not assumed, which is the unknown-result
+    path.** `partial`, and `timeout` after submission, both recover through
+    `reconcile_before_retry`. Reconciliation is what produces the provider's own
+    reference for the operation, so moving to `accepted` requires a provider
+    reference the unknown record did not hold. Moving to `retryable_failure` is
+    refused outright: it would convert an outcome the matrix marks not retryable
+    into one that is.
+
+    Nothing may move *to* `prepared`. Prepared means the request has not been sent,
+    and a task that has been sent cannot return to not having been.
+
+    Args:
+        current: The task record as it is held now.
+        proposed: The record that would replace it.
+
+    Returns:
+        None. Nothing is written here; this raises or returns quietly.
+
+    Raises:
+        TaskIdentityChangedError: The proposed record describes a different task.
+        TaskTransitionNotPermittedError: The move is not one the lifecycle allows.
+    """
+
+    _assert_same_task(current, proposed)
+
+    if proposed.updated_at < current.updated_at:
+        raise TaskTransitionNotPermittedError(
+            f'{current.task_id}: the proposed record is dated {proposed.updated_at.isoformat()}, '
+            f'before the state it would replace at {current.updated_at.isoformat()}.'
+        )
+
+    if current.delivery is ExternalTaskDelivery.SUBMITTED:
+        if proposed.delivery is not ExternalTaskDelivery.SUBMITTED:
+            raise TaskTransitionNotPermittedError(
+                f'{current.task_id}: has reached the provider, and lowering delivery to '
+                f'{proposed.delivery.value} would erase the record that it may already have '
+                'had an effect.'
+            )
+        if proposed.delivery_evidence != current.delivery_evidence:
+            raise TaskTransitionNotPermittedError(
+                f'{current.task_id}: delivery evidence would change from '
+                f'{current.delivery_evidence} to {proposed.delivery_evidence}, which rewrites '
+                'what reached the provider rather than recording what happened next.'
+            )
+
+    if proposed.status is ExternalTaskOperationStatus.PREPARED:
+        if current.status is not ExternalTaskOperationStatus.PREPARED:
+            raise TaskTransitionNotPermittedError(
+                f'{current.task_id}: is {current.status.value} and cannot return to prepared, '
+                'which would assert that the request had not been sent.'
+            )
+        return
+
+    if current.status in _SETTLED_TASK_STATES and proposed.status is not current.status:
+        raise TaskTransitionNotPermittedError(
+            f'{current.task_id}: is {current.status.value}, which the recovery matrix settles '
+            f'through review rather than another attempt, so it cannot become '
+            f'{proposed.status.value} here.'
+        )
+
+    if current.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        if proposed.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE:
+            raise TaskTransitionNotPermittedError(
+                f'{current.task_id}: recovers through reconciliation, so it cannot be recorded '
+                'as a retryable failure, which would permit an attempt the matrix refuses.'
+            )
+        if proposed.status is ExternalTaskOperationStatus.ACCEPTED:
+            if proposed.provider_reference is None:
+                raise TaskTransitionNotPermittedError(
+                    f'{current.task_id}: cannot be accepted without a provider reference, '
+                    'which is what reconciling an unknown outcome produces.'
+                )
+            if proposed.provider_reference == current.provider_reference:
+                raise TaskTransitionNotPermittedError(
+                    f'{current.task_id}: carries provider reference '
+                    f'{current.provider_reference} already, so accepting it on the same '
+                    'reference records no reconciliation.'
+                )
