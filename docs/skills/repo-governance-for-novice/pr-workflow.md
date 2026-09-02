@@ -112,3 +112,9 @@ or consuming modules and who is available at the time; do not form fixed
 reviewer pairs. Request via GitHub or
 `gh pr edit <number> --add-reviewer <login>`. A new commit dismisses previous
 approvals; re-request review after pushing.
+
+When relaying a review-ready PR or handoff through the current user to another
+contributor, lead with the PR number and exact current head so the recipient can
+locate the reviewable object directly. Mention the Issue number as context. Use
+the Issue number first only when the requested operation concerns the Issue
+itself, such as its acceptance, dependencies, or closure.
