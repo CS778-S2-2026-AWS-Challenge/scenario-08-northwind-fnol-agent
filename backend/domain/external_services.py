@@ -13,7 +13,6 @@ from backend.domain.models import (
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     IntegrationSource,
-    ResponsibleParty,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalSource
@@ -1446,28 +1445,32 @@ class ExternalTaskContinuationOutcome(ContractModel):
     alone, which would have told a claimant they could ask again after their claim
     had moved to professional review. The flag was not wrong about the failure; it
     was answering a question the failure cannot answer.
+
+    There is deliberately no responsible party here either, for the same reason one
+    step removed. `docs/claim-creation-boundary.md` maps a failure and its delivery
+    to an operation status, a recovery path, and retryability. It does not map a
+    recovery path to whoever is responsible now, and it could not: a task that the
+    matrix marks retryable may sit under a claim in professional review or with an
+    open handoff, where the next move is not the claimant's. Whose turn it is
+    depends on the live claim, and belongs where that is available.
     """
 
     continuation: ExternalTaskContinuation
     failure_permits_another_attempt: bool
-    responsible_party: ResponsibleParty
 
 
 _CONTINUATION_BY_RECOVERY = {
     ExternalTaskRecovery.RETRY_SAME_OPERATION: (
         ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
         True,
-        ResponsibleParty.CLAIMANT,
     ),
     ExternalTaskRecovery.RECONCILE_BEFORE_RETRY: (
         ExternalTaskContinuation.AWAITING_RECONCILIATION,
         False,
-        ResponsibleParty.NORTHWIND,
     ),
     ExternalTaskRecovery.REVIEW_REQUIRED: (
         ExternalTaskContinuation.AWAITING_REVIEW,
         False,
-        ResponsibleParty.CLAIMS_PROFESSIONAL,
     ),
 }
 
@@ -1488,9 +1491,10 @@ def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContin
     happened at the provider, and asking again could duplicate a side effect;
     `review_required` means a person decides before anything else happens.
 
-    **This does not grant permission to send again**, and the field names say so.
-    Whether a further request is allowed depends on the claim as it stands, which
-    this function is not given and could not evaluate from a past failure.
+    **This grants no permission and names no responsible party**, and the fields say
+    so by being absent. Both depend on the claim as it stands, which this function
+    is not given and could not evaluate from a past failure. It reports only the
+    two things the recovery matrix determines.
 
     A task that has not failed is refused rather than given a neutral answer. An
     accepted or still-prepared task has nothing to continue from, and answering
@@ -1500,8 +1504,8 @@ def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContin
         task: The failed external task record.
 
     Returns:
-        The continuation the failure implies, whether the failure itself bars
-        another attempt, and whose turn it is.
+        The continuation the failure implies, and whether the failure itself bars
+        another attempt.
 
     Raises:
         TaskHasNotFailedError: The task is prepared or accepted, so it has not
@@ -1517,9 +1521,8 @@ def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContin
         failure_code=task.failure_code,
         delivery=task.delivery,
     ).recovery
-    continuation, permits_attempt, responsible_party = _CONTINUATION_BY_RECOVERY[recovery]
+    continuation, permits_attempt = _CONTINUATION_BY_RECOVERY[recovery]
     return ExternalTaskContinuationOutcome(
         continuation=continuation,
         failure_permits_another_attempt=permits_attempt,
-        responsible_party=responsible_party,
     )

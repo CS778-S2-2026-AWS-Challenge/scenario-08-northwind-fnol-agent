@@ -13,7 +13,7 @@ from backend.domain.external_services import (
     classify_external_task_failure,
     continuation_for_failed_task,
 )
-from backend.domain.models import IntegrationSource, ResponsibleParty
+from backend.domain.models import IntegrationSource
 
 AT = datetime(2026, 9, 2, 10, 0, tzinfo=UTC)
 SERVICE = 'vehicle_damage_assessment_routing'
@@ -67,63 +67,55 @@ def _live_task(status: ExternalTaskOperationStatus) -> ExternalTaskRecord:
 
 
 @pytest.mark.parametrize(
-    ('failure_code', 'delivery', 'continuation', 'permits_attempt', 'responsible_party'),
+    ('failure_code', 'delivery', 'continuation', 'permits_attempt'),
     [
         (
             ExternalTaskFailureCode.TIMEOUT,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
-            ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.TIMEOUT,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.AWAITING_RECONCILIATION,
             False,
-            ResponsibleParty.NORTHWIND,
         ),
         (
             ExternalTaskFailureCode.UNAVAILABLE,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
-            ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.UNAVAILABLE,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
-            ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.PARTIAL,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.AWAITING_RECONCILIATION,
             False,
-            ResponsibleParty.NORTHWIND,
         ),
         (
             ExternalTaskFailureCode.ACCESS_DENIED,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.AWAITING_REVIEW,
             False,
-            ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
         (
             ExternalTaskFailureCode.MALFORMED,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.AWAITING_REVIEW,
             False,
-            ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
         (
             ExternalTaskFailureCode.CONFLICTING,
             ExternalTaskDelivery.SUBMITTED,
             ExternalTaskContinuation.AWAITING_REVIEW,
             False,
-            ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
     ],
 )
@@ -132,7 +124,6 @@ def test_the_recovery_path_decides_what_the_claimant_is_told(
     delivery: ExternalTaskDelivery,
     continuation: ExternalTaskContinuation,
     permits_attempt: bool,
-    responsible_party: ResponsibleParty,
 ) -> None:
     """Every row of the recovery matrix reaches the claimant as one consistent answer."""
 
@@ -143,7 +134,6 @@ def test_the_recovery_path_decides_what_the_claimant_is_told(
     assert outcome == ExternalTaskContinuationOutcome(
         continuation=continuation,
         failure_permits_another_attempt=permits_attempt,
-        responsible_party=responsible_party,
     )
 
 
@@ -216,7 +206,6 @@ def test_the_continuation_carries_nothing_internal() -> None:
     assert set(ExternalTaskContinuationOutcome.model_fields) == {
         'continuation',
         'failure_permits_another_attempt',
-        'responsible_party',
     }
     assert task.delivery_evidence is not None
     assert task.delivery_evidence not in rendered
@@ -228,14 +217,16 @@ def test_the_continuation_carries_nothing_internal() -> None:
 def test_the_outcome_makes_no_claim_level_permission_statement() -> None:
     """Permission depends on the claim as it stands, which a past failure cannot know.
 
-    An earlier revision of this head returned `can_request`, derived from the failure
-    alone. It would have told a claimant they could ask again after their claim moved
-    to professional review or gained an open handoff, because a failure record knows
-    none of that. The field is named for what it reports, and eligibility stays with
-    `claimant_assessor_action`, which reads the current claim.
+    Two fields were removed for one reason. `can_request` claimed permission, and
+    `responsible_party` claimed whose turn it is; both depend on the claim as it
+    stands, and a failure record knows neither. `docs/claim-creation-boundary.md`
+    maps a failure to an operation status, a recovery path, and retryability, and
+    stops there. Eligibility and responsibility stay with `claimant_assessor_action`
+    and with the card that has the live claim.
     """
 
     fields = set(ExternalTaskContinuationOutcome.model_fields)
 
     assert 'can_request' not in fields
-    assert 'failure_permits_another_attempt' in fields
+    assert 'responsible_party' not in fields
+    assert fields == {'continuation', 'failure_permits_another_attempt'}
