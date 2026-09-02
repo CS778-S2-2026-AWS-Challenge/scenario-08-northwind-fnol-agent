@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import AssessorFixtureFailure, MockAssessorServiceAdapter
 from backend.app import create_app
+from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -26,6 +27,7 @@ from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecor
 from backend.services.external_service_entry import (
     ExternalServiceEntry,
     ExternalServiceEntryDecision,
+    resolve_external_service_entry,
 )
 from backend.services.support import now_utc
 
@@ -826,19 +828,42 @@ def test_an_unavailable_service_entry_is_reported_as_retryable() -> None:
     assert error['details'][0]['reason'] == 'unavailable'
 
 
-def test_a_live_entry_records_the_configured_service_as_the_source() -> None:
-    """The recorded source follows the entry that served the call, not the adapter.
+def test_the_composition_root_cannot_label_a_fixture_answer_as_configured_service() -> None:
+    """The `live` label is unreachable while the answering adapter is a fixture double.
 
-    The unavailable and fixture entries are already covered on this path. This is the
-    third, and it is the one that carries the guarantee: a task served through `LIVE`
-    must record `configured_service`, so a reader can tell an answer that came through
-    the configured service from one produced by a fixture. The entry is what decides
-    that label, which is why the label cannot drift from the entry that produced it.
+    `backend/app.py` installs `MockAssessorServiceAdapter` whenever no adapter is
+    supplied, and that adapter answers with synthetic fixture routing. It selects the
+    entry separately, from the data runtime profile, and the only capability statuses
+    it can pass are `USING_FIXTURE` and `PENDING_CONFIRMATION`. Neither yields
+    `CONFIGURED_SERVICE`, so no composition this application can build records a
+    fixture-produced answer as though a configured service produced it.
+
+    This is asserted against the two statuses the composition root actually passes
+    rather than against a forced `app.state`. Overriding the entry by hand would
+    construct a pairing the application cannot produce and would prove the opposite of
+    the separation this card owns.
     """
+
+    for fixture_assessor in (True, False):
+        decision = resolve_external_service_entry(
+            capability_status=(
+                RuntimeCapabilityStatus.USING_FIXTURE
+                if fixture_assessor
+                else RuntimeCapabilityStatus.PENDING_CONFIRMATION
+            ),
+            allow_test_fixture=fixture_assessor,
+        )
+
+        assert decision.integration_source is not IntegrationSource.CONFIGURED_SERVICE
+        assert decision.entry is not ExternalServiceEntry.LIVE
+
+
+def test_the_recorded_source_names_the_adapter_that_answered() -> None:
+    """A fixture answer is recorded as `fixture`, and the answer is identifiably synthetic."""
 
     repository = FixtureRepository()
     with TestClient(create_app(repository=repository)) as client:
-        claim_id, revision = _start_created_motor_claim(client, repository, key='entry-live')
+        claim_id, revision = _start_created_motor_claim(client, repository, key='source-truth')
         stored = repository.get_claim_internal(claim_id)
         assert stored is not None
         location = stored.form['incident.location'].model_copy(
@@ -847,17 +872,13 @@ def test_a_live_entry_records_the_configured_service_as_the_source() -> None:
         repository._claims[stored.claim_id] = stored.model_copy(
             update={'form': {**stored.form, 'incident.location': location}}
         )
-        consent = _grant_consent(client, claim_id, revision, key='entry-live')
-        cast(Any, client.app).state.assessor_service_entry = ExternalServiceEntryDecision(
-            entry=ExternalServiceEntry.LIVE,
-            integration_source=IntegrationSource.CONFIGURED_SERVICE,
-        )
+        consent = _grant_consent(client, claim_id, revision, key='source-truth')
 
         routed = client.post(
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers={
                 **AUTH,
-                'Idempotency-Key': _idem('entry-live'),
+                'Idempotency-Key': _idem('source-truth'),
                 'If-Match': str(consent['revision']),
             },
         )
@@ -868,5 +889,6 @@ def test_a_live_entry_records_the_configured_service_as_the_source() -> None:
 
     assert routed.status_code == 201
     assert operational.status_code == 200
-    item = operational.json()['items'][0]
-    assert item['task']['integration_source'] == 'configured_service'
+    assert operational.json()['items'][0]['task']['integration_source'] == 'fixture'
+    routing = routed.json()['action']['routing']
+    assert routing['assessor_reference'].startswith('asr_fixture_')
