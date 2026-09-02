@@ -13,6 +13,7 @@ from backend.domain.models import (
     AgentDecisionRecord,
     AgentProposalSource,
     AuthorityOutcome,
+    BranchEvaluationRecord,
     BranchEvaluationResult,
     BranchEvaluationStatus,
     ClaimantDecision,
@@ -1095,6 +1096,28 @@ def submit_message(
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
     )
+    evaluation_record = BranchEvaluationRecord(
+        evaluation_id=new_id('brn'),
+        claim_id=claim_id,
+        session_id=session_id,
+        turn_id=claimant_message.message_id,
+        evaluated_against_claim_revision=branch_evaluation.evaluated_against_claim_revision,
+        resulting_claim_revision=resulting_revision,
+        registry_version=branch_evaluation.registry_version,
+        selected_family=branch_evaluation.selected_family,
+        unresolved_family_conflict=branch_evaluation.unresolved_family_conflict,
+        branch_results=branch_evaluation.branch_results,
+        field_selection_results=branch_evaluation.field_selection,
+        work_item_intents=branch_evaluation.work_item_intents,
+        handoff_intents=branch_evaluation.handoff_intents,
+        evidence_intents=branch_evaluation.evidence_intents,
+        consent_intents=branch_evaluation.consent_intents,
+        integration_intents=branch_evaluation.integration_intents,
+        interruption_result=branch_evaluation.interruption_result,
+        recomputation_reason=branch_evaluation.recomputation_reason,
+        status=BranchEvaluationStatus.APPLIED,
+        created_at=timestamp,
+    )
     try:
         repository.save_agent_turn(
             updated_claim,
@@ -1106,6 +1129,7 @@ def submit_message(
             idempotency,
             handoff,
             pending_evidence,
+            evaluation_record,
         )
     except RevisionConflict as conflict:
         raise ApiError(
