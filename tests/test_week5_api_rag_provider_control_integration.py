@@ -1,13 +1,20 @@
 import json
+from datetime import UTC, datetime
 from typing import cast
 
 import httpx
 from fastapi.testclient import TestClient
 
+from backend.adapters.evidence_storage import MockEvidenceStorage
+from backend.adapters.knowledge import FixtureKnowledgeDocumentStore, FixtureKnowledgeRetriever
 from backend.adapters.model_gateway import ModelGatewayRegistry, OpenAICompatibleModelGateway
+from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
-from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
+from backend.core.runtime_profiles import DataRuntimeBundle
+from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.model_gateway import ModelProfileStatus
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 
 INTEGRATION_HEADERS = {'Authorization': 'Bearer synthetic-integration'}
@@ -41,14 +48,50 @@ def _proposal() -> dict[str, object]:
 
 def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None:
     repository = FixtureRepository()
+    knowledge_store = FixtureKnowledgeDocumentStore(
+        (
+            KnowledgeChunk(
+                document_id='doc-integration-motor',
+                chunk_id='chunk-integration-motor',
+                title='The vehicle damage is now recorded.',
+                document_type='policy_guidance',
+                version='MVP-2026.1',
+                section_path='motor/intake',
+                page=1,
+                source_uri='fixture://knowledge/doc-integration-motor',
+                jurisdiction='NZ',
+                insurer='Northwind Insurance',
+                product='motor',
+                effective_from=datetime(2026, 8, 1, tzinfo=UTC),
+                effective_to=None,
+                authority='northwind_synthetic_demo',
+                visibility='customer_and_staff',
+                checksum='checksum-integration-motor',
+                ingested_at=datetime(2026, 8, 1, tzinfo=UTC),
+                text='The vehicle damage is now recorded for the motor intake.',
+            ),
+        )
+    )
+    knowledge_retriever = FixtureKnowledgeRetriever(knowledge_store)
+    data_bundle = DataRuntimeBundle(
+        profile=DataRuntimeProfile.FIXTURE,
+        repository=repository,
+        evidence_storage=MockEvidenceStorage(),
+        policy_history=MockPolicyHistoryAdapter(),
+        knowledge_documents=knowledge_store,
+        knowledge_retrieval=knowledge_retriever,
+    )
+    configuration_repository = ConfigurationRepository()
+    provider_requests: list[dict[str, object]] = []
 
-    def transport_handler(_request: httpx.Request) -> httpx.Response:
+    def transport_handler(request: httpx.Request) -> httpx.Response:
+        provider_requests.append(json.loads(request.content))
         return httpx.Response(
             200,
             headers={'x-request-id': 'integration-provider-request'},
             json={
                 'id': 'integration-completion',
-                'model': 'gpt-5.4-mini',
+                'model': 'control-plane-model',
                 'choices': [
                     {
                         'finish_reason': 'stop',
@@ -82,7 +125,8 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
     with TestClient(
         create_app(
             settings,
-            repository=repository,
+            data_runtime_bundle=data_bundle,
+            configuration_repository=configuration_repository,
             model_gateway_registry=registry,
         )
     ) as client:
@@ -101,11 +145,56 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         session = cast(dict[str, object], claim_response.json()['session'])
         session_id = str(session['session_id'])
 
+        model_configuration = client.post(
+            '/internal/v1/admin/configurations',
+            headers=ADMIN_HEADERS,
+            json={
+                'domain': 'model',
+                'values': {
+                    'protocol': 'openai_compatible',
+                    'provider': 'synthetic-provider',
+                    'model_identifier': 'control-plane-model',
+                    'base_url': 'https://provider.example/v1',
+                    'credential_environment_variable': None,
+                    'profile_id': 'integration-model-profile',
+                    'purpose': 'agent_turn',
+                    'privacy_class': 'synthetic_fnol',
+                    'prompt_version': 'northwind-fnol-motor-claimant-v2',
+                    'evaluation_status': 'configured',
+                    'timeout_seconds': 30,
+                    'structured_output': True,
+                    'tools': False,
+                },
+                'reason': 'Publish the model runtime used by the integration path.',
+            },
+        )
+        assert model_configuration.status_code == 201, model_configuration.text
+        configuration_id = model_configuration.json()['configuration_id']
+        published = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers={
+                'Authorization': 'Bearer synthetic-admin',
+                'Idempotency-Key': 'control-plane-model-validate',
+                'If-Match': '1',
+            },
+            json={
+                'scenario_results': [
+                    {
+                        'scenario_id': 'api-rag-provider-control',
+                        'outcome': 'passed',
+                        'evidence': 'Model configuration was validated before the claimant turn.',
+                    }
+                ]
+            },
+        )
+        assert published.status_code == 200, published.text
+        assert published.json()['state'] == 'published'
+
         knowledge = client.post(
             '/internal/v1/knowledge/search',
             headers=INTEGRATION_HEADERS,
             json={
-                'question': 'What information is needed for this motor report?',
+                'question': 'The vehicle damage is now recorded.',
                 'jurisdiction': 'NZ',
                 'visibility': 'customer_and_staff',
                 'authority': 'northwind_synthetic_demo',
@@ -117,7 +206,8 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
             },
         )
         assert knowledge.status_code == 200
-        assert knowledge.json()['status'] in {'evidence_found', 'no_evidence'}
+        assert knowledge.json()['status'] == 'evidence_found'
+        assert knowledge.json()['results'][0]['chunk_id'] == 'chunk-integration-motor'
 
         policy = client.post(
             '/internal/v1/policy/search',
@@ -140,33 +230,47 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         assert message.status_code == 200
         assert message.json()['decision']['action'] == 'UPDATE'
 
-        created = client.post(
-            '/internal/v1/admin/configurations',
-            headers=ADMIN_HEADERS,
-            json={
-                'domain': 'feature',
-                'values': {'enabled': True},
-                'reason': 'Integration test configuration.',
-            },
-        )
-        assert created.status_code == 201
-        configuration_id = created.json()['configuration_id']
-        validated = client.post(
-            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+        replay = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
             headers={
-                'Authorization': 'Bearer synthetic-admin',
-                'Idempotency-Key': 'control-plane-validate',
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'integration-message',
                 'If-Match': '1',
             },
             json={
-                'scenario_results': [
-                    {
-                        'scenario_id': 'api-rag-provider-control',
-                        'outcome': 'passed',
-                        'evidence': 'All four boundaries responded through one app.',
-                    }
-                ]
+                'client_message_id': 'integration-client-message',
+                'content': {'type': 'text', 'text': 'The vehicle damage is now recorded.'},
+                'evidence_refs': [],
             },
         )
-        assert validated.status_code == 200
-        assert validated.json()['state'] == 'published'
+        assert replay.status_code == 200
+        assert replay.json() == message.json()
+        assert len(provider_requests) == 1
+
+        no_evidence = client.post(
+            f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'integration-no-evidence',
+                'If-Match': str(message.json()['claim_revision']),
+            },
+            json={
+                'client_message_id': 'integration-no-evidence-message',
+                'content': {'type': 'text', 'text': 'A message with no matching knowledge.'},
+                'evidence_refs': [],
+            },
+        )
+        assert no_evidence.status_code == 200
+        assert len(provider_requests) == 2
+        no_evidence_messages = cast(list[dict[str, object]], provider_requests[1]['messages'])
+        no_evidence_context = json.loads(cast(str, no_evidence_messages[1]['content']))
+        assert no_evidence_context['knowledge_status'] == 'no_evidence'
+        assert no_evidence_context['knowledge_citations'] == []
+
+        request_body = provider_requests[0]
+        assert request_body['model'] == 'control-plane-model'
+        provider_messages = cast(list[dict[str, object]], request_body['messages'])
+        model_context_content = cast(str, provider_messages[1]['content'])
+        model_context = json.loads(model_context_content)
+        assert model_context['knowledge_status'] == 'evidence_found'
+        assert model_context['knowledge_citations'][0]['chunk_id'] == 'chunk-integration-motor'

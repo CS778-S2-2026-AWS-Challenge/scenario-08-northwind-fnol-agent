@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from backend.domain.intake import infer_controlled_incident_type, next_controlled_intake_field
+from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -149,6 +150,9 @@ class AgentTurnContext:
     message_text: str | None
     evidence_refs: list[str]
     professional_review_required: bool = False
+    knowledge_results: tuple[KnowledgeChunk, ...] = ()
+    knowledge_status: str = 'not_requested'
+    knowledge_limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

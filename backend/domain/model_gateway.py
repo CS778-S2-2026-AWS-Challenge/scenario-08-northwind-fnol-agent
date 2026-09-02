@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -144,6 +144,22 @@ class ModelTurnContext(ModelContract):
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
+    knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
+        'not_requested'
+    )
+    knowledge_citations: list['ModelKnowledgeCitation'] = Field(default_factory=list)
+    knowledge_limitations: list[str] = Field(default_factory=list)
+
+
+class ModelKnowledgeCitation(ModelContract):
+    document_id: str
+    chunk_id: str
+    title: str
+    section_path: str
+    source_uri: str
+    version: str
+    checksum: str
+    text: str
 
 
 class ModelProposedFormChange(ModelContract):

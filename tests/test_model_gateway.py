@@ -1260,8 +1260,14 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'message_text',
         'evidence_reference_count',
         'professional_review_required',
+        'knowledge_status',
+        'knowledge_citations',
+        'knowledge_limitations',
     }
     assert model_context['evidence_reference_count'] == 1
+    assert model_context['knowledge_status'] == 'not_requested'
+    assert model_context['knowledge_citations'] == []
+    assert model_context['knowledge_limitations'] == []
     assert set(model_context['claim']) == {
         'channel',
         'locale',

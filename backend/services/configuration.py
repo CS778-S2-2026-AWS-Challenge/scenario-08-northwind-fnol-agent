@@ -10,6 +10,7 @@ from backend.domain.configuration import (
     ConfigurationState,
     DataProfileConfiguration,
     DataRuntimeProfileValue,
+    ModelRuntimeConfiguration,
     ObjectStorageAdapterValue,
     TransitionRequest,
     ValidationRequest,
@@ -551,6 +552,16 @@ def _validate_configuration_values(
     domain: str, values: dict[str, object], *, for_validation: bool
 ) -> None:
     """Validate the structured provider configuration consumed by the runtime boundary."""
+    if domain == 'model':
+        try:
+            ModelRuntimeConfiguration.model_validate(values)
+        except ValueError as error:
+            raise _error(
+                422,
+                'PROVIDER_CONFIGURATION_INVALID',
+                'model requires a complete provider-neutral runtime configuration.',
+            ) from error
+        return
     if domain != 'data_profile':
         return
     try:

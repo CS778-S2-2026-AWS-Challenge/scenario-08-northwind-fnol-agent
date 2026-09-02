@@ -207,10 +207,20 @@ mongodb, and aws profiles may be retained as drafts for configuration review, bu
 returns `422 PROVIDER_CONFIGURATION_UNAVAILABLE` and they cannot be published. Invalid fields or
 combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 
+For the `model` domain, `values` is a closed provider-neutral object containing
+`protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
+`profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
+`timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
+environment-variable name; the secret itself remains outside the configuration record. Invalid
+or incomplete model values return `422 PROVIDER_CONFIGURATION_INVALID`.
+
 Runtime consumers use the provider-neutral configuration service to read the single active
 `published` record for a domain. Draft, awaiting-approval, withdrawn, superseded, and unverified
-provider records are never returned by that boundary; a domain without a publication fails with
-`ACTIVE_CONFIGURATION_NOT_FOUND` rather than falling back to another profile.
+provider records are never returned by that boundary. The model runtime resolves the active
+published `model` record before each provider request, so a configuration published after startup
+becomes effective for the next turn. A process without a published model record may use its
+explicit startup model settings as a bootstrap-only compatibility path; it never combines fields
+from a draft or superseded record.
 
 ## Claimant Identity and Account API
 

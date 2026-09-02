@@ -28,7 +28,7 @@ from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Setting
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
-from backend.core.model_gateway import build_model_gateway
+from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.core.runtime_profiles import (
     DataRuntimeBundle,
     build_data_runtime_bundle,
@@ -40,7 +40,7 @@ from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
-from backend.services.model_agent import GatewayAgent
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 
 
 def create_app(
@@ -55,6 +55,7 @@ def create_app(
     data_runtime_bundle: DataRuntimeBundle | None = None,
     model_gateway_registry: ModelGatewayRegistry | None = None,
     identity_repository: IdentityRepository | None = None,
+    configuration_repository: ConfigurationRepository | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     injected_data_dependencies = any(
@@ -100,7 +101,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.identity_repository = identity_repository or FixtureIdentityRepository()
-    app.state.configuration_repository = ConfigurationRepository()
+    app.state.configuration_repository = configuration_repository or ConfigurationRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
     app.state.knowledge_retriever = bundle.knowledge_retrieval
@@ -114,10 +115,17 @@ def create_app(
             raise ValueError(
                 'agent_turn_provider cannot override the configured model gateway runtime.'
             )
-        model_gateway = build_model_gateway(resolved_settings, model_gateway_registry)
+        model_gateway = ConfigurationBackedModelGateway(
+            resolved_settings,
+            app.state.configuration_repository,
+            model_gateway_registry,
+        )
         if not model_gateway.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        base_agent_turn_provider: AgentTurnProvider = GatewayAgent(model_gateway)
+        base_agent_turn_provider: AgentTurnProvider = KnowledgeGroundedAgent(
+            GatewayAgent(model_gateway),
+            bundle.knowledge_retrieval,
+        )
         app.state.agent_runtime_status = 'configured'
     else:
         base_agent_turn_provider = agent_turn_provider or ControlledAgent()

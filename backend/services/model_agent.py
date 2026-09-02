@@ -1,7 +1,14 @@
 import json
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.knowledge import (
+    KnowledgeRetrievalUnavailable,
+    KnowledgeRetriever,
+    KnowledgeSearch,
+)
 from backend.domain.model_gateway import (
     ModelAgentProposal,
     ModelCapabilities,
@@ -12,6 +19,7 @@ from backend.domain.model_gateway import (
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
+    ModelKnowledgeCitation,
     ModelMessage,
     ModelRequest,
     ModelRole,
@@ -26,7 +34,7 @@ from backend.domain.models import (
     ProposedFormChange,
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
-from backend.services.agent import AgentProposal, AgentTurnContext
+from backend.services.agent import AgentProposal, AgentTurnContext, AgentTurnProvider
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
@@ -83,6 +91,21 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
         professional_review_required=context.professional_review_required,
+        knowledge_status=context.knowledge_status,
+        knowledge_citations=[
+            ModelKnowledgeCitation(
+                document_id=chunk.document_id,
+                chunk_id=chunk.chunk_id,
+                title=chunk.title,
+                section_path=chunk.section_path,
+                source_uri=chunk.source_uri,
+                version=chunk.version,
+                checksum=chunk.checksum,
+                text=chunk.text,
+            )
+            for chunk in context.knowledge_results
+        ],
+        knowledge_limitations=list(context.knowledge_limitations),
     )
 
 
@@ -165,4 +188,57 @@ class GatewayAgent:
             proposal,
             provider_model=response.provider_model,
             provider_request_id=response.provider_request_id,
+        )
+
+
+class KnowledgeGroundedAgent:
+    """Retrieve scoped approved knowledge before delegating a model turn."""
+
+    def __init__(self, provider: AgentTurnProvider, retriever: KnowledgeRetriever) -> None:
+        self._provider = provider
+        self._retriever = retriever
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        if not context.message_text or not context.message_text.strip():
+            return self._provider.propose_turn(context)
+        product = {
+            'motor': 'motor',
+            'property': 'home',
+            'contents': 'contents',
+        }.get(context.claim.incident_type or '', 'motor')
+        status = 'evidence_found'
+        limitations: tuple[str, ...] = ()
+        try:
+            chunks = tuple(
+                self._retriever.search(
+                    KnowledgeSearch(
+                        text=context.message_text,
+                        jurisdiction='NZ',
+                        visibility='customer_and_staff',
+                        authority='northwind_synthetic_demo',
+                        version='MVP-2026.1',
+                        insurer='Northwind Insurance',
+                        product=product,
+                        effective_at=datetime.now(UTC),
+                        limit=3,
+                    )
+                )
+            )
+        except KnowledgeRetrievalUnavailable:
+            chunks = ()
+            status = 'unavailable'
+            limitations = ('Approved knowledge retrieval is temporarily unavailable.',)
+        else:
+            if not chunks:
+                status = 'no_evidence'
+                limitations = (
+                    'No applicable approved knowledge was found for the supplied scope and date.',
+                )
+        return self._provider.propose_turn(
+            replace(
+                context,
+                knowledge_results=chunks,
+                knowledge_status=status,
+                knowledge_limitations=limitations,
+            )
         )
