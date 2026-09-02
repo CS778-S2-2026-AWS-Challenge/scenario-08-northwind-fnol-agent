@@ -31,6 +31,51 @@ from backend.services.support import now_utc
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 
+_IDEMPOTENCY_SCOPE = ''
+
+
+@pytest.fixture(autouse=True)
+def _isolate_idempotency_keys(request: pytest.FixtureRequest) -> None:
+    """Give each test its own idempotency-key namespace.
+
+    The keys in this module are fixed strings, so two tests that ever share a
+    repository instance would collide on them and the second would be answered
+    from the first one's record. Nothing in this file is supposed to share a
+    repository, but the tests should not depend on that holding: a key collision
+    surfaces as a plain `409` on a first request, which reads as a product defect
+    rather than as test coupling. Scoping the keys per test removes the class.
+
+    Reuse of one key *within* a test is preserved, which several tests rely on to
+    prove idempotent replay, because the scope is constant for the whole test.
+    """
+
+    global _IDEMPOTENCY_SCOPE
+    _IDEMPOTENCY_SCOPE = request.node.name
+
+
+def _idem(key: str) -> str:
+    """Namespace one idempotency key to the running test."""
+
+    return f'{key}::{_IDEMPOTENCY_SCOPE}'
+
+
+def _first_request_context(
+    response: Any,
+    repository: FixtureRepository,
+) -> str:
+    """Describe why a first request was refused, for a failure neither side can reproduce.
+
+    A `409` here means the request was answered from an idempotency record that
+    should not exist yet. The record's own key is what identifies where it came
+    from, so the assertion prints the keys this repository holds rather than only
+    the status it did not expect.
+    """
+
+    return (
+        f'expected 201, got {response.status_code}: {response.json()}. '
+        f'Idempotency keys held by this repository: {sorted(repository._idempotency)}'
+    )
+
 
 def _start_created_motor_claim(
     client: TestClient,
@@ -40,7 +85,7 @@ def _start_created_motor_claim(
 ) -> tuple[str, int]:
     created = client.post(
         '/api/v1/claims',
-        headers={**AUTH, 'Idempotency-Key': f'claim-{key}'},
+        headers={**AUTH, 'Idempotency-Key': _idem(f'claim-{key}')},
         json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
     ).json()
     claim_id = str(created['claim']['claim_id'])
@@ -49,7 +94,7 @@ def _start_created_motor_claim(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
             **AUTH,
-            'Idempotency-Key': f'message-{key}',
+            'Idempotency-Key': _idem(f'message-{key}'),
             'If-Match': '1',
         },
         json={
@@ -117,7 +162,7 @@ def _grant_consent(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': f'consent-{key}',
+            'Idempotency-Key': _idem(f'consent-{key}'),
             'If-Match': str(revision),
         },
         json={'consent': True},
@@ -132,7 +177,7 @@ def test_claimant_assessor_action_appears_only_after_a_relevant_created_motor_cl
 ) -> None:
     started = client.post(
         '/api/v1/claims',
-        headers={**AUTH, 'Idempotency-Key': 'claim-not-ready'},
+        headers={**AUTH, 'Idempotency-Key': _idem('claim-not-ready')},
         json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
     ).json()
     draft_id = str(started['claim']['claim_id'])
@@ -170,7 +215,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'consent-contract',
+            'Idempotency-Key': _idem('consent-contract'),
             'If-Match': str(revision),
         },
         json={'consent': True},
@@ -179,7 +224,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'consent-contract',
+            'Idempotency-Key': _idem('consent-contract'),
             'If-Match': str(revision),
         },
         json={'consent': True},
@@ -188,7 +233,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'consent-contract',
+            'Idempotency-Key': _idem('consent-contract'),
             'If-Match': str(revision + 1),
         },
         json={'consent': True},
@@ -197,7 +242,7 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'consent-contract-additional-key',
+            'Idempotency-Key': _idem('consent-contract-additional-key'),
             'If-Match': str(revision + 1),
         },
         json={'consent': True},
@@ -255,7 +300,7 @@ def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> No
             f'/api/v1/claims/{claim_id}/assessor-routing/consent',
             headers={
                 **AUTH,
-                'Idempotency-Key': 'consent-atomic-failure',
+                'Idempotency-Key': _idem('consent-atomic-failure'),
                 'If-Match': str(revision),
             },
             json={'consent': True},
@@ -304,7 +349,7 @@ def test_claimant_consent_maps_atomic_repository_conflicts(
             f'/api/v1/claims/{claim_id}/assessor-routing/consent',
             headers={
                 **AUTH,
-                'Idempotency-Key': f'consent-{expected_code.lower()}',
+                'Idempotency-Key': _idem(f'consent-{expected_code.lower()}'),
                 'If-Match': str(revision),
             },
             json={'consent': True},
@@ -335,7 +380,7 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'route-success',
+            'Idempotency-Key': _idem('route-success'),
             'If-Match': str(consent['revision']),
         },
     )
@@ -347,7 +392,7 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'route-success',
+            'Idempotency-Key': _idem('route-success'),
             'If-Match': str(consent['revision']),
         },
     )
@@ -355,12 +400,12 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'route-success',
+            'Idempotency-Key': _idem('route-success'),
             'If-Match': str(consent['revision'] + 1),
         },
     )
 
-    assert first.status_code == 201
+    assert first.status_code == 201, _first_request_context(first, repository)
     assert replay.status_code == 200
     assert replay.json() == first.json()
     assert changed_replay.status_code == 409
@@ -433,7 +478,7 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'route-guard',
+            'Idempotency-Key': _idem('route-guard'),
             'If-Match': str(revision),
         },
     )
@@ -441,7 +486,7 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         f'/api/v1/claims/{claim_id}/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'stale-consent',
+            'Idempotency-Key': _idem('stale-consent'),
             'If-Match': str(revision - 1),
         },
         json={'consent': True},
@@ -450,7 +495,7 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'stale-route',
+            'Idempotency-Key': _idem('stale-route'),
             'If-Match': str(revision - 1),
         },
     )
@@ -458,7 +503,7 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         '/api/v1/claims/clm_missing/assessor-routing/consent',
         headers={
             **AUTH,
-            'Idempotency-Key': 'missing-consent',
+            'Idempotency-Key': _idem('missing-consent'),
             'If-Match': '1',
         },
         json={'consent': True},
@@ -467,7 +512,7 @@ def test_claimant_assessor_request_requires_consent_and_current_revision(
         '/api/v1/claims/clm_missing/assessor-routing',
         headers={
             **AUTH,
-            'Idempotency-Key': 'missing-route',
+            'Idempotency-Key': _idem('missing-route'),
             'If-Match': '1',
         },
     )
@@ -514,7 +559,7 @@ def test_claimant_route_maps_atomic_preparation_conflict() -> None:
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers={
                 **AUTH,
-                'Idempotency-Key': 'route-preparation-conflict',
+                'Idempotency-Key': _idem('route-preparation-conflict'),
                 'If-Match': str(consent['revision']),
             },
         )
@@ -537,7 +582,7 @@ def test_claimant_sees_retryable_failure_then_safe_success_with_the_same_request
         consent = _grant_consent(client, claim_id, revision, key='route-retry')
         route_headers = {
             **AUTH,
-            'Idempotency-Key': 'route-retry',
+            'Idempotency-Key': _idem('route-retry'),
             'If-Match': str(consent['revision']),
         }
 
@@ -630,7 +675,7 @@ def test_claimant_retry_restores_authoritative_success_when_response_save_fails(
         )
         headers = {
             **AUTH,
-            'Idempotency-Key': 'route-response-recovery',
+            'Idempotency-Key': _idem('route-response-recovery'),
             'If-Match': str(consent['revision']),
         }
 
@@ -700,7 +745,7 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
         )
         headers = {
             **AUTH,
-            'Idempotency-Key': 'accepted-cas-recovery',
+            'Idempotency-Key': _idem('accepted-cas-recovery'),
             'If-Match': str(consent['revision']),
         }
 
@@ -714,7 +759,7 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers={
                 **AUTH,
-                'Idempotency-Key': 'accepted-cas-unrelated',
+                'Idempotency-Key': _idem('accepted-cas-unrelated'),
                 'If-Match': str(consent['revision']),
             },
         )
@@ -769,7 +814,7 @@ def test_an_unavailable_service_entry_is_reported_as_retryable() -> None:
             f'/api/v1/claims/{claim_id}/assessor-routing',
             headers={
                 **AUTH,
-                'Idempotency-Key': 'entry-unavailable',
+                'Idempotency-Key': _idem('entry-unavailable'),
                 'If-Match': str(consent['revision']),
             },
         )
