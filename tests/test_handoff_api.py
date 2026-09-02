@@ -256,6 +256,9 @@ def test_support_endpoint_is_revision_protected_idempotent_and_claimant_safe(
 
     assert response.status_code == 201
     assert response.json()['revision'] == 2
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    assert evaluation.recomputation_reason == 'handoff_created'
+    assert evaluation.resulting_claim_revision == 2
     assert replay.json() == response.json()
     assert duplicate.json() == response.json()
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1

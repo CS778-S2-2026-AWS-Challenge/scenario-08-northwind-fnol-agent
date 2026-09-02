@@ -2106,6 +2106,11 @@
             "title": "Active Branches",
             "type": "array"
           },
+          "branch_rules_version": {
+            "minLength": 1,
+            "title": "Branch Rules Version",
+            "type": "string"
+          },
           "claim_id": {
             "title": "Claim Id",
             "type": "string"
@@ -2115,17 +2120,17 @@
             "title": "Claim Revision",
             "type": "integer"
           },
+          "field_registry_version": {
+            "minLength": 1,
+            "title": "Field Registry Version",
+            "type": "string"
+          },
           "fields": {
             "items": {
               "$ref": "#/components/schemas/FieldSelectionResult"
             },
             "title": "Fields",
             "type": "array"
-          },
-          "registry_version": {
-            "minLength": 1,
-            "title": "Registry Version",
-            "type": "string"
           },
           "selected_family": {
             "anyOf": [
@@ -2147,7 +2152,8 @@
         "required": [
           "claim_id",
           "claim_revision",
-          "registry_version"
+          "field_registry_version",
+          "branch_rules_version"
         ],
         "title": "DynamicFormProjection",
         "type": "object"

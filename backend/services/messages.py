@@ -3,7 +3,7 @@ from datetime import datetime
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.branch_registry import BranchRuleEvaluator, claimant_projection_fields
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -156,12 +156,16 @@ def _message_turn_response(
         else None
     )
     dynamic_form = None
+    claim = repository.get_claim(claim_id, principal.subject)
     evaluations = repository.list_branch_evaluations(claim_id, principal.subject)
     valid_evaluation = next(
         (
             item
             for item in reversed(evaluations)
-            if item.status in {BranchEvaluationStatus.EVALUATED, BranchEvaluationStatus.APPLIED}
+            if claim is not None
+            and item.status is BranchEvaluationStatus.APPLIED
+            and item.evaluated_against_claim_revision == claim.revision
+            and item.resulting_claim_revision == claim.revision
         ),
         None,
     )
@@ -170,14 +174,15 @@ def _message_turn_response(
             claim_id=claim_id,
             claim_revision=valid_evaluation.resulting_claim_revision
             or valid_evaluation.evaluated_against_claim_revision,
-            registry_version=valid_evaluation.registry_version,
+            field_registry_version=valid_evaluation.field_registry_version,
+            branch_rules_version=valid_evaluation.branch_rules_version,
             selected_family=valid_evaluation.selected_family,
             active_branches=[
                 result.branch_id
                 for result in valid_evaluation.branch_results
                 if result.status == 'active'
             ],
-            fields=valid_evaluation.field_selection_results,
+            fields=claimant_projection_fields(valid_evaluation),
         )
     return MessageTurnResponse(
         claim_id=claim_id,
@@ -839,6 +844,7 @@ def submit_message(
     branch_evaluation = BranchRuleEvaluator().evaluate(
         claim,
         latest_message=(payload.content.text if payload.content is not None else None),
+        trigger_source_refs=[claimant_message.message_id],
         current_action=claim.claim_state.next_action,
         recomputation_reason='claimant_message',
     )
@@ -1096,25 +1102,34 @@ def submit_message(
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
     )
+    applied_evaluation = BranchRuleEvaluator().evaluate(
+        updated_claim,
+        trigger_source_refs=[claimant_message.message_id],
+        current_action=updated_claim.claim_state.next_action,
+        recomputation_reason='agent_turn_applied',
+    )
     evaluation_record = BranchEvaluationRecord(
         evaluation_id=new_id('brn'),
         claim_id=claim_id,
         session_id=session_id,
         turn_id=claimant_message.message_id,
-        evaluated_against_claim_revision=branch_evaluation.evaluated_against_claim_revision,
+        evaluated_against_claim_revision=applied_evaluation.evaluated_against_claim_revision,
         resulting_claim_revision=resulting_revision,
-        registry_version=branch_evaluation.registry_version,
-        selected_family=branch_evaluation.selected_family,
-        unresolved_family_conflict=branch_evaluation.unresolved_family_conflict,
-        branch_results=branch_evaluation.branch_results,
-        field_selection_results=branch_evaluation.field_selection,
-        work_item_intents=branch_evaluation.work_item_intents,
-        handoff_intents=branch_evaluation.handoff_intents,
-        evidence_intents=branch_evaluation.evidence_intents,
-        consent_intents=branch_evaluation.consent_intents,
-        integration_intents=branch_evaluation.integration_intents,
-        interruption_result=branch_evaluation.interruption_result,
-        recomputation_reason=branch_evaluation.recomputation_reason,
+        field_registry_version=applied_evaluation.field_registry_version,
+        branch_rules_version=applied_evaluation.branch_rules_version,
+        selected_family=applied_evaluation.selected_family,
+        unresolved_family_conflict=applied_evaluation.unresolved_family_conflict,
+        branch_results=applied_evaluation.branch_results,
+        field_selection_results=applied_evaluation.field_selection,
+        work_item_intents=applied_evaluation.work_item_intents,
+        handoff_intents=applied_evaluation.handoff_intents,
+        evidence_intents=applied_evaluation.evidence_intents,
+        consent_intents=applied_evaluation.consent_intents,
+        integration_intents=applied_evaluation.integration_intents,
+        interruption_result=applied_evaluation.interruption_result,
+        permitted_actions=applied_evaluation.permitted_actions,
+        permitted_tools=applied_evaluation.permitted_tools,
+        recomputation_reason=applied_evaluation.recomputation_reason,
         status=BranchEvaluationStatus.APPLIED,
         created_at=timestamp,
     )

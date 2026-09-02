@@ -425,12 +425,13 @@ rule and requires Northwind authority.
 ## VP Branch Evaluation Contract
 
 The VP contract is implemented in `backend/domain/branch_registry.py` as a checked-in,
-provider-neutral registry snapshot (`vp-1`) and a pure `BranchRuleEvaluator`. The evaluator
-does not call a model, provider SDK, or repository and does not mutate Claim State. It returns
-an evaluation proposal for the current Claim revision. The message service supplies that result
-to the Agent turn context and rejects proposals for inactive or system-owned fields. Persistence
-adapters expose claim-scoped immutable evaluation records; a later integration step may persist
-the record atomically with a turn without changing the evaluator contract.
+provider-neutral Field Registry snapshot (`3`), branch-rule snapshot
+(`vp-dynamic-form-branch-rules-v1`), and pure `BranchRuleEvaluator`. The evaluator does not call a
+model, provider SDK, or repository and does not mutate Claim State. It returns an evaluation for
+the supplied Claim revision. The message service supplies a pre-effect result to the Agent turn
+context, validates proposals against its allowed fields, then recomputes the applied result from
+the resulting Claim snapshot. Persistence adapters atomically store that immutable result with
+the Claim mutation.
 
 This section records the agreed contract for the Sprint 3 Validation Prototype branch
 engine. It is the implementation baseline for the complete three-path design; it is not a
@@ -622,10 +623,11 @@ Dynamic Form
   = projection of Claim State + latest valid branch evaluation
 ```
 
-The evaluation record never becomes a competing source of current facts. If the Claim
-revision changes from 12 to 13 before an evaluation calculated against revision 12 is
-applied, the result is stale and must be recomputed. The old record remains for audit and is
-marked `stale` or `superseded`; it must not overwrite revision 13.
+The evaluation record never becomes a competing source of current facts. If the Claim revision
+changes from 12 to 13 before an evaluation calculated against revision 12 is applied, the result
+cannot be attached to revision 13 and must be recomputed. The old record remains immutable audit
+evidence but no longer qualifies as the current Dynamic Form projection. A future status event
+may describe it as stale or superseded, but must not rewrite the calculation payload.
 
 ### Runtime and Agent integration
 
@@ -669,6 +671,12 @@ The Dynamic Form controller consumes the evaluator result to:
 - accept multiple facts from one natural-language message;
 - recalculate after material facts, corrections, evidence updates, resume, and handoff; and
 - reject model proposals for unknown, inactive, or unauthorised fields.
+
+The complete three-path catalogue in `docs/fnol-field-model.md` is design authority, not a generic
+write allowlist. The executable registry contains only field codes that already have compatible
+domain, API, persistence, and visibility contracts. Candidate fields and separate Evidence,
+Participant, Contents Item, WorkItem, Handoff, Consent, and Integration records remain outside
+`WorkingClaim.form` until their owning typed contracts and consumers land together.
 
 ### VP implementation boundary and ownership
 

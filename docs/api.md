@@ -935,7 +935,8 @@ Response `200`:
   "dynamic_form": {
     "claim_id": "clm_01J4Y7Q2AW",
     "claim_revision": 3,
-    "registry_version": "vp-1",
+    "field_registry_version": "3",
+    "branch_rules_version": "vp-dynamic-form-branch-rules-v1",
     "selected_family": "motor",
     "active_branches": ["family.motor", "incident.collision"],
     "fields": [
@@ -953,9 +954,11 @@ Response `200`:
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
-`dynamic_form` is a claimant-safe projection of the latest branch evaluation. Selection state
-(`required_now`, `candidate_now`, `pending_later`, `inactive`, or `system_owned`) is separate from
-the stored value state. It is omitted only when no branch evaluation exists yet.
+`dynamic_form` is a claimant-safe projection of the latest applied branch evaluation whose
+evaluated and resulting revision both equal the current Claim revision. It exposes only active,
+claimant-visible fields; inactive and system-owned fields remain outside this response. Selection
+state (`required_now`, `candidate_now`, or `pending_later` in this projection) is separate from the
+stored value state. The projection is omitted when no current-revision evaluation exists.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 

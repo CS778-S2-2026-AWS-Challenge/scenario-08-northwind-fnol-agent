@@ -43,6 +43,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
 from backend.services.handoffs import claimant_handoff
@@ -388,6 +389,11 @@ def start_session(
                 expected_revision=claim.revision,
                 session=session,
                 idempotency=idempotency,
+                branch_evaluation=build_applied_branch_evaluation(
+                    updated_claim,
+                    recomputation_reason='session_resumed',
+                    session_id=session.session_id,
+                ),
             )
         except RevisionConflict as conflict:
             raise ApiError(
@@ -488,7 +494,14 @@ def update_form(
         }
     )
     try:
-        repository.save_claim(updated_claim, expected_revision=expected_revision)
+        repository.save_claim(
+            updated_claim,
+            expected_revision=expected_revision,
+            branch_evaluation=build_applied_branch_evaluation(
+                updated_claim,
+                recomputation_reason='form_updated',
+            ),
+        )
     except RevisionConflict as conflict:
         raise ApiError(
             status_code=409,
@@ -605,7 +618,15 @@ def confirm_form_fields(
         }
     )
     try:
-        repository.save_claim(updated_claim, expected_revision=expected_revision)
+        repository.save_claim(
+            updated_claim,
+            expected_revision=expected_revision,
+            branch_evaluation=build_applied_branch_evaluation(
+                updated_claim,
+                recomputation_reason='form_confirmed',
+                current_action=AgentAction.CONFIRM,
+            ),
+        )
     except RevisionConflict as conflict:
         raise ApiError(
             status_code=409,

@@ -36,6 +36,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
@@ -406,6 +407,11 @@ def create_support_request(
             expected_revision,
             handoff,
             idempotency,
+            branch_evaluation=build_applied_branch_evaluation(
+                updated_claim,
+                recomputation_reason='handoff_created',
+                trigger_source_refs=[handoff.handoff_id],
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(

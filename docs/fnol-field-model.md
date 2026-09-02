@@ -117,7 +117,7 @@ make their boundary explicit.
 | `consent.sharing_scope` | Purpose and fields allowed to share | conditional/structured/no | C/y/y/y | external/y/record | Consent record exists | C/S; consent/privacy |
 | `report.channel` | Entry channel | common/enum/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
 | `claim.created_at` | System receipt time | common/date-time/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
-| `claim.registry_version` | Registry snapshot used | common/scalar/no | Y/n/n/n | n/n/system-owned | Design only; persistence gap | S; audit |
+| `claim.registry_version` | Registry snapshot used | common/scalar/no | Y/n/n/n | n/n/record | Persisted as separate Field Registry and branch-rule coordinates on Branch Evaluation records, not as a claimant form field | S; audit |
 
 ## Motor field inventory
 

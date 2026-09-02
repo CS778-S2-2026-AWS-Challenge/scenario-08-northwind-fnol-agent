@@ -2,7 +2,12 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from backend.domain.intake import infer_controlled_incident_type, next_controlled_intake_field
+from backend.domain.intake import (
+    CONTROLLED_INTAKE_FIELDS,
+    INCIDENT_TYPE_INTAKE_FIELD,
+    infer_controlled_incident_type,
+    next_controlled_intake_field,
+)
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
@@ -601,6 +606,26 @@ class ControlledAgent:
             if guided is not None:
                 return guided
         intake_field = next_controlled_intake_field(context.claim)
+        if context.branch_evaluation is not None:
+            allowed_codes = {
+                item.field_code
+                for item in context.branch_evaluation.field_selection
+                if item.selection_state.value not in {'inactive', 'system_owned'}
+            }
+            if intake_field is not None and intake_field.field_code not in allowed_codes:
+                intake_field = next(
+                    (
+                        item
+                        for item in (*CONTROLLED_INTAKE_FIELDS, INCIDENT_TYPE_INTAKE_FIELD)
+                        if item.field_code in allowed_codes
+                        and (
+                            item.field_code not in context.claim.form
+                            or context.claim.form[item.field_code].status
+                            is not FormStatus.CONFIRMED
+                        )
+                    ),
+                    None,
+                )
         if context.message_text is not None and intake_field is not None:
             changes = (
                 _initial_form_changes(message_text, context.claim.incident_type)

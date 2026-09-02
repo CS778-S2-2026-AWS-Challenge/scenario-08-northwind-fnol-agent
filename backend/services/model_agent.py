@@ -4,10 +4,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from backend.domain.model_gateway import (
     ModelAgentProposal,
+    ModelBranchContext,
     ModelCapabilities,
     ModelClaimContext,
     ModelClaimStateContext,
     ModelCompletionStatus,
+    ModelFieldSelectionContext,
     ModelFormFieldContext,
     ModelGateway,
     ModelGatewayError,
@@ -48,6 +50,7 @@ _MODEL_CONTEXT_FIELD_CODES = frozenset(
 
 def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
     claim = context.claim
+    branch = context.branch_evaluation
     return ModelTurnContext(
         claim=ModelClaimContext(
             channel=claim.channel,
@@ -83,6 +86,36 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
         professional_review_required=context.professional_review_required,
+        branch=(
+            ModelBranchContext(
+                field_registry_version=branch.field_registry_version,
+                branch_rules_version=branch.branch_rules_version,
+                selected_family=branch.selected_family,
+                unresolved_family_conflict=branch.unresolved_family_conflict,
+                active_branches=branch.active_branches,
+                candidate_branches=branch.candidate_branches,
+                allowed_field_codes=sorted(
+                    item.field_code
+                    for item in branch.field_selection
+                    if item.selection_state.value not in {'inactive', 'system_owned'}
+                ),
+                field_selection=[
+                    ModelFieldSelectionContext(
+                        field_code=item.field_code,
+                        selection_state=item.selection_state,
+                        value_state=item.value_state,
+                    )
+                    for item in branch.field_selection
+                    if item.selection_state.value not in {'inactive', 'system_owned'}
+                ],
+                work_item_intents=branch.work_item_intents,
+                interruption_result=branch.interruption_result,
+                permitted_actions=branch.permitted_actions,
+                permitted_tools=branch.permitted_tools,
+            )
+            if branch is not None
+            else None
+        ),
     )
 
 

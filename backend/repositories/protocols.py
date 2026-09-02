@@ -69,7 +69,12 @@ class ClaimRepository(Protocol):
         """Return claims for an authorised staff projection."""
         raise NotImplementedError
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def save_claim_mutation(
@@ -77,6 +82,7 @@ class ClaimRepository(Protocol):
         claim: WorkingClaim,
         expected_revision: int,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a claim revision and its retry metadata."""
         raise NotImplementedError
@@ -98,6 +104,7 @@ class ClaimRepository(Protocol):
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a resumed session, claim revision, and retry metadata."""
         raise NotImplementedError
@@ -273,6 +280,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
         raise NotImplementedError
@@ -452,6 +460,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a handoff, shared claim state, and retry metadata."""
         raise NotImplementedError

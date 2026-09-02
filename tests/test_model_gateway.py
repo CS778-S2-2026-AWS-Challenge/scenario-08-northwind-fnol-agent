@@ -16,6 +16,7 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
+from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -38,6 +39,7 @@ from backend.domain.models import (
     AuthorityOutcome,
     Channel,
     CustomerNextStep,
+    FieldSelectionState,
     FormSource,
     FormStatus,
     FraudSignal,
@@ -1256,11 +1258,13 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert gateway.last_request.response_schema is not None
     model_context = json.loads(gateway.last_request.messages[1].content)
     assert set(model_context) == {
+        'branch',
         'claim',
         'message_text',
         'evidence_reference_count',
         'professional_review_required',
     }
+    assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 1
     assert set(model_context['claim']) == {
         'channel',
@@ -1313,6 +1317,85 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     authority = validate_proposal(proposal)
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(proposal, authority) == []
+
+
+def test_gateway_agent_receives_bounded_branch_context() -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output={
+                'action': 'ASK',
+                'reason_codes': ['CONTINUE_INTAKE'],
+                'customer_reason': 'More information is required.',
+                'customer_response': 'Where did the incident happen?',
+                'customer_next_step': {
+                    'status': 'information_required',
+                    'summary': 'Provide the incident location.',
+                    'responsible_party': 'claimant',
+                    'required_items': ['incident.location'],
+                },
+                'form_changes': [],
+                'state_changes': [],
+                'proposed_signals': [],
+                'required_tools': [],
+                'next_action_requirements': [],
+                'handoff_priority': None,
+            }
+        )
+    )
+    agent = GatewayAgent(gateway)
+    timestamp = datetime.now(UTC)
+    claim = _working_claim().model_copy(
+        update={
+            'form': {
+                'incident.type': _form_field('motor', timestamp),
+                'incident.description': _form_field('A rear-end collision.', timestamp),
+            }
+        }
+    )
+    branch = BranchRuleEvaluator().evaluate(claim, recomputation_reason='model_context')
+    branch = branch.model_copy(
+        update={
+            'field_selection': [
+                item.model_copy(update={'selection_state': FieldSelectionState.SYSTEM_OWNED})
+                if item.field_code == 'claimant.client_number'
+                else item
+                for item in branch.field_selection
+            ]
+        }
+    )
+
+    agent.propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses-gateway',
+            trigger_message_id='msg-gateway',
+            message_text='Continue my motor claim.',
+            evidence_refs=[],
+            branch_evaluation=branch,
+        )
+    )
+
+    assert gateway.last_request is not None
+    model_context = json.loads(gateway.last_request.messages[1].content)
+    assert model_context['branch']['selected_family'] == 'motor'
+    assert 'family.motor' in model_context['branch']['active_branches']
+    assert 'vehicle.registration' in model_context['branch']['allowed_field_codes']
+    assert 'property.address' not in model_context['branch']['allowed_field_codes']
+    assert 'claimant.client_number' not in model_context['branch']['allowed_field_codes']
+    assert set(model_context['branch']) == {
+        'field_registry_version',
+        'branch_rules_version',
+        'selected_family',
+        'unresolved_family_conflict',
+        'active_branches',
+        'candidate_branches',
+        'allowed_field_codes',
+        'field_selection',
+        'work_item_intents',
+        'interruption_result',
+        'permitted_actions',
+        'permitted_tools',
+    }
 
 
 @pytest.mark.parametrize(

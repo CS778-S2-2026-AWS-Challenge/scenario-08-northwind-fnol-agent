@@ -213,6 +213,7 @@ def test_start_session_requires_idempotency_and_reuses_active_session(
 def test_form_update_records_registered_field_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
 ) -> None:
     created = create_claim(client, auth_headers)
     claim = created.json()['claim']
@@ -238,6 +239,10 @@ def test_form_update_records_registered_field_and_revision(
         response.json()['updated_fields']['incident.description']['updated_by']['actor_id']
         == 'cus_demo'
     )
+    evaluations = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+    assert evaluations[-1].evaluated_against_claim_revision == 2
+    assert evaluations[-1].resulting_claim_revision == 2
+    assert evaluations[-1].recomputation_reason == 'form_updated'
 
 
 def test_form_update_rejects_stale_revision_unknown_field_and_silent_overwrite(
@@ -552,6 +557,7 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
 ) -> None:
     created = create_claim(client, auth_headers, key='confirm-field').json()
     claim_id = created['claim']['claim_id']
@@ -608,6 +614,12 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert corrected['source'] == 'claimant'
     assert corrected['updated_by']['actor_id'] == 'cus_demo'
     assert replay.json() == confirmed.json()
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert [item.recomputation_reason for item in evaluations[-2:]] == [
+        'form_confirmed',
+        'form_updated',
+    ]
+    assert evaluations[-1].resulting_claim_revision == 4
 
 
 def test_confirmed_intake_field_is_not_asked_again(

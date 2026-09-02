@@ -86,6 +86,12 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
     assert stored.claim_state.evidence.value == 'pending_generation'
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    assert evaluation.recomputation_reason == 'evidence_changed'
+    assert evaluation.resulting_claim_revision == stored.revision
+    assert response.json()['evidence']['evidence_id'] in {
+        source_ref for result in evaluation.branch_results for source_ref in result.source_refs
+    }
 
 
 @pytest.mark.parametrize(

@@ -45,6 +45,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
     now_utc,
@@ -173,6 +174,11 @@ def _persist(
             expected_revision,
             evidence,
             idempotency,
+            branch_evaluation=build_applied_branch_evaluation(
+                claim,
+                recomputation_reason='evidence_changed',
+                trigger_source_refs=[evidence.evidence_id],
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(

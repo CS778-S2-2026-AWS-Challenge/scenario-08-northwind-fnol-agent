@@ -1192,6 +1192,8 @@ class BranchResult(ContractModel):
     """Deterministic result for one registered content branch."""
 
     branch_id: str
+    rule_id: str = Field(min_length=1)
+    source_refs: list[str] = Field(default_factory=list)
     status: Literal['active', 'candidate', 'suspended', 'exited']
     reason: str
     registered_fields: list[str] = Field(default_factory=list)
@@ -1212,7 +1214,8 @@ class BranchEvaluationResult(ContractModel):
 
     claim_id: str
     evaluated_against_claim_revision: int = Field(ge=1)
-    registry_version: str = Field(min_length=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
     selected_family: Literal['motor', 'home', 'contents'] | None = None
     unresolved_family_conflict: list[str] = Field(default_factory=list)
     active_branches: list[str] = Field(default_factory=list)
@@ -1227,6 +1230,8 @@ class BranchEvaluationResult(ContractModel):
     consent_intents: list[dict[str, Any]] = Field(default_factory=list)
     integration_intents: list[dict[str, Any]] = Field(default_factory=list)
     interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
     recomputation_reason: str = Field(min_length=1)
 
 
@@ -1239,7 +1244,8 @@ class BranchEvaluationRecord(ContractModel):
     turn_id: str | None = None
     evaluated_against_claim_revision: int = Field(ge=1)
     resulting_claim_revision: int | None = Field(default=None, ge=1)
-    registry_version: str = Field(min_length=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
     selected_family: Literal['motor', 'home', 'contents'] | None = None
     unresolved_family_conflict: list[str] = Field(default_factory=list)
     branch_results: list[BranchResult] = Field(default_factory=list)
@@ -1250,9 +1256,22 @@ class BranchEvaluationRecord(ContractModel):
     consent_intents: list[dict[str, Any]] = Field(default_factory=list)
     integration_intents: list[dict[str, Any]] = Field(default_factory=list)
     interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
     recomputation_reason: str = Field(min_length=1)
     status: BranchEvaluationStatus = BranchEvaluationStatus.EVALUATED
     created_at: datetime
+
+    @model_validator(mode='after')
+    def require_revision_coordinates(self) -> 'BranchEvaluationRecord':
+        if self.status is BranchEvaluationStatus.APPLIED:
+            if self.resulting_claim_revision != self.evaluated_against_claim_revision:
+                raise ValueError(
+                    'An applied branch evaluation must describe its resulting Claim revision.'
+                )
+        elif self.resulting_claim_revision is not None:
+            raise ValueError('Only an applied branch evaluation may name a resulting revision.')
+        return self
 
 
 class DynamicFormProjection(ContractModel):
@@ -1260,7 +1279,8 @@ class DynamicFormProjection(ContractModel):
 
     claim_id: str
     claim_revision: int = Field(ge=1)
-    registry_version: str = Field(min_length=1)
+    field_registry_version: str = Field(min_length=1)
+    branch_rules_version: str = Field(min_length=1)
     selected_family: Literal['motor', 'home', 'contents'] | None = None
     active_branches: list[str] = Field(default_factory=list)
     fields: list[FieldSelectionResult] = Field(default_factory=list)

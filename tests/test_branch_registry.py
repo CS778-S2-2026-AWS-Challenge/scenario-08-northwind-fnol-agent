@@ -1,79 +1,221 @@
 from datetime import UTC, datetime
 
-from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
+import mongomock
+import pytest
+
+from backend.domain.branch_registry import (
+    BranchRuleEvaluator,
+    build_default_registry,
+    claimant_projection_fields,
+)
+from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
 from backend.domain.models import (
+    ActorType,
+    AgentAction,
+    AgentAuthority,
+    AgentDecisionRecord,
+    AuthorityOutcome,
     BranchEvaluationRecord,
     BranchEvaluationStatus,
     Channel,
     CustomerNextStep,
+    FieldSelectionState,
     FormSource,
     FormStatus,
+    MessageRecord,
+    MessageVisibility,
     ResponsibleParty,
     SessionRecord,
     StructuredFormField,
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    IdempotencyRecord,
+    PersistenceRepository,
+)
+
+FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
 
 
-def make_claim() -> WorkingClaim:
-    timestamp = datetime.now(UTC)
+def make_claim(*, revision: int = 1) -> WorkingClaim:
     return WorkingClaim(
         claim_id='clm_branch',
         customer_id='cus_branch',
+        revision=revision,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
+        active_session_id='ses_branch',
         customer_next_step=CustomerNextStep(
             status='describe_incident',
             summary='Describe the incident.',
             responsible_party=ResponsibleParty.CLAIMANT,
         ),
-        created_at=timestamp,
-        updated_at=timestamp,
+        created_at=FIXED_TIME,
+        updated_at=FIXED_TIME,
     )
 
 
 def field(value: object, status: FormStatus = FormStatus.CONFIRMED) -> StructuredFormField:
-    timestamp = datetime.now(UTC)
     return StructuredFormField(
         value=value,
         source=FormSource.CLAIMANT,
+        source_refs=['msg_source'],
         status=status,
         needed_for='current_action',
-        updated_at=timestamp,
+        updated_at=FIXED_TIME,
         updated_by={'actor_type': 'claimant', 'actor_id': 'cus_branch'},
     )
 
 
-def test_registry_keeps_family_exclusive_and_shared_fields_single() -> None:
-    claim = make_claim().model_copy(
-        update={
-            'form': {
-                'incident.type': field('motor'),
-                'incident.description': field('A car hit my vehicle.'),
-            }
-        }
+def evaluation_record(
+    claim: WorkingClaim,
+    *,
+    evaluation_id: str = 'brn_eval_1',
+) -> BranchEvaluationRecord:
+    result = BranchRuleEvaluator().evaluate(claim, recomputation_reason='test')
+    return BranchEvaluationRecord(
+        evaluation_id=evaluation_id,
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id,
+        evaluated_against_claim_revision=claim.revision,
+        resulting_claim_revision=claim.revision,
+        field_registry_version=result.field_registry_version,
+        branch_rules_version=result.branch_rules_version,
+        selected_family=result.selected_family,
+        unresolved_family_conflict=result.unresolved_family_conflict,
+        branch_results=result.branch_results,
+        field_selection_results=result.field_selection,
+        work_item_intents=result.work_item_intents,
+        handoff_intents=result.handoff_intents,
+        evidence_intents=result.evidence_intents,
+        interruption_result=result.interruption_result,
+        permitted_actions=result.permitted_actions,
+        permitted_tools=result.permitted_tools,
+        recomputation_reason=result.recomputation_reason,
+        status=BranchEvaluationStatus.APPLIED,
+        created_at=FIXED_TIME,
     )
-    result = BranchRuleEvaluator().evaluate(claim, latest_message='A car hit my vehicle.')
 
-    assert result.selected_family == 'motor'
+
+@pytest.mark.parametrize('family', ['motor', 'home', 'contents'])
+def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
+    claim = make_claim().model_copy(update={'form': {'incident.type': field(family)}})
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family == family
+    assert [item for item in result.active_branches if item.startswith('family.')] == [
+        f'family.{family}'
+    ]
     assert result.unresolved_family_conflict == []
-    assert result.active_branches[0] == 'family.motor'
-    assert 'family.home' in result.exited_branches
-    assert 'family.contents' in result.exited_branches
-    assert sum(item.field_code == 'incident.description' for item in result.field_selection) == 1
+    incident_type = next(
+        item for item in result.field_selection if item.field_code == 'incident.type'
+    )
+    assert incident_type.selection_state.value == 'candidate_now'
 
 
-def test_conflicting_family_candidates_are_not_activated() -> None:
-    claim = make_claim()
+def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
+    claim = make_claim().model_copy(
+        update={'form': {'incident.type': field('contents', FormStatus.PROPOSED)}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family is None
+    assert 'family.contents' in result.candidate_branches
+    assert 'family.contents' not in result.active_branches
+
+
+def test_conflicting_family_candidates_use_shared_fields_only() -> None:
     result = BranchRuleEvaluator().evaluate(
-        claim,
+        make_claim(),
         latest_message='My car was damaged and my laptop was stolen.',
+        trigger_source_refs=['msg_conflict'],
     )
 
     assert result.selected_family is None
     assert set(result.unresolved_family_conflict) == {'motor', 'contents'}
     assert result.active_branches == []
+    vehicle = next(
+        item for item in result.field_selection if item.field_code == 'vehicle.registration'
+    )
+    assert vehicle.selection_state.value == 'inactive'
+
+
+def test_false_other_party_value_does_not_activate_collision_branches() -> None:
+    claim = make_claim().model_copy(
+        update={
+            'form': {
+                'incident.type': field('motor'),
+                'parties.other_parties': field(False),
+            }
+        }
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert 'incident.collision' not in result.active_branches
+    assert 'participant.another_party' not in result.active_branches
+
+
+def test_confirm_action_uses_the_agent_action_enum_contract() -> None:
+    claim = make_claim().model_copy(update={'form': {'incident.type': field('home')}})
+
+    result = BranchRuleEvaluator().evaluate(claim, current_action=AgentAction.CONFIRM)
+
+    required = {
+        item.field_code
+        for item in result.field_selection
+        if item.selection_state.value == 'required_now'
+    }
+    assert required == {'incident.description', 'incident.location', 'incident.occurred_at'}
+
+
+def test_runtime_registry_excludes_design_only_and_separate_record_codes() -> None:
+    registry = build_default_registry()
+
+    assert registry.field_codes == REGISTERED_FIELD_CODES
+    assert registry.field_registry_version == FIELD_REGISTRY_VERSION
+    assert 'contents.items' not in registry.field_codes
+    assert 'other_party.contact' not in registry.field_codes
+    assert 'motor.evidence_refs' not in registry.field_codes
+
+
+def test_branch_results_retain_rule_and_source_coordinates() -> None:
+    claim = make_claim().model_copy(update={'form': {'incident.type': field('motor')}})
+
+    result = BranchRuleEvaluator().evaluate(claim)
+    motor = next(item for item in result.branch_results if item.branch_id == 'family.motor')
+
+    assert motor.rule_id == 'BR-FAMILY-MOTOR-001'
+    assert motor.source_refs == ['msg_source']
+    assert result.field_registry_version == FIELD_REGISTRY_VERSION
+    assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v1'
+
+
+def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None:
+    claim = make_claim().model_copy(update={'form': {'incident.type': field('motor')}})
+    evaluation = evaluation_record(claim)
+    evaluation = evaluation.model_copy(
+        update={
+            'field_selection_results': [
+                item.model_copy(update={'selection_state': FieldSelectionState.SYSTEM_OWNED})
+                if item.field_code == 'claimant.client_number'
+                else item
+                for item in evaluation.field_selection_results
+            ]
+        }
+    )
+
+    projected = claimant_projection_fields(evaluation)
+    projected_codes = {item.field_code for item in projected}
+
+    assert 'vehicle.registration' in projected_codes
+    assert 'property.address' not in projected_codes
+    assert 'claimant.client_number' not in projected_codes
 
 
 def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> None:
@@ -88,8 +230,7 @@ def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> 
     )
     result = BranchRuleEvaluator().evaluate(
         claim,
-        latest_message='The police report is pending and will be provided later.',
-        current_action='create_claim',
+        current_action=AgentAction.CREATE_CLAIM,
     )
 
     police = next(
@@ -107,39 +248,149 @@ def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> 
     assert description.selection_state.value == 'candidate_now'
 
 
-def test_evaluation_record_is_claim_scoped_and_status_can_advance() -> None:
-    repository = FixtureRepository()
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_evaluation_payload_is_immutable_in_both_repositories(repository_kind: str) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'branch_immutable')
+        mongo_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo_repository
     claim = make_claim()
-    timestamp = datetime.now(UTC)
-    repository.create_claim(
-        claim,
-        SessionRecord(
-            session_id='ses_branch',
-            claim_id=claim.claim_id,
-            customer_id=claim.customer_id,
-            started_at=timestamp,
-            last_active_at=timestamp,
-        ),
-    )
-    evaluated = BranchRuleEvaluator().evaluate(claim, latest_message='A car was damaged.')
-    record = BranchEvaluationRecord(
-        evaluation_id='brn_eval_1',
-        claim_id=claim.claim_id,
+    session = SessionRecord(
         session_id='ses_branch',
-        evaluated_against_claim_revision=evaluated.evaluated_against_claim_revision,
-        resulting_claim_revision=claim.revision,
-        registry_version=evaluated.registry_version,
-        selected_family=evaluated.selected_family,
-        branch_results=evaluated.branch_results,
-        field_selection_results=evaluated.field_selection,
-        recomputation_reason='test',
-        status=BranchEvaluationStatus.EVALUATED,
-        created_at=timestamp,
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
     )
+    repository.create_claim(claim, session)
+    record = evaluation_record(claim)
     repository.save_branch_evaluation(record, claim.customer_id)
-    applied = record.model_copy(update={'status': BranchEvaluationStatus.APPLIED})
-    repository.save_branch_evaluation(applied, claim.customer_id)
 
-    stored = repository.list_branch_evaluations(claim.claim_id, claim.customer_id)
-    assert stored == [applied]
-    assert build_default_registry().version == evaluated.registry_version
+    rewritten = record.model_copy(
+        update={
+            'selected_family': 'home',
+            'branch_results': [],
+            'field_selection_results': [],
+        }
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_branch_evaluation(rewritten, claim.customer_id)
+
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == [record]
+
+
+def test_mongodb_agent_turn_persists_evaluation_with_resulting_claim_atomically() -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'branch_agent_turn')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    claim = make_claim()
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    repository.create_claim(claim, session)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    updated_session = session.model_copy(update={'context_revision': 2})
+    claimant_message = MessageRecord(
+        message_id='msg_claimant',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        actor=ActorType.CLAIMANT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'My home was damaged.'},
+        created_at=FIXED_TIME,
+    )
+    agent_message = claimant_message.model_copy(
+        update={
+            'message_id': 'msg_agent',
+            'actor': ActorType.AGENT,
+            'in_reply_to': claimant_message.message_id,
+        }
+    )
+    decision = AgentDecisionRecord(
+        decision_id='dec_branch',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        trigger_message_id=claimant_message.message_id,
+        action=AgentAction.ASK,
+        reason_codes=['TEST'],
+        customer_reason='Continue.',
+        customer_response='Continue.',
+        customer_next_step=claim.customer_next_step,
+        authority=AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        ),
+        resulting_revision=2,
+        created_at=FIXED_TIME,
+    )
+    record = evaluation_record(updated_claim)
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-turn',
+        key='branch-agent-turn',
+        request_fingerprint='branch-agent-turn-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        decision_id=decision.decision_id,
+    )
+
+    repository.save_agent_turn(
+        updated_claim,
+        1,
+        updated_session,
+        claimant_message,
+        agent_message,
+        decision,
+        idempotency,
+        branch_evaluation=record,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == updated_claim
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == [record]
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_evaluation_identity_conflict_cannot_partially_advance_claim(
+    repository_kind: str,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'branch_atomic_conflict')
+        mongo_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo_repository
+    claim = make_claim()
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    repository.create_claim(claim, session)
+    original_evaluation = evaluation_record(claim, evaluation_id='brn_collision')
+    repository.save_branch_evaluation(original_evaluation, claim.customer_id)
+    updated_claim = claim.model_copy(update={'revision': 2})
+    colliding_evaluation = evaluation_record(updated_claim, evaluation_id='brn_collision')
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_claim(
+            updated_claim,
+            expected_revision=1,
+            branch_evaluation=colliding_evaluation,
+        )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == [
+        original_evaluation
+    ]

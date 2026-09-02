@@ -1,19 +1,15 @@
-"""Provider-neutral branch registry and deterministic dynamic-form evaluator.
-
-The registry is a checked-in, versioned snapshot for the VP.  It is deliberately
-small enough to review in source control while keeping the application-facing
-port replaceable by a future Control Plane publication.
-"""
+"""Provider-neutral Dynamic Form branch registry and deterministic evaluator."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from backend.domain.field_registry import REGISTERED_FIELD_CODES
+from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
 from backend.domain.models import (
     AgentAction,
+    BranchEvaluationRecord,
     BranchEvaluationResult,
     BranchResult,
     FieldSelectionResult,
@@ -22,98 +18,47 @@ from backend.domain.models import (
     WorkingClaim,
 )
 
+BRANCH_RULES_VERSION = 'vp-dynamic-form-branch-rules-v1'
 FAMILY_NAMES = ('motor', 'home', 'contents')
+FAMILY_RULE_IDS = {
+    'motor': 'BR-FAMILY-MOTOR-001',
+    'home': 'BR-FAMILY-HOME-001',
+    'contents': 'BR-FAMILY-CONTENTS-001',
+}
+
+# Only fields already supported by the generic form contract are executable here.
+# The complete VP catalogue remains design input until each candidate or separate
+# record receives its typed domain, API, persistence, and visibility contracts.
 COMMON_FIELDS = frozenset(
     {
-        'claim.product_family',
-        'incident.description',
-        'incident.occurred_at',
-        'incident.location',
-        'incident.cause',
-        'loss.description',
+        'policy.policy_number',
         'claimant.client_number',
         'claimant.role',
         'claimant.contact_preference',
-        'policy.policy_number',
+        'incident.type',
+        'incident.occurred_at',
+        'incident.location',
+        'incident.description',
         'incident.injury_or_danger',
+        'incident.cause',
+        'loss.description',
     }
 )
 FAMILY_FIELDS = {
     'motor': frozenset(
         {
-            'incident.type',
-            'vehicle.registration',
-            'vehicle.damage_description',
-            'vehicle.drivable',
             'parties.other_parties',
             'authorities.police_report_reference',
             'authorities.emergency_services_notified',
-            'collision.occurred',
-            'collision.impact_area',
-            'collision.movement',
-            'other_vehicle.identity',
-            'other_party.contact',
-            'witness.details',
-            'road.conditions',
-            'weather.visibility',
-            'authority.police_status',
-            'authority.police_reference',
-            'repairer.details',
-            'motor.evidence_refs',
+            'vehicle.registration',
+            'vehicle.damage_description',
+            'vehicle.drivable',
         }
     ),
-    'home': frozenset(
-        {
-            'incident.type',
-            'property.address',
-            'property.occupancy_relationship',
-            'property.occupancy',
-            'property.affected_areas',
-            'property.building_damage',
-            'property.fixture_damage',
-            'property.cause_source',
-            'property.severity',
-            'property.ongoing_risk',
-            'property.habitable',
-            'property.utilities',
-            'mitigation.emergency_action',
-            'mitigation.temporary_repair',
-            'mitigation.contractor',
-            'accommodation.required',
-            'accommodation.details',
-            'weather.event',
-            'home.evidence_refs',
-        }
-    ),
-    'contents': frozenset(
-        {
-            'incident.type',
-            'contents.items',
-            'contents.item.description',
-            'contents.item.category',
-            'contents.item.quantity',
-            'contents.item.brand',
-            'contents.item.model',
-            'contents.item.serial_number',
-            'contents.item.ownership',
-            'contents.item.purchase_date',
-            'contents.item.purchase_source',
-            'contents.item.estimated_value',
-            'contents.item.replacement_need',
-            'contents.item.loss_type',
-            'contents.discovery_at',
-            'theft.entry_context',
-            'contents.receipt_availability',
-            'contents.proof_of_ownership',
-            'contents.police_status',
-            'contents.police_reference',
-            'contents.item.evidence_refs',
-            'contents.item_group',
-        }
-    ),
+    'home': frozenset({'property.address', 'property.affected_areas'}),
+    'contents': frozenset(),
 }
-
-SYSTEM_OWNED_FIELDS = frozenset({'claim.product_family'})
+SYSTEM_OWNED_FIELDS: frozenset[str] = frozenset()
 FAMILY_PATTERNS = {
     'motor': re.compile(
         r'\b(car|vehicle|motor|driv(?:e|ing)|collision|crash|road|traffic)\b', re.I
@@ -126,20 +71,23 @@ FAMILY_PATTERNS = {
 @dataclass(frozen=True, slots=True)
 class FieldDefinition:
     code: str
-    family: str | None = None
+    families: frozenset[str] = frozenset()
     system_owned: bool = False
+    claimant_visible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class ContentBranch:
     branch_id: str
+    rule_id: str
     family: str | None
     fields: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
 class BranchRegistrySnapshot:
-    version: str
+    field_registry_version: str
+    branch_rules_version: str
     fields: tuple[FieldDefinition, ...]
     branches: tuple[ContentBranch, ...]
 
@@ -151,80 +99,81 @@ class BranchRegistrySnapshot:
     def branch_by_id(self) -> dict[str, ContentBranch]:
         return {branch.branch_id: branch for branch in self.branches}
 
+    @property
+    def field_by_code(self) -> dict[str, FieldDefinition]:
+        return {field.code: field for field in self.fields}
+
 
 def build_default_registry() -> BranchRegistrySnapshot:
-    """Return the immutable VP registry snapshot used by the local runtime."""
+    """Return the checked-in executable VP registry snapshot."""
 
-    all_codes = set(REGISTERED_FIELD_CODES) | COMMON_FIELDS
-    for family_fields in FAMILY_FIELDS.values():
-        all_codes.update(family_fields)
-    definitions = tuple(
+    executable_codes = set(REGISTERED_FIELD_CODES)
+    fields = tuple(
         FieldDefinition(
             code=code,
-            family=next(
-                (family for family, fields in FAMILY_FIELDS.items() if code in fields),
-                None,
+            families=frozenset(
+                family for family, family_fields in FAMILY_FIELDS.items() if code in family_fields
             ),
             system_owned=code in SYSTEM_OWNED_FIELDS,
         )
-        for code in sorted(all_codes)
+        for code in sorted(executable_codes)
     )
     branches = [
-        ContentBranch(f'family.{family}', family, frozenset(COMMON_FIELDS | FAMILY_FIELDS[family]))
+        ContentBranch(
+            branch_id=f'family.{family}',
+            rule_id=FAMILY_RULE_IDS[family],
+            family=family,
+            fields=frozenset((COMMON_FIELDS | FAMILY_FIELDS[family]) & executable_codes),
+        )
         for family in FAMILY_NAMES
     ]
     branches.extend(
         [
             ContentBranch(
                 'incident.collision',
+                'BR-COLLISION-001',
                 'motor',
-                frozenset({'collision.occurred', 'collision.impact_area', 'collision.movement'}),
+                frozenset({'parties.other_parties'} & executable_codes),
             ),
             ContentBranch(
                 'participant.another_party',
+                'BR-PARTICIPANT-OTHER-001',
                 None,
-                frozenset(
-                    {'parties.other_parties', 'other_vehicle.identity', 'other_party.contact'}
-                ),
+                frozenset({'parties.other_parties'} & executable_codes),
             ),
-            ContentBranch('participant.witness', None, frozenset({'witness.details'})),
+            ContentBranch('participant.witness', 'BR-PARTICIPANT-WITNESS-001', None, frozenset()),
             ContentBranch(
                 'authority.police',
+                'BR-AUTHORITY-POLICE-001',
                 None,
                 frozenset(
                     {
-                        'authority.police_status',
-                        'authority.police_reference',
                         'authorities.police_report_reference',
+                        'authorities.emergency_services_notified',
                     }
+                    & executable_codes
                 ),
             ),
             ContentBranch(
-                'evidence.pending', None, frozenset({'authorities.police_report_reference'})
+                'evidence.pending',
+                'BR-EVIDENCE-PENDING-001',
+                None,
+                frozenset({'authorities.police_report_reference'} & executable_codes),
             ),
-            ContentBranch(
-                'accommodation.temporary',
-                'home',
-                frozenset({'accommodation.required', 'accommodation.details'}),
-            ),
-            ContentBranch(
-                'contents.theft',
-                'contents',
-                frozenset(
-                    {'theft.entry_context', 'contents.police_status', 'contents.police_reference'}
-                ),
-            ),
+            ContentBranch('accommodation.temporary', 'BR-ACCOMMODATION-001', 'home', frozenset()),
+            ContentBranch('contents.theft', 'BR-THEFT-001', 'contents', frozenset()),
         ]
     )
-    return BranchRegistrySnapshot(version='vp-1', fields=definitions, branches=tuple(branches))
+    return BranchRegistrySnapshot(
+        field_registry_version=FIELD_REGISTRY_VERSION,
+        branch_rules_version=BRANCH_RULES_VERSION,
+        fields=fields,
+        branches=tuple(branches),
+    )
 
 
 class BranchRuleEvaluator:
-    """Pure deterministic branch/form evaluator.
-
-    The evaluator reads a claim snapshot and produces a proposal.  It never
-    calls a model/provider, writes Claim State, or persists an evaluation.
-    """
+    """Evaluate branch and field relevance without I/O or Claim State mutation."""
 
     def __init__(self, registry: BranchRegistrySnapshot | None = None) -> None:
         self.registry = registry or build_default_registry()
@@ -234,95 +183,77 @@ class BranchRuleEvaluator:
         claim: WorkingClaim,
         *,
         latest_message: str | None = None,
+        trigger_source_refs: Sequence[str] = (),
         current_action: AgentAction | str | None = None,
         recomputation_reason: str = 'turn',
     ) -> BranchEvaluationResult:
         text = latest_message or ''
-        family_candidates = self._family_candidates(claim, text)
-        selected_family = family_candidates[0] if len(family_candidates) == 1 else None
-        conflict = family_candidates if len(family_candidates) > 1 else []
+        selected_family, family_candidates, family_sources = self._family_state(
+            claim, text, trigger_source_refs
+        )
+        unresolved_conflict = (
+            sorted(family_candidates)
+            if selected_family is None and len(family_candidates) > 1
+            else []
+        )
         active: list[str] = []
         candidate: list[str] = []
-        suspended: list[str] = []
         exited: list[str] = []
         branch_results: list[BranchResult] = []
 
         for family in FAMILY_NAMES:
-            branch_id = f'family.{family}'
+            branch = self.registry.branch_by_id[f'family.{family}']
             if selected_family == family:
-                active.append(branch_id)
-                branch_results.append(
-                    BranchResult(
-                        branch_id=branch_id,
-                        status='active',
-                        reason='The claim has one deterministic family classification.',
-                        registered_fields=sorted(COMMON_FIELDS | FAMILY_FIELDS[family]),
-                    )
-                )
+                status = 'active'
+                active.append(branch.branch_id)
+                reason = 'A confirmed family fact activates this mutually exclusive branch.'
             elif family in family_candidates:
-                candidate.append(branch_id)
-                branch_results.append(
-                    BranchResult(
-                        branch_id=branch_id,
-                        status='candidate',
-                        reason='The family is mentioned but conflicts with another candidate.',
-                        registered_fields=sorted(COMMON_FIELDS | FAMILY_FIELDS[family]),
-                    )
-                )
+                status = 'candidate'
+                candidate.append(branch.branch_id)
+                reason = 'Proposed or message evidence identifies a family candidate.'
             else:
-                branch_results.append(
-                    BranchResult(
-                        branch_id=branch_id,
-                        status='exited',
-                        reason='No current evidence activates this family.',
-                        registered_fields=[],
-                    )
-                )
-                exited.append(branch_id)
-
-        conditional = self._conditional_branches(selected_family, claim, text)
-        for branch_id, reason, fields in conditional:
-            active.append(branch_id)
+                status = 'exited'
+                exited.append(branch.branch_id)
+                reason = 'No current evidence supports this family.'
             branch_results.append(
-                BranchResult(
-                    branch_id=branch_id,
-                    status='active',
-                    reason=reason,
-                    registered_fields=sorted(fields),
-                )
+                self._branch_result(branch, status, reason, family_sources.get(family, []))
             )
 
-        active_fields = set(COMMON_FIELDS)
+        for result in self._conditional_branches(selected_family, claim, text, trigger_source_refs):
+            branch_results.append(result)
+            if result.status == 'active':
+                active.append(result.branch_id)
+            elif result.status == 'candidate':
+                candidate.append(result.branch_id)
+
+        permitted_fields = set(COMMON_FIELDS & self.registry.field_codes)
         for branch_id in active:
-            branch = self.registry.branch_by_id.get(branch_id)
-            if branch is not None:
-                active_fields.update(branch.fields)
-        # When family evidence conflicts, retain candidate family fields for
-        # proposal capture and clarification, but do not mark either family
-        # active or expose those fields as claimant-required questions.
-        if selected_family is None and conflict:
-            for family in conflict:
-                active_fields.update(FAMILY_FIELDS[family])
+            permitted_fields.update(self.registry.branch_by_id[branch_id].fields)
+        if selected_family is None and len(family_candidates) == 1:
+            candidate_family = next(iter(family_candidates))
+            permitted_fields.update(FAMILY_FIELDS[candidate_family] & self.registry.field_codes)
+
         selections = [
             self._select_field(
-                field.code,
-                active_fields,
+                definition,
+                permitted_fields,
                 claim,
                 selected_family,
+                family_candidates,
                 current_action,
-                conflict,
             )
-            for field in self.registry.fields
+            for definition in self.registry.fields
         ]
         return BranchEvaluationResult(
             claim_id=claim.claim_id,
             evaluated_against_claim_revision=claim.revision,
-            registry_version=self.registry.version,
+            field_registry_version=self.registry.field_registry_version,
+            branch_rules_version=self.registry.branch_rules_version,
             selected_family=selected_family,
-            unresolved_family_conflict=conflict,
+            unresolved_family_conflict=unresolved_conflict,
             active_branches=active,
             candidate_branches=candidate,
-            suspended_branches=suspended,
+            suspended_branches=[],
             exited_branches=exited,
             branch_results=branch_results,
             field_selection=selections,
@@ -332,175 +263,251 @@ class BranchRuleEvaluator:
             consent_intents=[],
             integration_intents=[],
             interruption_result=self._interruption(claim),
+            permitted_actions=list(AgentAction),
+            permitted_tools=[],
             recomputation_reason=recomputation_reason,
         )
 
-    def _family_candidates(self, claim: WorkingClaim, text: str) -> list[str]:
-        explicit = claim.form.get('claim.product_family')
-        if (
-            explicit is not None
-            and explicit.value in FAMILY_NAMES
-            and explicit.status is not FormStatus.DISPUTED
-        ):
-            return [str(explicit.value)]
+    def _family_state(
+        self, claim: WorkingClaim, text: str, trigger_source_refs: Sequence[str]
+    ) -> tuple[str | None, set[str], dict[str, list[str]]]:
+        selected: str | None = None
+        candidates: set[str] = set()
+        sources: dict[str, list[str]] = {family: [] for family in FAMILY_NAMES}
         incident_type = claim.form.get('incident.type')
-        if (
-            incident_type is not None
-            and incident_type.value in FAMILY_NAMES
-            and incident_type.status is not FormStatus.DISPUTED
-        ):
-            return [str(incident_type.value)]
-        if claim.incident_type in FAMILY_NAMES:
-            return [claim.incident_type]
-        return [family for family in FAMILY_NAMES if FAMILY_PATTERNS[family].search(text)]
+        if incident_type is not None and incident_type.value in FAMILY_NAMES:
+            family = str(incident_type.value)
+            sources[family].extend(incident_type.source_refs)
+            if incident_type.status is FormStatus.CONFIRMED:
+                selected = family
+            elif incident_type.status is FormStatus.PROPOSED:
+                candidates.add(family)
+        for family, pattern in FAMILY_PATTERNS.items():
+            if pattern.search(text):
+                candidates.add(family)
+                sources[family].extend(trigger_source_refs)
+        if selected is not None:
+            candidates.discard(selected)
+        for family in sources:
+            sources[family] = sorted(set(sources[family]))
+        return selected, candidates, sources
 
     def _conditional_branches(
-        self, selected_family: str | None, claim: WorkingClaim, text: str
-    ) -> list[tuple[str, str, frozenset[str]]]:
-        branches: list[tuple[str, str, frozenset[str]]] = []
-        values = {code: str(field.value).lower() for code, field in claim.form.items()}
-        if selected_family == 'motor' and (
-            'parties.other_parties' in values
-            or re.search(r'\b(other driver|another car|rear[- ]?ended|hit me)\b', text, re.I)
-        ):
-            branches.append(
-                (
-                    'incident.collision',
-                    'Collision wording activates the motor collision branch.',
-                    self.registry.branch_by_id['incident.collision'].fields,
-                )
+        self,
+        selected_family: str | None,
+        claim: WorkingClaim,
+        text: str,
+        trigger_source_refs: Sequence[str],
+    ) -> list[BranchResult]:
+        results: list[BranchResult] = []
+
+        def add(
+            branch_id: str,
+            status: str,
+            reason: str,
+            codes: Sequence[str] = (),
+            source_refs: Sequence[str] = (),
+        ) -> None:
+            branch = self.registry.branch_by_id[branch_id]
+            refs = set(source_refs)
+            if status == 'candidate':
+                refs.update(trigger_source_refs)
+            else:
+                refs.update(self._source_refs(claim, codes))
+            results.append(self._branch_result(branch, status, reason, refs))
+
+        another_party = self._confirmed_truthy(claim, 'parties.other_parties')
+        collision_text = bool(
+            re.search(
+                r'\b(collision|crash|other driver|another car|rear[- ]?ended|hit me)\b',
+                text,
+                re.I,
             )
-            branches.append(
-                (
-                    'participant.another_party',
-                    'Another party is explicitly mentioned.',
-                    self.registry.branch_by_id['participant.another_party'].fields,
-                )
+        )
+        if selected_family == 'motor' and another_party:
+            add(
+                'incident.collision',
+                'active',
+                'A confirmed motor fact records another party or collision.',
+                ('parties.other_parties',),
             )
-        if re.search(r'\b(police|police report|constable|incident number)\b', text, re.I) or any(
-            code in values
-            for code in ('authority.police_status', 'authorities.police_report_reference')
-        ):
-            branches.append(
-                (
-                    'authority.police',
-                    'Police involvement or a police report is recorded.',
-                    self.registry.branch_by_id['authority.police'].fields,
-                )
+            add(
+                'participant.another_party',
+                'active',
+                'A confirmed fact records another participant.',
+                ('parties.other_parties',),
             )
-        if re.search(
-            r'\b(later|pending|not yet|will provide|waiting)\b.*\b(report|police)\b', text, re.I
-        ):
-            branches.append(
-                (
-                    'evidence.pending',
-                    'The message states that required evidence is not yet available.',
-                    self.registry.branch_by_id['evidence.pending'].fields,
-                )
+        elif collision_text:
+            add('incident.collision', 'candidate', 'The claimant message describes a collision.')
+            add(
+                'participant.another_party',
+                'candidate',
+                'The claimant message may identify another participant.',
             )
+
+        police_codes = (
+            'authorities.police_report_reference',
+            'authorities.emergency_services_notified',
+        )
+        police_confirmed = any(self._confirmed_truthy(claim, code) for code in police_codes)
+        police_text = bool(
+            re.search(r'\b(police|police report|constable|incident number)\b', text, re.I)
+        )
+        if police_confirmed:
+            add(
+                'authority.police',
+                'active',
+                'Confirmed Claim State records Police involvement.',
+                police_codes,
+            )
+        elif police_text:
+            add(
+                'authority.police',
+                'candidate',
+                'The claimant message mentions Police involvement.',
+            )
+
+        pending = self._police_pending(claim)
+        pending_text = bool(
+            re.search(
+                r'\b(later|pending|not yet|will provide|waiting)\b.*\b(report|police)\b',
+                text,
+                re.I,
+            )
+        )
+        if pending:
+            add(
+                'evidence.pending',
+                'active',
+                'Claim State records Police material as pending generation.',
+                ('authorities.police_report_reference',),
+                trigger_source_refs,
+            )
+        elif pending_text:
+            add('evidence.pending', 'candidate', 'The claimant message describes pending material.')
+
+        witness = claim.form.get('witness.details')
+        if witness is not None and witness.status is FormStatus.CONFIRMED and bool(witness.value):
+            add(
+                'participant.witness',
+                'active',
+                'A confirmed fact records a witness.',
+                ('witness.details',),
+            )
+        elif re.search(r'\bwitness\b', text, re.I):
+            add('participant.witness', 'candidate', 'The claimant message mentions a witness.')
+
         if selected_family == 'home' and re.search(
             r'\b(not habitable|temporary accommodation|hotel)\b', text, re.I
         ):
-            branches.append(
-                (
-                    'accommodation.temporary',
-                    'The home is not habitable or accommodation is requested.',
-                    self.registry.branch_by_id['accommodation.temporary'].fields,
-                )
+            add(
+                'accommodation.temporary',
+                'candidate',
+                'The claimant message describes a possible accommodation need.',
             )
         if selected_family == 'contents' and re.search(
             r'\b(stolen|theft|burglary|break[- ]?in)\b', text, re.I
         ):
-            branches.append(
-                (
-                    'contents.theft',
-                    'Theft wording activates the contents authority branch.',
-                    self.registry.branch_by_id['contents.theft'].fields,
-                )
-            )
-        if claim.form.get('witness.details') is not None or re.search(r'\bwitness\b', text, re.I):
-            branches.append(
-                (
-                    'participant.witness',
-                    'A witness is mentioned.',
-                    self.registry.branch_by_id['participant.witness'].fields,
-                )
-            )
-        return branches
+            add('contents.theft', 'candidate', 'The claimant message describes possible theft.')
+        return results
 
-    def _select_field(
-        self,
-        code: str,
-        active_fields: set[str],
-        claim: WorkingClaim,
-        selected_family: str | None,
-        current_action: AgentAction | str | None,
-        family_conflict: list[str] | None = None,
-    ) -> FieldSelectionResult:
-        field = next(item for item in self.registry.fields if item.code == code)
-        stored = claim.form.get(code)
-        value_state = stored.status if stored is not None else FormStatus.MISSING
-        if field.system_owned:
-            return FieldSelectionResult(
-                field_code=code,
-                selection_state=FieldSelectionState.SYSTEM_OWNED,
-                value_state=value_state,
-                source=stored.source if stored else None,
-                reason='The value is owned by routing or identity, not a claimant question.',
-            )
-        if code not in active_fields or (
-            field.family is not None
-            and selected_family != field.family
-            and not (selected_family is None and field.family in (family_conflict or []))
-        ):
-            return FieldSelectionResult(
-                field_code=code,
-                selection_state=FieldSelectionState.INACTIVE,
-                value_state=value_state,
-                source=stored.source if stored else None,
-                reason='The field is outside the selected content branch.',
-            )
-        if code.endswith('police_report_reference') and self._police_pending(claim):
-            return FieldSelectionResult(
-                field_code=code,
-                selection_state=FieldSelectionState.PENDING_LATER,
-                value_state=value_state,
-                source=stored.source if stored else None,
-                reason='The claimant has recorded the evidence as pending for a later action.',
-            )
-        if value_state is not FormStatus.MISSING:
-            return FieldSelectionResult(
-                field_code=code,
-                selection_state=FieldSelectionState.CANDIDATE_NOW,
-                value_state=value_state,
-                source=stored.source if stored else None,
-                reason='A value exists; do not ask the claimant to repeat it.',
-            )
-        action = current_action.value if isinstance(current_action, AgentAction) else current_action
-        required = self._required_now(code, selected_family, action)
-        state = FieldSelectionState.REQUIRED_NOW if required else FieldSelectionState.CANDIDATE_NOW
-        return FieldSelectionResult(
-            field_code=code,
-            selection_state=state,
-            value_state=value_state,
-            source=None,
-            reason='Missing and required for the current safe action.'
-            if required
-            else 'Relevant but not blocking the current safe action.',
+    @staticmethod
+    def _branch_result(
+        branch: ContentBranch, status: str, reason: str, source_refs: Iterable[str]
+    ) -> BranchResult:
+        return BranchResult(
+            branch_id=branch.branch_id,
+            rule_id=branch.rule_id,
+            source_refs=sorted(set(source_refs)),
+            status=status,
+            reason=reason,
+            registered_fields=sorted(branch.fields) if status in {'active', 'candidate'} else [],
         )
 
     @staticmethod
-    def _required_now(code: str, family: str | None, action: AgentAction | str | None) -> bool:
-        if action in {AgentAction.CREATE_CLAIM.value, 'create_claim', 'confirm'}:
+    def _source_refs(claim: WorkingClaim, codes: Sequence[str]) -> list[str]:
+        refs: set[str] = set()
+        for code in codes:
+            stored = claim.form.get(code)
+            if stored is not None:
+                refs.update(stored.source_refs)
+        return sorted(refs)
+
+    @staticmethod
+    def _confirmed_truthy(claim: WorkingClaim, code: str) -> bool:
+        stored = claim.form.get(code)
+        if stored is None or stored.status is not FormStatus.CONFIRMED:
+            return False
+        value = stored.value
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() not in {
+                '',
+                'false',
+                'no',
+                'none',
+                'not_applicable',
+            }
+        return bool(value)
+
+    def _select_field(
+        self,
+        definition: FieldDefinition,
+        permitted_fields: set[str],
+        claim: WorkingClaim,
+        selected_family: str | None,
+        family_candidates: set[str],
+        current_action: AgentAction | str | None,
+    ) -> FieldSelectionResult:
+        stored = claim.form.get(definition.code)
+        value_state = stored.status if stored is not None else FormStatus.MISSING
+        if definition.system_owned:
+            selection_state = FieldSelectionState.SYSTEM_OWNED
+            reason = 'The field is owned by an identity or workflow authority.'
+        elif definition.code not in permitted_fields or (
+            definition.families
+            and selected_family not in definition.families
+            and not definition.families.intersection(family_candidates)
+        ):
+            selection_state = FieldSelectionState.INACTIVE
+            reason = 'The field is outside the selected or single candidate family.'
+        elif definition.code.endswith('police_report_reference') and self._police_pending(claim):
+            selection_state = FieldSelectionState.PENDING_LATER
+            reason = 'The required material is recorded as pending for a later action.'
+        elif value_state is not FormStatus.MISSING:
+            selection_state = FieldSelectionState.CANDIDATE_NOW
+            reason = 'A value exists and must not be requested again without a reason.'
+        elif self._required_now(definition.code, current_action):
+            selection_state = FieldSelectionState.REQUIRED_NOW
+            reason = 'The field is missing and required for the current safe action.'
+        else:
+            selection_state = FieldSelectionState.CANDIDATE_NOW
+            reason = 'The field is relevant but does not block the current safe action.'
+        return FieldSelectionResult(
+            field_code=definition.code,
+            selection_state=selection_state,
+            value_state=value_state,
+            source=stored.source if stored else None,
+            reason=reason,
+        )
+
+    @staticmethod
+    def _required_now(code: str, action: AgentAction | str | None) -> bool:
+        raw = action.value if isinstance(action, AgentAction) else action
+        normalised = raw.upper() if isinstance(raw, str) else None
+        if normalised in {AgentAction.CREATE_CLAIM.value, AgentAction.CONFIRM.value}:
             return code in {'incident.description', 'incident.occurred_at', 'incident.location'}
-        if action in {AgentAction.ASK.value, 'intake', None}:
+        if normalised in {AgentAction.ASK.value, 'INTAKE'} or normalised is None:
             return code == 'incident.description'
         return False
 
     @staticmethod
     def _police_pending(claim: WorkingClaim) -> bool:
         evidence = claim.form.get('authorities.police_report_reference')
-        return evidence is not None and evidence.status is FormStatus.PENDING_GENERATION
+        return claim.evidence_summary.pending > 0 or (
+            evidence is not None and evidence.status is FormStatus.PENDING_GENERATION
+        )
 
     @staticmethod
     def _work_item_intents(selections: Iterable[FieldSelectionResult]) -> list[dict[str, object]]:
@@ -523,11 +530,9 @@ class BranchRuleEvaluator:
 
     @staticmethod
     def _evidence_intents(claim: WorkingClaim) -> list[dict[str, object]]:
-        return (
-            [{'type': 'pending', 'count': claim.evidence_summary.pending}]
-            if claim.evidence_summary.pending
-            else []
-        )
+        if claim.evidence_summary.pending:
+            return [{'type': 'pending', 'count': claim.evidence_summary.pending}]
+        return []
 
     @staticmethod
     def _interruption(claim: WorkingClaim) -> dict[str, object]:
@@ -541,10 +546,30 @@ class BranchRuleEvaluator:
         return {'control': 'continue'}
 
 
+def claimant_projection_fields(
+    evaluation: BranchEvaluationRecord,
+    registry: BranchRegistrySnapshot | None = None,
+) -> list[FieldSelectionResult]:
+    """Filter an evaluation to claimant-visible, currently permitted fields."""
+
+    active_registry = registry or build_default_registry()
+    definitions = active_registry.field_by_code
+    return [
+        field
+        for field in evaluation.field_selection_results
+        if field.field_code in definitions
+        and definitions[field.field_code].claimant_visible
+        and field.selection_state
+        not in {FieldSelectionState.INACTIVE, FieldSelectionState.SYSTEM_OWNED}
+    ]
+
+
 __all__ = [
+    'BRANCH_RULES_VERSION',
     'BranchRegistrySnapshot',
     'BranchRuleEvaluator',
     'ContentBranch',
     'FieldDefinition',
     'build_default_registry',
+    'claimant_projection_fields',
 ]

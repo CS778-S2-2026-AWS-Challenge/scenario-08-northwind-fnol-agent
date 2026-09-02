@@ -39,6 +39,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import assessor_operation_id, route_assessor
 from backend.services.support import (
@@ -295,6 +296,11 @@ def grant_assessor_consent(
             updated,
             expected_revision=claim.revision,
             idempotency=idempotency,
+            branch_evaluation=build_applied_branch_evaluation(
+                updated,
+                recomputation_reason='external_consent_granted',
+                trigger_source_refs=[consent.consent_ref],
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(

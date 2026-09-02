@@ -162,9 +162,15 @@ and checksums rather than embedding those bytes.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
 - A Branch Evaluation is evidence of a deterministic calculation, not a second Claim State. It
-  records the Claim revision it evaluated and the resulting revision, and is written atomically
-  with an Agent turn when one is present. An evaluation based on an older revision is stale and
-  cannot be applied over newer Claim State.
+  records separate Field Registry and branch-rule versions, rule/source coordinates, the Claim
+  revision it evaluated, and the resulting revision.
+- An applied evaluation is written atomically with the resulting Claim revision for Agent turns,
+  form updates and confirmations, session resume, evidence updates, handoff creation, claimant
+  consent changes, and integration results. An evaluation based on another revision cannot be
+  attached to the mutation.
+- Evaluation identities and payloads are immutable in both fixture and MongoDB repositories. An
+  older record remains audit evidence but is ineligible for a current Dynamic Form projection;
+  later status reporting must not rewrite the original calculation.
 
 ## Session and Resume Invariants
 
