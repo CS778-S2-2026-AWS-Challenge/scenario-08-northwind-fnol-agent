@@ -16,6 +16,7 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -758,6 +759,87 @@ class MongoDBRepository:
             EvidenceRecord,
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
+        )
+
+    def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        if not self._claim_owned(task.claim_id, customer_id):
+            raise KeyError(task.claim_id)
+        existing = self._get(
+            'external_task',
+            task.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        immutable_identity = (
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'integration_source',
+            'created_at',
+        )
+        if existing is not None and (
+            any(getattr(existing, name) != getattr(task, name) for name in immutable_identity)
+            or task.updated_at < existing.updated_at
+        ):
+            raise IdempotencyConflict(task.task_id)
+        self._put(
+            'external_task',
+            task.task_id,
+            task,
+            customer_id=customer_id,
+            claim_id=task.claim_id,
+        )
+
+    def save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+    ) -> None:
+        if not self._claim_owned(link.claim_id, customer_id):
+            raise KeyError(link.claim_id)
+        task = self._get(
+            'external_task',
+            link.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if task is None or task.claim_id != link.claim_id:
+            raise KeyError(link.task_id)
+
+        identifier = f'{link.claim_id}:{link.evidence_id}'
+        existing = self._get(
+            'external_task_evidence_link',
+            identifier,
+            ExternalTaskEvidenceLink,
+            customer_id=customer_id,
+        )
+        if existing is not None and existing != link:
+            raise IdempotencyConflict(link.evidence_id)
+        self._put(
+            'external_task_evidence_link',
+            identifier,
+            link,
+            customer_id=customer_id,
+            claim_id=link.claim_id,
+        )
+
+    def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        return self._list(
+            'external_task',
+            ExternalTaskRecord,
+            {'claim_id': claim_id},
+            'created_at',
+        )
+
+    def list_external_task_evidence_links_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskEvidenceLink]:
+        return self._list(
+            'external_task_evidence_link',
+            ExternalTaskEvidenceLink,
+            {'claim_id': claim_id},
+            'linked_at',
         )
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
 from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
@@ -253,6 +254,29 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
+        raise NotImplementedError
+
+    def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        """Persist current operational state outside shared Claim State."""
+        raise NotImplementedError
+
+    def save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+    ) -> None:
+        """Persist one immutable evidence origin for an external task."""
+        raise NotImplementedError
+
+    def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        """List task records after an internal caller has authorised the claim read."""
+        raise NotImplementedError
+
+    def list_external_task_evidence_links_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskEvidenceLink]:
+        """List task-to-evidence links for an authorised internal projection."""
         raise NotImplementedError
 
     def save_retrieval_bundle(

@@ -273,6 +273,7 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | Session | `ses_01J4Y7RPN8` |
 | Message | `msg_01J4Y7T1KC` |
 | Evidence | `evd_01J4Y7V5QJ` |
+| External task | `tsk_01J4Y7VZ82` |
 | Decision | `dec_01J4Y7W90S` |
 | Handoff | `hnd_01J4Y7XG2C` |
 | Signal | `sig_01J4Y7Z0EH` |
@@ -1684,6 +1685,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 | `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
+| `GET` | `/internal/v1/claims/{claim_id}/external-tasks` | List operational third-party tasks with linked evidence identifiers |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
 | `POST` | `/internal/v1/assessors/route` | Request a rule-authorised assessor action |
 
@@ -1934,6 +1936,49 @@ An evidence-storage outage is reported to the caller as `503`
 rejection, and leaves the claim unchanged. Registering evidence the claimant
 does not yet hold does not touch the object store, so that path keeps working
 during an outage.
+
+### `GET /internal/v1/claims/{claim_id}/external-tasks`
+
+Lists the provider-neutral operational tasks recorded for one Working Claim. The route requires
+integration-service credentials and is not a claimant or browser projection. Each item carries
+the task's claim association, service identity, requested action, integration source, operation
+status, delivery state, bounded failure or provider reference when present, creation and update
+times, and the evidence identifiers mapped to that task.
+
+The query accepts `limit` from 1 to 100, defaulting to 25, and an opaque `cursor`. Results use the
+stable `(created_at, task_id)` ascending order and return the next cursor in `page.next_cursor`.
+Clients must reuse the returned cursor unchanged.
+
+```json
+{
+  "claim_id": "clm_01J4Y7Q2AW",
+  "items": [
+    {
+      "task": {
+        "task_id": "tsk_01J4Y7VZ82",
+        "claim_id": "clm_01J4Y7Q2AW",
+        "service_identity": "vehicle_damage_assessment_routing",
+        "requested_action": "vehicle_damage_assessment",
+        "integration_source": "fixture",
+        "status": "prepared",
+        "delivery": "not_submitted",
+        "delivery_evidence": null,
+        "failure_code": null,
+        "provider_reference": null,
+        "created_at": "2026-09-02T01:01:00Z",
+        "updated_at": "2026-09-02T01:01:00Z"
+      },
+      "evidence_ids": ["evd_01J4Y7V5QJ"]
+    }
+  ],
+  "page": {"next_cursor": null}
+}
+```
+
+The task record stays outside shared Claim State. A fixture task remains labelled `fixture`, and
+the route never converts an unavailable or unverified provider capability into
+`configured_service`. Provider references and delivery evidence are operational fields and must
+not be copied into claimant projections.
 
 ### `POST /internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing`
 

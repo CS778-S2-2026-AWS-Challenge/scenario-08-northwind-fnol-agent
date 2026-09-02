@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -36,6 +37,8 @@ class FixtureRepository(PersistenceRepository):
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
+        self._external_tasks: dict[str, ExternalTaskRecord] = {}
+        self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
         self._staff_actions: dict[str, StaffActionRecord] = {}
@@ -57,6 +60,8 @@ class FixtureRepository(PersistenceRepository):
             'agent_decisions': len(self._decisions),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
+            'external_tasks': len(self._external_tasks),
+            'external_task_evidence_links': len(self._external_task_evidence_links),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
             'staff_actions': len(self._staff_actions),
@@ -71,6 +76,8 @@ class FixtureRepository(PersistenceRepository):
         self._decisions.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
+        self._external_tasks.clear()
+        self._external_task_evidence_links.clear()
         self._retrievals.clear()
         self._review_signals.clear()
         self._staff_actions.clear()
@@ -687,6 +694,59 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim.claim_id] = deepcopy(claim)
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
         self._idempotency[lookup] = idempotency
+
+    def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        if self.get_claim(task.claim_id, customer_id) is None:
+            raise KeyError(task.claim_id)
+        existing = self._external_tasks.get(task.task_id)
+        if existing is not None and existing.claim_id != task.claim_id:
+            raise IdempotencyConflict(task.task_id)
+        immutable_identity = (
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'integration_source',
+            'created_at',
+        )
+        if existing is not None and (
+            any(getattr(existing, name) != getattr(task, name) for name in immutable_identity)
+            or task.updated_at < existing.updated_at
+        ):
+            raise IdempotencyConflict(task.task_id)
+        self._external_tasks[task.task_id] = deepcopy(task)
+
+    def save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+    ) -> None:
+        if self.get_claim(link.claim_id, customer_id) is None:
+            raise KeyError(link.claim_id)
+        task = self._external_tasks.get(link.task_id)
+        if task is None or task.claim_id != link.claim_id:
+            raise KeyError(link.task_id)
+        key = (link.claim_id, link.evidence_id)
+        existing = self._external_task_evidence_links.get(key)
+        if existing is not None and existing != link:
+            raise IdempotencyConflict(link.evidence_id)
+        self._external_task_evidence_links[key] = deepcopy(link)
+
+    def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        tasks = [
+            deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
+        ]
+        return sorted(tasks, key=lambda task: (task.created_at, task.task_id))
+
+    def list_external_task_evidence_links_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskEvidenceLink]:
+        links = [
+            deepcopy(link)
+            for link in self._external_task_evidence_links.values()
+            if link.claim_id == claim_id
+        ]
+        return sorted(links, key=lambda link: (link.linked_at, link.evidence_id, link.task_id))
 
     def save_retrieval_bundle(
         self,
