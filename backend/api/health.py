@@ -41,6 +41,8 @@ def readiness(request: Request) -> ReadinessResponse:
         status=status,
         checks={
             **data_checks,
+            'data_runtime_profile': data_runtime.profile.value,
+            'object_storage_adapter': request.app.state.settings.object_storage_adapter.value,
             'agent': agent_runtime_status,
             'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
