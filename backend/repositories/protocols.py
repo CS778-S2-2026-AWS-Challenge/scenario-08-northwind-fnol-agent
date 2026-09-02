@@ -9,6 +9,7 @@ from backend.domain.external_services import (
 from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
+    BranchEvaluationRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -168,6 +169,21 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         raise NotImplementedError
 
+    def save_branch_evaluation(
+        self,
+        evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        """Persist one claim-scoped branch evaluation without changing Claim State."""
+        raise NotImplementedError
+
+    def list_branch_evaluations(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[BranchEvaluationRecord]:
+        raise NotImplementedError
+
     def get_assessor_routing_operation(
         self,
         operation_id: str,
@@ -232,6 +248,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
         raise NotImplementedError

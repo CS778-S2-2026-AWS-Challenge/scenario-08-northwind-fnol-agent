@@ -8,7 +8,7 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
+method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Evidence metadata,
 External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
@@ -73,6 +73,7 @@ projections, fixtures, and transaction tests change together.
 | Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
+| Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
@@ -115,6 +116,8 @@ and checksums rather than embedding those bytes.
 23. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
+24. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+    order without allowing an evaluation to overwrite Claim State.
 
 ## Development/Test Identity Invariants
 
@@ -158,6 +161,10 @@ and checksums rather than embedding those bytes.
   routing result, and then completes the missing idempotency response.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
+- A Branch Evaluation is evidence of a deterministic calculation, not a second Claim State. It
+  records the Claim revision it evaluated and the resulting revision, and is written atomically
+  with an Agent turn when one is present. An evaluation based on an older revision is stale and
+  cannot be applied over newer Claim State.
 
 ## Session and Resume Invariants
 

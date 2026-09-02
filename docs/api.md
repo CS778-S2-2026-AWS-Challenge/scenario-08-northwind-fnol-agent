@@ -931,11 +931,31 @@ Response `200`:
     "customer_reason": "Please check the incident details before I continue.",
     "customer_next_step": {}
   },
-  "handoff": null
+  "handoff": null,
+  "dynamic_form": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "claim_revision": 3,
+    "registry_version": "vp-1",
+    "selected_family": "motor",
+    "active_branches": ["family.motor", "incident.collision"],
+    "fields": [
+      {
+        "field_code": "incident.occurred_at",
+        "selection_state": "required_now",
+        "value_state": "missing",
+        "source": null,
+        "reason": "Missing and required for the current safe action."
+      }
+    ]
+  }
 }
 ```
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
+
+`dynamic_form` is a claimant-safe projection of the latest branch evaluation. Selection state
+(`required_now`, `candidate_now`, `pending_later`, `inactive`, or `system_owned`) is separate from
+the stored value state. It is omitted only when no branch evaluation exists yet.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 

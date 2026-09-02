@@ -424,6 +424,14 @@ rule and requires Northwind authority.
 
 ## VP Branch Evaluation Contract
 
+The VP contract is implemented in `backend/domain/branch_registry.py` as a checked-in,
+provider-neutral registry snapshot (`vp-1`) and a pure `BranchRuleEvaluator`. The evaluator
+does not call a model, provider SDK, or repository and does not mutate Claim State. It returns
+an evaluation proposal for the current Claim revision. The message service supplies that result
+to the Agent turn context and rejects proposals for inactive or system-owned fields. Persistence
+adapters expose claim-scoped immutable evaluation records; a later integration step may persist
+the record atomically with a turn without changing the evaluator contract.
+
 This section records the agreed contract for the Sprint 3 Validation Prototype branch
 engine. It is the implementation baseline for the complete three-path design; it is not a
 claim that every component below already exists in the repository.

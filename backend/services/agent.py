@@ -8,6 +8,7 @@ from backend.domain.models import (
     AgentAuthority,
     AgentProposalSource,
     AuthorityOutcome,
+    BranchEvaluationResult,
     CustomerNextStep,
     FormSource,
     FormStatus,
@@ -149,6 +150,7 @@ class AgentTurnContext:
     message_text: str | None
     evidence_refs: list[str]
     professional_review_required: bool = False
+    branch_evaluation: BranchEvaluationResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
