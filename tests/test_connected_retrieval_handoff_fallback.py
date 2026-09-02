@@ -133,3 +133,5 @@ def test_retrieval_and_dispatch_outages_fail_closed_without_losing_handoff_conte
     assert recovered.json()['revision'] == 3
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
     assert readiness.status_code == 200
+    assert readiness.json()['checks']['policy'] == 'unavailable'
+    assert readiness.json()['checks']['handoff_dispatch'] == 'using_fixture'
