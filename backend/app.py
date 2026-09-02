@@ -41,7 +41,10 @@ from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
-from backend.services.external_service_entry import resolve_external_service_entry
+from backend.services.external_service_entry import (
+    assert_adapter_matches_entry,
+    resolve_external_service_entry,
+)
 from backend.services.model_agent import GatewayAgent
 
 
@@ -126,9 +129,9 @@ def create_app(
         app.state.agent_runtime_status = 'not_configured'
     app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
-    app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
+    resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     fixture_assessor = resolved_settings.data_runtime_profile is DataRuntimeProfile.FIXTURE
-    app.state.assessor_service_entry = resolve_external_service_entry(
+    assessor_service_entry = resolve_external_service_entry(
         capability_status=(
             RuntimeCapabilityStatus.USING_FIXTURE
             if fixture_assessor
@@ -136,6 +139,15 @@ def create_app(
         ),
         allow_test_fixture=fixture_assessor,
     )
+    # The entry and the adapter are chosen independently above, so the composition
+    # is checked rather than assumed: a runtime that would answer through one
+    # source class while recording another must not assemble at all.
+    assert_adapter_matches_entry(
+        resolved_assessor_adapter.integration_source,
+        assessor_service_entry,
+    )
+    app.state.assessor_service_adapter = resolved_assessor_adapter
+    app.state.assessor_service_entry = assessor_service_entry
     app.state.evidence_storage = bundle.evidence_storage
     app.state.policy_history_adapter = bundle.policy_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()
