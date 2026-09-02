@@ -175,6 +175,8 @@ py -3.12 -m scripts.verify_model_gateway_live
 
 The verifier requires a complete structured response and reports only bounded metadata,
 capabilities, and usage. It never prints the credential or full provider output.
+When the profile is not enabled or the provider call fails, it prints a bounded machine-readable
+failure status and exits non-zero without exposing a traceback or provider response.
 
 ## Custom Protocols
 

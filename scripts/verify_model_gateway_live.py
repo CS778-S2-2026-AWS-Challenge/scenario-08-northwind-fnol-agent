@@ -12,6 +12,7 @@ from backend.core.model_gateway import build_model_gateway
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
+    ModelGatewayError,
     ModelMessage,
     ModelRequest,
     ModelRole,
@@ -19,55 +20,69 @@ from backend.domain.model_gateway import (
 
 
 def main() -> int:
-    settings = Settings.from_environment()
-    if settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
-        raise SystemExit('Set AGENT_RUNTIME_PROFILE=model_gateway before running this command.')
+    try:
+        settings = Settings.from_environment()
+        if settings.agent_runtime_profile is not AgentRuntimeProfile.MODEL_GATEWAY:
+            print('status=live_call_not_run reason=MODEL_GATEWAY_PROFILE_REQUIRED')
+            return 2
 
-    gateway = build_model_gateway(settings)
-    response = gateway.complete(
-        ModelRequest(
-            purpose=settings.model_purpose,
-            prompt_version=settings.model_prompt_version,
-            privacy_class=settings.model_privacy_class,
-            required_capabilities=ModelCapabilities(structured_output=True),
-            messages=[
-                ModelMessage(
-                    role=ModelRole.SYSTEM,
-                    content=(
-                        'You are a Northwind FNOL proposal generator. Return a JSON object '
-                        'with an action and a short customer-safe response. Use only the '
-                        'synthetic incident supplied by the user.'
+        gateway = build_model_gateway(settings)
+        response = gateway.complete(
+            ModelRequest(
+                purpose=settings.model_purpose,
+                prompt_version=settings.model_prompt_version,
+                privacy_class=settings.model_privacy_class,
+                required_capabilities=ModelCapabilities(structured_output=True),
+                messages=[
+                    ModelMessage(
+                        role=ModelRole.SYSTEM,
+                        content=(
+                            'You are a Northwind FNOL proposal generator. Return a JSON object '
+                            'with an action and a short customer-safe response. Use only the '
+                            'synthetic incident supplied by the user.'
+                        ),
                     ),
-                ),
-                ModelMessage(
-                    role=ModelRole.USER,
-                    content=json.dumps(
-                        {
-                            'incident_type': 'motor',
-                            'incident_description': (
-                                'Synthetic rear-end collision; no injury reported.'
-                            ),
-                            'urgency': 'normal',
-                        },
-                        separators=(',', ':'),
+                    ModelMessage(
+                        role=ModelRole.USER,
+                        content=json.dumps(
+                            {
+                                'incident_type': 'motor',
+                                'incident_description': (
+                                    'Synthetic rear-end collision; no injury reported.'
+                                ),
+                                'urgency': 'normal',
+                            },
+                            separators=(',', ':'),
+                        ),
                     ),
-                ),
-            ],
-            response_schema={
-                'type': 'object',
-                'properties': {
-                    'action': {'type': 'string'},
-                    'response': {'type': 'string'},
+                ],
+                response_schema={
+                    'type': 'object',
+                    'properties': {
+                        'action': {'type': 'string'},
+                        'response': {'type': 'string'},
+                    },
+                    'required': ['action', 'response'],
+                    'additionalProperties': False,
                 },
-                'required': ['action', 'response'],
-                'additionalProperties': False,
-            },
+            )
         )
-    )
+    except ModelGatewayError as error:
+        retryable = str(error.retryable).lower()
+        print(f'status=live_call_failed code={error.code.value} retryable={retryable}')
+        return 1
+    except ValueError:
+        print('status=live_call_failed code=configuration retryable=false')
+        return 1
     if response.completion_status is not ModelCompletionStatus.COMPLETE:
-        raise SystemExit('The model endpoint did not return a complete response.')
+        print(
+            f'status=live_call_failed code={response.completion_status.value}_response '
+            'retryable=false'
+        )
+        return 1
     if response.structured_output is None:
-        raise SystemExit('The model endpoint did not return the required structured output.')
+        print('status=live_call_failed code=malformed_response retryable=false')
+        return 1
     print(
         json.dumps(
             {
