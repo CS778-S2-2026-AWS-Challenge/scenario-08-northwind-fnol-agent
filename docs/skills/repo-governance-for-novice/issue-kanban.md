@@ -16,6 +16,11 @@ for, and how they are linked.
   `Code work` Issue Form. Required fields must not be left as placeholders.
   Every issue must declare the behavior it owns, the expected impact area,
   non-goals, affected shared contracts, dependencies, and risk level.
+- **Task-definition record**: task definition, decomposition, boundary changes,
+  and handoffs must leave a durable written record before implementation begins.
+  An Issue body or comment is sufficient for ordinary work; governance, design,
+  architecture, API, and cross-owner decisions must update the applicable
+  current document.
 - **PR**: one coherent repository change plus one valid linked issue. Do not
   open empty placeholder PRs, split work to evade acceptance or review, or use
   a new PR to conceal the unfinished work of an old one.
