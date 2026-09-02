@@ -115,10 +115,10 @@ def _validate_payload(schema: ActionInputSchema, payload: Mapping[str, object]) 
         field.name for field in schema.fields if field.required and field.name not in payload
     )
     if missing:
-        raise AgentActionCommandError(f"Missing action input: {', '.join(missing)}.")
+        raise AgentActionCommandError(f'Missing action input: {", ".join(missing)}.')
     unexpected = sorted(set(payload) - set(fields))
     if not schema.additional_properties and unexpected:
-        raise AgentActionCommandError(f"Unexpected action input: {', '.join(unexpected)}.")
+        raise AgentActionCommandError(f'Unexpected action input: {", ".join(unexpected)}.')
     for name, value in payload.items():
         field = fields.get(name)
         if field is not None and not _matches_type(value, field.value_type):
