@@ -82,11 +82,11 @@ urgent handoff, evidence registration, support transfer, or another safe action 
 
 ## Current Registered Field Coverage
 
-The current implementation recognises these 18 form field codes:
+The current implementation recognises these 19 form field codes:
 
 | Group | Registered fields |
 | --- | --- |
-| Policy and claimant | `policy.policy_number`, `claimant.role`, `claimant.contact_preference` |
+| Policy and claimant | `policy.policy_number`, `claimant.client_number`, `claimant.role`, `claimant.contact_preference` |
 | Incident | `incident.type`, `incident.occurred_at`, `incident.location`, `incident.description`, `incident.injury_or_danger`, `incident.cause` |
 | Loss and parties | `loss.description`, `parties.other_parties` |
 | Authorities | `authorities.police_report_reference`, `authorities.emergency_services_notified` |
@@ -104,6 +104,187 @@ WorkItems, follow-up due time, expiry, and purge status belong to Claim State an
 records.
 They are not automatically claimant-facing FNOL fields and must not be confused with
 the dynamic information collected from the claimant.
+
+## VP Field Directory
+
+This directory is the complete information inventory for the three Sprint 3 Validation
+Prototype paths. It is deliberately broader than the current runtime registry so that
+branch design can distinguish a known product requirement from an implemented field.
+It is not a promise that every row is currently collectable or required for claim creation.
+
+The status values used below are:
+
+| Status | Meaning |
+| --- | --- |
+| `registered` | The field code is accepted by the current backend field registry and may be used by the current bounded runtime path. |
+| `candidate` | The information belongs in the VP directory, but its field code or consumer contract is not yet registered. It requires a later shared-contract change before runtime use. |
+| `record` | The information is owned by a separate Claim State, Evidence, Handoff, consent, or integration record rather than a Dynamic Form field. |
+| `system-owned` | The service, authenticated identity, provider, workflow, or staff supplies it; it must not be collected as an ordinary claimant question. |
+
+`Common` means that the information may be relevant to all three paths. It does not mean
+that the field is globally mandatory. `Conditional` means that an incident, participant,
+safety, authority, evidence, or support fact must activate it first.
+
+### Common FNOL fields
+
+These fields form the shared baseline from which each path-specific branch starts.
+
+| Field code | Meaning | Class | Status | Source and confirmation boundary |
+| --- | --- | --- | --- | --- |
+| `claimant.client_number` | Authenticated customer reference | Common, system-owned | `registered` | Authenticated identity; never ask the claimant to re-enter it when available |
+| `claimant.role` | Relationship of reporter to the policyholder or incident | Common | `registered` | Claimant statement or authenticated context; confirm when authority is material |
+| `claimant.contact_preference` | Preferred contact channel | Common | `registered` | Claimant choice; explicit consent may be required for a channel |
+| `policy.policy_number` | Policy reference supplied for lookup | Common | `registered` | Claimant or policy lookup; provider result remains source-linked |
+| `policy.product` | Product or claim-family product match | Common, system/provider-owned | `candidate` | Structured policy lookup or controlled classification; do not infer coverage from the label |
+| `incident.type` | Broad incident family or type | Common | `registered` | Claimant statement or bounded classification proposal; material ambiguity requires clarification |
+| `incident.occurred_at` | Date and time of loss or occurrence | Common | `registered` | Claimant statement, evidence, or system-normalised time; preserve uncertainty |
+| `incident.location` | Place where the incident occurred | Common | `registered` | Claimant statement; confirm only when ambiguity affects routing or safety |
+| `incident.description` | Claimant's natural account of what happened | Common | `registered` | Always retain original message provenance; never replace it with a model summary |
+| `incident.cause` | Initial stated or proposed cause | Common | `registered` | Claimant statement or proposed interpretation; do not turn a hypothesis into a conclusion |
+| `incident.injury_or_danger` | Injury, continuing danger, or immediate safety concern | Common, conditional | `registered` | Explicit claimant statement; safety interruption takes precedence over ordinary intake |
+| `loss.description` | What was damaged, lost, stolen, or otherwise affected | Common | `registered` | Claimant statement; may contain several items or areas in one message |
+| `parties.other_parties` | Whether another person, vehicle, or organisation is involved | Common, conditional | `registered` | Claimant statement; detailed party data belongs to a later approved structure |
+| `authorities.emergency_services_notified` | Whether emergency services were contacted | Common, conditional | `registered` | Claimant statement or verified service result; never claim contact without confirmation |
+| `declaration.factual_declaration` | Claimant declaration that the supplied account is accurate to the best of their knowledge | Common, customer decision | `candidate` | Explicit claimant action; not implied by confirming an individual field |
+| `consent.sharing_scope` | Data and purpose approved for an external participant | Common, customer decision | `candidate` | Explicit consent record; scope must name the permitted fields and recipient |
+| `claim.next_action` | Current safe next step and responsible party | Common, system-owned | `record` | Derived from Claim State and WorkItems; not an ordinary claimant form field |
+| `claim.lifecycle_state` | Draft, waiting, handoff, ready-to-create, created, or other lifecycle state | Common, system-owned | `record` | Authoritative Claim State; Dynamic Form must not redefine it |
+| `evidence.summary` | Aggregate evidence availability and outstanding materials | Common, system-owned | `record` | Evidence records and WorkItems; individual files are not embedded in the form |
+
+### Motor path field set
+
+The motor path includes the common baseline plus vehicle, driver, road, participant,
+authority, and mobility information. Rows marked `record` remain separate records even
+when the motor branch makes them relevant.
+
+| Field code | Meaning | Class | Status | Source and confirmation boundary |
+| --- | --- | --- | --- | --- |
+| `vehicle.registration` | Registration or plate identifier | Motor | `registered` | Claimant statement or policy/vehicle lookup; confirm before an external request |
+| `vehicle.make` | Vehicle manufacturer | Motor | `candidate` | Claimant statement or authorised lookup |
+| `vehicle.model` | Vehicle model | Motor | `candidate` | Claimant statement or authorised lookup |
+| `vehicle.year` | Vehicle model year | Motor | `candidate` | Claimant statement or authorised lookup |
+| `vehicle.use` | Personal, business, commuting, or other use | Motor | `candidate` | Claimant statement; do not infer policy use from the incident description |
+| `vehicle.damage_description` | Visible damage to the insured vehicle | Motor | `registered` | Claimant statement, image proposal, or staff observation; image extraction remains proposed |
+| `vehicle.drivable` | Whether the vehicle can be safely driven | Motor | `registered` | Claimant statement; safety-sensitive ambiguity requires clarification |
+| `vehicle.towing_location` | Location to which the vehicle was or should be towed | Motor, conditional | `candidate` | Claimant or verified towing result; only activate when towing is needed |
+| `driver.identity` | Driver identity | Motor, conditional | `candidate` | Claimant or authorised record; subject to privacy and authority checks |
+| `driver.contact` | Driver contact details | Motor, conditional | `candidate` | Claimant or authorised record; collect only for an active participant need |
+| `driver.policy_relationship` | Driver relationship to the policyholder | Motor, conditional | `candidate` | Claimant statement or policy lookup; material uncertainty may require review |
+| `driver.licence_status` | Bounded licence status relevant to the report | Motor, conditional | `candidate` | Claimant or authorised staff; not a coverage or liability decision |
+| `other_vehicle.description` | Other vehicle make, model, registration, or damage summary | Motor, conditional | `candidate` | Claimant statement or evidence; detailed third-party data requires a shared contract |
+| `other_party.contact` | Contact details for another involved party | Motor, conditional | `candidate` | Claimant statement; claimant consent and privacy scope apply |
+| `witness.exists` | Whether a witness exists | Motor, conditional | `candidate` | Claimant statement |
+| `witness.contact` | Witness contact details | Motor, conditional | `candidate` | Claimant statement; collect only when needed for the next action |
+| `road.direction_of_travel` | Direction or lane context | Motor, conditional | `candidate` | Claimant statement; do not infer from a map or image without a governed source |
+| `road.condition` | Road surface or traffic condition | Motor, conditional | `candidate` | Claimant statement or cited evidence |
+| `weather.condition` | Weather or visibility condition | Motor, conditional | `candidate` | Claimant statement or cited evidence |
+| `authorities.police_report_status` | Whether Police reporting is not started, pending, supplied, or unavailable | Motor, conditional | `candidate` | Claimant statement or authority result; status is not proof of liability |
+| `authorities.police_report_reference` | Police file or report reference | Motor, conditional | `registered` | Claimant or verified Police result; pending generation remains explicit |
+| `authorities.emergency_services_notified` | Emergency service notification status | Motor, conditional | `registered` | Shared field; only active when safety facts require it |
+| `motor.repairer_preference` | Preferred repairer or repair route | Motor, conditional | `candidate` | Claimant choice or staff decision; does not itself authorise a referral |
+
+### Home path field set
+
+The home path includes the common baseline plus property, occupancy, habitability,
+mitigation, and affected-area information.
+
+| Field code | Meaning | Class | Status | Source and confirmation boundary |
+| --- | --- | --- | --- | --- |
+| `property.address` | Address of the affected property | Home | `registered` | Claimant statement or authorised policy lookup |
+| `property.affected_areas` | Rooms, structures, or areas affected | Home | `registered` | Claimant statement; retain multiple areas without collapsing them |
+| `property.occupancy_status` | Whether the property is occupied, vacant, or partly occupied | Home, conditional | `candidate` | Claimant statement; activate when safety or mitigation depends on occupancy |
+| `property.habitability_status` | Whether the property remains safely habitable | Home, conditional | `candidate` | Claimant statement; safety ambiguity takes precedence over ordinary intake |
+| `property.damage_description` | Description of building or fixture damage | Home | `candidate` | Claimant statement, image proposal, or staff observation |
+| `property.cause_source` | Water, fire, weather, impact, or other initial cause source | Home | `candidate` | Claimant statement or cited service result; no coverage conclusion |
+| `property.emergency_repair_needed` | Whether urgent mitigation or repair is needed | Home, conditional | `candidate` | Claimant statement or staff assessment; may create a WorkItem |
+| `property.utilities_status` | Whether electricity, water, gas, or another utility is affected | Home, conditional | `candidate` | Claimant statement; collect only when relevant to safety or mitigation |
+| `property.temporary_accommodation_needed` | Whether temporary accommodation is needed | Home, conditional | `candidate` | Claimant statement; creates a follow-up or professional-work item, not an automatic entitlement |
+| `property.owner_or_tenant` | Occupancy or ownership relationship | Home, conditional | `candidate` | Claimant statement or policy record; use only for an authorised purpose |
+| `home.mitigation_actions_taken` | Safe actions already taken to reduce further loss | Home, conditional | `candidate` | Claimant statement; never request unsafe action |
+| `home.contractor_contact` | Contractor or emergency repair contact | Home, conditional | `candidate` | Claimant statement or staff record; external sharing requires consent |
+| `home.weather_event` | Weather event associated with the loss | Home, conditional | `candidate` | Claimant statement or cited knowledge/service result |
+
+### Contents path field set
+
+The contents path includes the common baseline plus item, ownership, valuation,
+purchase-evidence, and theft/discovery information. Item evidence remains an Evidence
+record and is not reduced to a free-text form field.
+
+| Field code | Meaning | Class | Status | Source and confirmation boundary |
+| --- | --- | --- | --- | --- |
+| `contents.item_description` | Description of each affected item | Contents | `candidate` | Claimant statement; support multiple items and preserve item grouping |
+| `contents.item_category` | Category such as electronics, furniture, clothing, or jewellery | Contents | `candidate` | Claimant statement or controlled classification proposal |
+| `contents.item_quantity` | Number of affected items | Contents | `candidate` | Claimant statement; do not infer quantity from a singular phrase |
+| `contents.item_brand` | Brand or manufacturer | Contents | `candidate` | Claimant statement or evidence proposal |
+| `contents.item_model` | Model or product identifier | Contents | `candidate` | Claimant statement or evidence proposal |
+| `contents.item_serial_number` | Serial or unique item identifier | Contents, conditional | `candidate` | Claimant statement or evidence; collect only when useful for identification |
+| `contents.purchase_date` | Approximate purchase date | Contents | `candidate` | Claimant statement or receipt; preserve approximate dates |
+| `contents.purchase_source` | Retailer or source of purchase | Contents, conditional | `candidate` | Claimant statement or receipt |
+| `contents.ownership_status` | Ownership or responsibility for the item | Contents | `candidate` | Claimant statement or policy record; material conflict requires review |
+| `contents.estimated_value` | Initial claimant estimate of value | Contents | `candidate` | Claimant statement; an estimate is not an approved settlement value |
+| `contents.replacement_needed` | Whether replacement is requested or relevant | Contents, conditional | `candidate` | Claimant choice; does not authorise payment or coverage |
+| `contents.receipt_available` | Whether purchase evidence is available | Contents, conditional | `candidate` | Claimant statement; absence should create pending evidence, not erase the item |
+| `contents.proof_of_ownership` | Available ownership evidence references | Contents, conditional | `record` | Evidence metadata and protected objects; claimant sees only safe status |
+| `contents.discovery_at` | When loss, theft, or damage was discovered | Contents, conditional | `candidate` | Claimant statement; distinguish occurrence time when unknown |
+| `contents.entry_or_theft_context` | Bounded description of entry, theft, or loss context | Contents, conditional | `candidate` | Claimant statement; Police and fraud decisions remain outside the field |
+| `contents.police_report_status` | Police report state for theft or burglary | Contents, conditional | `candidate` | Claimant statement or authority result |
+| `contents.police_report_reference` | Police reference for theft or burglary | Contents, conditional | `candidate` | Claimant or verified Police result; pending generation remains explicit |
+
+### Cross-path conditional records
+
+These records can attach to any path when the facts activate them. They are listed here
+to prevent each path from inventing a separate representation.
+
+| Record or field | Activation signal | Owner | Status | Boundary |
+| --- | --- | --- | --- | --- |
+| `evidence.items[]` | Image, document, receipt, Police report, estimate, or other material is supplied or expected | Evidence subsystem | `record` | Preserve metadata, provenance, lifecycle, protected object reference, and extraction proposals separately |
+| `evidence.pending_generation` | A document is expected but has not yet been generated | Evidence subsystem | `record` | Create a pending WorkItem; do not block unrelated safe work |
+| `handoff.request` | Human-support, urgency, accessibility, or professional-review condition | Handoff subsystem | `record` | Transfer confirmed facts, sources, gaps, responsibility, and requested action |
+| `review.signal` | Material conflict, coverage ambiguity, or other approved review trigger | Review subsystem | `record` | Internal-only proposal; never expose fraud or risk conclusions to the claimant |
+| `external.consent` | A third-party request needs claimant-approved sharing | Integration subsystem | `record` | Store purpose, recipient, permitted fields, actor, and lifecycle |
+| `external.request` | A repairer, assessor, Police, or other participant request is prepared | Integration subsystem | `record` | Track preparation, authority, submission, result, verification, reconciliation, and failure |
+| `follow_up.task` | A later customer, staff, or external action is required | Workflow subsystem | `record` | Record responsible party, due time, attempts, and outcome; do not make it a form field |
+
+## Common Fields and Branch Differences
+
+The directory produces the following branch structure:
+
+| Layer | Common to all three paths | Motor additions | Home additions | Contents additions |
+| --- | --- | --- | --- | --- |
+| Identity and policy | Claimant role/contact, policy reference, product match | — | — | — |
+| Incident | Type, occurrence time, location, natural description, initial cause, safety signal | Road/vehicle context | Property/occupancy context | Item/loss context |
+| Loss | Loss description, other-party signal, emergency-service status | Vehicle damage and drivability | Building damage, affected areas, habitability and mitigation | Item catalogue, ownership, value and purchase evidence |
+| Conditional authority | Police, witness, injury, evidence, consent, handoff, review and external records | Police/driver/other vehicle branches | Emergency repair/utility/accommodation branches | Theft/discovery/Police branches |
+| Operational records | Claim lifecycle, next action, evidence summary, handoff, WorkItems and integrations | Same shared records | Same shared records | Same shared records |
+
+The shared baseline must be collected or reused before path-specific questioning, but only
+the current action's required fields become `required_now`. A motor claim must not ask
+home-only questions, and a contents claim must not ask vehicle-only questions, unless a
+supported multi-branch incident activates the additional dimension.
+
+## VP Branch Decision Matrix
+
+The following matrix is the first executable design target for #384. It defines what a
+published rule may activate; it does not claim that the current runtime already evaluates
+all rows.
+
+| Branch | Trigger evidence | Activate fields/records | Exit or correction | Required-now guidance |
+| --- | --- | --- | --- | --- |
+| `family.motor` | Claimant describes a vehicle or road incident, or an authorised lookup identifies motor context | Motor registered fields plus motor candidate set; activate `vehicle.*` and relevant participant/evidence records | Explicit correction to home/contents or a conflicting authoritative lookup suspends motor candidates while preserving source history | Ask only fields needed for safe mobility, claim preparation, or the current requested action |
+| `family.home` | Claimant describes damage to a building, home, fixture, or property area | Home registered fields plus home candidate set; activate `property.*` and mitigation records as supported | Explicit correction to motor/contents or conflicting authoritative lookup suspends home candidates | Ask location, affected area, safety/habitability, or mitigation fields only when they unblock the next safe action |
+| `family.contents` | Claimant describes lost, stolen, or damaged belongings or individual items | Contents candidate set plus item evidence records; activate theft/Police branch only when supported | Explicit correction to home/motor or conflicting authoritative lookup suspends contents candidates without deleting item facts | Ask item identity, quantity, ownership, or evidence only when needed for the current action |
+| `incident.collision` | Impact, crash, rear-end, or collision wording | `incident.type`, parties, vehicle/road fields, possible Police/evidence branches | Correction to non-collision cause exits collision branch and recalculates candidates | Do not ask road or other-party detail unless it affects the current action |
+| `participant.other_party` | Another person, vehicle, property owner, or organisation is mentioned | Other-party and consent records; motor may add `other_vehicle.*` | Claimant says no other party or corrects the account | Ask only contact or identity needed for an authorised next step |
+| `authority.police` | Police report, theft, burglary, authority attendance, or pending report is mentioned | Police status/reference and evidence WorkItem | Police involvement is corrected or evidence is verified as not applicable | Pending Police generation remains a later WorkItem and does not block unrelated safe progress |
+| `safety.injury_or_danger` | Explicit injury, continuing danger, or emergency condition | Safety field, urgent handoff, emergency-service record, and bounded response | Safety signal is corrected by claimant or authorised staff; preserve the original statement and decision history | Interrupt ordinary questions; do not wait for the complete form |
+| `evidence.pending` | Required or expected material is missing, incomplete, unofficial, or not yet generated | Evidence record and pending WorkItem | Evidence arrives, is rejected, or is no longer needed | Mark responsibility and next step; do not make unrelated fields mandatory |
+| `support.human` | Human-support request, repeated request, distress, or accessibility need | Handoff record and claimant-safe status; preserve current form and messages | Staff resolves/cancels handoff or claimant withdraws request | Apply the configured first-request rule; repeated/urgent/accessibility requests transfer immediately |
+| `review.professional` | Material conflict, coverage ambiguity, or approved review signal | Internal review record and structured handoff packet | Staff records a decision or resolves the conflict | Do not convert the signal into a claimant-visible conclusion |
+
+Branch activation is additive: one claim may be `family.motor + incident.collision +
+participant.other_party + authority.police + evidence.pending` at the same time. A later
+correction recalculates the active form and candidate questions, but does not erase the
+original account, source references, evidence history, or staff decisions.
 
 ## Content Branch Model
 
