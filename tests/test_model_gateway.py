@@ -2057,3 +2057,14 @@ def test_endpoint_credentials_are_rejected_as_configuration() -> None:
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert 'embedded' not in str(captured.value)
     assert 'secret' not in str(captured.value)
+
+
+@pytest.mark.parametrize('credential_name', ['MODEL-KEY', 'MODEL KEY', 'MODEL=KEY'])
+def test_invalid_credential_environment_names_fail_closed(
+    credential_name: str,
+) -> None:
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway_config(credential_environment_variable=credential_name)
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert credential_name not in str(captured.value)
