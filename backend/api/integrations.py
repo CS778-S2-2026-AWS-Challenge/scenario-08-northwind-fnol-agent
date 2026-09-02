@@ -1,10 +1,12 @@
+import logging
 from typing import cast
 
-from fastapi import APIRouter, Depends, Header, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_integration_service
+from backend.domain.external_task_api import ExternalTaskListResponse
 from backend.domain.knowledge import (
     KnowledgeRetriever,
     KnowledgeSearchRequest,
@@ -26,11 +28,13 @@ from backend.domain.retrieval import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import complete_evidence_processing
+from backend.services.external_tasks import list_external_tasks
 from backend.services.integrations import create_external_claim, route_assessor
 from backend.services.knowledge_search import search_knowledge
 from backend.services.retrieval import search_claim_history, search_policy
 
 router = APIRouter(prefix='/internal/v1', tags=['internal-integrations'])
+logger = logging.getLogger(__name__)
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -51,6 +55,46 @@ def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
 
 def knowledge_retriever_for(request: Request) -> KnowledgeRetriever:
     return cast(KnowledgeRetriever, request.app.state.knowledge_retriever)
+
+
+@router.get('/claims/{claim_id}/external-tasks', response_model=ExternalTaskListResponse)
+def read_external_tasks_integration(
+    claim_id: str,
+    request: Request,
+    _principal: Principal = Depends(require_integration_service),
+    limit: int = Query(default=25, ge=1),
+    cursor: str | None = Query(default=None),
+) -> ExternalTaskListResponse:
+    """List one claim's operational external tasks for an integration service.
+
+    Args:
+        claim_id: Working Claim whose external tasks are requested.
+        request: Authenticated HTTP request carrying the correlation identifier.
+        _principal: Verified integration-service principal supplied by FastAPI.
+        limit: Requested page size; values above 100 are truncated.
+        cursor: Opaque cursor returned by an earlier list response.
+
+    Returns:
+        One stable page of task records with mapped evidence identifiers.
+
+    Raises:
+        ApiError: The claim or cursor is unavailable or invalid.
+    """
+    logger.info(
+        'external_tasks.list',
+        extra={
+            'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+            'claim_id': claim_id,
+            'limit': min(limit, 100),
+            'cursor_supplied': cursor is not None,
+        },
+    )
+    return list_external_tasks(
+        repository_for(request),
+        claim_id,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.post('/knowledge/search', response_model=KnowledgeSearchResponse)

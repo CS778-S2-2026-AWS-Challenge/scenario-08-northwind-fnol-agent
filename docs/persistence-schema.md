@@ -9,8 +9,9 @@ this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
 method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
-Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
-Idempotency records. Mock-backed tests verify document mapping, ownership filters,
+External Task and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
+Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
+document mapping, ownership filters,
 relationship checks, revision conflicts, and mutation ordering. The local replica-set smoke
 verifies real multi-document writes, restart recovery, and stale-revision refusal. The additional
 shared transaction-boundary hardening in PR #288 remains a merge dependency and is not duplicated
@@ -42,10 +43,13 @@ collection names, table names, partition keys, indexes, bucket keys, vector-inde
 provider payloads, or SDK types.
 
 The TurnPlan, namespaced ActionEnvelope, WorkItem, Model Profile, and complete external
-request lifecycle described below are target logical contracts. The current persistence
-implementation still stores the legacy Agent Decision shape and must not be represented
-as supporting the target records until migrations, repository methods, API projections,
-fixtures, and transaction tests change together.
+request lifecycle described below are target logical contracts. The implemented external-task
+slice stores the task's claim, service/action, source class, operation and delivery state,
+failure/provider reference, timestamps, and one immutable originating task per evidence item. It
+does not yet store the later request, attempt, result, verification, or reconciliation records.
+The current persistence implementation still stores the legacy Agent Decision shape and must not
+be represented as supporting those target records until migrations, repository methods, API
+projections, fixtures, and transaction tests change together.
 
 ## Logical Record Groups
 
@@ -105,6 +109,8 @@ and checksums rather than embedding those bytes.
     browser-supplied customer identifier to alter the authenticated principal.
 22. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
+23. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+    each task to its single-origin evidence links without exposing another Claim.
 
 ## Development/Test Identity Invariants
 
@@ -287,6 +293,13 @@ and checksums rather than embedding those bytes.
   until non-submission is confirmed or an idempotent replay is proven safe.
 - An external response cannot mutate Claim State until provenance, request linkage,
   schema, current revision, field conflicts, and required authority are validated.
+- An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
+  integration source, status, and timestamps are stored with the claim association. A
+  task keeps its original claim, service, action, source class, and creation time across status
+  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
+  task-to-evidence link is accepted only when the named Evidence record exists under the same
+  claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
+  another claim; repeated material cannot acquire a second external origin.
 
 ## Configuration and Control Plane Invariants
 
