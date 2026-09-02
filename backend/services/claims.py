@@ -2,7 +2,6 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.intake import next_controlled_intake_step
@@ -11,7 +10,6 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     ClaimantClaim,
-    ClaimantHandoff,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -43,9 +41,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.evidence_visibility import claimant_visible_evidence
-from backend.services.external_services import claimant_assessor_action
-from backend.services.handoffs import claimant_handoff
+from backend.services.claim_projections import claimant_claim_projection
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -69,60 +65,6 @@ def _session_not_found() -> ApiError:
         status_code=404,
         code='RESOURCE_NOT_FOUND',
         message='The session was not found.',
-    )
-
-
-def _claimant_form(
-    repository: PersistenceRepository,
-    claim: WorkingClaim,
-) -> dict[str, StructuredFormField]:
-    """Keep field provenance but never expose internal retrieval identifiers to a claimant."""
-
-    internal_refs = {
-        record.retrieval_id
-        for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
-    }
-    if not internal_refs:
-        return claim.form
-    projected: dict[str, StructuredFormField] = {}
-    for field_code, fact in claim.form.items():
-        visible_refs = [ref for ref in fact.source_refs if ref not in internal_refs]
-        projected[field_code] = (
-            fact
-            if len(visible_refs) == len(fact.source_refs)
-            else fact.model_copy(update={'source_refs': visible_refs})
-        )
-    return projected
-
-
-def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
-    claimant_evidence = claimant_visible_evidence(
-        repository.list_evidence(claim.claim_id, claim.customer_id)
-    )
-    handoff: ClaimantHandoff | None = None
-    if claim.active_session_id is not None:
-        # Claimant receives only the public lifecycle state, never staff routing data.
-        open_handoffs = [
-            item
-            for item in repository.list_handoffs(claim.claim_id, claim.customer_id)
-            if item.status.value not in {'resolved', 'cancelled'} and item.support_need is not None
-        ]
-        if open_handoffs:
-            active = open_handoffs[-1]
-            handoff = claimant_handoff(active)
-    return ClaimantClaim(
-        claim_id=claim.claim_id,
-        revision=claim.revision,
-        incident_type=claim.incident_type,
-        workflow_state=claim.claim_state.workflow_state,
-        form=_claimant_form(repository, claim),
-        evidence_summary=evidence_summary_for(claimant_evidence),
-        external_claim=claim.external_claim,
-        external_service_action=claimant_assessor_action(repository, claim),
-        customer_next_step=claim.customer_next_step,
-        handoff=handoff,
-        created_at=claim.created_at,
-        updated_at=claim.updated_at,
     )
 
 
@@ -185,7 +127,7 @@ def start_claim(
                 retryable=True,
             )
         return CreateClaimResponse(
-            claim=_claimant_claim(repository, claim),
+            claim=claimant_claim_projection(repository, claim),
             session=_claimant_session(session, claim.customer_next_step),
         )
 
@@ -229,7 +171,7 @@ def start_claim(
         )
     )
     return CreateClaimResponse(
-        claim=_claimant_claim(repository, claim),
+        claim=claimant_claim_projection(repository, claim),
         session=_claimant_session(session, next_step),
     )
 
@@ -240,7 +182,7 @@ def get_claim(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _claim_not_found()
-    return _claimant_claim(repository, claim)
+    return claimant_claim_projection(repository, claim)
 
 
 def list_claims(

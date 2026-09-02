@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
@@ -304,10 +305,11 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
         f'/api/v1/claims/{claim_id}/evidence',
         headers=auth_headers,
     ).json()
+    internal_sentinel = 'HISTORY_INCONSISTENCY_REVIEW'
 
     assert staff['claim_state']['fraud_signal'] == 'review_required'
     assert staff['route'] == 'professional_review'
-    assert staff['signals']
+    assert staff['signals'][0]['code'] == internal_sentinel
     assert any(message['visibility'] == 'internal_only' for message in staff['messages'])
     assert 'claim_state' not in claimant_claim
     assert 'route' not in claimant_claim
@@ -318,6 +320,15 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
         message['message_id'] != 'msg_internal_note' for message in claimant_messages['items']
     )
     assert 'provenance' not in claimant_evidence['items'][0]
+    claimant_projection = json.dumps(
+        {
+            'claim': claimant_claim,
+            'messages': claimant_messages,
+            'evidence': claimant_evidence,
+        }
+    )
+    assert internal_sentinel not in claimant_projection
+    assert 'Internal review note.' not in claimant_projection
 
 
 def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_safe(
