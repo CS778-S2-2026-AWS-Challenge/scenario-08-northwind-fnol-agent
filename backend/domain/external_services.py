@@ -1408,3 +1408,121 @@ def assert_task_transition_is_permitted(
                     f'{current.provider_reference} already, so accepting it on the same '
                     'reference records no reconciliation.'
                 )
+
+
+class TaskHasNotFailedError(ValueError):
+    """A task that has not failed has no failure continuation to describe."""
+
+
+class ExternalTaskContinuation(str, Enum):
+    """What a failed third-party task means for whoever is waiting on it.
+
+    These are internal names, not a response contract. An earlier revision of this
+    head added the same three outcomes to `ClaimantExternalServiceStatus`, which is
+    published in `docs/api.md` and the OpenAPI snapshot. `docs-contract.md` requires
+    an API contract change to update its claimant and staff consumers in the same
+    pull request, and no consumer exists yet, so the vocabulary stays here until the
+    card that renders it can publish it alongside its own consumer.
+    """
+
+    RETRY_PERMITTED_BY_THE_FAILURE = 'retry_permitted_by_the_failure'
+    AWAITING_RECONCILIATION = 'awaiting_reconciliation'
+    AWAITING_REVIEW = 'awaiting_review'
+
+
+class ExternalTaskContinuationOutcome(ContractModel):
+    """What a failure means, and whose turn it is, with no claim-level permission.
+
+    `failure_permits_another_attempt` is deliberately narrow and deliberately named
+    for what it is. It reports only that the recovery matrix marks *this failure*
+    retryable. It is not permission to send again: that depends on the claim as it
+    stands now — its workflow state, whether a handoff is open, whether consent is
+    still current — and `claimant_assessor_action` already owns that decision with
+    the information to make it. A record of a past failure cannot know any of it.
+
+    Reporting the two separately would be worse than reporting one. An earlier
+    revision of this head returned a `can_request` flag derived from the failure
+    alone, which would have told a claimant they could ask again after their claim
+    had moved to professional review. The flag was not wrong about the failure; it
+    was answering a question the failure cannot answer.
+
+    There is deliberately no responsible party here either, for the same reason one
+    step removed. `docs/claim-creation-boundary.md` maps a failure and its delivery
+    to an operation status, a recovery path, and retryability. It does not map a
+    recovery path to whoever is responsible now, and it could not: a task that the
+    matrix marks retryable may sit under a claim in professional review or with an
+    open handoff, where the next move is not the claimant's. Whose turn it is
+    depends on the live claim, and belongs where that is available.
+    """
+
+    continuation: ExternalTaskContinuation
+    failure_permits_another_attempt: bool
+
+
+_CONTINUATION_BY_RECOVERY = {
+    ExternalTaskRecovery.RETRY_SAME_OPERATION: (
+        ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
+        True,
+    ),
+    ExternalTaskRecovery.RECONCILE_BEFORE_RETRY: (
+        ExternalTaskContinuation.AWAITING_RECONCILIATION,
+        False,
+    ),
+    ExternalTaskRecovery.REVIEW_REQUIRED: (
+        ExternalTaskContinuation.AWAITING_REVIEW,
+        False,
+    ),
+}
+
+
+def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContinuationOutcome:
+    """Say what a failed third-party task means for whoever is waiting on it.
+
+    The failure itself is already preserved: `ExternalTaskRecord` records the
+    status, the failure class, and whether the request reached the provider, and
+    `list_external_tasks_internal` keeps it on the protected surface. What has been
+    missing is the other half of the card — nothing turns that record into a
+    statement about who acts next.
+
+    The answer is derived from the recovery path rather than from the failure
+    class, because recovery is the part that says whose turn it is.
+    `retry_same_operation` means the failure does not itself bar another attempt;
+    `reconcile_before_retry` means Northwind must first establish what actually
+    happened at the provider, and asking again could duplicate a side effect;
+    `review_required` means a person decides before anything else happens.
+
+    **This grants no permission and names no responsible party**, and the fields say
+    so by being absent. Both depend on the claim as it stands, which this function
+    is not given and could not evaluate from a past failure. It reports only the
+    two things the recovery matrix determines.
+
+    A task that has not failed is refused rather than given a neutral answer. An
+    accepted or still-prepared task has nothing to continue from, and answering
+    for it would let a live request be presented as a failed one.
+
+    Args:
+        task: The failed external task record.
+
+    Returns:
+        The continuation the failure implies, and whether the failure itself bars
+        another attempt.
+
+    Raises:
+        TaskHasNotFailedError: The task is prepared or accepted, so it has not
+            failed and has no continuation.
+    """
+
+    if task.failure_code is None:
+        raise TaskHasNotFailedError(
+            f'{task.task_id}: is {task.status.value} and holds no failure, so it has no '
+            'continuation to describe.'
+        )
+    recovery = classify_external_task_failure(
+        failure_code=task.failure_code,
+        delivery=task.delivery,
+    ).recovery
+    continuation, permits_attempt = _CONTINUATION_BY_RECOVERY[recovery]
+    return ExternalTaskContinuationOutcome(
+        continuation=continuation,
+        failure_permits_another_attempt=permits_attempt,
+    )
