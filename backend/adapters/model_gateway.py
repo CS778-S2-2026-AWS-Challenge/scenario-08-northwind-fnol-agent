@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -39,6 +40,10 @@ class ModelGatewayConfig:
         if url.scheme not in {'http', 'https'} or not url.host or url.userinfo:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         if not self.model.strip() or self.timeout_seconds <= 0:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+        if self.credential_environment_variable is not None and not re.fullmatch(
+            r'[A-Za-z_][A-Za-z0-9_]*', self.credential_environment_variable
+        ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         if (
             self.profile.model_identifier != self.model
