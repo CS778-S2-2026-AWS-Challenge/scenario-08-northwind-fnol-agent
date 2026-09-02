@@ -6,7 +6,6 @@ from pydantic import Field, model_validator
 
 from backend.domain.models import (
     ActorType,
-    ClaimantExternalServiceStatus,
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
@@ -1416,72 +1415,93 @@ class TaskHasNotFailedError(ValueError):
     """A task that has not failed has no failure continuation to describe."""
 
 
-class ClaimantTaskContinuation(ContractModel):
-    """What a claimant is told after a third-party task failed, and what they may do.
+class ExternalTaskContinuation(str, Enum):
+    """What a failed third-party task means for whoever is waiting on it.
 
-    The status and the permission travel together because they are one decision.
-    Returning them separately would let a caller pair `under_review` with
-    permission to send again, which is the case the recovery matrix exists to
-    prevent, and nothing downstream could tell the pair had been mismatched.
-
-    Nothing here identifies the provider or the failure. No provider reference, no
-    delivery evidence, and no failure code: those are internal, and a claimant
-    reading this learns only whose turn it is.
+    These are internal names, not a response contract. An earlier revision of this
+    head added the same three outcomes to `ClaimantExternalServiceStatus`, which is
+    published in `docs/api.md` and the OpenAPI snapshot. `docs-contract.md` requires
+    an API contract change to update its claimant and staff consumers in the same
+    pull request, and no consumer exists yet, so the vocabulary stays here until the
+    card that renders it can publish it alongside its own consumer.
     """
 
-    status: ClaimantExternalServiceStatus
-    can_request: bool
+    RETRY_PERMITTED_BY_THE_FAILURE = 'retry_permitted_by_the_failure'
+    AWAITING_RECONCILIATION = 'awaiting_reconciliation'
+    AWAITING_REVIEW = 'awaiting_review'
+
+
+class ExternalTaskContinuationOutcome(ContractModel):
+    """What a failure means, and whose turn it is, with no claim-level permission.
+
+    `failure_permits_another_attempt` is deliberately narrow and deliberately named
+    for what it is. It reports only that the recovery matrix marks *this failure*
+    retryable. It is not permission to send again: that depends on the claim as it
+    stands now — its workflow state, whether a handoff is open, whether consent is
+    still current — and `claimant_assessor_action` already owns that decision with
+    the information to make it. A record of a past failure cannot know any of it.
+
+    Reporting the two separately would be worse than reporting one. An earlier
+    revision of this head returned a `can_request` flag derived from the failure
+    alone, which would have told a claimant they could ask again after their claim
+    had moved to professional review. The flag was not wrong about the failure; it
+    was answering a question the failure cannot answer.
+    """
+
+    continuation: ExternalTaskContinuation
+    failure_permits_another_attempt: bool
     responsible_party: ResponsibleParty
 
 
 _CONTINUATION_BY_RECOVERY = {
     ExternalTaskRecovery.RETRY_SAME_OPERATION: (
-        ClaimantExternalServiceStatus.RETRY_AVAILABLE,
+        ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
         True,
         ResponsibleParty.CLAIMANT,
     ),
     ExternalTaskRecovery.RECONCILE_BEFORE_RETRY: (
-        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION,
+        ExternalTaskContinuation.AWAITING_RECONCILIATION,
         False,
         ResponsibleParty.NORTHWIND,
     ),
     ExternalTaskRecovery.REVIEW_REQUIRED: (
-        ClaimantExternalServiceStatus.UNDER_REVIEW,
+        ExternalTaskContinuation.AWAITING_REVIEW,
         False,
         ResponsibleParty.CLAIMS_PROFESSIONAL,
     ),
 }
 
 
-def claimant_continuation_for_failed_task(
-    task: ExternalTaskRecord,
-) -> ClaimantTaskContinuation:
-    """Describe a failed third-party task in terms a claimant can act on.
+def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContinuationOutcome:
+    """Say what a failed third-party task means for whoever is waiting on it.
 
     The failure itself is already preserved: `ExternalTaskRecord` records the
     status, the failure class, and whether the request reached the provider, and
     `list_external_tasks_internal` keeps it on the protected surface. What has been
-    missing is the other half of the card: a claimant reading their own claim
-    cannot tell that an attempt failed, or whether the next move is theirs.
+    missing is the other half of the card — nothing turns that record into a
+    statement about who acts next.
 
     The answer is derived from the recovery path rather than from the failure
     class, because recovery is the part that says whose turn it is.
-    `retry_same_operation` means the claimant may ask again;
+    `retry_same_operation` means the failure does not itself bar another attempt;
     `reconcile_before_retry` means Northwind must first establish what actually
     happened at the provider, and asking again could duplicate a side effect;
     `review_required` means a person decides before anything else happens.
 
-    A task that has not failed is refused rather than given a continuation. An
-    accepted or still-prepared task has nothing to continue from, and returning a
-    neutral answer for it would let a caller present a live request as a failed
-    one.
+    **This does not grant permission to send again**, and the field names say so.
+    Whether a further request is allowed depends on the claim as it stands, which
+    this function is not given and could not evaluate from a past failure.
+
+    A task that has not failed is refused rather than given a neutral answer. An
+    accepted or still-prepared task has nothing to continue from, and answering
+    for it would let a live request be presented as a failed one.
 
     Args:
         task: The failed external task record.
 
     Returns:
-        The claimant-safe status, whether a further request is permitted, and
-        whose turn it is.
+        The continuation the failure implies, whether the failure itself bars
+        another attempt, and whose turn it is.
 
     Raises:
         TaskHasNotFailedError: The task is prepared or accepted, so it has not
@@ -1497,9 +1517,9 @@ def claimant_continuation_for_failed_task(
         failure_code=task.failure_code,
         delivery=task.delivery,
     ).recovery
-    status, can_request, responsible_party = _CONTINUATION_BY_RECOVERY[recovery]
-    return ClaimantTaskContinuation(
-        status=status,
-        can_request=can_request,
+    continuation, permits_attempt, responsible_party = _CONTINUATION_BY_RECOVERY[recovery]
+    return ExternalTaskContinuationOutcome(
+        continuation=continuation,
+        failure_permits_another_attempt=permits_attempt,
         responsible_party=responsible_party,
     )

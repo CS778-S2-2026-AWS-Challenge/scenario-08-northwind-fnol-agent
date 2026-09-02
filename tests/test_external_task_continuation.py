@@ -3,20 +3,17 @@ from datetime import UTC, datetime
 import pytest
 
 from backend.domain.external_services import (
-    ClaimantTaskContinuation,
+    ExternalTaskContinuation,
+    ExternalTaskContinuationOutcome,
     ExternalTaskDelivery,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     TaskHasNotFailedError,
-    claimant_continuation_for_failed_task,
     classify_external_task_failure,
+    continuation_for_failed_task,
 )
-from backend.domain.models import (
-    ClaimantExternalServiceStatus,
-    IntegrationSource,
-    ResponsibleParty,
-)
+from backend.domain.models import IntegrationSource, ResponsibleParty
 
 AT = datetime(2026, 9, 2, 10, 0, tzinfo=UTC)
 SERVICE = 'vehicle_damage_assessment_routing'
@@ -70,61 +67,61 @@ def _live_task(status: ExternalTaskOperationStatus) -> ExternalTaskRecord:
 
 
 @pytest.mark.parametrize(
-    ('failure_code', 'delivery', 'status', 'can_request', 'responsible_party'),
+    ('failure_code', 'delivery', 'continuation', 'permits_attempt', 'responsible_party'),
     [
         (
             ExternalTaskFailureCode.TIMEOUT,
             ExternalTaskDelivery.NOT_SUBMITTED,
-            ClaimantExternalServiceStatus.RETRY_AVAILABLE,
+            ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
             ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.TIMEOUT,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.AWAITING_RECONCILIATION,
+            ExternalTaskContinuation.AWAITING_RECONCILIATION,
             False,
             ResponsibleParty.NORTHWIND,
         ),
         (
             ExternalTaskFailureCode.UNAVAILABLE,
             ExternalTaskDelivery.NOT_SUBMITTED,
-            ClaimantExternalServiceStatus.RETRY_AVAILABLE,
+            ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
             ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.UNAVAILABLE,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.RETRY_AVAILABLE,
+            ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE,
             True,
             ResponsibleParty.CLAIMANT,
         ),
         (
             ExternalTaskFailureCode.PARTIAL,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.AWAITING_RECONCILIATION,
+            ExternalTaskContinuation.AWAITING_RECONCILIATION,
             False,
             ResponsibleParty.NORTHWIND,
         ),
         (
             ExternalTaskFailureCode.ACCESS_DENIED,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.UNDER_REVIEW,
+            ExternalTaskContinuation.AWAITING_REVIEW,
             False,
             ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
         (
             ExternalTaskFailureCode.MALFORMED,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.UNDER_REVIEW,
+            ExternalTaskContinuation.AWAITING_REVIEW,
             False,
             ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
         (
             ExternalTaskFailureCode.CONFLICTING,
             ExternalTaskDelivery.SUBMITTED,
-            ClaimantExternalServiceStatus.UNDER_REVIEW,
+            ExternalTaskContinuation.AWAITING_REVIEW,
             False,
             ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
@@ -133,30 +130,30 @@ def _live_task(status: ExternalTaskOperationStatus) -> ExternalTaskRecord:
 def test_the_recovery_path_decides_what_the_claimant_is_told(
     failure_code: ExternalTaskFailureCode,
     delivery: ExternalTaskDelivery,
-    status: ClaimantExternalServiceStatus,
-    can_request: bool,
+    continuation: ExternalTaskContinuation,
+    permits_attempt: bool,
     responsible_party: ResponsibleParty,
 ) -> None:
     """Every row of the recovery matrix reaches the claimant as one consistent answer."""
 
-    continuation = claimant_continuation_for_failed_task(
+    outcome = continuation_for_failed_task(
         _failed_task(failure_code=failure_code, delivery=delivery)
     )
 
-    assert continuation == ClaimantTaskContinuation(
-        status=status,
-        can_request=can_request,
+    assert outcome == ExternalTaskContinuationOutcome(
+        continuation=continuation,
+        failure_permits_another_attempt=permits_attempt,
         responsible_party=responsible_party,
     )
 
 
-def test_only_a_retryable_recovery_permits_another_request() -> None:
-    """The status and the permission cannot disagree, because one decision produces both."""
+def test_only_a_retryable_recovery_leaves_another_attempt_open() -> None:
+    """One decision produces both fields, so the continuation and the flag cannot disagree."""
 
     permitted = {
-        claimant_continuation_for_failed_task(
+        continuation_for_failed_task(
             _failed_task(failure_code=code, delivery=delivery)
-        ).status
+        ).continuation
         for code, delivery in (
             (ExternalTaskFailureCode.TIMEOUT, ExternalTaskDelivery.NOT_SUBMITTED),
             (ExternalTaskFailureCode.TIMEOUT, ExternalTaskDelivery.SUBMITTED),
@@ -166,32 +163,32 @@ def test_only_a_retryable_recovery_permits_another_request() -> None:
             (ExternalTaskFailureCode.MALFORMED, ExternalTaskDelivery.SUBMITTED),
             (ExternalTaskFailureCode.CONFLICTING, ExternalTaskDelivery.SUBMITTED),
         )
-        if claimant_continuation_for_failed_task(
+        if continuation_for_failed_task(
             _failed_task(failure_code=code, delivery=delivery)
-        ).can_request
+        ).failure_permits_another_attempt
     }
 
-    assert permitted == {ClaimantExternalServiceStatus.RETRY_AVAILABLE}
+    assert permitted == {ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE}
 
 
-def test_a_submitted_timeout_does_not_invite_another_request() -> None:
-    """The one case where delivery, not the failure class, decides the claimant's answer."""
+def test_a_submitted_timeout_does_not_leave_another_attempt_open() -> None:
+    """The one case where delivery, not the failure class, decides the answer."""
 
-    not_submitted = claimant_continuation_for_failed_task(
+    not_submitted = continuation_for_failed_task(
         _failed_task(
             failure_code=ExternalTaskFailureCode.TIMEOUT,
             delivery=ExternalTaskDelivery.NOT_SUBMITTED,
         )
     )
-    submitted = claimant_continuation_for_failed_task(
+    submitted = continuation_for_failed_task(
         _failed_task(
             failure_code=ExternalTaskFailureCode.TIMEOUT,
             delivery=ExternalTaskDelivery.SUBMITTED,
         )
     )
 
-    assert not_submitted.can_request is True
-    assert submitted.can_request is False
+    assert not_submitted.failure_permits_another_attempt is True
+    assert submitted.failure_permits_another_attempt is False
 
 
 @pytest.mark.parametrize(
@@ -202,23 +199,23 @@ def test_a_task_that_has_not_failed_has_no_continuation(
     status: ExternalTaskOperationStatus,
 ) -> None:
     with pytest.raises(TaskHasNotFailedError):
-        claimant_continuation_for_failed_task(_live_task(status))
+        continuation_for_failed_task(_live_task(status))
 
 
 def test_the_continuation_carries_nothing_internal() -> None:
-    """A claimant learns whose turn it is, not what the provider did."""
+    """A reader learns whose turn it is, not what the provider did."""
 
     task = _failed_task(
         failure_code=ExternalTaskFailureCode.MALFORMED,
         delivery=ExternalTaskDelivery.SUBMITTED,
     )
 
-    continuation = claimant_continuation_for_failed_task(task)
+    continuation = continuation_for_failed_task(task)
     rendered = continuation.model_dump_json()
 
-    assert set(ClaimantTaskContinuation.model_fields) == {
-        'status',
-        'can_request',
+    assert set(ExternalTaskContinuationOutcome.model_fields) == {
+        'continuation',
+        'failure_permits_another_attempt',
         'responsible_party',
     }
     assert task.delivery_evidence is not None
@@ -226,3 +223,19 @@ def test_the_continuation_carries_nothing_internal() -> None:
     assert task.failure_code is not None
     assert task.failure_code.value not in rendered
     assert task.task_id not in rendered
+
+
+def test_the_outcome_makes_no_claim_level_permission_statement() -> None:
+    """Permission depends on the claim as it stands, which a past failure cannot know.
+
+    An earlier revision of this head returned `can_request`, derived from the failure
+    alone. It would have told a claimant they could ask again after their claim moved
+    to professional review or gained an open handoff, because a failure record knows
+    none of that. The field is named for what it reports, and eligibility stays with
+    `claimant_assessor_action`, which reads the current claim.
+    """
+
+    fields = set(ExternalTaskContinuationOutcome.model_fields)
+
+    assert 'can_request' not in fields
+    assert 'failure_permits_another_attempt' in fields
