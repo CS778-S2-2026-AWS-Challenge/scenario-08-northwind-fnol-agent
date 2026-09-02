@@ -1008,6 +1008,10 @@ class UnboundEvidenceSnapshotError(ValueError):
     """Evidence was recorded after the claim snapshot it would be checked against."""
 
 
+class VerificationPrecedesStateError(ValueError):
+    """A check is dated before some state it read came into being."""
+
+
 def _assert_evidence_belongs_to_snapshot(
     claim: WorkingClaim,
     evidence: Sequence[EvidenceRecord],
@@ -1060,6 +1064,45 @@ def _assert_evidence_belongs_to_snapshot(
                 f'{claim.updated_at.isoformat()} on revision {claim.revision}, so the '
                 'decision cannot be recorded against that revision.'
             )
+
+
+def _latest_state_read(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    links: Sequence[ExternalTaskEvidenceLink],
+    claim: WorkingClaim,
+) -> tuple[str, datetime]:
+    """Name and time of the most recent state the decision depends on.
+
+    The evidence records are deliberately absent. `_assert_evidence_belongs_to_snapshot`
+    has already refused any record newer than the claim, so the claim's own time
+    bounds every one of them and a separate comparison could never be the latest.
+
+    Args:
+        result: The provider result being checked.
+        task: The external task record the result names.
+        links: The evidence-to-task links known for this claim.
+        claim: The claim snapshot the check is made against.
+
+    Returns:
+        A pair of a human-readable description and the time it refers to.
+    """
+
+    latest = ('the result arriving', result.received_at)
+    candidates = [
+        ('the task record being updated', task.updated_at),
+        ('the claim snapshot being written', claim.updated_at),
+    ]
+    named = set(result.evidence_ids)
+    for link in links:
+        if link.evidence_id not in named:
+            continue
+        candidates.append((f'evidence {link.evidence_id} being linked', link.linked_at))
+    for candidate in candidates:
+        if candidate[1] > latest[1]:
+            latest = candidate
+    return latest
 
 
 def _names_conflicting_material(
@@ -1142,6 +1185,15 @@ def verify_external_task_result(
     `_assert_evidence_belongs_to_snapshot` for what that does and does not
     establish.
 
+    A check cannot be dated before the state it read. `checked_at` is compared
+    against the latest of the result's arrival, the task record, the claim snapshot,
+    and the links this result's material reaches it through. A verification stamped
+    at a moment when that state did not yet exist describes a check that could not
+    have happened, and the record would then be a false account of when the claim
+    was examined rather than a merely imprecise one. The evidence records need no
+    separate bound, because none of them can be newer than the claim by the time
+    this comparison is made.
+
     Args:
         result: The unverified provider result to check.
         task: The external task record the result names.
@@ -1171,7 +1223,8 @@ def verify_external_task_result(
         CrossClaimEvidenceError: An evidence record belongs to another claim.
         UnboundEvidenceSnapshotError: An evidence record was written after the
             claim snapshot was read.
-        ValueError: The check is dated before the result arrived.
+        VerificationPrecedesStateError: The check is dated before the result
+            arrived, or before the task, claim, or relevant link it read.
     """
 
     if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
@@ -1187,10 +1240,11 @@ def verify_external_task_result(
     assert_result_matches_task(result, task)
     assert_result_evidence_is_linked(result, links)
     _assert_evidence_belongs_to_snapshot(claim, evidence)
-    if checked_at < result.received_at:
-        raise ValueError(
+    description, latest = _latest_state_read(result, task=task, links=links, claim=claim)
+    if checked_at < latest:
+        raise VerificationPrecedesStateError(
             f'{result.result_id}: cannot be checked at {checked_at.isoformat()}, which is '
-            f'before it arrived at {result.received_at.isoformat()}.'
+            f'before {description} at {latest.isoformat()}.'
         )
 
     verification = _decide_result_verification(result, task=task, evidence=evidence)
