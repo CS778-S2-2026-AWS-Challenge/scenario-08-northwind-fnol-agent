@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.configuration import ValidationRequest
-from backend.services.configuration import validate
+from backend.services.configuration import read_active, validate
 
 
 def _client() -> TestClient:
@@ -103,6 +103,39 @@ def test_admin_boundary_and_revision_errors() -> None:
         assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
 
 
+def test_draft_update_records_version_actor_time_and_changed_fields() -> None:
+    with _client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('change-create'),
+            json={
+                'domain': 'feature',
+                'values': {'enabled': False},
+                'reason': 'Create disabled feature.',
+            },
+        ).json()
+        configuration_id = created['configuration_id']
+
+        updated = client.patch(
+            f'/internal/v1/admin/configurations/{configuration_id}',
+            headers=_post_headers('change-patch', 1),
+            json={'values': {'enabled': True}, 'reason': 'Enable controlled feature.'},
+        )
+
+        assert updated.status_code == 200
+        assert updated.json()['revision'] == 2
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        change = audits[-1]
+        assert change['action'] == 'update_draft'
+        assert change['revision'] == 2
+        assert change['previous_revision'] == 1
+        assert change['actor'] == 'adm_demo'
+        assert change['changed_fields'] == ['reason', 'values']
+        assert change['created_at']
+
+
 def test_plaintext_secret_is_rejected() -> None:
     with _client() as client:
         response = client.post(
@@ -191,6 +224,26 @@ def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
         assert audits[-1]['outcome'] == 'rejected'
 
 
+@pytest.mark.parametrize('profile', ['local_mvp', 'cloudflare', 'mongodb', 'aws'])
+def test_data_profile_rejects_fixture_storage_for_every_external_profile(profile: str) -> None:
+    with _client() as client:
+        response = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'data-profile-mixed-{profile}'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': profile,
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject mixed provider configuration.',
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
+
 def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
     with _client() as client:
         first = client.post(
@@ -251,6 +304,64 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
         )
         assert rolled_back.status_code == 200
         assert rolled_back.json()['rollback_target'] == first_id
+        assert (
+            client.get(f'/internal/v1/admin/configurations/{second_id}', headers=_headers()).json()[
+                'state'
+            ]
+            == 'superseded'
+        )
+        second_audits = client.get(
+            f'/internal/v1/admin/configurations/{second_id}/audit', headers=_headers()
+        ).json()['items']
+        assert second_audits[-1]['action'] == 'supersede'
+        assert second_audits[-1]['changed_fields'] == ['state']
+        rollback_audits = client.get(
+            f'/internal/v1/admin/configurations/{rolled_back.json()["configuration_id"]}/audit',
+            headers=_headers(),
+        ).json()['items']
+        assert rollback_audits[-1]['action'] == 'rollback'
+        assert rollback_audits[-1]['actor'] == 'adm_demo'
+        assert rollback_audits[-1]['previous_revision'] == 3
+        assert rollback_audits[-1]['changed_fields'] == [
+            'effective_time',
+            'previous_version',
+            'rollback_target',
+            'state',
+        ]
+
+
+def test_runtime_reads_only_the_active_published_configuration() -> None:
+    with _client() as client:
+        repository = cast(Any, client.app).state.configuration_repository
+        draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('runtime-draft'),
+            json={'domain': 'feature', 'values': {'enabled': False}, 'reason': 'Draft only.'},
+        ).json()
+
+        with pytest.raises(Exception) as missing:
+            read_active(repository, 'feature')
+        assert getattr(missing.value, 'code', None) == 'ACTIVE_CONFIGURATION_NOT_FOUND'
+
+        published = client.post(
+            f'/internal/v1/admin/configurations/{draft["configuration_id"]}/validate',
+            headers=_post_headers('runtime-publish', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'feature-runtime', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        ).json()
+        later_draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('runtime-later-draft'),
+            json={'domain': 'feature', 'values': {'enabled': True}, 'reason': 'Not published.'},
+        ).json()
+
+        active = read_active(repository, 'feature')
+        assert active.configuration_id == published['configuration_id']
+        assert active.configuration_id != later_draft['configuration_id']
+        assert active.state.value == 'published'
 
 
 def test_normal_validation_supersedes_previous_publication() -> None:
