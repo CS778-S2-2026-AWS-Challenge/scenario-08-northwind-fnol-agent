@@ -208,6 +208,7 @@ def test_internal_external_task_api_maps_material_pages_and_logs(
         assert payload['claim_id'] == claim.claim_id
         assert [item['task']['task_id'] for item in payload['items']] == ['tsk_1', 'tsk_2']
         assert payload['items'][0]['evidence_ids'] == ['evd_external_1']
+        assert payload['items'][0]['request'] is None
         assert payload['items'][0]['task']['integration_source'] == 'fixture'
         assert payload['items'][1]['task']['status'] == 'retryable_failure'
         assert payload['items'][0]['task']['created_at'] is not None

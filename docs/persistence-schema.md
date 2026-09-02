@@ -9,7 +9,7 @@ this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
 method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
-External Task and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
+External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
 relationship checks, revision conflicts, and mutation ordering. The local replica-set smoke
@@ -45,8 +45,11 @@ provider payloads, or SDK types.
 The TurnPlan, namespaced ActionEnvelope, WorkItem, Model Profile, and complete external
 request lifecycle described below are target logical contracts. The implemented external-task
 slice stores the task's claim, service/action, source class, operation and delivery state,
-failure/provider reference, timestamps, and one immutable originating task per evidence item. It
-does not yet store the later request, attempt, result, verification, or reconciliation records.
+failure/provider reference, timestamps, one immutable originating task per evidence item, and
+one `erq_` request per task. The request records its purpose, disclosed field names, independent
+Northwind-authority and claimant-consent references, authorised Claim revision, preparation
+time, first send time, and stable operation identity. It does not yet store the later attempt,
+provider-result, verification, or reconciliation records.
 The current persistence implementation still stores the legacy Agent Decision shape and must not
 be represented as supporting those target records until migrations, repository methods, API
 projections, fixtures, and transaction tests change together.
@@ -68,7 +71,7 @@ projections, fixtures, and transaction tests change together.
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
-| External request | capability and requirement versions, request type, disclosure manifest, consent and authority, idempotency, provider reference, status, verified response, reconciliation result | `claim_id`, `external_request_id` |
+| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
@@ -110,7 +113,8 @@ and checksums rather than embedding those bytes.
 22. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
 23. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
-    each task to its single-origin evidence links without exposing another Claim.
+    each task to its single request and single-origin evidence links without exposing another
+    Claim.
 
 ## Development/Test Identity Invariants
 
@@ -300,6 +304,17 @@ and checksums rather than embedding those bytes.
   task-to-evidence link is accepted only when the named Evidence record exists under the same
   claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
   another claim; repeated material cannot acquire a second external origin.
+- An implemented external request uses an opaque `erq_` identifier derived deterministically
+  from the reserved assessor operation identity so crash recovery and explicit retry cannot mint
+  a second request. The request and task must agree on claim, service, and action. Persistence
+  verifies the parent claim/customer, task, named claimant consent, Northwind authority, and
+  authorised revision before accepting it. One task has at most one request.
+- Request preparation is immutable. Its stakeholder, purpose, disclosed field names,
+  authorisation pair, authorised revision, and preparation time cannot be rewritten. The only
+  permitted update records the first `sent_at` and the already-reserved operation identity;
+  neither field can be cleared or replaced. `sent_at` records that Northwind handed the request
+  to the selected service entry. Provider receipt remains the separate task `delivery` state and
+  requires named delivery evidence.
 
 ## Configuration and Control Plane Invariants
 
