@@ -2170,6 +2170,8 @@ Returns readiness without secrets or private configuration:
   "status": "degraded",
   "checks": {
     "persistence": "using_fixture",
+    "data_runtime_profile": "fixture",
+    "object_storage_adapter": "fixture",
     "agent": "not_configured",
     "policy": "using_fixture",
     "claim_history": "using_fixture",
@@ -2187,6 +2189,11 @@ Readiness is `ok`, `degraded`, or `unavailable`. A required configured data capa
 reporting `unavailable` makes overall readiness `unavailable`; otherwise the current
 fixture/model combination remains `degraded`. A fixture is not reported as a real
 connected service.
+
+`data_runtime_profile` and `object_storage_adapter` identify the single selected runtime
+bundle and object-store adapter. They are labels only; connection credentials, endpoints,
+physical keys, and provider payloads are never returned. A process must report one profile and
+must not combine capabilities from another profile.
 
 The `agent` check is `not_configured` for the default controlled prototype provider and
 `configured` when the provider-neutral model gateway has composed successfully. The
