@@ -297,7 +297,8 @@ and checksums rather than embedding those bytes.
   integration source, status, and timestamps are stored with the claim association. A
   task keeps its original claim, service, action, source class, and creation time across status
   updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
-  task-to-evidence link is immutable for `(claim_id, evidence_id)` and cannot name a task on
+  task-to-evidence link is accepted only when the named Evidence record exists under the same
+  claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
   another claim; repeated material cannot acquire a second external origin.
 
 ## Configuration and Control Plane Invariants

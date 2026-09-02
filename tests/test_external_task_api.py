@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,10 @@ from backend.domain.models import (
     Channel,
     ClaimState,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
     IntegrationSource,
     ResponsibleParty,
     SessionRecord,
@@ -92,6 +97,19 @@ def _task(
     )
 
 
+def _evidence(claim: WorkingClaim, evidence_id: str = 'evd_external_1') -> EvidenceRecord:
+    return EvidenceRecord(
+        evidence_id=evidence_id,
+        claim_id=claim.claim_id,
+        kind='external_assessment',
+        status=EvidenceStatus.PENDING_GENERATION,
+        file_status=EvidenceFileStatus.NOT_AVAILABLE,
+        source=EvidenceSource.EXTERNAL_SYSTEM,
+        created_at=claim.created_at,
+        updated_at=claim.updated_at,
+    )
+
+
 def _repositories() -> Iterator[PersistenceRepository]:
     yield FixtureRepository()
     mongo = MongoDBRepository(mongomock.MongoClient(), 'external_task_contract')
@@ -109,6 +127,7 @@ def test_external_task_persistence_keeps_claim_and_evidence_origins(
     second = _task(claim, 2)
     repository.save_external_task(second, claim.customer_id)
     repository.save_external_task(first, claim.customer_id)
+    repository.save_evidence(_evidence(claim), claim.customer_id)
     link = ExternalTaskEvidenceLink(
         task_id=first.task_id,
         evidence_id='evd_external_1',
@@ -131,6 +150,17 @@ def test_external_task_persistence_keeps_claim_and_evidence_origins(
     repository.save_external_task(progressed, claim.customer_id)
     assert repository.list_external_tasks_internal(claim.claim_id)[0] == progressed
 
+    missing_evidence = link.model_copy(update={'evidence_id': 'evd_missing'})
+    with pytest.raises(KeyError):
+        repository.save_external_task_evidence_link(missing_evidence, claim.customer_id)
+
+    other_claim = _claim(claim_id='clm_external_tasks_other')
+    repository.create_claim(other_claim, _session(other_claim))
+    repository.save_evidence(_evidence(other_claim, 'evd_other_claim'), other_claim.customer_id)
+    cross_claim = link.model_copy(update={'evidence_id': 'evd_other_claim'})
+    with pytest.raises(KeyError):
+        repository.save_external_task_evidence_link(cross_claim, claim.customer_id)
+
     conflicting = link.model_copy(update={'task_id': second.task_id})
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_evidence_link(conflicting, claim.customer_id)
@@ -141,7 +171,9 @@ def test_external_task_persistence_keeps_claim_and_evidence_origins(
         repository.save_external_task(first, 'cus_other')
 
 
-def test_internal_external_task_api_maps_material_and_pages_from_launch() -> None:
+def test_internal_external_task_api_maps_material_pages_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     repository = FixtureRepository()
     claim = _claim()
     repository.create_claim(claim, _session(claim))
@@ -152,6 +184,7 @@ def test_internal_external_task_api_maps_material_and_pages_from_launch() -> Non
     ]
     for task in tasks:
         repository.save_external_task(task, claim.customer_id)
+    repository.save_evidence(_evidence(claim), claim.customer_id)
     repository.save_external_task_evidence_link(
         ExternalTaskEvidenceLink(
             task_id=tasks[0].task_id,
@@ -164,11 +197,12 @@ def test_internal_external_task_api_maps_material_and_pages_from_launch() -> Non
     settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
     with TestClient(create_app(settings, repository)) as client:
-        first = client.get(
-            f'/internal/v1/claims/{claim.claim_id}/external-tasks',
-            headers=INTEGRATION_AUTH,
-            params={'limit': 2},
-        )
+        with caplog.at_level(logging.INFO, logger='backend.api.integrations'):
+            first = client.get(
+                f'/internal/v1/claims/{claim.claim_id}/external-tasks',
+                headers={**INTEGRATION_AUTH, 'X-Request-ID': 'external-task-list-test'},
+                params={'limit': 2},
+            )
         assert first.status_code == 200
         payload = first.json()
         assert payload['claim_id'] == claim.claim_id
@@ -177,6 +211,10 @@ def test_internal_external_task_api_maps_material_and_pages_from_launch() -> Non
         assert payload['items'][0]['task']['integration_source'] == 'fixture'
         assert payload['items'][1]['task']['status'] == 'retryable_failure'
         assert payload['items'][0]['task']['created_at'] is not None
+        event = next(record for record in caplog.records if record.msg == 'external_tasks.list')
+        assert event.__dict__['request_id'] == 'external-task-list-test'
+        assert event.__dict__['claim_id'] == claim.claim_id
+        assert event.__dict__['limit'] == 2
 
         second = client.get(
             f'/internal/v1/claims/{claim.claim_id}/external-tasks',
@@ -186,6 +224,26 @@ def test_internal_external_task_api_maps_material_and_pages_from_launch() -> Non
         assert second.status_code == 200
         assert [item['task']['task_id'] for item in second.json()['items']] == ['tsk_3']
         assert second.json()['page'] == {'next_cursor': None}
+
+
+def test_internal_external_task_api_truncates_limit_above_cap() -> None:
+    repository = FixtureRepository()
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    for number in range(1, 102):
+        repository.save_external_task(_task(claim, number), claim.customer_id)
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+
+    with TestClient(create_app(settings, repository)) as client:
+        response = client.get(
+            f'/internal/v1/claims/{claim.claim_id}/external-tasks',
+            headers=INTEGRATION_AUTH,
+            params={'limit': 101},
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()['items']) == 100
+    assert response.json()['page']['next_cursor'] is not None
 
 
 def test_internal_external_task_api_fails_closed_for_auth_claim_and_cursor(
@@ -203,6 +261,12 @@ def test_internal_external_task_api_fails_closed_for_auth_claim_and_cursor(
     repository.create_claim(claim, _session(claim))
     settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
     with TestClient(create_app(settings, repository)) as scoped_client:
+        invalid_limit = scoped_client.get(
+            f'/internal/v1/claims/{claim.claim_id}/external-tasks',
+            headers=INTEGRATION_AUTH,
+            params={'limit': 0},
+        )
+        assert invalid_limit.status_code == 422
         invalid = scoped_client.get(
             f'/internal/v1/claims/{claim.claim_id}/external-tasks',
             headers=INTEGRATION_AUTH,

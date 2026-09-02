@@ -1945,9 +1945,10 @@ the task's claim association, service identity, requested action, integration so
 status, delivery state, bounded failure or provider reference when present, creation and update
 times, and the evidence identifiers mapped to that task.
 
-The query accepts `limit` from 1 to 100, defaulting to 25, and an opaque `cursor`. Results use the
-stable `(created_at, task_id)` ascending order and return the next cursor in `page.next_cursor`.
-Clients must reuse the returned cursor unchanged.
+The query accepts a positive `limit`, defaulting to 25, and an opaque `cursor`. Values above 100
+are truncated to 100; values below 1 return `422 VALIDATION_ERROR`. Results use the stable
+`(created_at, task_id)` ascending order and return the next cursor in `page.next_cursor`. Clients
+must reuse the returned cursor unchanged.
 
 ```json
 {

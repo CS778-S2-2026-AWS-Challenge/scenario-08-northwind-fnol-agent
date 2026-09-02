@@ -696,6 +696,19 @@ class FixtureRepository(PersistenceRepository):
         self._idempotency[lookup] = idempotency
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        """Create or advance one claim-owned external task.
+
+        Args:
+            task: External task state to create or advance.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim is missing or not owned by the customer.
+            IdempotencyConflict: The write changes immutable identity or is stale.
+        """
         if self.get_claim(task.claim_id, customer_id) is None:
             raise KeyError(task.claim_id)
         existing = self._external_tasks.get(task.task_id)
@@ -721,11 +734,26 @@ class FixtureRepository(PersistenceRepository):
         link: ExternalTaskEvidenceLink,
         customer_id: str,
     ) -> None:
+        """Save one claim-owned evidence origin after validating its task and record.
+
+        Args:
+            link: Task-to-evidence relationship to persist.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, or evidence record is missing or not owned.
+            IdempotencyConflict: The evidence already has a different origin.
+        """
         if self.get_claim(link.claim_id, customer_id) is None:
             raise KeyError(link.claim_id)
         task = self._external_tasks.get(link.task_id)
         if task is None or task.claim_id != link.claim_id:
             raise KeyError(link.task_id)
+        if self.get_evidence(link.claim_id, link.evidence_id, customer_id) is None:
+            raise KeyError(link.evidence_id)
         key = (link.claim_id, link.evidence_id)
         existing = self._external_task_evidence_links.get(key)
         if existing is not None and existing != link:
@@ -733,6 +761,17 @@ class FixtureRepository(PersistenceRepository):
         self._external_task_evidence_links[key] = deepcopy(link)
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        """List task records for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose tasks are requested.
+
+        Returns:
+            Deep-copied task records in stable creation order.
+
+        Raises:
+            RuntimeError: The in-memory fixture cannot complete the read.
+        """
         tasks = [
             deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
         ]
@@ -742,6 +781,17 @@ class FixtureRepository(PersistenceRepository):
         self,
         claim_id: str,
     ) -> list[ExternalTaskEvidenceLink]:
+        """List evidence-origin links for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose evidence links are requested.
+
+        Returns:
+            Deep-copied links in stable linkage order.
+
+        Raises:
+            RuntimeError: The in-memory fixture cannot complete the read.
+        """
         links = [
             deepcopy(link)
             for link in self._external_task_evidence_links.values()

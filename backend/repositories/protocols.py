@@ -257,7 +257,19 @@ class PersistenceRepository(ClaimRepository, Protocol):
         raise NotImplementedError
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
-        """Persist current operational state outside shared Claim State."""
+        """Persist current operational state outside shared Claim State.
+
+        Args:
+            task: External task state to create or advance.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The parent claim is missing or not owned by the customer.
+            IdempotencyConflict: The write changes immutable identity or is stale.
+        """
         raise NotImplementedError
 
     def save_external_task_evidence_link(
@@ -265,18 +277,50 @@ class PersistenceRepository(ClaimRepository, Protocol):
         link: ExternalTaskEvidenceLink,
         customer_id: str,
     ) -> None:
-        """Persist one immutable evidence origin for an external task."""
+        """Persist one immutable evidence origin for an external task.
+
+        Args:
+            link: Task-to-evidence relationship to persist.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The parent claim, task, or evidence record is unavailable.
+            IdempotencyConflict: The evidence already has a different origin.
+        """
         raise NotImplementedError
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
-        """List task records after an internal caller has authorised the claim read."""
+        """List task records after an internal caller authorises the claim read.
+
+        Args:
+            claim_id: Working Claim whose tasks are requested.
+
+        Returns:
+            Task records in stable creation order.
+
+        Raises:
+            RuntimeError: A configured persistence provider cannot complete the read.
+        """
         raise NotImplementedError
 
     def list_external_task_evidence_links_internal(
         self,
         claim_id: str,
     ) -> list[ExternalTaskEvidenceLink]:
-        """List task-to-evidence links for an authorised internal projection."""
+        """List task-to-evidence links for an authorised internal projection.
+
+        Args:
+            claim_id: Working Claim whose evidence links are requested.
+
+        Returns:
+            Claim-scoped links in stable linkage order.
+
+        Raises:
+            RuntimeError: A configured persistence provider cannot complete the read.
+        """
         raise NotImplementedError
 
     def save_retrieval_bundle(

@@ -762,6 +762,19 @@ class MongoDBRepository:
         )
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        """Create or conditionally advance one claim-owned external task.
+
+        Args:
+            task: External task state to create or advance.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim is missing or not owned by the customer.
+            IdempotencyConflict: The write changes immutable identity or is stale.
+        """
         if not self._claim_owned(task.claim_id, customer_id):
             raise KeyError(task.claim_id)
         record_id = self._record_id('external_task', task.task_id)
@@ -826,6 +839,19 @@ class MongoDBRepository:
         link: ExternalTaskEvidenceLink,
         customer_id: str,
     ) -> None:
+        """Save one claim-owned evidence origin after validating its task and record.
+
+        Args:
+            link: Task-to-evidence relationship to persist.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, or evidence record is missing or not owned.
+            IdempotencyConflict: The evidence already has a different origin.
+        """
         if not self._claim_owned(link.claim_id, customer_id):
             raise KeyError(link.claim_id)
         task = self._get(
@@ -836,6 +862,8 @@ class MongoDBRepository:
         )
         if task is None or task.claim_id != link.claim_id:
             raise KeyError(link.task_id)
+        if self.get_evidence(link.claim_id, link.evidence_id, customer_id) is None:
+            raise KeyError(link.evidence_id)
 
         identifier = f'{link.claim_id}:{link.evidence_id}'
         record_id = self._record_id('external_task_evidence_link', identifier)
@@ -863,6 +891,17 @@ class MongoDBRepository:
                 raise IdempotencyConflict(link.evidence_id) from error
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        """List task records for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose tasks are requested.
+
+        Returns:
+            Task records in stable creation order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
         return self._list(
             'external_task',
             ExternalTaskRecord,
@@ -874,6 +913,17 @@ class MongoDBRepository:
         self,
         claim_id: str,
     ) -> list[ExternalTaskEvidenceLink]:
+        """List evidence-origin links for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose evidence links are requested.
+
+        Returns:
+            Links in stable linkage order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
         return self._list(
             'external_task_evidence_link',
             ExternalTaskEvidenceLink,

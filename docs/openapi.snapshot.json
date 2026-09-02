@@ -10059,6 +10059,7 @@
     },
     "/internal/v1/claims/{claim_id}/external-tasks": {
       "get": {
+        "description": "List one claim's operational external tasks for an integration service.\n\nArgs:\n    claim_id: Working Claim whose external tasks are requested.\n    request: Authenticated HTTP request carrying the correlation identifier.\n    _principal: Verified integration-service principal supplied by FastAPI.\n    limit: Requested page size; values above 100 are truncated.\n    cursor: Opaque cursor returned by an earlier list response.\n\nReturns:\n    One stable page of task records with mapped evidence identifiers.\n\nRaises:\n    ApiError: The claim or cursor is unavailable or invalid.",
         "operationId": "read_external_tasks_integration_internal_v1_claims__claim_id__external_tasks_get",
         "parameters": [
           {
@@ -10076,7 +10077,6 @@
             "required": false,
             "schema": {
               "default": 25,
-              "maximum": 100,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
