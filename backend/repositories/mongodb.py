@@ -16,6 +16,7 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.external_services import ExternalTaskEvidenceLink, ExternalTaskRecord
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
@@ -758,6 +759,176 @@ class MongoDBRepository:
             EvidenceRecord,
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
+        )
+
+    def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        """Create or conditionally advance one claim-owned external task.
+
+        Args:
+            task: External task state to create or advance.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim is missing or not owned by the customer.
+            IdempotencyConflict: The write changes immutable identity or is stale.
+        """
+        if not self._claim_owned(task.claim_id, customer_id):
+            raise KeyError(task.claim_id)
+        record_id = self._record_id('external_task', task.task_id)
+        document = {
+            **task.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task',
+            'customer_id': customer_id,
+            'claim_id': task.claim_id,
+        }
+        stored = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+        if stored is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError:
+                stored = self._collection.find_one(
+                    {'_id': record_id, 'record_type': 'external_task'}
+                )
+        existing = self._model_from_document(stored, ExternalTaskRecord)
+        if (
+            stored is None
+            or stored.get('customer_id') != customer_id
+            or stored.get('claim_id') != task.claim_id
+            or existing is None
+        ):
+            raise IdempotencyConflict(task.task_id)
+        immutable_identity = (
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'integration_source',
+            'created_at',
+        )
+        if existing == task:
+            return
+        if any(getattr(existing, name) != getattr(task, name) for name in immutable_identity):
+            raise IdempotencyConflict(task.task_id)
+        if task.updated_at <= existing.updated_at:
+            raise IdempotencyConflict(task.task_id)
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task',
+                'customer_id': customer_id,
+                'claim_id': task.claim_id,
+                'updated_at': stored.get('updated_at'),
+            },
+            document,
+        )
+        if result.matched_count == 0:
+            current = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+            same_owner = current is not None and (
+                current.get('customer_id') == customer_id
+                and current.get('claim_id') == task.claim_id
+            )
+            if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
+                raise IdempotencyConflict(task.task_id)
+
+    def save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+    ) -> None:
+        """Save one claim-owned evidence origin after validating its task and record.
+
+        Args:
+            link: Task-to-evidence relationship to persist.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, or evidence record is missing or not owned.
+            IdempotencyConflict: The evidence already has a different origin.
+        """
+        if not self._claim_owned(link.claim_id, customer_id):
+            raise KeyError(link.claim_id)
+        task = self._get(
+            'external_task',
+            link.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if task is None or task.claim_id != link.claim_id:
+            raise KeyError(link.task_id)
+        if self.get_evidence(link.claim_id, link.evidence_id, customer_id) is None:
+            raise KeyError(link.evidence_id)
+
+        identifier = f'{link.claim_id}:{link.evidence_id}'
+        record_id = self._record_id('external_task_evidence_link', identifier)
+        document = {
+            **link.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_evidence_link',
+            'customer_id': customer_id,
+            'claim_id': link.claim_id,
+        }
+        try:
+            self._collection.insert_one(document)
+        except DuplicateKeyError as error:
+            existing = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task_evidence_link'}
+            )
+            same_owner = existing is not None and (
+                existing.get('customer_id') == customer_id
+                and existing.get('claim_id') == link.claim_id
+            )
+            if (
+                not same_owner
+                or self._model_from_document(existing, ExternalTaskEvidenceLink) != link
+            ):
+                raise IdempotencyConflict(link.evidence_id) from error
+
+    def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        """List task records for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose tasks are requested.
+
+        Returns:
+            Task records in stable creation order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task',
+            ExternalTaskRecord,
+            {'claim_id': claim_id},
+            'created_at',
+        )
+
+    def list_external_task_evidence_links_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskEvidenceLink]:
+        """List evidence-origin links for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose evidence links are requested.
+
+        Returns:
+            Links in stable linkage order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task_evidence_link',
+            ExternalTaskEvidenceLink,
+            {'claim_id': claim_id},
+            'linked_at',
         )
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
