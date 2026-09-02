@@ -12,8 +12,9 @@ from backend.adapters.claims_service import (
 )
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
-from backend.domain.models import RouteAssessorRequest
+from backend.domain.models import IntegrationSource, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
+from backend.services.external_service_entry import MismatchedServiceAdapterError
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
@@ -95,6 +96,10 @@ def _grant_consent(client: TestClient, claim_id: str, revision: int, *, key: str
 
 
 class NeverCalledAssessorAdapter:
+    """A double that must never answer, so it declares the source class of a double."""
+
+    integration_source = IntegrationSource.FIXTURE
+
     def route_assessor(
         self,
         command: RouteAssessorRequest,
@@ -269,3 +274,36 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
         if decision.reason_codes == ['ASSESSOR_RULE_AUTHORISED']
     ]
     assert len(decisions) == 1
+
+
+class ConfiguredServiceAssessorAdapter(NeverCalledAssessorAdapter):
+    """A double that claims to be a configured service, which the fixture runtime is not."""
+
+    integration_source = IntegrationSource.CONFIGURED_SERVICE
+
+
+def test_a_runtime_will_not_assemble_an_adapter_its_entry_cannot_provide() -> None:
+    """The separation is enforced at composition, not left to whoever wires the app.
+
+    Under the fixture profile the entry resolves to `test_fixture`, so an adapter
+    declaring `configured_service` would answer through one source class while the
+    runtime recorded another. The application refuses to start rather than run in
+    that state, because a runtime that mislabels its own answers is worse than one
+    that will not boot.
+    """
+
+    with pytest.raises(MismatchedServiceAdapterError):
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=FixtureRepository(),
+            assessor_service_adapter=ConfiguredServiceAssessorAdapter(),
+        )
+
+
+def test_the_fixture_runtime_assembles_with_the_adapter_it_declares() -> None:
+    """The refusal above is a real bound, not one that refuses everything."""
+
+    app = create_app(DEVELOPER_SETTINGS, repository=FixtureRepository())
+
+    assert app.state.assessor_service_adapter.integration_source is IntegrationSource.FIXTURE
+    assert app.state.assessor_service_entry.integration_source is IntegrationSource.FIXTURE
