@@ -188,6 +188,25 @@ def build_claim_context_command(
             schema, role, authority, lifecycle, revision, or idempotency validation.
     """
 
+    if not isinstance(action_code, str):
+        raise UnknownAgentActionError('Action code must be a string.')
+    if not isinstance(payload, Mapping):
+        raise AgentActionCommandError('Action payload must be a mapping.')
+    if not isinstance(proposer_role, ActionActorRole):
+        raise AgentActionCommandError('proposer_role must be an ActionActorRole.')
+    if not isinstance(approved_authority, ExecutionAuthority):
+        raise AgentActionCommandError('approved_authority must be an ExecutionAuthority.')
+    if not isinstance(authority_reference, str):
+        raise AgentActionCommandError('authority_reference must be a string.')
+    if not isinstance(workflow_state, WorkflowState):
+        raise AgentActionCommandError('workflow_state must be a WorkflowState.')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int) or isinstance(expected_revision, bool)
+    ):
+        raise AgentActionCommandError('expected_revision must be an integer.')
+    if idempotency_key is not None and not isinstance(idempotency_key, str):
+        raise AgentActionCommandError('idempotency_key must be a string.')
+
     try:
         contract = action_contract(action_code)
     except ValueError as error:

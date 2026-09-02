@@ -278,3 +278,127 @@ def test_lifecycle_and_idempotency_payload_metadata_fail_closed() -> None:
             workflow_state=WorkflowState.COLLECTING,
             idempotency_key='metadata-key',
         )
+
+
+def test_non_string_action_code_fails_closed() -> None:
+    with pytest.raises(UnknownAgentActionError, match='Action code must be a string'):
+        build_claim_context_command(
+            ['claim.apply_fact_patch'],  # type: ignore[arg-type]
+            {
+                'claim_id': 'clm_123',
+                'fact_patches': [],
+                'expected_revision': 2,
+            },
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            idempotency_key='patch-invalid-action',
+        )
+
+
+def test_non_mapping_payload_fails_closed() -> None:
+    with pytest.raises(AgentActionCommandError, match='Action payload must be a mapping'):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            ['claim_id', 'fact_patches', 'expected_revision'],  # type: ignore[arg-type]
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            expected_revision=2,
+            idempotency_key='patch-invalid-payload',
+        )
+
+
+def test_malformed_runtime_boundary_types_fail_closed() -> None:
+    payload: dict[str, object] = {
+        'claim_id': 'clm_123',
+        'fact_patches': [],
+        'expected_revision': 2,
+    }
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='proposer_role must be an ActionActorRole',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role='runtime',  # type: ignore[arg-type]
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            idempotency_key='patch-invalid-role',
+        )
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='authority_reference must be a string',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference=None,  # type: ignore[arg-type]
+            workflow_state=WorkflowState.COLLECTING,
+            idempotency_key='patch-invalid-authority-reference',
+        )
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='workflow_state must be a WorkflowState',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state='collecting',  # type: ignore[arg-type]
+            idempotency_key='patch-invalid-state',
+        )
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='approved_authority must be an ExecutionAuthority',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority='claimant_staff_or_published_rule',  # type: ignore[arg-type]
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            idempotency_key='patch-invalid-authority',
+        )
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='expected_revision must be an integer',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            expected_revision='2',  # type: ignore[arg-type]
+            idempotency_key='patch-invalid-revision',
+        )
+
+    with pytest.raises(
+        AgentActionCommandError,
+        match='idempotency_key must be a string',
+    ):
+        build_claim_context_command(
+            'claim.apply_fact_patch',
+            payload,
+            proposer_role=ActionActorRole.RUNTIME,
+            approved_authority=ExecutionAuthority.CLAIMANT_STAFF_OR_PUBLISHED_RULE,
+            authority_reference='published-rule:fact-patch-v1',
+            workflow_state=WorkflowState.COLLECTING,
+            idempotency_key=123,  # type: ignore[arg-type]
+        )
