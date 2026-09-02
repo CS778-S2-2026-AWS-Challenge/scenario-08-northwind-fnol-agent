@@ -1094,6 +1094,15 @@ routing authority remain separate requirements.
 Response `201`, or `200` for an identical replay, returns the new revision,
 `customer_next_step`, and the claimant-safe `external_service_action` with status
 `ready_to_request`. Raw consent references and the internal consent list are not returned.
+
+`external_service_action.status` also carries three values that describe a third-party request
+that failed, chosen by what the claimant may do next rather than by what went wrong:
+`retry_available` when an unchanged request may be sent again with the same operation identity,
+`awaiting_reconciliation` when the request reached the provider and its outcome must be
+established before anything further is sent, and `under_review` when a claims professional
+decides before another attempt. `can_request` is true only for `retry_available`. The provider
+reference, the delivery evidence, and the failure class remain internal and are never returned
+on this surface.
 The consent, single Claim revision advance, and idempotency response are one repository
 mutation: a failed transaction leaves all three unchanged.
 

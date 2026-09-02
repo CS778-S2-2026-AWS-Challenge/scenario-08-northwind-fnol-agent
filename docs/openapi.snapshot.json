@@ -1225,11 +1225,15 @@
         "type": "object"
       },
       "ClaimantExternalServiceStatus": {
+        "description": "What a claimant is told about a third-party service request.\n\nThe first four values describe a request that has not failed. The last three\ndescribe one that has, and they differ by what the claimant may do next rather\nthan by what went wrong: a provider failure class is internal detail, while\n\"you may ask again\", \"we are checking\" and \"a person is looking at it\" are the\ndistinctions a claimant can act on. Keeping them separate is what stops a\nfailed request from being presented either as a success or as nothing at all.",
         "enum": [
           "consent_required",
           "ready_to_request",
           "queued",
-          "assigned"
+          "assigned",
+          "retry_available",
+          "awaiting_reconciliation",
+          "under_review"
         ],
         "title": "ClaimantExternalServiceStatus",
         "type": "string"

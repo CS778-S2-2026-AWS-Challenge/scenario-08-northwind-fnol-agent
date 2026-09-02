@@ -201,10 +201,23 @@ class ExternalServiceConsentStatus(str, Enum):
 
 
 class ClaimantExternalServiceStatus(str, Enum):
+    """What a claimant is told about a third-party service request.
+
+    The first four values describe a request that has not failed. The last three
+    describe one that has, and they differ by what the claimant may do next rather
+    than by what went wrong: a provider failure class is internal detail, while
+    "you may ask again", "we are checking" and "a person is looking at it" are the
+    distinctions a claimant can act on. Keeping them separate is what stops a
+    failed request from being presented either as a success or as nothing at all.
+    """
+
     CONSENT_REQUIRED = 'consent_required'
     READY_TO_REQUEST = 'ready_to_request'
     QUEUED = 'queued'
     ASSIGNED = 'assigned'
+    RETRY_AVAILABLE = 'retry_available'
+    AWAITING_RECONCILIATION = 'awaiting_reconciliation'
+    UNDER_REVIEW = 'under_review'
 
 
 class SupportNeed(str, Enum):

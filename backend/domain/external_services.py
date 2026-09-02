@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from backend.domain.models import (
     ActorType,
+    ClaimantExternalServiceStatus,
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
@@ -13,6 +14,7 @@ from backend.domain.models import (
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     IntegrationSource,
+    ResponsibleParty,
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalSource
@@ -1408,3 +1410,96 @@ def assert_task_transition_is_permitted(
                     f'{current.provider_reference} already, so accepting it on the same '
                     'reference records no reconciliation.'
                 )
+
+
+class TaskHasNotFailedError(ValueError):
+    """A task that has not failed has no failure continuation to describe."""
+
+
+class ClaimantTaskContinuation(ContractModel):
+    """What a claimant is told after a third-party task failed, and what they may do.
+
+    The status and the permission travel together because they are one decision.
+    Returning them separately would let a caller pair `under_review` with
+    permission to send again, which is the case the recovery matrix exists to
+    prevent, and nothing downstream could tell the pair had been mismatched.
+
+    Nothing here identifies the provider or the failure. No provider reference, no
+    delivery evidence, and no failure code: those are internal, and a claimant
+    reading this learns only whose turn it is.
+    """
+
+    status: ClaimantExternalServiceStatus
+    can_request: bool
+    responsible_party: ResponsibleParty
+
+
+_CONTINUATION_BY_RECOVERY = {
+    ExternalTaskRecovery.RETRY_SAME_OPERATION: (
+        ClaimantExternalServiceStatus.RETRY_AVAILABLE,
+        True,
+        ResponsibleParty.CLAIMANT,
+    ),
+    ExternalTaskRecovery.RECONCILE_BEFORE_RETRY: (
+        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION,
+        False,
+        ResponsibleParty.NORTHWIND,
+    ),
+    ExternalTaskRecovery.REVIEW_REQUIRED: (
+        ClaimantExternalServiceStatus.UNDER_REVIEW,
+        False,
+        ResponsibleParty.CLAIMS_PROFESSIONAL,
+    ),
+}
+
+
+def claimant_continuation_for_failed_task(
+    task: ExternalTaskRecord,
+) -> ClaimantTaskContinuation:
+    """Describe a failed third-party task in terms a claimant can act on.
+
+    The failure itself is already preserved: `ExternalTaskRecord` records the
+    status, the failure class, and whether the request reached the provider, and
+    `list_external_tasks_internal` keeps it on the protected surface. What has been
+    missing is the other half of the card: a claimant reading their own claim
+    cannot tell that an attempt failed, or whether the next move is theirs.
+
+    The answer is derived from the recovery path rather than from the failure
+    class, because recovery is the part that says whose turn it is.
+    `retry_same_operation` means the claimant may ask again;
+    `reconcile_before_retry` means Northwind must first establish what actually
+    happened at the provider, and asking again could duplicate a side effect;
+    `review_required` means a person decides before anything else happens.
+
+    A task that has not failed is refused rather than given a continuation. An
+    accepted or still-prepared task has nothing to continue from, and returning a
+    neutral answer for it would let a caller present a live request as a failed
+    one.
+
+    Args:
+        task: The failed external task record.
+
+    Returns:
+        The claimant-safe status, whether a further request is permitted, and
+        whose turn it is.
+
+    Raises:
+        TaskHasNotFailedError: The task is prepared or accepted, so it has not
+            failed and has no continuation.
+    """
+
+    if task.failure_code is None:
+        raise TaskHasNotFailedError(
+            f'{task.task_id}: is {task.status.value} and holds no failure, so it has no '
+            'continuation to describe.'
+        )
+    recovery = classify_external_task_failure(
+        failure_code=task.failure_code,
+        delivery=task.delivery,
+    ).recovery
+    status, can_request, responsible_party = _CONTINUATION_BY_RECOVERY[recovery]
+    return ClaimantTaskContinuation(
+        status=status,
+        can_request=can_request,
+        responsible_party=responsible_party,
+    )
