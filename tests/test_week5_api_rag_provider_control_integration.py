@@ -12,7 +12,7 @@ from backend.adapters.policy_history import MockPolicyHistoryAdapter
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, IdentityMode, Settings
 from backend.core.runtime_profiles import DataRuntimeBundle
-from backend.domain.knowledge import KnowledgeChunk
+from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
 from backend.domain.model_gateway import ModelProfileStatus
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
@@ -23,6 +23,16 @@ ADMIN_HEADERS = {
     'Authorization': 'Bearer synthetic-admin',
     'Idempotency-Key': 'control-plane-create',
 }
+
+
+class RecordingKnowledgeRetriever(FixtureKnowledgeRetriever):
+    def __init__(self, store: FixtureKnowledgeDocumentStore) -> None:
+        super().__init__(store)
+        self.searches: list[KnowledgeSearch] = []
+
+    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        self.searches.append(request)
+        return super().search(request)
 
 
 def _proposal() -> dict[str, object]:
@@ -72,7 +82,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
             ),
         )
     )
-    knowledge_retriever = FixtureKnowledgeRetriever(knowledge_store)
+    knowledge_retriever = RecordingKnowledgeRetriever(knowledge_store)
     data_bundle = DataRuntimeBundle(
         profile=DataRuntimeProfile.FIXTURE,
         repository=repository,
@@ -289,3 +299,40 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         model_context = json.loads(model_context_content)
         assert model_context['knowledge_status'] == 'evidence_found'
         assert model_context['knowledge_citations'][0]['chunk_id'] == 'chunk-integration-motor'
+
+        search_count = len(knowledge_retriever.searches)
+        unknown_claim_response = client.post(
+            '/api/v1/claims',
+            headers={**CLAIMANT_HEADERS, 'Idempotency-Key': 'unknown-product-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': None},
+        )
+        assert unknown_claim_response.status_code == 201
+        unknown_claim = cast(dict[str, object], unknown_claim_response.json()['claim'])
+        unknown_session = cast(dict[str, object], unknown_claim_response.json()['session'])
+        unknown_turn = client.post(
+            (
+                f'/api/v1/claims/{unknown_claim["claim_id"]}/sessions/'
+                f'{unknown_session["session_id"]}/messages'
+            ),
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'unknown-product-first-turn',
+                'If-Match': str(unknown_claim['revision']),
+            },
+            json={
+                'client_message_id': 'unknown-product-first-turn-message',
+                'content': {
+                    'type': 'text',
+                    'text': 'A pipe burst overnight and damaged my kitchen.',
+                },
+                'evidence_refs': [],
+            },
+        )
+        assert unknown_turn.status_code == 200, unknown_turn.text
+        assert len(knowledge_retriever.searches) == search_count
+        unknown_messages = cast(list[dict[str, object]], provider_requests[-1]['messages'])
+        unknown_context = json.loads(cast(str, unknown_messages[1]['content']))
+        unknown_claim_context = cast(dict[str, object], unknown_context['claim'])
+        assert unknown_claim_context['incident_type'] is None
+        assert unknown_context['knowledge_status'] == 'not_requested'
+        assert unknown_context['knowledge_citations'] == []

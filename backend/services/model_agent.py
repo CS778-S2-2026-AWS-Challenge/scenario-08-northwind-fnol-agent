@@ -56,14 +56,15 @@ _MODEL_CONTEXT_FIELD_CODES = frozenset(
 )
 
 
-def _knowledge_product(incident_type: str | None) -> str:
+def _knowledge_product(incident_type: str | None) -> str | None:
     """Resolve the canonical knowledge product scope for a Claim Context type.
 
     Args:
         incident_type: Claim Context incident/product family.
 
     Returns:
-        The provider-neutral knowledge product scope.
+        The provider-neutral knowledge product scope, or ``None`` until the Claim Context
+        identifies a supported product family.
     """
     return {
         'motor': 'motor',
@@ -71,7 +72,7 @@ def _knowledge_product(incident_type: str | None) -> str:
         # ``property`` is retained as a compatibility alias for older fixtures.
         'property': 'home',
         'contents': 'contents',
-    }.get(incident_type or '', 'motor')
+    }.get(incident_type or '')
 
 
 def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
@@ -222,6 +223,8 @@ class KnowledgeGroundedAgent:
         if not context.message_text or not context.message_text.strip():
             return self._provider.propose_turn(context)
         product = _knowledge_product(context.claim.incident_type)
+        if product is None:
+            return self._provider.propose_turn(context)
         status = 'evidence_found'
         limitations: tuple[str, ...] = ()
         try:
