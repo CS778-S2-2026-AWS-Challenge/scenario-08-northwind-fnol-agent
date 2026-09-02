@@ -23,6 +23,10 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord, RevisionConflict
+from backend.services.external_service_entry import (
+    ExternalServiceEntry,
+    ExternalServiceEntryDecision,
+)
 from backend.services.support import now_utc
 
 AUTH = {'Authorization': 'Bearer synthetic-claimant'}
@@ -741,3 +745,37 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
     assert stored.assessor_routing is not None
     assert stored.assessor_routing.assessor_reference == accepted_reference
     assert len(repository._assessor_routing_operations) == 1
+
+
+def test_an_unavailable_service_entry_is_reported_as_retryable() -> None:
+    """`docs/api.md` ties `retryable` to the error code, not to the cause of the outage.
+
+    A `503 DEPENDENCY_UNAVAILABLE` is documented as retryable wherever it is raised,
+    and the recovery matrix means by that only what is true here: nothing was sent,
+    so an unchanged attempt may be made again with the same operation identity.
+    Returning `false` would make clients suppress the recovery the contract promises.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        claim_id, revision = _start_created_motor_claim(client, repository, key='entry-unavailable')
+        consent = _grant_consent(client, claim_id, revision, key='entry-unavailable')
+        cast(Any, client.app).state.assessor_service_entry = ExternalServiceEntryDecision(
+            entry=ExternalServiceEntry.UNAVAILABLE,
+            limitation='The assessment service is not configured in this runtime.',
+        )
+
+        response = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'entry-unavailable',
+                'If-Match': str(consent['revision']),
+            },
+        )
+
+    assert response.status_code == 503
+    error = response.json()['error']
+    assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert error['retryable'] is True
+    assert error['details'][0]['reason'] == 'unavailable'

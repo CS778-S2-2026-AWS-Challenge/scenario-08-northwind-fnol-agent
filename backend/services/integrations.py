@@ -100,12 +100,22 @@ def _external_request_id(operation_id: str) -> str:
 
 
 def _external_service_unavailable(decision: ExternalServiceEntryDecision) -> ApiError:
+    """Report that no entry could serve this call, on the documented contract.
+
+    `docs/api.md` ties `retryable` to the error code rather than to the cause, and
+    `503 DEPENDENCY_UNAVAILABLE` is documented as retryable wherever it is raised.
+    That holds here in the sense the recovery matrix uses: no request was sent, so
+    nothing happened that a repeat could duplicate, and an unchanged attempt may be
+    made again with the same operation identity. Whether the next attempt succeeds
+    depends on the runtime capability, which is not what this flag reports.
+    """
+
     return ApiError(
         status_code=503,
         code='DEPENDENCY_UNAVAILABLE',
         message=decision.limitation or 'The assessment service is unavailable.',
         details=[ErrorDetail(field='assessor_service', reason=decision.entry.value)],
-        retryable=False,
+        retryable=True,
     )
 
 
