@@ -221,6 +221,21 @@ def test_environment_inspection_does_not_inherit_or_leak_managed_host_settings(
     assert 'host-secret' not in str(result)
 
 
+def test_switching_profiles_keeps_each_preflight_isolated() -> None:
+    fixture_values = load_environment_example(EXAMPLES / 'fixture.env.example')
+    candidate_values = load_environment_example(EXAMPLES / 'mongodb.env.example')
+
+    fixture_result, fixture_exit_code = inspect_environment(fixture_values)
+    candidate_result, candidate_exit_code = inspect_environment(candidate_values)
+
+    assert fixture_exit_code == 0
+    assert fixture_result['profile'] == 'fixture'
+    assert candidate_exit_code == 2
+    assert candidate_result['profile'] == 'mongodb'
+    assert candidate_result['status'] == 'startup_refused'
+    assert 'second-provider fallback' in str(candidate_result['reason'])
+
+
 def test_runtime_environment_loader_rejects_duplicates(tmp_path: Path) -> None:
     environment = tmp_path / 'duplicate.env.example'
     environment.write_text(

@@ -28,6 +28,11 @@ for, and how they are linked.
   satisfies the issue's acceptance criteria.
 - Use `Refs #123` for partial delivery, dependencies, investigation, or
   follow-ups; it must not close the issue.
+- For an intentionally collaborative Issue with multiple assignees, any
+  assignee may, without maintainer approval, ask another assignee in the Issue
+  comments to complete an explicitly bounded remaining slice; the completing
+  assignee's PR may use `Closes #123` when that PR, together with prior
+  `Refs #123` deliveries, satisfies the Issue's full acceptance criteria.
 - A `Refs` relationship does not drive closing-reference Kanban automation; the
   card stays open and its status must reflect the remaining work.
 - Do not claim an issue is complete while dependencies, acceptance criteria,
