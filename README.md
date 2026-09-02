@@ -121,6 +121,12 @@ updates the same backend claim state.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
+Developer mode uses separate synthetic administrator and release-approver tokens. The
+administrator may author and validate configuration, while
+`NORTHWIND_SYNTHETIC_RELEASE_APPROVER_TOKEN` represents the independent identity required to
+publish a high-impact configuration. These synthetic tokens are local test identities only and
+must not be used as a production approval mechanism.
+
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,

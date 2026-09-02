@@ -193,7 +193,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         published = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/publish',
             headers={
-                'Authorization': 'Bearer synthetic-admin',
+                'Authorization': 'Bearer synthetic-release-approver',
                 'Idempotency-Key': 'control-plane-model-publish',
                 'If-Match': '2',
             },

@@ -11,6 +11,7 @@ from backend.domain.configuration import (
     ConfigurationCreate,
     ConfigurationPatch,
     ConfigurationRecord,
+    ModelRuntimeBinding,
     TransitionRequest,
     ValidationRequest,
 )
@@ -26,6 +27,15 @@ router = APIRouter(prefix='/internal/v1/admin', tags=['administration'])
 
 def repo(request: Request) -> ConfigurationRepository:
     return cast(ConfigurationRepository, request.app.state.configuration_repository)
+
+
+def _model_runtime_binding(request: Request) -> ModelRuntimeBinding:
+    settings = request.app.state.settings
+    return ModelRuntimeBinding(
+        protocol=settings.model_protocol_adapter,
+        base_url=settings.model_base_url,
+        credential_environment_variable=settings.model_api_key_env,
+    )
 
 
 def _idempotent(
@@ -142,7 +152,12 @@ def validate_configuration(
         f'POST /internal/v1/admin/configurations/{configuration_id}/validate',
         {'payload': payload.model_dump(mode='json'), 'revision': expected},
         lambda: service.validate(
-            repo(request), configuration_id, payload, principal.subject, expected
+            repo(request),
+            configuration_id,
+            payload,
+            principal.subject,
+            expected,
+            _model_runtime_binding(request),
         ),
     )
 

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
@@ -16,6 +17,13 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.model_gateway import ConfigurationBackedModelGateway
+from backend.domain.configuration import (
+    ConfigurationImpact,
+    ConfigurationRecord,
+    ConfigurationState,
+    now_utc,
+)
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -46,6 +54,7 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import (
     AgentTurnContext,
@@ -2022,6 +2031,70 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
 
     assert readiness.json()['checks']['agent'] == 'configured'
     assert all('model' not in path for path in openapi['paths'])
+
+
+def test_published_model_cannot_override_deployment_endpoint_or_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_base_url='https://approved-model.example/v1',
+        model_identifier='approved-model',
+        model_api_key_env='NORTHWIND_MODEL_API_KEY',
+    )
+    repository = ConfigurationRepository()
+    repository.create(
+        ConfigurationRecord(
+            configuration_id='cfg_malicious',
+            revision=3,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            domain='model',
+            values={
+                'protocol': 'openai_compatible',
+                'provider': 'untrusted-provider',
+                'model_identifier': 'untrusted-model',
+                'base_url': 'https://unapproved.example/v1',
+                'credential_environment_variable': 'UNAPPROVED_PROCESS_SECRET',
+                'profile_id': 'untrusted-profile',
+                'purpose': 'agent_turn',
+                'privacy_class': 'synthetic_fnol',
+                'prompt_version': 'northwind-fnol-motor-claimant-v2',
+                'evaluation_status': 'configured',
+                'timeout_seconds': 30,
+                'structured_output': True,
+                'tools': False,
+            },
+            secret_references={},
+            author='adm_demo',
+            reason='Simulate a storage-boundary bypass.',
+            effective_time=now_utc(),
+            updated_at=now_utc(),
+        )
+    )
+    registry = ModelGatewayRegistry()
+    provider_constructions: list[ModelGatewayConfig] = []
+    environment_reads: list[str] = []
+
+    def record_environment_read(name: str) -> str | None:
+        environment_reads.append(name)
+        return 'must-not-be-read'
+
+    def record_provider_construction(config: ModelGatewayConfig) -> ModelGateway:
+        provider_constructions.append(config)
+        return OpenAICompatibleModelGateway(config)
+
+    monkeypatch.setattr(os, 'getenv', record_environment_read)
+    registry.register('openai_compatible', record_provider_construction)
+    gateway = ConfigurationBackedModelGateway(settings, repository, registry)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(messages=[]))
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert provider_constructions == []
+    assert environment_reads == []
 
 
 def test_gateway_agent_requires_structured_output_at_composition() -> None:

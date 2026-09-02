@@ -48,6 +48,19 @@ def _model_gateway_config_from_runtime(
     )
 
 
+def _runtime_configuration_matches_settings(
+    configuration: ModelRuntimeConfiguration,
+    settings: Settings,
+) -> bool:
+    return (
+        configuration.evaluation_status == ModelProfileStatus.CONFIGURED.value
+        and configuration.protocol.strip().lower()
+        == settings.model_protocol_adapter.strip().lower()
+        and configuration.base_url.rstrip('/') == settings.model_base_url.rstrip('/')
+        and configuration.credential_environment_variable == settings.model_api_key_env
+    )
+
+
 def build_model_gateway(
     settings: Settings,
     registry: ModelGatewayRegistry | None = None,
@@ -110,6 +123,8 @@ class ConfigurationBackedModelGateway:
             configuration = ModelRuntimeConfiguration.model_validate(active.values)
         except ValueError as error:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
+        if not _runtime_configuration_matches_settings(configuration, self._settings):
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return ModelCapabilities(
             structured_output=configuration.structured_output,
             tools=configuration.tools,
@@ -124,6 +139,8 @@ class ConfigurationBackedModelGateway:
                 configuration = ModelRuntimeConfiguration.model_validate(active.values)
             except ValueError as error:
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
+            if not _runtime_configuration_matches_settings(configuration, self._settings):
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             registry = self._registry or default_model_gateway_registry()
             gateway = registry.create(
                 configuration.protocol,

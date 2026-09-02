@@ -10,6 +10,7 @@ from backend.domain.configuration import (
     ConfigurationState,
     DataProfileConfiguration,
     DataRuntimeProfileValue,
+    ModelRuntimeBinding,
     ModelRuntimeConfiguration,
     ObjectStorageAdapterValue,
     TransitionRequest,
@@ -180,6 +181,7 @@ def validate(
     payload: ValidationRequest,
     actor: str,
     expected_revision: int,
+    model_runtime_binding: ModelRuntimeBinding | None = None,
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
@@ -193,7 +195,12 @@ def validate(
         'result': 'passed',
     }
     try:
-        _validate_configuration_values(current.domain, current.values, for_validation=True)
+        _validate_configuration_values(
+            current.domain,
+            current.values,
+            for_validation=True,
+            model_runtime_binding=model_runtime_binding,
+        )
     except ApiError as error:
         _audit(repo, current, actor, 'validate', error.message, 'rejected')
         raise
@@ -306,6 +313,20 @@ def publish(
             400,
             'INVALID_CONFIGURATION_TRANSITION',
             'The configuration is not ready for publication.',
+        )
+    if current.impact is ConfigurationImpact.HIGH and current.author == actor:
+        _audit(
+            repo,
+            current,
+            actor,
+            'publish',
+            'A high-impact configuration requires an independent approver.',
+            'rejected',
+        )
+        raise _error(
+            403,
+            'CONFIGURATION_APPROVER_CONFLICT',
+            'A high-impact configuration requires an independent approver.',
         )
     updated = current.model_copy(
         update={
@@ -549,18 +570,39 @@ def _validate_secret_references(references: dict[str, str]) -> None:
 
 
 def _validate_configuration_values(
-    domain: str, values: dict[str, object], *, for_validation: bool
+    domain: str,
+    values: dict[str, object],
+    *,
+    for_validation: bool,
+    model_runtime_binding: ModelRuntimeBinding | None = None,
 ) -> None:
     """Validate the structured provider configuration consumed by the runtime boundary."""
     if domain == 'model':
         try:
-            ModelRuntimeConfiguration.model_validate(values)
+            configuration = ModelRuntimeConfiguration.model_validate(values)
         except ValueError as error:
             raise _error(
                 422,
                 'PROVIDER_CONFIGURATION_INVALID',
                 'model requires a complete provider-neutral runtime configuration.',
             ) from error
+        if not for_validation:
+            return
+        binding_matches = (
+            model_runtime_binding is not None
+            and configuration.protocol.strip().lower()
+            == model_runtime_binding.protocol.strip().lower()
+            and configuration.base_url.rstrip('/') == model_runtime_binding.base_url.rstrip('/')
+            and configuration.credential_environment_variable
+            == model_runtime_binding.credential_environment_variable
+        )
+        if configuration.evaluation_status != 'configured' or not binding_matches:
+            raise _error(
+                422,
+                'PROVIDER_CONFIGURATION_UNAVAILABLE',
+                'The model provider profile is not verified for this runtime and cannot '
+                'be published.',
+            )
         return
     if domain != 'data_profile':
         return

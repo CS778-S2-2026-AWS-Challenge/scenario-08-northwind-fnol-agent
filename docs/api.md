@@ -45,6 +45,7 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 | Claims professional | Assigned or permitted workbench claims, internal evidence, handoffs, signals, staff actions, and claimant updates |
 | Claims operations | Workbench data, routing and service metrics, subject to operational role permissions |
 | System administrator | Versioned system configuration, knowledge, integrations, access, evaluation, health, and audit through a separately contracted Admin API |
+| Release approver | Independent publication approval for high-impact configuration; must not be the configuration's sole author |
 | Agent service | Claim-scoped orchestration commands and approved internal tools; no unlimited decision authority |
 | Integration service | Narrow adapter operation for policy, history, claim creation, evidence storage, or assessor systems |
 
@@ -187,7 +188,9 @@ Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or 
 Validation accepts explicit results for each named scenario, including evidence. A failed result
 is recorded and returns `422 VALIDATION_FAILED` without changing the configuration state. A normal-
 impact draft publishes after all supplied scenarios pass; a high-impact draft moves to
-`awaiting_approval` and requires an explicit publish operation. Every transition, including a
+`awaiting_approval` and requires an explicit publish operation by an identity other than its sole
+author. An author publication attempt returns `403 CONFIGURATION_APPROVER_CONFLICT` and leaves the
+record awaiting approval. Every transition, including a
 rejected transition, records actor, reason, outcome, revision, prior revision when applicable,
 top-level changed fields, and timestamp in the audit collection. Changed-field metadata names
 fields only and never copies configuration or secret values. State-changing POST requests require
@@ -212,7 +215,11 @@ For the `model` domain, `values` is a closed provider-neutral object containing
 `profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
 `timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
 environment-variable name; the secret itself remains outside the configuration record. Invalid
-or incomplete model values return `422 PROVIDER_CONFIGURATION_INVALID`.
+or incomplete model values return `422 PROVIDER_CONFIGURATION_INVALID`. Model validation permits
+publication only when `evaluation_status` is `configured` and the protocol, base URL, and
+credential environment-variable name exactly match the deployment-owned startup settings. A
+degraded, unavailable, or deployment-mismatched profile returns `422
+PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft.
 
 Runtime consumers use the provider-neutral configuration service to read the single active
 `published` record for a domain. Draft, awaiting-approval, withdrawn, superseded, and unverified
@@ -220,7 +227,9 @@ provider records are never returned by that boundary. The model runtime resolves
 published `model` record before each provider request, so a configuration published after startup
 becomes effective for the next turn. A process without a published model record may use its
 explicit startup model settings as a bootstrap-only compatibility path; it never combines fields
-from a draft or superseded record.
+from a draft or superseded record. The runtime repeats the deployment-binding check before
+constructing a provider adapter or reading a credential environment variable. A stored published
+record cannot redirect a deployment-approved credential to another endpoint.
 
 ## Claimant Identity and Account API
 
@@ -2217,6 +2226,9 @@ All errors use one envelope:
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
+| `CONFIGURATION_APPROVER_CONFLICT` | `403` | A high-impact configuration's sole author attempted publication |
+| `PROVIDER_CONFIGURATION_INVALID` | `422` | Provider configuration is incomplete or structurally invalid |
+| `PROVIDER_CONFIGURATION_UNAVAILABLE` | `422` | Provider configuration is unverified or outside deployment authority |
 | `SECRET_VALUE_FORBIDDEN` | `422` | Secret values must use protected references |
 | `ACTIVE_SESSION_EXISTS` | `409` | A conflicting active session exists |
 | `UNSUPPORTED_MEDIA_TYPE` | `415` | File type is not allowed |

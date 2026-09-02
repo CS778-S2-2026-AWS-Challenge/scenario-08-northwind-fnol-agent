@@ -68,6 +68,7 @@ class Settings:
     synthetic_claimant_token: str = 'synthetic-claimant'
     synthetic_staff_token: str = 'synthetic-staff'
     synthetic_admin_token: str = 'synthetic-admin'
+    synthetic_release_approver_token: str = 'synthetic-release-approver'
     synthetic_integration_token: str = 'synthetic-integration'
     claimant_session_ttl_minutes: int = 30
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
@@ -109,12 +110,13 @@ class Settings:
             self.synthetic_claimant_token,
             self.synthetic_staff_token,
             self.synthetic_admin_token,
+            self.synthetic_release_approver_token,
             self.synthetic_integration_token,
         }
-        if len(synthetic_tokens) != 4:
+        if len(synthetic_tokens) != 5:
             raise ValueError(
-                'Synthetic claimant, staff, administrator, and integration tokens '
-                'must be pairwise distinct.'
+                'Synthetic claimant, staff, administrator, release approver, and '
+                'integration tokens must be pairwise distinct.'
             )
         if self.claimant_session_ttl_minutes <= 0:
             raise ValueError('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES must be greater than zero.')
@@ -198,6 +200,10 @@ class Settings:
             synthetic_admin_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_ADMIN_TOKEN',
                 'synthetic-admin',
+            ),
+            synthetic_release_approver_token=os.getenv(
+                'NORTHWIND_SYNTHETIC_RELEASE_APPROVER_TOKEN',
+                'synthetic-release-approver',
             ),
             synthetic_integration_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',
