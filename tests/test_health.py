@@ -33,6 +33,8 @@ def test_readiness_reports_every_dependency_honestly(client: TestClient) -> None
 
     # Readiness identifies the adapter class without exposing deployment configuration.
     assert payload['checks']['persistence'] == 'using_fixture'
+    assert payload['checks']['data_runtime_profile'] == 'fixture'
+    assert payload['checks']['object_storage_adapter'] == 'fixture'
     assert payload['checks']['agent'] == 'not_configured'
 
     assert datetime.fromisoformat(payload['checked_at'])

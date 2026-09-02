@@ -5,7 +5,7 @@ description: Repository governance for the Northwind FNOL repository (scenario-0
 
 # Northwind FNOL repository governance
 
-Version: v1.1 · 2026-08-31
+Version: v1.2 · 2026-09-02
 
 This version line is incremented whenever a rule changes substantively. The
 "Governance confirmation" section of the PR template cites the version you read
