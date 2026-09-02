@@ -224,6 +224,26 @@ def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
         assert audits[-1]['outcome'] == 'rejected'
 
 
+@pytest.mark.parametrize('profile', ['local_mvp', 'cloudflare', 'mongodb', 'aws'])
+def test_data_profile_rejects_fixture_storage_for_every_external_profile(profile: str) -> None:
+    with _client() as client:
+        response = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'data-profile-mixed-{profile}'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': profile,
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject mixed provider configuration.',
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
+
 def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
     with _client() as client:
         first = client.post(

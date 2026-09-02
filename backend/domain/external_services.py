@@ -9,9 +9,11 @@ from backend.domain.models import (
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
+    EvidenceStatus,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     IntegrationSource,
+    WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalSource
 
@@ -595,10 +597,10 @@ class ExternalTaskResultVerification(str, Enum):
 
     There is deliberately no value meaning "this is now a confirmed claim fact".
     A provider answer is evidence about the claim, never the claim's own record
-    of what is true, and `docs/claim-creation-boundary.md` requires an
-    inconsistent result to stay proposed or review-required rather than settle
-    anything. Promotion to a confirmed fact is a claim-level decision made
-    elsewhere, so this enum cannot express it and no caller can shortcut to it.
+    of what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts
+    proposed until the claim's own confirmation path accepts them. Promotion to a
+    confirmed fact is a claim-level decision made elsewhere, so this enum cannot
+    express it and no caller can shortcut to it.
     """
 
     UNVERIFIED = 'unverified'
@@ -992,3 +994,262 @@ def assert_retry_is_permitted(
             f'{request.request_id}: attempt {latest.attempt_number} ended '
             f'{latest.outcome.value}, whose recovery is {recovery.value}, not a retry.'
         )
+
+
+class ResultAlreadyVerifiedError(ValueError):
+    """A result that already carries a verification cannot be checked again."""
+
+
+class CrossClaimEvidenceError(ValueError):
+    """An evidence record offered for this check belongs to another claim."""
+
+
+class UnboundEvidenceSnapshotError(ValueError):
+    """Evidence was recorded after the claim snapshot it would be checked against."""
+
+
+class VerificationPrecedesStateError(ValueError):
+    """A check is dated before some state it read came into being."""
+
+
+def _assert_evidence_belongs_to_snapshot(
+    claim: WorkingClaim,
+    evidence: Sequence[EvidenceRecord],
+) -> None:
+    """Check that the evidence offered is the evidence of this claim snapshot.
+
+    Evidence ownership is `claim_id` plus `evidence_id`, so an identifier alone
+    does not say which claim a record belongs to. `assert_result_evidence_is_linked`
+    checks the links, not the records passed beside them, so without this a record
+    carrying a familiar `evidence_id` under a different claim would be read and one
+    claim's evidence state would decide another claim's provider result.
+
+    The revision the decision records comes from the claim, and evidence carries no
+    revision of its own, so the two inputs cannot be compared directly. They can be
+    ordered. `backend/services/evidence.py` advances a claim on every evidence
+    mutation and sets `updated_at` to the newest record in the bundle it wrote, so
+    within one snapshot no record is newer than the claim. A record that is newer
+    was written after this claim was read, and recording the decision against the
+    claim's revision would name a revision the check did not use.
+
+    This detects a demonstrable mismatch; it does not prove that the two reads were
+    atomic. A caller that reads them separately with nothing in between is not
+    distinguishable from one that read them together, and nothing in the models
+    could tell them apart. What it removes is the case where the mismatch is
+    visible in the data and was previously ignored.
+
+    Args:
+        claim: The claim snapshot the check is made against.
+        evidence: The evidence records offered with it.
+
+    Returns:
+        None. Nothing is modified; this raises or returns quietly.
+
+    Raises:
+        CrossClaimEvidenceError: A record belongs to a different claim.
+        UnboundEvidenceSnapshotError: A record was updated after the claim
+            snapshot was taken.
+    """
+
+    for record in evidence:
+        if record.claim_id != claim.claim_id:
+            raise CrossClaimEvidenceError(
+                f'{record.evidence_id}: belongs to claim {record.claim_id}, and the check '
+                f'was offered the snapshot of claim {claim.claim_id}.'
+            )
+        if record.updated_at > claim.updated_at:
+            raise UnboundEvidenceSnapshotError(
+                f'{record.evidence_id}: was updated at {record.updated_at.isoformat()}, '
+                f'after claim {claim.claim_id} was read at '
+                f'{claim.updated_at.isoformat()} on revision {claim.revision}, so the '
+                'decision cannot be recorded against that revision.'
+            )
+
+
+def _latest_state_read(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    links: Sequence[ExternalTaskEvidenceLink],
+    claim: WorkingClaim,
+) -> tuple[str, datetime]:
+    """Name and time of the most recent state the decision depends on.
+
+    The evidence records are deliberately absent. `_assert_evidence_belongs_to_snapshot`
+    has already refused any record newer than the claim, so the claim's own time
+    bounds every one of them and a separate comparison could never be the latest.
+
+    Args:
+        result: The provider result being checked.
+        task: The external task record the result names.
+        links: The evidence-to-task links known for this claim.
+        claim: The claim snapshot the check is made against.
+
+    Returns:
+        A pair of a human-readable description and the time it refers to.
+    """
+
+    latest = ('the result arriving', result.received_at)
+    candidates = [
+        ('the task record being updated', task.updated_at),
+        ('the claim snapshot being written', claim.updated_at),
+    ]
+    named = set(result.evidence_ids)
+    for link in links:
+        if link.evidence_id not in named:
+            continue
+        candidates.append((f'evidence {link.evidence_id} being linked', link.linked_at))
+    for candidate in candidates:
+        if candidate[1] > latest[1]:
+            latest = candidate
+    return latest
+
+
+def _names_conflicting_material(
+    result: ExternalTaskResult,
+    evidence: Sequence[EvidenceRecord],
+) -> bool:
+    """Report whether material this result itself names is recorded as inconsistent."""
+
+    named = set(result.evidence_ids)
+    for record in evidence:
+        if record.evidence_id not in named:
+            continue
+        if record.status is EvidenceStatus.INCONSISTENT:
+            return True
+    return False
+
+
+def _decide_result_verification(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    evidence: Sequence[EvidenceRecord],
+) -> ExternalTaskResultVerification:
+    """Choose the verification an already-validated result earns."""
+
+    if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        return ExternalTaskResultVerification.REVIEW_REQUIRED
+    if _names_conflicting_material(result, evidence):
+        return ExternalTaskResultVerification.INCONSISTENT
+    return ExternalTaskResultVerification.REVIEW_REQUIRED
+
+
+def verify_external_task_result(
+    result: ExternalTaskResult,
+    *,
+    task: ExternalTaskRecord,
+    links: Sequence[ExternalTaskEvidenceLink],
+    claim: WorkingClaim,
+    evidence: Sequence[EvidenceRecord],
+    checked_at: datetime,
+) -> ExternalTaskResult:
+    """Check a provider result against its own material, and record the answer.
+
+    `assert_result_may_settle_fact` refuses a result that has not been checked and
+    says in its own wording that what made a result consistent is decided
+    elsewhere. This is that decision, bounded to what this repository can actually
+    evidence today.
+
+    **This function never returns `CONSISTENT`, and that is the point.** Agreement
+    between a provider answer and the claim is a statement about content: what the
+    provider said, measured against what the claim records as true. Nothing here
+    models the claim's facts in a form that comparison could be made against, and
+    an answer that has not been compared has not been agreed with. Returning
+    `CONSISTENT` from task state and evidence links alone would assert a check that
+    was never performed, and `assert_result_may_settle_fact` would then let it
+    settle a claim fact. `CONSISTENT` stays reserved for a comparison that can be
+    evidenced, and until one exists no code in this repository produces it.
+
+    Two outcomes are therefore reachable:
+
+    - `INCONSISTENT` when material this result itself names is recorded as
+      `EvidenceStatus.INCONSISTENT`. The conflict is read from the records the
+      result names, never from the claim's aggregate evidence state, because a
+      claim-wide rollup would attribute an unrelated conflict to this provider.
+    - `REVIEW_REQUIRED` otherwise, which is the honest description of an answer
+      that has been placed and attributed but not compared.
+
+    An `unknown_outcome` task yields `REVIEW_REQUIRED` before the conflict is
+    considered. Its delivery is still unreconciled, so a conflict cannot be
+    attributed to the provider any more than an agreement can.
+
+    The claim is taken as one snapshot rather than as an identifier, a state, and
+    a revision passed separately. Those three can disagree, and a caller passing an
+    older state beside a newer revision number would have the decision recorded
+    against a snapshot it never read.
+
+    The evidence records are a second input and are not inside that snapshot, so
+    they are checked against it rather than trusted: a record owned by another
+    claim, or written after the claim was read, is refused. See
+    `_assert_evidence_belongs_to_snapshot` for what that does and does not
+    establish.
+
+    A check cannot be dated before the state it read. `checked_at` is compared
+    against the latest of the result's arrival, the task record, the claim snapshot,
+    and the links this result's material reaches it through. A verification stamped
+    at a moment when that state did not yet exist describes a check that could not
+    have happened, and the record would then be a false account of when the claim
+    was examined rather than a merely imprecise one. The evidence records need no
+    separate bound, because none of them can be newer than the claim by the time
+    this comparison is made.
+
+    Args:
+        result: The unverified provider result to check.
+        task: The external task record the result names.
+        links: The evidence-to-task links known for this claim.
+        claim: The claim snapshot the check is made against, supplying both the
+            identity the result must match and the revision recorded with it.
+        evidence: The evidence records read with that snapshot.
+        checked_at: When the check was performed.
+
+    Returns:
+        A new `ExternalTaskResult` carrying the decided verification, the time of
+        the check, and the claim revision it was made against. The argument is left
+        unchanged.
+
+    Raises:
+        ResultAlreadyVerifiedError: The result already carries a verification, so
+            checking it would replace a decision rather than make one.
+        ExternalTaskClaimMismatchError: The claim snapshot belongs to a different
+            claim than the result.
+        ExternalRequestTaskMismatchError: The result names a different task, or a
+            different claim than the task it names.
+        TaskCannotHaveResultError: The task is in a state that received no answer.
+        ConflictingEvidenceOriginError: A link attributes the result's material to
+            a different task.
+        UntraceableExternalEvidenceError: The result names material no link
+            accounts for.
+        CrossClaimEvidenceError: An evidence record belongs to another claim.
+        UnboundEvidenceSnapshotError: An evidence record was written after the
+            claim snapshot was read.
+        VerificationPrecedesStateError: The check is dated before the result
+            arrived, or before the task, claim, or relevant link it read.
+    """
+
+    if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
+        raise ResultAlreadyVerifiedError(
+            f'{result.result_id}: is already recorded as {result.verification.value}, so '
+            'checking it again would replace a decision rather than make one.'
+        )
+    if result.claim_id != claim.claim_id:
+        raise ExternalTaskClaimMismatchError(
+            f'{result.result_id}: belongs to claim {result.claim_id}, and the check was '
+            f'offered the snapshot of claim {claim.claim_id}.'
+        )
+    assert_result_matches_task(result, task)
+    assert_result_evidence_is_linked(result, links)
+    _assert_evidence_belongs_to_snapshot(claim, evidence)
+    description, latest = _latest_state_read(result, task=task, links=links, claim=claim)
+    if checked_at < latest:
+        raise VerificationPrecedesStateError(
+            f'{result.result_id}: cannot be checked at {checked_at.isoformat()}, which is '
+            f'before {description} at {latest.isoformat()}.'
+        )
+
+    verification = _decide_result_verification(result, task=task, evidence=evidence)
+    fields = result.model_dump()
+    fields['verification'] = verification
+    fields['verified_at'] = checked_at
+    fields['verified_against_revision'] = claim.revision
+    return ExternalTaskResult(**fields)
