@@ -221,6 +221,129 @@ Branches may coexist, e.g. `family.motor + incident.collision + participant.anot
 authority.police + evidence.pending`. Runtime rules, not the model, control activation,
 correction, and exit.
 
+## VP branch rules v1
+
+The matrix above describes the business meaning of each branch. This section gives the
+first rule-set shape that an implementation can evaluate. It is intentionally a bounded
+VP baseline, not a Northwind production policy. The rule-set identifier is
+`vp-dynamic-form-branch-rules-v1`; a published registry snapshot must carry its identifier
+and version whenever a claim is evaluated.
+
+### Rule inputs and outputs
+
+The branch evaluator receives only provider-neutral, authorised inputs:
+
+| Input | Use |
+| --- | --- |
+| Accepted Claim facts and their source references | Determine whether a trigger is explicit, confirmed, inferred, corrected, or conflicting |
+| Current proposed facts | Permit a branch candidate without treating a model interpretation as confirmed |
+| Current registered field and branch catalogue | Reject unknown codes and prevent a rule from activating an unregistered field |
+| Current action and open WorkItems | Decide whether an active field can be `required_now` or remains a candidate/pending item |
+| Safety, support, evidence, authority, and consent records | Activate interruption or conditional branches without copying those records into the form |
+| Registry and policy version | Keep an evaluation reproducible and prevent a stale rule from changing a newer claim |
+
+The evaluator returns a deterministic result containing:
+
+- active, suspended, exited, and candidate branches with rule IDs and source references;
+- the registered fields each branch adds or removes from the active projection;
+- selection state for each relevant field (`required_now`, `candidate_now`, `pending_later`,
+  `inactive`, or `system_owned`);
+- WorkItem, Handoff, Evidence, Review, Consent, or Integration records to create or update;
+- the primary runtime control signal, if a safety or support interruption applies; and
+- a recomputation reason and the Claim revision against which the result was calculated.
+
+The result is a proposal for Runtime execution. It is not a direct model instruction and it
+does not itself mutate Claim State.
+
+### Evaluation order
+
+Rules are evaluated in this order, while branch activation remains additive:
+
+1. **Safety interruption:** explicit injury, continuing danger, or emergency conditions are
+   evaluated first. They may interrupt ordinary collection and create an urgent handoff.
+2. **Support interruption:** repeated human requests, distress, or accessibility needs are
+   evaluated next. A first ordinary request follows the configured/versioned rule.
+3. **Family classification:** activate at most the supported family candidates for `motor`,
+   `home`, and `contents`; an unresolved conflict keeps the candidates proposed and uses
+   shared fields only.
+4. **Incident and participant dimensions:** collision, theft/burglary, another party,
+   witness, Police, and other conditional branches are evaluated independently.
+5. **Evidence and mitigation:** pending evidence, emergency mitigation, towing, repair, and
+   temporary accommodation create their own records and do not turn every related field into
+   a blocker.
+6. **Professional review:** material ambiguity or conflict creates an internal review record
+   and may pause a high-impact action without exposing the internal signal to the claimant.
+7. **Field selection:** only after active branches and WorkItems are known are fields promoted
+   to `required_now`, `candidate_now`, or `pending_later` for the current action.
+
+The first two steps select the primary Runtime control directive. The later steps may still
+add useful fact proposals, evidence records, or questions without overriding that directive.
+
+### Rule catalogue
+
+| Rule ID | Condition | Activation result | Exit/correction | Current-action effect |
+| --- | --- | --- | --- | --- |
+| `BR-FAMILY-MOTOR-001` | Explicit vehicle/road/driver wording, a supported collision description, or an authorised lookup identifies motor context | Activate `family.motor`; add the motor field set and retain the common baseline | A clear claimant correction or conflicting authoritative lookup suspends motor-only candidates and preserves their source history | Only mobility, routing, or current-action fields can become `required_now` |
+| `BR-FAMILY-HOME-001` | Explicit building, property, room, fixture, or home-damage wording, or an authorised lookup identifies home context | Activate `family.home`; add the home field set and retain the common baseline | A clear correction or authoritative conflict suspends home-only candidates without deleting facts | Only location, safety, habitability, mitigation, or current-action fields can become `required_now` |
+| `BR-FAMILY-CONTENTS-001` | Explicit item, belongings, theft, loss, or contents wording, or an authorised lookup identifies contents context | Activate `family.contents`; add the contents item set and item/evidence records | A clear correction or authoritative conflict suspends contents candidates while retaining item facts and provenance | Only item identity, evidence, authority, or current-action fields can become `required_now` |
+| `BR-COLLISION-001` | Impact, crash, rear-end, or collision is explicitly described | Activate `incident.collision`; add collision, participant, road, and possible Police/evidence candidates | Correction to a non-collision incident exits the branch and recalculates candidates | Do not require movement, road, or other-party details unless they block the current safe action |
+| `BR-PARTICIPANT-OTHER-001` | Another person, vehicle, property owner, or organisation is mentioned | Activate `participant.another_party`; add participant candidates and a consent check before disclosure | A correction or consent withdrawal exits sharing while retaining the original statement | Contact or identity is `required_now` only for an authorised next action |
+| `BR-PARTICIPANT-WITNESS-001` | A witness is mentioned or requested for the next action | Activate `participant.witness`; create a participant/evidence work item | Mark unavailable when the claimant cannot provide details; never invent contact data | Witness details normally remain `candidate_now` or `pending_later` |
+| `BR-AUTHORITY-POLICE-001` | Police contact, a Police report, theft/burglary, or pending Police generation is mentioned | Activate `authority.police`; track status/reference and an evidence WorkItem | Correction or verified inapplicability exits the branch with audit history | A missing report remains `pending_later` unless a current authorised action explicitly requires it |
+| `BR-SAFETY-001` | Explicit injury, continuing danger, or an emergency condition is present | Activate `safety.injury_or_danger`; create urgent handoff/WorkItem and bounded safe response | Clear only from a new authoritative fact; preserve the original safety statement | Interrupt ordinary questions; do not wait for the complete form |
+| `BR-EVIDENCE-PENDING-001` | Expected material is missing, incomplete, unofficial, or not yet generated | Activate `evidence.pending`; create or update an evidence WorkItem with responsibility | Supplied evidence can resolve the item; rejection keeps the limitation explicit | Do not block unrelated safe progress or erase accepted facts |
+| `BR-MITIGATION-001` | Active leak, fire, exposure, unsafe property, towing, or emergency repair is described | Activate the relevant mitigation branch and record safe actions separately | Verified resolution closes the WorkItem but retains action history | Ask only the minimum safety or mitigation information needed now |
+| `BR-ACCOMMODATION-001` | A home is not safely habitable or temporary accommodation is requested | Activate `accommodation.temporary`; create a support WorkItem | Habitability correction or staff resolution exits the branch | Accommodation details remain support/workflow data unless needed for the current action |
+| `BR-THEFT-001` | Stolen item, forced entry, burglary, or unknown disappearance is described | Activate theft/discovery, ownership-evidence, and possible Police branches | Reclassification requires a source-backed correction; preserve prior item facts | Discovery, entry context, and Police status may become current candidates; no fraud conclusion is inferred |
+| `BR-REVIEW-001` | Material conflict, coverage ambiguity, or another approved review trigger exists | Create an internal Review record and, where necessary, a professional handoff | Staff records an immutable decision or resolves the conflict | Do not expose the internal signal as a claimant conclusion |
+| `BR-HUMAN-SUPPORT-001` | Repeated human request, distress, accessibility need, or configured first-request condition | Create or reuse a Handoff and preserve the structured packet | Staff resolution/cancellation ends the active support branch | Claimant sees safe status and responsibility; staff receives context and requested action |
+
+### Field-state promotion
+
+After branch evaluation, the rule engine applies this order to each active registered field:
+
+| Condition | Selection state |
+| --- | --- |
+| Field is supplied by authenticated identity, workflow, provider, integration, staff, or audit | `system_owned` |
+| Field is not supported by an active branch | `inactive` |
+| Field is relevant only to a later action or unavailable evidence | `pending_later` |
+| Field is relevant but missing does not block the current safe action | `candidate_now` |
+| Field is missing and a published rule says the current safe action cannot proceed without it | `required_now` |
+
+Stored fact status remains separate from selection state. A `required_now` field may still be
+`proposed`, `missing`, or `disputed`; it is not silently confirmed merely because the rule
+engine selected it for the next question.
+
+### Runtime integration boundary
+
+The Agent does not fetch or execute this Markdown directly. The intended integration is:
+
+```text
+published Branch/Field Registry snapshot
+        ↓
+provider-neutral BranchRuleEvaluator
+        ↓
+active branches + field selection + WorkItems + interruption result
+        ↓
+bounded Claim Context supplied to Agent Runtime
+        ↓
+Agent proposes conversation moves, form patches, lookups, or handoff actions
+        ↓
+Runtime validates the proposal and applies authorised effects
+```
+
+In the target architecture, the evaluator reads a versioned Field/Content Branch Registry
+through the configuration or registry port. It does not call a model, database, or provider
+directly. The Agent receives the evaluated active branches, allowed registered fields,
+current selection states, relevant WorkItems, and permitted actions as bounded context. The
+Agent may suggest a branch candidate or field patch, but the evaluator and Runtime remain the
+authority for activation, `required_now`, Claim State mutation, visibility, and side effects.
+
+For the VP implementation, the same boundary may initially be backed by a checked-in,
+versioned rule definition or a local registry adapter. That is an implementation choice; the
+contract must remain replaceable so a later Control Plane publication can provide the active
+snapshot without changing Agent code.
+
 ## Required-now selection rules
 
 1. Handle injury, danger, distress, accessibility, and explicit support requests first.
