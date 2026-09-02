@@ -18,6 +18,9 @@ from backend.domain.models import (
     WorkflowState,
 )
 
+CLAIMANT_AGENT_PURPOSE = 'agent_turn'
+CLAIMANT_AGENT_PRIVACY_CLASS = 'synthetic_fnol'
+
 
 class ModelContract(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -95,9 +98,13 @@ class ModelRequest(ModelContract):
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
-    purpose: str = Field(default='agent_turn', min_length=1, max_length=100)
+    purpose: str = Field(default=CLAIMANT_AGENT_PURPOSE, min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
-    privacy_class: str = Field(default='synthetic_fnol', min_length=1, max_length=100)
+    privacy_class: str = Field(
+        default=CLAIMANT_AGENT_PRIVACY_CLASS,
+        min_length=1,
+        max_length=100,
+    )
     required_capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 

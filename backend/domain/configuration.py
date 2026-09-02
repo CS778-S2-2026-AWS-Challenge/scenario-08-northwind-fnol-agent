@@ -64,13 +64,17 @@ class ModelRuntimeConfiguration(BaseModel):
 
 
 class ModelRuntimeBinding(BaseModel):
-    """Deployment-owned authority for model endpoint and credential selection."""
+    """Runtime-owned authority for model connection and claimant-turn capabilities."""
 
     model_config = ConfigDict(extra='forbid')
 
     protocol: str = Field(min_length=1, max_length=50)
     base_url: str = Field(max_length=500)
     credential_environment_variable: str | None = Field(default=None, max_length=200)
+    purpose: str = Field(min_length=1, max_length=100)
+    privacy_class: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    structured_output: bool
 
 
 class ConfigurationRecord(BaseModel):

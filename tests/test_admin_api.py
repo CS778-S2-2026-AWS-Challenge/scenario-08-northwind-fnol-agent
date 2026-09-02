@@ -35,7 +35,7 @@ def _model_values(**overrides: object) -> dict[str, object]:
         'profile_id': 'approved-profile',
         'purpose': 'agent_turn',
         'privacy_class': 'synthetic_fnol',
-        'prompt_version': 'northwind-fnol-motor-claimant-v2',
+        'prompt_version': 'northwind-fnol-motor-claimant-v3',
         'evaluation_status': 'configured',
         'timeout_seconds': 30,
         'structured_output': True,
@@ -230,6 +230,28 @@ def test_plaintext_secret_is_rejected() -> None:
         assert response.json()['error']['code'] == 'SECRET_VALUE_FORBIDDEN'
 
 
+@pytest.mark.parametrize('impact_fields', [{}, {'impact': 'normal'}], ids=['omitted', 'normal'])
+def test_model_configuration_cannot_downgrade_its_impact_classification(
+    impact_fields: dict[str, str],
+) -> None:
+    with _model_client() as client:
+        response = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'model-normal-impact-{impact_fields}'),
+            json={
+                'domain': 'model',
+                'values': _model_values(),
+                'reason': 'Attempt to bypass independent approval.',
+                **impact_fields,
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+        repository = cast(Any, client.app).state.configuration_repository
+        assert repository.list_configurations(domain='model') == []
+
+
 @pytest.mark.parametrize(
     ('field', 'value'),
     [
@@ -238,6 +260,10 @@ def test_plaintext_secret_is_rejected() -> None:
         ('credential_environment_variable', 'UNAPPROVED_PROCESS_SECRET'),
         ('evaluation_status', 'degraded'),
         ('evaluation_status', 'unavailable'),
+        ('purpose', 'batch_evaluation'),
+        ('privacy_class', 'unrestricted'),
+        ('prompt_version', 'northwind-fnol-motor-claimant-v2'),
+        ('structured_output', False),
     ],
 )
 def test_model_validation_rejects_unverified_runtime_authority(

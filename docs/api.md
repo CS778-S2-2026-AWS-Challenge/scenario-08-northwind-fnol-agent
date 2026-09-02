@@ -214,12 +214,16 @@ For the `model` domain, `values` is a closed provider-neutral object containing
 `protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
 `profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
 `timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
-environment-variable name; the secret itself remains outside the configuration record. Invalid
-or incomplete model values return `422 PROVIDER_CONFIGURATION_INVALID`. Model validation permits
-publication only when `evaluation_status` is `configured` and the protocol, base URL, and
-credential environment-variable name exactly match the deployment-owned startup settings. A
-degraded, unavailable, or deployment-mismatched profile returns `422
-PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft.
+environment-variable name; the secret itself remains outside the configuration record. Every
+model configuration must declare `impact=high`; an omitted or normal impact returns `422
+PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
+publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
+environment-variable name match the deployment-owned startup settings; and purpose, privacy
+class, executable prompt identifier, and structured-output capability match the claimant Runtime
+contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v3`. A
+degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
+PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
+return `422 PROVIDER_CONFIGURATION_INVALID`.
 
 Runtime consumers use the provider-neutral configuration service to read the single active
 `published` record for a domain. Draft, awaiting-approval, withdrawn, superseded, and unverified
@@ -229,7 +233,8 @@ becomes effective for the next turn. A process without a published model record 
 explicit startup model settings as a bootstrap-only compatibility path; it never combines fields
 from a draft or superseded record. The runtime repeats the deployment-binding check before
 constructing a provider adapter or reading a credential environment variable. A stored published
-record cannot redirect a deployment-approved credential to another endpoint.
+record cannot redirect a deployment-approved credential to another endpoint or weaken the
+claimant Runtime's purpose, privacy, prompt-version, or structured-output boundary.
 
 ## Claimant Identity and Account API
 

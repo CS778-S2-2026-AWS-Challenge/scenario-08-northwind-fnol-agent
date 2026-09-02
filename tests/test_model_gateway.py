@@ -54,6 +54,7 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import (
@@ -1027,7 +1028,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
             gateway_config(
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v2',
+                prompt_version='northwind-fnol-motor-claimant-v3',
             ),
             transport=transport,
         )
@@ -1051,7 +1052,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v2',
+                prompt_version='northwind-fnol-motor-claimant-v3',
             ),
             transport=transport,
         )
@@ -1322,7 +1323,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v2'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v3'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
@@ -2033,8 +2034,21 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
     assert all('model' not in path for path in openapi['paths'])
 
 
-def test_published_model_cannot_override_deployment_endpoint_or_secret(
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('base_url', 'https://unapproved.example/v1'),
+        ('credential_environment_variable', 'UNAPPROVED_PROCESS_SECRET'),
+        ('purpose', 'batch_evaluation'),
+        ('privacy_class', 'unrestricted'),
+        ('prompt_version', 'northwind-fnol-motor-claimant-v2'),
+        ('structured_output', False),
+    ],
+)
+def test_published_model_cannot_override_runtime_authority(
     monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
 ) -> None:
     settings = Settings(
         agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
@@ -2044,6 +2058,22 @@ def test_published_model_cannot_override_deployment_endpoint_or_secret(
         model_api_key_env='NORTHWIND_MODEL_API_KEY',
     )
     repository = ConfigurationRepository()
+    values: dict[str, object] = {
+        'protocol': 'openai_compatible',
+        'provider': 'untrusted-provider',
+        'model_identifier': 'untrusted-model',
+        'base_url': 'https://approved-model.example/v1',
+        'credential_environment_variable': 'NORTHWIND_MODEL_API_KEY',
+        'profile_id': 'untrusted-profile',
+        'purpose': 'agent_turn',
+        'privacy_class': 'synthetic_fnol',
+        'prompt_version': 'northwind-fnol-motor-claimant-v3',
+        'evaluation_status': 'configured',
+        'timeout_seconds': 30,
+        'structured_output': True,
+        'tools': False,
+    }
+    values[field] = value
     repository.create(
         ConfigurationRecord(
             configuration_id='cfg_malicious',
@@ -2051,21 +2081,7 @@ def test_published_model_cannot_override_deployment_endpoint_or_secret(
             state=ConfigurationState.PUBLISHED,
             impact=ConfigurationImpact.HIGH,
             domain='model',
-            values={
-                'protocol': 'openai_compatible',
-                'provider': 'untrusted-provider',
-                'model_identifier': 'untrusted-model',
-                'base_url': 'https://unapproved.example/v1',
-                'credential_environment_variable': 'UNAPPROVED_PROCESS_SECRET',
-                'profile_id': 'untrusted-profile',
-                'purpose': 'agent_turn',
-                'privacy_class': 'synthetic_fnol',
-                'prompt_version': 'northwind-fnol-motor-claimant-v2',
-                'evaluation_status': 'configured',
-                'timeout_seconds': 30,
-                'structured_output': True,
-                'tools': False,
-            },
+            values=values,
             secret_references={},
             author='adm_demo',
             reason='Simulate a storage-boundary bypass.',
@@ -2095,6 +2111,16 @@ def test_published_model_cannot_override_deployment_endpoint_or_secret(
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert provider_constructions == []
     assert environment_reads == []
+
+
+def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
+    prompt = load_motor_claimant_prompt()
+
+    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-motor-claimant-v3'
+    assert 'Prompt ID: `northwind-fnol-motor-claimant-v3`' in prompt
+    assert '`knowledge_citations` from approved retrieval' in prompt
+    assert 'untrusted reference material' in prompt
+    assert 'do not invent a policy or knowledge answer' in prompt
 
 
 def test_gateway_agent_requires_structured_output_at_composition() -> None:

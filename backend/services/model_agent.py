@@ -10,6 +10,8 @@ from backend.domain.knowledge import (
     KnowledgeSearch,
 )
 from backend.domain.model_gateway import (
+    CLAIMANT_AGENT_PRIVACY_CLASS,
+    CLAIMANT_AGENT_PURPOSE,
     ModelAgentProposal,
     ModelCapabilities,
     ModelClaimContext,
@@ -171,9 +173,9 @@ class GatewayAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         request = ModelRequest(
-            purpose='agent_turn',
+            purpose=CLAIMANT_AGENT_PURPOSE,
             prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
-            privacy_class='synthetic_fnol',
+            privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
             required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
                 ModelMessage(role=ModelRole.SYSTEM, content=_SYSTEM_INSTRUCTION),

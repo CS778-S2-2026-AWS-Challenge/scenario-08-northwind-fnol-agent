@@ -75,6 +75,12 @@ def create(
     )
     _reject_plaintext_secrets(record.values)
     _validate_secret_references(record.secret_references)
+    if record.domain == 'model' and record.impact is not ConfigurationImpact.HIGH:
+        raise _error(
+            422,
+            'PROVIDER_CONFIGURATION_INVALID',
+            'Model configurations must declare high impact.',
+        )
     _validate_configuration_values(record.domain, record.values, for_validation=False)
     saved = repo.create(record)
     _audit(
@@ -595,6 +601,10 @@ def _validate_configuration_values(
             and configuration.base_url.rstrip('/') == model_runtime_binding.base_url.rstrip('/')
             and configuration.credential_environment_variable
             == model_runtime_binding.credential_environment_variable
+            and configuration.purpose == model_runtime_binding.purpose
+            and configuration.privacy_class == model_runtime_binding.privacy_class
+            and configuration.prompt_version == model_runtime_binding.prompt_version
+            and configuration.structured_output is model_runtime_binding.structured_output
         )
         if configuration.evaluation_status != 'configured' or not binding_matches:
             raise _error(
