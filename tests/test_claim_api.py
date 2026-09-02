@@ -1,9 +1,11 @@
 from datetime import timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLookupEnvelope
 from backend.domain.models import (
     AgentAction,
     CustomerNextStep,
@@ -16,7 +18,7 @@ from backend.domain.models import (
     SessionStatus,
     StateChange,
 )
-from backend.domain.retrieval import ClaimHistoryRetrievalRecord
+from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import AgentProposal, AgentTurnContext
 
@@ -48,6 +50,9 @@ class HighImpactAgent:
 
 
 class ClaimHistoryLookupAgent:
+    def __init__(self, tool: dict[str, object]) -> None:
+        self._tool = tool
+
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         return AgentProposal(
             action=AgentAction.UPDATE,
@@ -62,11 +67,21 @@ class ClaimHistoryLookupAgent:
                 {
                     'tool': 'claim_history',
                     'operation': 'search_claim_history',
-                    'history_reference': 'synthetic-history-204',
+                    **self._tool,
                 }
             ],
             next_action_requirements=[],
         )
+
+
+class SpyPolicyHistoryAdapter(MockPolicyHistoryAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.history_calls = 0
+
+    def search_claim_history(self, command: ClaimHistorySearchRequest) -> ProviderLookupEnvelope:
+        self.history_calls += 1
+        return super().search_claim_history(command)
 
 
 def create_claim(
@@ -422,7 +437,11 @@ def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
     auth_headers: dict[str, str],
     repository: FixtureRepository,
 ) -> None:
-    app.state.agent_turn_provider = ClaimHistoryLookupAgent()
+    app.state.agent_turn_provider = ClaimHistoryLookupAgent(
+        {
+            'history_reference': 'synthetic-history-204',
+        }
+    )
     created = create_claim(client, auth_headers, key='history-lookup-turn').json()
     claim_id = created['claim']['claim_id']
     session_id = created['session']['session_id']
@@ -460,6 +479,44 @@ def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
         )
         == 1
     )
+
+
+@pytest.mark.parametrize(
+    'tool',
+    [
+        {'history_reference': []},
+        {'history_reference': {}},
+        {'history_reference': '   '},
+        {'history_reference': 'synthetic-history-204', 'limit': None},
+        {'history_reference': 'synthetic-history-204', 'limit': '10'},
+        {'history_reference': 'synthetic-history-204', 'limit': 2.5},
+        {'history_reference': 'synthetic-history-204', 'limit': True},
+        {'history_reference': 'synthetic-history-204', 'limit': 0},
+        {'history_reference': 'synthetic-history-204', 'limit': 51},
+    ],
+)
+def test_invalid_claim_history_tool_arguments_do_not_call_provider(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    tool: dict[str, object],
+) -> None:
+    adapter = SpyPolicyHistoryAdapter()
+    app.state.policy_history_adapter = adapter
+    app.state.agent_turn_provider = ClaimHistoryLookupAgent(tool)
+    created = create_claim(client, auth_headers, key='invalid-history-tool').json()
+
+    response = submit_message(
+        client,
+        auth_headers,
+        created['claim']['claim_id'],
+        created['session']['session_id'],
+    )
+
+    assert response.status_code == 200
+    assert adapter.history_calls == 0
+    assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []
 
 
 def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(

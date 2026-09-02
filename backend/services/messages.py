@@ -476,11 +476,19 @@ def _execute_claim_history_search(
     tool = _claim_history_search_tool(proposal)
     if tool is None:
         return None
-    history_reference = str(tool.get('history_reference') or '')
+    raw_reference = tool.get('history_reference')
+    if not isinstance(raw_reference, str):
+        return None
+    history_reference = raw_reference.strip()
     if not history_reference:
         return None
-    raw_limit = tool.get('limit')
-    limit = raw_limit if isinstance(raw_limit, int) and not isinstance(raw_limit, bool) else 10
+    if 'limit' not in tool:
+        limit = 10
+    else:
+        raw_limit = tool['limit']
+        if not isinstance(raw_limit, int) or isinstance(raw_limit, bool):
+            return None
+        limit = raw_limit
     if not 1 <= limit <= 50:
         return None
     existing = next(
