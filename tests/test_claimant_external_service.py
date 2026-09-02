@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import AssessorFixtureFailure, MockAssessorServiceAdapter
 from backend.app import create_app
+from backend.core.runtime_profiles import RuntimeCapabilityStatus
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -26,6 +27,7 @@ from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecor
 from backend.services.external_service_entry import (
     ExternalServiceEntry,
     ExternalServiceEntryDecision,
+    resolve_external_service_entry,
 )
 from backend.services.support import now_utc
 
@@ -824,3 +826,69 @@ def test_an_unavailable_service_entry_is_reported_as_retryable() -> None:
     assert error['code'] == 'DEPENDENCY_UNAVAILABLE'
     assert error['retryable'] is True
     assert error['details'][0]['reason'] == 'unavailable'
+
+
+def test_the_composition_root_cannot_label_a_fixture_answer_as_configured_service() -> None:
+    """The `live` label is unreachable while the answering adapter is a fixture double.
+
+    `backend/app.py` installs `MockAssessorServiceAdapter` whenever no adapter is
+    supplied, and that adapter answers with synthetic fixture routing. It selects the
+    entry separately, from the data runtime profile, and the only capability statuses
+    it can pass are `USING_FIXTURE` and `PENDING_CONFIRMATION`. Neither yields
+    `CONFIGURED_SERVICE`, so no composition this application can build records a
+    fixture-produced answer as though a configured service produced it.
+
+    This is asserted against the two statuses the composition root actually passes
+    rather than against a forced `app.state`. Overriding the entry by hand would
+    construct a pairing the application cannot produce and would prove the opposite of
+    the separation this card owns.
+    """
+
+    for fixture_assessor in (True, False):
+        decision = resolve_external_service_entry(
+            capability_status=(
+                RuntimeCapabilityStatus.USING_FIXTURE
+                if fixture_assessor
+                else RuntimeCapabilityStatus.PENDING_CONFIRMATION
+            ),
+            allow_test_fixture=fixture_assessor,
+        )
+
+        assert decision.integration_source is not IntegrationSource.CONFIGURED_SERVICE
+        assert decision.entry is not ExternalServiceEntry.LIVE
+
+
+def test_the_recorded_source_names_the_adapter_that_answered() -> None:
+    """A fixture answer is recorded as `fixture`, and the answer is identifiably synthetic."""
+
+    repository = FixtureRepository()
+    with TestClient(create_app(repository=repository)) as client:
+        claim_id, revision = _start_created_motor_claim(client, repository, key='source-truth')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        location = stored.form['incident.location'].model_copy(
+            update={'value': {'city': 'Auckland'}}
+        )
+        repository._claims[stored.claim_id] = stored.model_copy(
+            update={'form': {**stored.form, 'incident.location': location}}
+        )
+        consent = _grant_consent(client, claim_id, revision, key='source-truth')
+
+        routed = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': _idem('source-truth'),
+                'If-Match': str(consent['revision']),
+            },
+        )
+        operational = client.get(
+            f'/internal/v1/claims/{claim_id}/external-tasks',
+            headers={'Authorization': 'Bearer synthetic-integration'},
+        )
+
+    assert routed.status_code == 201
+    assert operational.status_code == 200
+    assert operational.json()['items'][0]['task']['integration_source'] == 'fixture'
+    routing = routed.json()['action']['routing']
+    assert routing['assessor_reference'].startswith('asr_fixture_')
