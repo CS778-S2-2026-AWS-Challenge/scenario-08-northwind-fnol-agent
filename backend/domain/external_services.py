@@ -1000,6 +1000,68 @@ class ResultAlreadyVerifiedError(ValueError):
     """A result that already carries a verification cannot be checked again."""
 
 
+class CrossClaimEvidenceError(ValueError):
+    """An evidence record offered for this check belongs to another claim."""
+
+
+class UnboundEvidenceSnapshotError(ValueError):
+    """Evidence was recorded after the claim snapshot it would be checked against."""
+
+
+def _assert_evidence_belongs_to_snapshot(
+    claim: WorkingClaim,
+    evidence: Sequence[EvidenceRecord],
+) -> None:
+    """Check that the evidence offered is the evidence of this claim snapshot.
+
+    Evidence ownership is `claim_id` plus `evidence_id`, so an identifier alone
+    does not say which claim a record belongs to. `assert_result_evidence_is_linked`
+    checks the links, not the records passed beside them, so without this a record
+    carrying a familiar `evidence_id` under a different claim would be read and one
+    claim's evidence state would decide another claim's provider result.
+
+    The revision the decision records comes from the claim, and evidence carries no
+    revision of its own, so the two inputs cannot be compared directly. They can be
+    ordered. `backend/services/evidence.py` advances a claim on every evidence
+    mutation and sets `updated_at` to the newest record in the bundle it wrote, so
+    within one snapshot no record is newer than the claim. A record that is newer
+    was written after this claim was read, and recording the decision against the
+    claim's revision would name a revision the check did not use.
+
+    This detects a demonstrable mismatch; it does not prove that the two reads were
+    atomic. A caller that reads them separately with nothing in between is not
+    distinguishable from one that read them together, and nothing in the models
+    could tell them apart. What it removes is the case where the mismatch is
+    visible in the data and was previously ignored.
+
+    Args:
+        claim: The claim snapshot the check is made against.
+        evidence: The evidence records offered with it.
+
+    Returns:
+        None. Nothing is modified; this raises or returns quietly.
+
+    Raises:
+        CrossClaimEvidenceError: A record belongs to a different claim.
+        UnboundEvidenceSnapshotError: A record was updated after the claim
+            snapshot was taken.
+    """
+
+    for record in evidence:
+        if record.claim_id != claim.claim_id:
+            raise CrossClaimEvidenceError(
+                f'{record.evidence_id}: belongs to claim {record.claim_id}, and the check '
+                f'was offered the snapshot of claim {claim.claim_id}.'
+            )
+        if record.updated_at > claim.updated_at:
+            raise UnboundEvidenceSnapshotError(
+                f'{record.evidence_id}: was updated at {record.updated_at.isoformat()}, '
+                f'after claim {claim.claim_id} was read at '
+                f'{claim.updated_at.isoformat()} on revision {claim.revision}, so the '
+                'decision cannot be recorded against that revision.'
+            )
+
+
 def _names_conflicting_material(
     result: ExternalTaskResult,
     evidence: Sequence[EvidenceRecord],
@@ -1074,13 +1136,19 @@ def verify_external_task_result(
     older state beside a newer revision number would have the decision recorded
     against a snapshot it never read.
 
+    The evidence records are a second input and are not inside that snapshot, so
+    they are checked against it rather than trusted: a record owned by another
+    claim, or written after the claim was read, is refused. See
+    `_assert_evidence_belongs_to_snapshot` for what that does and does not
+    establish.
+
     Args:
         result: The unverified provider result to check.
         task: The external task record the result names.
         links: The evidence-to-task links known for this claim.
         claim: The claim snapshot the check is made against, supplying both the
             identity the result must match and the revision recorded with it.
-        evidence: The evidence records known for this claim.
+        evidence: The evidence records read with that snapshot.
         checked_at: When the check was performed.
 
     Returns:
@@ -1100,6 +1168,9 @@ def verify_external_task_result(
             a different task.
         UntraceableExternalEvidenceError: The result names material no link
             accounts for.
+        CrossClaimEvidenceError: An evidence record belongs to another claim.
+        UnboundEvidenceSnapshotError: An evidence record was written after the
+            claim snapshot was read.
         ValueError: The check is dated before the result arrived.
     """
 
@@ -1115,6 +1186,7 @@ def verify_external_task_result(
         )
     assert_result_matches_task(result, task)
     assert_result_evidence_is_linked(result, links)
+    _assert_evidence_belongs_to_snapshot(claim, evidence)
     if checked_at < result.received_at:
         raise ValueError(
             f'{result.result_id}: cannot be checked at {checked_at.isoformat()}, which is '

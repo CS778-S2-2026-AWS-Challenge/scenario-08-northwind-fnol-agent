@@ -4,6 +4,7 @@ import pytest
 
 from backend.domain.external_services import (
     ConflictingEvidenceOriginError,
+    CrossClaimEvidenceError,
     ExternalRequestTaskMismatchError,
     ExternalTaskClaimMismatchError,
     ExternalTaskDelivery,
@@ -15,6 +16,7 @@ from backend.domain.external_services import (
     ExternalTaskResultVerification,
     ResultAlreadyVerifiedError,
     TaskCannotHaveResultError,
+    UnboundEvidenceSnapshotError,
     UnsettledResultError,
     UntraceableExternalEvidenceError,
     assert_result_may_settle_fact,
@@ -129,6 +131,7 @@ def _evidence(
     evidence_id: str = 'evd_1',
     claim_id: str = CLAIM,
     status: EvidenceStatus = EvidenceStatus.RECEIVED,
+    updated_at: datetime = RECEIVED_AT,
 ) -> EvidenceRecord:
     return EvidenceRecord(
         evidence_id=evidence_id,
@@ -138,7 +141,7 @@ def _evidence(
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.EXTERNAL_SYSTEM,
         created_at=RECEIVED_AT,
-        updated_at=RECEIVED_AT,
+        updated_at=updated_at,
     )
 
 
@@ -352,3 +355,54 @@ def test_the_argument_is_left_unchanged() -> None:
     assert original.verification is ExternalTaskResultVerification.UNVERIFIED
     assert original.verified_at is None
     assert original.verified_against_revision is None
+
+
+def test_evidence_owned_by_another_claim_is_refused() -> None:
+    """Ownership is claim_id plus evidence_id, so a familiar identifier is not enough."""
+
+    with pytest.raises(CrossClaimEvidenceError):
+        _verify(
+            _result(evidence_ids=['evd_1']),
+            links=[_link()],
+            evidence=[_evidence(claim_id='clm_2', status=EvidenceStatus.INCONSISTENT)],
+        )
+
+
+def test_evidence_written_after_the_claim_was_read_is_refused() -> None:
+    """The decision records the claim revision, so it must not use later evidence."""
+
+    with pytest.raises(UnboundEvidenceSnapshotError):
+        _verify(
+            _result(evidence_ids=['evd_1']),
+            links=[_link()],
+            evidence=[_evidence(updated_at=RECEIVED_AT + timedelta(seconds=1))],
+        )
+
+
+def test_evidence_as_new_as_the_claim_is_accepted() -> None:
+    """An evidence mutation sets the claim to the newest record, so equal is the norm."""
+
+    checked = _verify(
+        _result(evidence_ids=['evd_1']),
+        links=[_link()],
+        evidence=[_evidence(updated_at=RECEIVED_AT)],
+    )
+
+    assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
+
+
+def test_an_unnamed_record_is_still_bound_to_the_snapshot() -> None:
+    """The bundle is checked whole; a stale record does not become safe by going unnamed."""
+
+    with pytest.raises(UnboundEvidenceSnapshotError):
+        _verify(
+            _result(evidence_ids=['evd_1']),
+            links=[_link()],
+            evidence=[
+                _evidence(),
+                _evidence(
+                    evidence_id='evd_unrelated',
+                    updated_at=RECEIVED_AT + timedelta(seconds=1),
+                ),
+            ],
+        )
