@@ -7,6 +7,8 @@ response is printed.
 
 import json
 
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+
 from backend.core.config import AgentRuntimeProfile, Settings
 from backend.core.model_gateway import build_model_gateway
 from backend.domain.model_gateway import (
@@ -17,6 +19,22 @@ from backend.domain.model_gateway import (
     ModelRequest,
     ModelRole,
 )
+
+
+class LiveVerificationOutput(BaseModel):
+    """Strict structured result required for a successful live verification."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    action: str
+    response: str
+
+    @field_validator('action', 'response')
+    @classmethod
+    def require_non_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError('value must not be blank')
+        return value
 
 
 def main() -> int:
@@ -81,6 +99,11 @@ def main() -> int:
         )
         return 1
     if response.structured_output is None:
+        print('status=live_call_failed code=malformed_response retryable=false')
+        return 1
+    try:
+        LiveVerificationOutput.model_validate(response.structured_output)
+    except ValidationError:
         print('status=live_call_failed code=malformed_response retryable=false')
         return 1
     print(
