@@ -39,6 +39,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.integrations import assessor_operation_id, route_assessor
 from backend.services.support import (
     now_utc,
@@ -353,6 +354,7 @@ def _raise_revision_conflict(claim: WorkingClaim) -> NoReturn:
 def request_assessor_routing(
     repository: PersistenceRepository,
     adapter: AssessorServiceAdapter,
+    entry_decision: ExternalServiceEntryDecision,
     principal: Principal,
     claim_id: str,
     idempotency_key: str | None,
@@ -397,6 +399,7 @@ def request_assessor_routing(
         route_assessor(
             repository,
             adapter,
+            entry_decision,
             route_request,
         )
         restored = repository.get_claim(claim_id, principal.subject)
@@ -471,6 +474,7 @@ def request_assessor_routing(
     route_assessor(
         repository,
         adapter,
+        entry_decision,
         _assessor_route_request(claim, consent, decision.decision_id),
         authorisation_decision=decision,
     )

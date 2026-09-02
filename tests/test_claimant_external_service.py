@@ -335,6 +335,10 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
             'If-Match': str(consent['revision']),
         },
     )
+    operational = client.get(
+        f'/internal/v1/claims/{claim_id}/external-tasks',
+        headers={'Authorization': 'Bearer synthetic-integration'},
+    )
     replay = client.post(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
@@ -364,11 +368,55 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
     assert body['action']['routing']['routing_status'] == 'assigned'
     assert body['action']['routing']['assessor_reference'].startswith('asr_fixture_')
     assert body['customer_next_step']['responsible_party'] == 'external_party'
+    assert operational.status_code == 200
+    operational_item = operational.json()['items'][0]
+    assert operational_item['task']['status'] == 'accepted'
+    assert operational_item['task']['integration_source'] == 'fixture'
+    assert operational_item['task']['delivery'] == 'submitted'
+    assert (
+        operational_item['task']['provider_reference']
+        == body['action']['routing']['assessor_reference']
+    )
+    assert operational_item['request']['sent_at'] is not None
+    assert operational_item['request']['operation_id'].startswith('asr_op_')
+    assert set(operational_item['request']['disclosed_fields']) == {
+        'claim_id',
+        'external_claim_id',
+        'authorisation_ref',
+        'claimant_consent_ref',
+        'requested_action',
+        'location.region',
+    }
+    assert operational_item['request']['purpose'].endswith(
+        'This does not decide coverage or approve repairs.'
+    )
+    assert 'request_id' not in str(body)
+    assert 'northwind_authority_ref' not in str(body)
     stored = repository.get_claim_internal(claim_id)
     assert stored is not None
     decisions = repository.list_agent_decisions(claim_id, 'cus_demo')
     assert decisions[-1].reason_codes == ['ASSESSOR_RULE_AUTHORISED']
     assert decisions[-1].resulting_revision == consent['revision']
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    assert request.authorisation.northwind_authority_ref == decisions[-1].decision_id
+    assert (
+        request.authorisation.claimant_consent_ref
+        == stored.external_service_consents[-1].consent_ref
+    )
+    assert request.authorisation.authorised_revision == consent['revision']
+    repository.save_external_task_request(request, 'cus_demo')
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_request(
+            request.model_copy(update={'purpose': 'Changed after the send.'}),
+            'cus_demo',
+        )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_request(
+            request.model_copy(update={'request_id': 'erq_second_request'}),
+            'cus_demo',
+        )
+    with pytest.raises(KeyError):
+        repository.save_external_task_request(request, 'cus_another_customer')
 
 
 def test_claimant_assessor_request_requires_consent_and_current_revision(

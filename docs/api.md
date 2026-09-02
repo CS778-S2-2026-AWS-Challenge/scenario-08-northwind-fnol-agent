@@ -274,6 +274,7 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | Message | `msg_01J4Y7T1KC` |
 | Evidence | `evd_01J4Y7V5QJ` |
 | External task | `tsk_01J4Y7VZ82` |
+| External request | `erq_4d29a6dbafdf5ed57152f15c` |
 | Decision | `dec_01J4Y7W90S` |
 | Handoff | `hnd_01J4Y7XG2C` |
 | Signal | `sig_01J4Y7Z0EH` |
@@ -1119,8 +1120,13 @@ the same operation identity for an unchanged permitted retry. Automatic retry co
 unapproved; the claimant client offers only an explicit retry for retryable failures.
 
 The authorised decision and prepared operation identity are persisted together before the
-provider call. A timeout retry reuses that durable authority record rather than replacing it
-with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
+provider call. The service also persists one operational `tsk_` task and its `erq_` request,
+including the selected stakeholder, readable purpose, disclosed field names, separate Northwind
+authority and claimant-consent references, authorised Claim revision, preparation time, first
+send time, and stable operation identity. The request is available only through the protected
+internal task projection; raw authority, consent, delivery evidence, and provider references do
+not enter this claimant response. A timeout retry reuses that durable authority and request
+record rather than replacing either with a new identity or timestamp. If provider acceptance and the Claim update succeed but saving the public
 idempotency response fails, the same request restores the authoritative assigned or queued state;
 the claimant client also reloads that state before presenting a failure message.
 If provider acceptance is durable but a concurrent Claim mutation wins the following
@@ -1685,7 +1691,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 | `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
-| `GET` | `/internal/v1/claims/{claim_id}/external-tasks` | List operational third-party tasks with linked evidence identifiers |
+| `GET` | `/internal/v1/claims/{claim_id}/external-tasks` | List operational third-party tasks with their request and linked evidence identifiers |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
 | `POST` | `/internal/v1/assessors/route` | Request a rule-authorised assessor action |
 
@@ -1943,7 +1949,9 @@ Lists the provider-neutral operational tasks recorded for one Working Claim. The
 integration-service credentials and is not a claimant or browser projection. Each item carries
 the task's claim association, service identity, requested action, integration source, operation
 status, delivery state, bounded failure or provider reference when present, creation and update
-times, and the evidence identifiers mapped to that task.
+times, the request preparation/send record when one exists, and the evidence identifiers mapped
+to that task. `request` remains nullable for task records created before request persistence was
+introduced.
 
 The query accepts a positive `limit`, defaulting to 25, and an opaque `cursor`. Values above 100
 are truncated to 100; values below 1 return `422 VALIDATION_ERROR`. Results use the stable
@@ -1961,13 +1969,37 @@ must reuse the returned cursor unchanged.
         "service_identity": "vehicle_damage_assessment_routing",
         "requested_action": "vehicle_damage_assessment",
         "integration_source": "fixture",
-        "status": "prepared",
-        "delivery": "not_submitted",
-        "delivery_evidence": null,
+        "status": "accepted",
+        "delivery": "submitted",
+        "delivery_evidence": "fixture routing acknowledgement: asr_fixture_11d35f649a",
         "failure_code": null,
-        "provider_reference": null,
+        "provider_reference": "asr_fixture_11d35f649a",
         "created_at": "2026-09-02T01:01:00Z",
-        "updated_at": "2026-09-02T01:01:00Z"
+        "updated_at": "2026-09-02T01:01:01Z"
+      },
+      "request": {
+        "request_id": "erq_4d29a6dbafdf5ed57152f15c",
+        "task_id": "tsk_01J4Y7VZ82",
+        "claim_id": "clm_01J4Y7Q2AW",
+        "service_identity": "vehicle_damage_assessment_routing",
+        "requested_action": "vehicle_damage_assessment",
+        "purpose": "Route the vehicle damage assessment request using the confirmed incident region. This does not decide coverage or approve repairs.",
+        "disclosed_fields": [
+          "authorisation_ref",
+          "claim_id",
+          "claimant_consent_ref",
+          "external_claim_id",
+          "location.region",
+          "requested_action"
+        ],
+        "authorisation": {
+          "northwind_authority_ref": "dec_01J4Y7V7B2",
+          "claimant_consent_ref": "cns_01J4Y7V8PT",
+          "authorised_revision": 8
+        },
+        "prepared_at": "2026-09-02T01:01:00Z",
+        "sent_at": "2026-09-02T01:01:01Z",
+        "operation_id": "asr_op_b6bd9fb0b17ec1138d914c5d"
       },
       "evidence_ids": ["evd_01J4Y7V5QJ"]
     }
@@ -1979,7 +2011,10 @@ must reuse the returned cursor unchanged.
 The task record stays outside shared Claim State. A fixture task remains labelled `fixture`, and
 the route never converts an unavailable or unverified provider capability into
 `configured_service`. Provider references and delivery evidence are operational fields and must
-not be copied into claimant projections.
+not be copied into claimant projections. `request.sent_at` means Northwind invoked the selected
+service entry; it does not by itself prove provider receipt. Task `delivery=submitted` is recorded
+only when the entry returns a named acknowledgement. In the fixture profile that acknowledgement
+and provider reference remain explicitly synthetic.
 
 ### `POST /internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing`
 

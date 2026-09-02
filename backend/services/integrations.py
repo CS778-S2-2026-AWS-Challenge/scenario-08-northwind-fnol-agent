@@ -9,6 +9,13 @@ from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskAuthorisation,
+    ExternalTaskDelivery,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+    assert_disclosure_within_consent,
+    assert_request_matches_task,
 )
 from backend.domain.models import (
     ActorType,
@@ -24,6 +31,7 @@ from backend.domain.models import (
     CreateExternalClaimRequest,
     CustomerNextStep,
     ExternalClaimResult,
+    ExternalServiceConsent,
     ExternalServiceConsentStatus,
     FormStatus,
     ResponsibleParty,
@@ -36,7 +44,16 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.external_service_entry import (
+    ExternalServiceEntryDecision,
+    assert_task_matches_entry,
+)
 from backend.services.support import now_utc, request_fingerprint
+
+_ASSESSOR_REQUEST_PURPOSE = (
+    'Route the vehicle damage assessment request using the confirmed incident region. '
+    'This does not decide coverage or approve repairs.'
+)
 
 
 def _claim_not_found() -> ApiError:
@@ -72,6 +89,133 @@ def assessor_operation_id(payload: RouteAssessorRequest) -> str:
         'requested_action': payload.requested_action,
     }
     return f'asr_op_{request_fingerprint(identity)}'
+
+
+def _external_task_id(operation_id: str) -> str:
+    return f'tsk_{request_fingerprint({"operation_id": operation_id})[:24]}'
+
+
+def _external_request_id(operation_id: str) -> str:
+    return f'erq_{request_fingerprint({"operation_id": operation_id})[:24]}'
+
+
+def _external_service_unavailable(decision: ExternalServiceEntryDecision) -> ApiError:
+    return ApiError(
+        status_code=503,
+        code='DEPENDENCY_UNAVAILABLE',
+        message=decision.limitation or 'The assessment service is unavailable.',
+        details=[ErrorDetail(field='assessor_service', reason=decision.entry.value)],
+        retryable=False,
+    )
+
+
+def _prepare_external_request(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    consent: ExternalServiceConsent,
+    operation: AssessorRoutingOperation,
+    entry_decision: ExternalServiceEntryDecision,
+) -> tuple[ExternalTaskRecord, ExternalTaskRequest]:
+    source = entry_decision.integration_source
+    if source is None:
+        raise _external_service_unavailable(entry_decision)
+    task = ExternalTaskRecord(
+        task_id=_external_task_id(operation.operation_id),
+        claim_id=operation.claim_id,
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=operation.requested_action,
+        integration_source=source,
+        status=ExternalTaskOperationStatus.PREPARED,
+        created_at=operation.created_at,
+        updated_at=operation.created_at,
+    )
+    request = ExternalTaskRequest(
+        request_id=_external_request_id(operation.operation_id),
+        task_id=task.task_id,
+        claim_id=operation.claim_id,
+        service_identity=task.service_identity,
+        requested_action=task.requested_action,
+        purpose=_ASSESSOR_REQUEST_PURPOSE,
+        disclosed_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        authorisation=ExternalTaskAuthorisation(
+            northwind_authority_ref=operation.authorisation_ref,
+            claimant_consent_ref=operation.claimant_consent_ref,
+            authorised_revision=operation.authorised_revision,
+        ),
+        prepared_at=operation.created_at,
+    )
+    assert_task_matches_entry(task, entry_decision)
+    assert_request_matches_task(request, task)
+    assert_disclosure_within_consent(
+        request,
+        consent,
+        claim_customer_id=claim.customer_id,
+    )
+    try:
+        repository.save_external_task(task, claim.customer_id)
+        existing = next(
+            (
+                held
+                for held in repository.list_external_task_requests_internal(claim.claim_id)
+                if held.request_id == request.request_id
+            ),
+            None,
+        )
+        if existing is None:
+            repository.save_external_task_request(request, claim.customer_id)
+        else:
+            assert_request_matches_task(existing, task)
+            request = existing
+    except (IdempotencyConflict, KeyError, ValueError) as conflict:
+        raise _idempotency_error() from conflict
+    return task, request
+
+
+def _record_external_send(
+    repository: PersistenceRepository,
+    *,
+    request: ExternalTaskRequest,
+    customer_id: str,
+    operation_id: str,
+) -> ExternalTaskRequest:
+    if request.sent_at is not None:
+        return request
+    sent = request.model_copy(
+        update={
+            'sent_at': now_utc(),
+            'operation_id': operation_id,
+        }
+    )
+    try:
+        repository.save_external_task_request(sent, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    return sent
+
+
+def _record_external_acceptance(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    customer_id: str,
+    provider_reference: str,
+) -> None:
+    accepted = task.model_copy(
+        update={
+            'status': ExternalTaskOperationStatus.ACCEPTED,
+            'delivery': ExternalTaskDelivery.SUBMITTED,
+            'delivery_evidence': (
+                f'{task.integration_source.value} routing acknowledgement: {provider_reference}'
+            ),
+            'provider_reference': provider_reference,
+            'updated_at': now_utc(),
+        }
+    )
+    try:
+        repository.save_external_task(accepted, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
 
 
 def _assessor_failure_error(failure_code: AssessorRoutingFailureCode) -> ApiError:
@@ -250,6 +394,7 @@ def create_external_claim(
 def route_assessor(
     repository: PersistenceRepository,
     adapter: AssessorServiceAdapter,
+    entry_decision: ExternalServiceEntryDecision,
     payload: RouteAssessorRequest,
     *,
     authorisation_decision: AgentDecisionRecord | None = None,
@@ -276,6 +421,26 @@ def route_assessor(
 
     if operation is not None and operation.status is AssessorRoutingOperationStatus.ACCEPTED:
         assert operation.result is not None
+        task_id = _external_task_id(operation.operation_id)
+        task = next(
+            (
+                item
+                for item in repository.list_external_tasks_internal(operation.claim_id)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        if task is not None and task.status is ExternalTaskOperationStatus.PREPARED:
+            provider_reference = (
+                operation.result.assessor_reference or operation.result.queue_reference
+            )
+            assert provider_reference is not None
+            _record_external_acceptance(
+                repository,
+                task=task,
+                customer_id=claim.customer_id,
+                provider_reference=provider_reference,
+            )
         return _save_assessor_result(
             repository,
             payload.claim_id,
@@ -333,6 +498,9 @@ def route_assessor(
             'Assessor routing requires current authority for this claim revision.',
         )
 
+    if entry_decision.integration_source is None:
+        raise _external_service_unavailable(entry_decision)
+
     if operation is None:
         timestamp = now_utc()
         operation = AssessorRoutingOperation(
@@ -360,11 +528,25 @@ def route_assessor(
         except IdempotencyConflict as conflict:
             raise _idempotency_error() from conflict
 
+    task, external_request = _prepare_external_request(
+        repository,
+        claim=claim,
+        consent=consent,
+        operation=operation,
+        entry_decision=entry_decision,
+    )
+
     try:
         outcome = adapter.route_assessor(payload, fingerprint)
     except AdapterIdempotencyConflict as conflict:
         raise _idempotency_error() from conflict
     except AssessorAdapterFailure as failure:
+        _record_external_send(
+            repository,
+            request=external_request,
+            customer_id=claim.customer_id,
+            operation_id=operation.operation_id,
+        )
         unavailable = failure.code in {
             AssessorFixtureFailure.TIMEOUT,
             AssessorFixtureFailure.UNAVAILABLE,
@@ -382,6 +564,13 @@ def route_assessor(
         )
         repository.save_assessor_routing_operation(failed_operation)
         raise _assessor_failure_error(failure.code) from failure
+
+    _record_external_send(
+        repository,
+        request=external_request,
+        customer_id=claim.customer_id,
+        operation_id=operation.operation_id,
+    )
 
     if outcome.result.routing_status not in {
         AssessorRoutingStatus.ASSIGNED,
@@ -407,7 +596,15 @@ def route_assessor(
             'updated_at': now_utc(),
         }
     )
+    provider_reference = outcome.result.assessor_reference or outcome.result.queue_reference
+    assert provider_reference is not None
     repository.save_assessor_routing_operation(accepted_operation)
+    _record_external_acceptance(
+        repository,
+        task=task,
+        customer_id=claim.customer_id,
+        provider_reference=provider_reference,
+    )
     return _save_assessor_result(
         repository,
         payload.claim_id,

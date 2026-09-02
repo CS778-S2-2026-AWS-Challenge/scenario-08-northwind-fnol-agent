@@ -28,6 +28,7 @@ from backend.domain.retrieval import (
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import complete_evidence_processing
+from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_tasks import list_external_tasks
 from backend.services.integrations import create_external_claim, route_assessor
 from backend.services.knowledge_search import search_knowledge
@@ -47,6 +48,10 @@ def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
 
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
     return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
+
+
+def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
+    return cast(ExternalServiceEntryDecision, request.app.state.assessor_service_entry)
 
 
 def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
@@ -158,6 +163,7 @@ def route_assessor_integration(
     result, replayed = route_assessor(
         repository_for(request),
         assessor_adapter_for(request),
+        _assessor_entry_for(request),
         payload,
     )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
