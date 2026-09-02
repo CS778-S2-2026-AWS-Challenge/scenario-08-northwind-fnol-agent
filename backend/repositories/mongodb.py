@@ -764,12 +764,31 @@ class MongoDBRepository:
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
         if not self._claim_owned(task.claim_id, customer_id):
             raise KeyError(task.claim_id)
-        existing = self._get(
-            'external_task',
-            task.task_id,
-            ExternalTaskRecord,
-            customer_id=customer_id,
-        )
+        record_id = self._record_id('external_task', task.task_id)
+        document = {
+            **task.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task',
+            'customer_id': customer_id,
+            'claim_id': task.claim_id,
+        }
+        stored = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+        if stored is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError:
+                stored = self._collection.find_one(
+                    {'_id': record_id, 'record_type': 'external_task'}
+                )
+        existing = self._model_from_document(stored, ExternalTaskRecord)
+        if (
+            stored is None
+            or stored.get('customer_id') != customer_id
+            or stored.get('claim_id') != task.claim_id
+            or existing is None
+        ):
+            raise IdempotencyConflict(task.task_id)
         immutable_identity = (
             'claim_id',
             'service_identity',
@@ -777,18 +796,30 @@ class MongoDBRepository:
             'integration_source',
             'created_at',
         )
-        if existing is not None and (
-            any(getattr(existing, name) != getattr(task, name) for name in immutable_identity)
-            or task.updated_at < existing.updated_at
-        ):
+        if existing == task:
+            return
+        if any(getattr(existing, name) != getattr(task, name) for name in immutable_identity):
             raise IdempotencyConflict(task.task_id)
-        self._put(
-            'external_task',
-            task.task_id,
-            task,
-            customer_id=customer_id,
-            claim_id=task.claim_id,
+        if task.updated_at <= existing.updated_at:
+            raise IdempotencyConflict(task.task_id)
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task',
+                'customer_id': customer_id,
+                'claim_id': task.claim_id,
+                'updated_at': stored.get('updated_at'),
+            },
+            document,
         )
+        if result.matched_count == 0:
+            current = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+            same_owner = current is not None and (
+                current.get('customer_id') == customer_id
+                and current.get('claim_id') == task.claim_id
+            )
+            if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
+                raise IdempotencyConflict(task.task_id)
 
     def save_external_task_evidence_link(
         self,
@@ -807,21 +838,29 @@ class MongoDBRepository:
             raise KeyError(link.task_id)
 
         identifier = f'{link.claim_id}:{link.evidence_id}'
-        existing = self._get(
-            'external_task_evidence_link',
-            identifier,
-            ExternalTaskEvidenceLink,
-            customer_id=customer_id,
-        )
-        if existing is not None and existing != link:
-            raise IdempotencyConflict(link.evidence_id)
-        self._put(
-            'external_task_evidence_link',
-            identifier,
-            link,
-            customer_id=customer_id,
-            claim_id=link.claim_id,
-        )
+        record_id = self._record_id('external_task_evidence_link', identifier)
+        document = {
+            **link.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_evidence_link',
+            'customer_id': customer_id,
+            'claim_id': link.claim_id,
+        }
+        try:
+            self._collection.insert_one(document)
+        except DuplicateKeyError as error:
+            existing = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task_evidence_link'}
+            )
+            same_owner = existing is not None and (
+                existing.get('customer_id') == customer_id
+                and existing.get('claim_id') == link.claim_id
+            )
+            if (
+                not same_owner
+                or self._model_from_document(existing, ExternalTaskEvidenceLink) != link
+            ):
+                raise IdempotencyConflict(link.evidence_id) from error
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         return self._list(

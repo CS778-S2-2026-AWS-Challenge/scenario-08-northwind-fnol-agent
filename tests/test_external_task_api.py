@@ -116,9 +116,20 @@ def test_external_task_persistence_keeps_claim_and_evidence_origins(
         linked_at=claim.created_at + timedelta(minutes=3),
     )
     repository.save_external_task_evidence_link(link, claim.customer_id)
+    repository.save_external_task_evidence_link(link, claim.customer_id)
 
     assert repository.list_external_tasks_internal(claim.claim_id) == [first, second]
     assert repository.list_external_task_evidence_links_internal(claim.claim_id) == [link]
+
+    progressed = first.model_copy(
+        update={
+            'status': ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+            'failure_code': ExternalTaskFailureCode.TIMEOUT,
+            'updated_at': first.updated_at + timedelta(minutes=1),
+        }
+    )
+    repository.save_external_task(progressed, claim.customer_id)
+    assert repository.list_external_tasks_internal(claim.claim_id)[0] == progressed
 
     conflicting = link.model_copy(update={'task_id': second.task_id})
     with pytest.raises(IdempotencyConflict):

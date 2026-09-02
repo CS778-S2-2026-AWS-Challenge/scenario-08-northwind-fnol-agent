@@ -708,11 +708,12 @@ class FixtureRepository(PersistenceRepository):
             'integration_source',
             'created_at',
         )
-        if existing is not None and (
-            any(getattr(existing, name) != getattr(task, name) for name in immutable_identity)
-            or task.updated_at < existing.updated_at
-        ):
-            raise IdempotencyConflict(task.task_id)
+        if existing is not None and existing != task:
+            changed_identity = any(
+                getattr(existing, name) != getattr(task, name) for name in immutable_identity
+            )
+            if changed_identity or task.updated_at <= existing.updated_at:
+                raise IdempotencyConflict(task.task_id)
         self._external_tasks[task.task_id] = deepcopy(task)
 
     def save_external_task_evidence_link(
