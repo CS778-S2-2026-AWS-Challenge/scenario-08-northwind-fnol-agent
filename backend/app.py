@@ -41,9 +41,8 @@ from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
-from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.external_service_entry import resolve_external_service_entry
-from backend.services.model_agent import GatewayAgent
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 
 
 def create_app(
