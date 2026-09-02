@@ -150,6 +150,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
             headers=ADMIN_HEADERS,
             json={
                 'domain': 'model',
+                'impact': 'high',
                 'values': {
                     'protocol': 'openai_compatible',
                     'provider': 'synthetic-provider',
@@ -170,7 +171,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         )
         assert model_configuration.status_code == 201, model_configuration.text
         configuration_id = model_configuration.json()['configuration_id']
-        published = client.post(
+        validated = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/validate',
             headers={
                 'Authorization': 'Bearer synthetic-admin',
@@ -186,6 +187,17 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
                     }
                 ]
             },
+        )
+        assert validated.status_code == 200, validated.text
+        assert validated.json()['state'] == 'awaiting_approval'
+        published = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/publish',
+            headers={
+                'Authorization': 'Bearer synthetic-admin',
+                'Idempotency-Key': 'control-plane-model-publish',
+                'If-Match': '2',
+            },
+            json={'reason': 'Approved for the controlled integration scenario.'},
         )
         assert published.status_code == 200, published.text
         assert published.json()['state'] == 'published'
