@@ -8,7 +8,7 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Evidence metadata,
+method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
 External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
@@ -101,14 +101,24 @@ tokens, and unrestricted model context are excluded.
 
 The initial event vocabulary is intentionally bounded to consent, permission, action,
 and access outcomes. New event types or changes to field meaning require an explicit
-contract update; additive optional fields are structural changes detected by CI. Claim,
-integration, and configuration mutations must add their events within the applicable
-transaction boundary once their repository adapters consume this envelope.
+contract update; additive optional fields are structural changes detected by CI.
 
-The existing configuration-only `backend.domain.configuration.AuditEvent` projection is
-kept compatible with the Admin API. It is not yet the cross-domain repository
-implementation of this envelope; migration of that projection and the generic
-Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
+The Fixture and MongoDB repositories implement provider-neutral immutable append and
+authorised subject/time-range reads for this envelope. A Claim mutation may persist its
+idempotency record, applied Branch Evaluation, and claim-scoped audit facts in one atomic
+repository boundary. The implemented claimant assessor-consent mutation records a
+`consent.granted` fact with the authenticated claimant actor and authentication source,
+the consent identity/state, bounded reason/source reference, idempotency identity, and
+resulting Claim revision. The controlled assessor-routing preparation records the
+Northwind `permission.authorised` fact in the same repository boundary as the authority
+decision and prepared operation, including the active claimant consent reference and
+authorised Claim revision. These audit records use the audit-only visibility boundary
+and are not added to claimant or staff API projections by #415.
+
+The existing configuration-only `backend.domain.configuration.AuditEvent` projection
+remains compatible with the Admin API and separate from this cross-domain repository
+envelope. #415 does not redefine that API projection or claim that every target action,
+failure, access, or configuration event is already wired.
 
 ## Required Access Patterns
 
@@ -185,14 +195,16 @@ Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
   reactivate consent.
-- The claimant consent mutation atomically stores its idempotency result with the one Claim State
-  revision advance. The assessor request uses a separate operation identity so provider retry does
-  not replay or rewrite the consent mutation.
+- The claimant consent mutation atomically stores its idempotency result, applied Branch
+  Evaluation, `consent.granted` audit fact, and the one Claim State revision advance. The assessor
+  request uses a separate operation identity so provider retry does not replay or rewrite the
+  consent mutation.
 - Assessor routing persists its immutable identity, complete request fingerprint, consent and
   authority references, authorised claim revision, and `prepared` state before provider
-  invocation. The authority decision and prepared operation are one atomic repository mutation;
-  retries never replace the durable decision record. Retryable failure, terminal failure, and
-  accepted result are explicit transitions.
+  invocation. When the controlled rule creates the authority decision, that decision, prepared
+  operation, and `permission.authorised` audit fact are one atomic repository mutation; retries
+  never replace the durable decision record. Retryable failure, terminal failure, and accepted
+  result are explicit transitions.
 - Provider acceptance is durable before the final Claim State compare-and-set. If another claim
   mutation advances the revision first, an unchanged retry reconciles the accepted result into a
   new claim revision without invoking or creating a second external task.
