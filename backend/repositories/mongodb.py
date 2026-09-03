@@ -9,13 +9,15 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -53,6 +55,7 @@ from backend.repositories.protocols import (
 )
 
 ModelT = TypeVar('ModelT', bound=BaseModel)
+_DATETIME_ADAPTER = TypeAdapter(datetime)
 
 
 class MongoDBConfigurationError(ValueError):
@@ -171,6 +174,15 @@ class MongoDBRepository:
         self._client = client
         self._collection: Collection[dict[str, Any]] = client[database_name][collection_name]
         self._collection.create_index([('record_type', 1), ('claim_id', 1), ('created_at', 1)])
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('subject.subject_type', 1),
+                ('subject.subject_id', 1),
+                ('subject.claim_id', 1),
+                ('created_at', 1),
+            ]
+        )
         self._collection.create_index([('record_type', 1), ('customer_id', 1), ('updated_at', -1)])
         self._collection.create_index(
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
@@ -294,6 +306,73 @@ class MongoDBRepository:
             return None
         payload = {key: value for key, value in document.items() if key in model_type.model_fields}
         return model_type.model_validate(payload)
+
+    @staticmethod
+    def _audit_timestamp(value: datetime) -> str:
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            value = value.astimezone(UTC)
+        return str(_DATETIME_ADAPTER.dump_python(value, mode='json'))
+
+    def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        record_id = self._record_id('audit_event', event.event_id)
+        existing = self._collection.find_one({'_id': record_id, 'record_type': 'audit_event'})
+        if existing is not None:
+            stored = self._model_from_document(existing, AuditEventEnvelope)
+            if stored != event:
+                raise IdempotencyConflict(event.event_id)
+            return
+
+        document = event.model_dump(mode='json')
+        document.update(
+            {
+                '_id': record_id,
+                'record_type': 'audit_event',
+                'created_at': self._audit_timestamp(event.created_at),
+            }
+        )
+        try:
+            self._collection.insert_one(document)
+        except DuplicateKeyError as error:
+            existing = self._collection.find_one({'_id': record_id, 'record_type': 'audit_event'})
+            stored = self._model_from_document(existing, AuditEventEnvelope)
+            if stored != event:
+                raise IdempotencyConflict(event.event_id) from error
+
+    def list_audit_events_internal(
+        self,
+        subject: AuditSubject,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        if start_at is not None and end_at is not None:
+            try:
+                invalid_range = start_at > end_at
+            except TypeError as error:
+                raise ValueError('Audit event time bounds must use comparable timestamps.') from error
+            if invalid_range:
+                raise ValueError('Audit event start_at must not be after end_at.')
+
+        query: dict[str, Any] = {
+            'record_type': 'audit_event',
+            'subject.subject_type': subject.subject_type.value,
+            'subject.subject_id': subject.subject_id,
+            'subject.claim_id': subject.claim_id,
+        }
+        time_range: dict[str, str] = {}
+        if start_at is not None:
+            time_range['$gte'] = self._audit_timestamp(start_at)
+        if end_at is not None:
+            time_range['$lte'] = self._audit_timestamp(end_at)
+        if time_range:
+            query['created_at'] = time_range
+
+        events: list[AuditEventEnvelope] = []
+        for document in self._collection.find(query).sort([('created_at', 1), ('_id', 1)]):
+            event = self._model_from_document(document, AuditEventEnvelope)
+            if event is not None:
+                events.append(event)
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         if (
