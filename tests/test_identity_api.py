@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.identity import FixtureIdentityRepository
 from backend.app import create_app
-from backend.core.config import Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.identity import ClaimantAuthSessionRecord
 
 
@@ -53,6 +53,57 @@ def test_login_rejects_invalid_credentials_without_revealing_account(client: Tes
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
     assert 'email or password' in response.json()['error']['message']
+
+
+def test_registration_creates_authenticated_account_and_rejects_duplicate_email(
+    client: TestClient,
+) -> None:
+    payload = {
+        'email': 'new.claimant@example.invalid',
+        'password': 'a-strong-test-password',
+        'display_name': 'New Claimant',
+    }
+    created = client.post('/api/v1/auth/accounts', json=payload)
+    duplicate = client.post('/api/v1/auth/accounts', json=payload)
+
+    assert created.status_code == 201
+    assert created.json()['customer_id'].startswith('cus_')
+    assert created.json()['development_identity'] is True
+    assert duplicate.status_code == 409
+    assert duplicate.json()['error']['code'] == 'RESOURCE_CONFLICT'
+
+
+def test_claim_capabilities_are_available_to_authenticated_claimants(client: TestClient) -> None:
+    session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+    response = client.get(
+        '/api/v1/claims/capabilities',
+        headers={'Authorization': f'Bearer {session["access_token"]}'},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['claim_types'] == ['motor', 'home', 'contents']
+    assert response.json()['models'] == []
+
+
+def test_claim_capabilities_exposes_configured_model_profile() -> None:
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_identifier='gpt54-mini',
+        model_protocol_adapter='openai_compatible',
+        model_base_url='https://model.example.invalid',
+        model_supports_structured_output=True,
+        model_supports_tools=True,
+    )
+    with TestClient(create_app(settings)) as client:
+        session = login(client, 'claimant.one@example.invalid', 'northwind-demo-one')
+        response = client.get(
+            '/api/v1/claims/capabilities',
+            headers={'Authorization': f'Bearer {session["access_token"]}'},
+        )
+
+    assert response.json()['models'][0]['id'] == 'gpt54-mini'
 
 
 def test_fixed_compatibility_token_cannot_bypass_account_session_lifecycle(

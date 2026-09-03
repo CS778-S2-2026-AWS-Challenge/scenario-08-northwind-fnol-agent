@@ -1,8 +1,12 @@
 from datetime import timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.core.auth import Principal
+from backend.core.errors import ApiError
+from backend.domain.external_services import ExternalTaskRecord
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -20,6 +24,11 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.services.staff_access import (
+    ClaimStaffAccess,
+    claim_staff_access,
+    require_claim_collaborator,
+)
 from backend.services.support import now_utc
 
 
@@ -1010,3 +1019,107 @@ def test_requeue_refuses_while_protected_staff_work_is_active(
     )
     assert requeue.status_code == 409
     assert requeue.json()['error']['code'] == 'OWNERSHIP_CONFLICT'
+
+
+def test_owner_can_requeue_claim_and_clear_active_handoff(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(
+        client, auth_headers, repository, key_suffix='requeue-success'
+    )
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'requeue-success-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    )
+    assert accepted.status_code == 200
+    requeue = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/requeue',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'requeue-success',
+            'If-Match': str(accepted.json()['revision']),
+        },
+        json={'reason': 'Return this Claim to the shared queue.'},
+    )
+    assert requeue.status_code == 200
+    assert requeue.json()['revision'] == accepted.json()['revision'] + 1
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    assert claim.assignee_id is None
+
+
+def test_workbench_exposes_external_request_and_activity_event_pages(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository, key_suffix='events')
+
+    external = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+    events = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/events',
+        headers=staff_auth_headers,
+    )
+
+    assert external.status_code == 200
+    assert external.json()['items'] == []
+    assert external.json()['status'] == 'available'
+    assert events.status_code == 200
+    assert events.json()['items']
+    assert any(item['event_type'] == 'claim.created' for item in events.json()['items'])
+
+
+def test_workbench_marks_external_requests_unavailable_when_store_fails(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='external-down'
+    )
+
+    def unavailable(_: str) -> list[ExternalTaskRecord]:
+        raise RuntimeError('external store unavailable')
+
+    monkeypatch.setattr(repository, 'list_external_tasks_internal', unavailable)
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['limitation']
+
+
+def test_staff_access_projection_distinguishes_primary_and_read_only_claimants(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository, key_suffix='access')
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    owner = claim.model_copy(update={'assignee_id': 'stf_owner'})
+    assert (
+        claim_staff_access(repository, owner, Principal(subject='stf_owner', actor_type='staff'))
+        is ClaimStaffAccess.PRIMARY
+    )
+    outsider = Principal(subject='stf_outsider', actor_type='staff')
+    assert claim_staff_access(repository, owner, outsider) is ClaimStaffAccess.READ_ONLY
+    with pytest.raises(ApiError):
+        require_claim_collaborator(repository, owner, outsider)

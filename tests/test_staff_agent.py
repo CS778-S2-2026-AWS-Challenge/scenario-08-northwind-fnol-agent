@@ -241,3 +241,96 @@ def test_staff_agent_routes_require_staff_identity() -> None:
 
     assert response.status_code == 403
     assert response.json()['error']['code'] == 'ACCESS_DENIED'
+
+
+def test_staff_agent_returns_not_found_for_unknown_session() -> None:
+    repository = FixtureRepository()
+    with _client(repository, RecordingStaffAgent()) as client:
+        response = client.get(
+            '/api/v1/workbench/agent/sessions/sas_missing/messages',
+            headers=STAFF_HEADERS,
+        )
+
+    assert response.status_code == 404
+    assert response.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
+
+
+def test_staff_agent_replays_idempotent_turn_and_rejects_duplicate_claim_scope() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-replay')
+        session_id = _create_session(client)
+        payload = {
+            'client_message_id': 'replay-question',
+            'content': 'Summarise this Claim.',
+            'claim_ids': [claim_id],
+        }
+        first = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json=payload,
+        )
+        replay = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json=payload,
+        )
+        duplicate = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                **payload,
+                'client_message_id': 'duplicate-scope',
+                'claim_ids': [claim_id, claim_id],
+            },
+        )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert (
+        replay.json()['assistant_message']['message_id']
+        == first.json()['assistant_message']['message_id']
+    )
+    assert duplicate.status_code == 422
+    assert duplicate.json()['error']['code'] == 'VALIDATION_ERROR'
+
+
+def test_staff_agent_rejects_reused_message_identity_and_missing_claim() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        session_id = _create_session(client)
+        first = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'identity-conflict',
+                'content': 'First question.',
+                'claim_ids': [],
+            },
+        )
+        conflict = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'identity-conflict',
+                'content': 'Different question.',
+                'claim_ids': [],
+            },
+        )
+        missing = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'missing-claim',
+                'content': 'Review this.',
+                'claim_ids': ['clm_missing'],
+            },
+        )
+
+    assert first.status_code == 201
+    assert conflict.status_code == 409
+    assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert missing.status_code == 404
+    assert missing.json()['error']['code'] == 'RESOURCE_NOT_FOUND'
