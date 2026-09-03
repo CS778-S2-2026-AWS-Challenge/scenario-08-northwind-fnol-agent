@@ -102,6 +102,17 @@ class FixtureRepository(PersistenceRepository):
         return cleared
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        """Append one immutable audit event to the fixture store.
+
+        Args:
+            event: Audit event to persist.
+
+        Returns:
+            None.
+
+        Raises:
+            IdempotencyConflict: The event identity exists with different content.
+        """
         existing = self._audit_events.get(event.event_id)
         if existing is not None:
             if existing != event:
@@ -116,6 +127,19 @@ class FixtureRepository(PersistenceRepository):
         start_at: datetime | None = None,
         end_at: datetime | None = None,
     ) -> list[AuditEventEnvelope]:
+        """Return audit events for an already-authorised subject read.
+
+        Args:
+            subject: Exact logical subject to match.
+            start_at: Optional inclusive lower timestamp bound.
+            end_at: Optional inclusive upper timestamp bound.
+
+        Returns:
+            Deep-copied matching events in stable time and identity order.
+
+        Raises:
+            ValueError: The requested time range is invalid.
+        """
         if start_at is not None and end_at is not None and start_at > end_at:
             raise ValueError('Audit event start_at must not be after end_at.')
 
@@ -127,6 +151,26 @@ class FixtureRepository(PersistenceRepository):
             and (end_at is None or event.created_at <= end_at)
         ]
         return sorted(events, key=lambda event: (event.created_at, event.event_id))
+
+    def _prepare_audit_events(
+        self,
+        claim: WorkingClaim,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> tuple[AuditEventEnvelope, ...]:
+        prepared: dict[str, AuditEventEnvelope] = {}
+        for event in audit_events:
+            if event.subject.claim_id != claim.claim_id:
+                raise KeyError(claim.claim_id)
+            if event.subject.subject_type.value == 'claim' and event.claim_revision != claim.revision:
+                raise KeyError(claim.claim_id)
+            incoming = prepared.get(event.event_id)
+            if incoming is not None and incoming != event:
+                raise IdempotencyConflict(event.event_id)
+            existing = self._audit_events.get(event.event_id)
+            if existing is not None and existing != event:
+                raise IdempotencyConflict(event.event_id)
+            prepared[event.event_id] = event
+        return tuple(prepared.values())
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -187,6 +231,34 @@ class FixtureRepository(PersistenceRepository):
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._idempotency[lookup] = deepcopy(idempotency)
+
+    def save_claim_mutation_with_audit(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> None:
+        """Persist one claim mutation and its prevalidated audit facts atomically.
+
+        Args:
+            claim: Resulting authoritative Claim State.
+            expected_revision: Revision that must still be current.
+            idempotency: Retry metadata for the mutation.
+            audit_events: Claim-scoped immutable facts produced by the mutation.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Retry or audit identity conflicts with stored data.
+            KeyError: Claim ownership, revision linkage, or audit scope is invalid.
+        """
+        prepared = self._prepare_audit_events(claim, audit_events)
+        self.save_claim_mutation(claim, expected_revision, idempotency)
+        for event in prepared:
+            self._audit_events[event.event_id] = deepcopy(event)
 
     def get_session(
         self,
