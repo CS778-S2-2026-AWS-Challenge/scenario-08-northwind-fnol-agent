@@ -24,6 +24,14 @@ one:
   3. `docs/api.md` remains the human-readable authority; the snapshot is only
      a mechanical sentinel and does not replace contract tests.
   4. Optional: lint the exported spec with spectral.
+- **AuditEvent envelope drift check**: the provider-neutral audit envelope is
+  defined by the Pydantic model in `backend/domain/audit.py`. The committed
+  `docs/contracts/audit-event.schema.json` snapshot is regenerated with
+  `python scripts/export_audit_contract.py`; the backend quality profile runs
+  the script with `--check`, and a snapshot change must update
+  `docs/persistence-schema.md` in the same PR. The snapshot checks structure
+  only; event meaning, visibility, authorisation, retention, and transaction
+  boundaries remain governed by the persistence contract and tests.
 - Broken-link check for documentation: `lycheeverse/lychee-action` over
   `./docs/**/*.md`.
 - Path coupling (fail when API code changes but the contract document does
@@ -42,6 +50,18 @@ one:
 
   Coupling on the whole `backend/` directory may over-report; narrow it to the
   route/model subdirectories when implementing.
+
+- **Impact-scoped backend tests**: pull requests use
+  `scripts/select_backend_tests.py` to select direct consumer tests from the
+  changed paths. Documentation-only changes may skip backend pytest. Shared
+  domain models, repository protocols, runtime composition, dependency
+  manifests, and unmapped backend changes select the complete suite. The
+  `main` branch always runs the complete suite with coverage enforcement.
+  Scoped PRs also scope Ruff and Mypy to changed Python files, while OpenAPI
+  and AuditEvent snapshot checks run only when their contract can be affected.
+  Scoped pytest runs intentionally omit the global coverage threshold; the
+  full coverage gate remains on `main`. The selector is itself covered by
+  tests and must never return an empty selection for a backend behavior change.
 
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing

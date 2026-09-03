@@ -68,6 +68,7 @@ class Settings:
     synthetic_claimant_token: str = 'synthetic-claimant'
     synthetic_staff_token: str = 'synthetic-staff'
     synthetic_admin_token: str = 'synthetic-admin'
+    synthetic_release_approver_token: str = 'synthetic-release-approver'
     synthetic_integration_token: str = 'synthetic-integration'
     claimant_session_ttl_minutes: int = 30
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
@@ -77,7 +78,7 @@ class Settings:
     model_provider: str = 'unconfigured'
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
-    model_prompt_version: str = 'northwind-fnol-motor-claimant-v2'
+    model_prompt_version: str = 'northwind-fnol-motor-claimant-v4'
     model_evaluation_status: str = 'configured'
     model_base_url: str = ''
     model_identifier: str = ''
@@ -109,12 +110,13 @@ class Settings:
             self.synthetic_claimant_token,
             self.synthetic_staff_token,
             self.synthetic_admin_token,
+            self.synthetic_release_approver_token,
             self.synthetic_integration_token,
         }
-        if len(synthetic_tokens) != 4:
+        if len(synthetic_tokens) != 5:
             raise ValueError(
-                'Synthetic claimant, staff, administrator, and integration tokens '
-                'must be pairwise distinct.'
+                'Synthetic claimant, staff, administrator, release approver, and '
+                'integration tokens must be pairwise distinct.'
             )
         if self.claimant_session_ttl_minutes <= 0:
             raise ValueError('NORTHWIND_CLAIMANT_SESSION_TTL_MINUTES must be greater than zero.')
@@ -199,6 +201,10 @@ class Settings:
                 'NORTHWIND_SYNTHETIC_ADMIN_TOKEN',
                 'synthetic-admin',
             ),
+            synthetic_release_approver_token=os.getenv(
+                'NORTHWIND_SYNTHETIC_RELEASE_APPROVER_TOKEN',
+                'synthetic-release-approver',
+            ),
             synthetic_integration_token=os.getenv(
                 'NORTHWIND_SYNTHETIC_INTEGRATION_TOKEN',
                 'synthetic-integration',
@@ -215,7 +221,7 @@ class Settings:
             model_privacy_class=os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip(),
             model_prompt_version=os.getenv(
                 'MODEL_PROMPT_VERSION',
-                'northwind-fnol-motor-claimant-v2',
+                'northwind-fnol-motor-claimant-v4',
             ).strip(),
             model_evaluation_status=os.getenv(
                 'MODEL_EVALUATION_STATUS',

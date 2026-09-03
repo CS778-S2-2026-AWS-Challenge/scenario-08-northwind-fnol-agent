@@ -167,3 +167,50 @@ def assert_task_matches_entry(
             f'{task.task_id}: entry {decision.entry.value} provides {permitted.value}, '
             f'but the task records {task.integration_source.value}.'
         )
+
+
+class MismatchedServiceAdapterError(ValueError):
+    """The installed adapter does not provide what the selected entry promises."""
+
+
+def assert_adapter_matches_entry(
+    adapter_source: IntegrationSource,
+    decision: ExternalServiceEntryDecision,
+) -> None:
+    """Check that the adapter installed can provide what the entry promises.
+
+    `assert_task_matches_entry` refuses a task whose recorded source contradicts
+    its entry, but by then the call has already been made and the record written.
+    This is the same discipline one step earlier, at composition: the entry
+    decision and the adapter are chosen separately at startup, so nothing
+    previously stopped a fixture double being installed beside a `LIVE` entry, or
+    a configured service beside `TEST_FIXTURE`. The first would label synthetic
+    answers as a configured service's; the second would refuse real answers the
+    runtime is entitled to.
+
+    An `UNAVAILABLE` entry provides nothing and is not a mismatch: no call is made
+    through it, so any adapter may sit beside it unused. Refusing that pairing
+    would make a correctly configured runtime unassemblable whenever its service
+    is not yet verified, which is the ordinary state of this repository.
+
+    Args:
+        adapter_source: The source class the installed adapter declares.
+        decision: The entry decision the runtime resolved.
+
+    Returns:
+        None. Nothing is composed here; this raises or returns quietly.
+
+    Raises:
+        MismatchedServiceAdapterError: The entry provides a source class the
+            adapter does not.
+    """
+
+    permitted = _ENTRY_SOURCES[decision.entry]
+    if permitted is None:
+        return
+    if adapter_source is not permitted:
+        raise MismatchedServiceAdapterError(
+            f'entry {decision.entry.value} provides {permitted.value}, but the installed '
+            f'adapter provides {adapter_source.value}, so its answers would be recorded '
+            'under a source class it cannot produce.'
+        )

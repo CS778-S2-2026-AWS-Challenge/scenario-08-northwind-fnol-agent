@@ -1,279 +1,446 @@
 # FNOL Information Model and Field Taxonomy
 
-## Status and Authority
+## Scope and authority
 
-This document is the field-level logical model that complements
-[Data Architecture](data-architecture.md). It defines the information that may arise
-during FNOL, how that information is classified, and how a controlled branch selects a
-dynamic subset for one claim.
+This design defines the Sprint 3 Validation Prototype information space for representative
+`motor`, `home`, and `contents` FNOL paths. It is not a production insurance form, policy
+decision, provider schema, or implementation claim. `SPEC/`, `docs/api.md`,
+`docs/persistence-schema.md`, and published registry versions remain authoritative. A
+listed field is not automatically mandatory.
 
-The model is derived from the
-[FNOL As-Is Process and Reporting Fields research](research/fnol-as-is-process-and-reporting-fields.md).
-Research provenance explains why a field group is considered; this document defines its
-architectural position. Neither source is an approved Northwind production form.
+The catalogue separates Claim Context fields from Evidence, WorkItem, Handoff, Review,
+Consent, and Integration records. Branches are independent content dimensions, not
+claim-lifecycle states, work statuses, or risk conclusions.
 
-A field appearing in this model does not mean that it is implemented, mandatory for
-every claim, claimant-supplied, or required before the next safe action. Current API and
-runtime support remains limited to the explicitly registered fields and separate domain
-records identified below.
+## Status and notation
 
-## Core Model
+| Term | Meaning |
+| --- | --- |
+| `required_now` | Missing value blocks the current safe action under a published rule. |
+| `candidate_now` | Relevant but not a current blocker. |
+| `pending_later` | Relevant to a later action or unavailable evidence. |
+| `inactive` | Unsupported by current facts or active branches. |
+| `system_owned` | Supplied by identity, lookup, workflow, integration, staff, or audit. |
+| `registered` | Present in the current backend registry/API subset. |
+| `candidate` | VP design field needing a later contract decision. |
+| `record` | Separate durable record, not a Dynamic Form field. |
 
-The claimant starts with a natural account, not a pre-expanded form. The system builds a
-claim-specific information form by activating only predefined fields and tags through
-controlled branch rules.
+Table shorthand: `src` = claimant (`C`), staff (`S`), provider (`P`), evidence (`E`),
+workflow (`W`), or system (`Y`); `NL` = natural-language extraction; `conf` = claimant
+confirmation; `infer` = model may propose only; `safe` = affects current safe action;
+`now` = may become required now; `vis` = claimant/staff visibility; `auth` = consent,
+privacy, authority, or professional review.
 
-```text
-natural claimant account
--> multiple explicit facts and bounded classification proposals
--> safety and support interruption checks
--> content-branch candidates, such as motor, collision, or another party
--> approved rule activates registered field groups and tags
--> conditional sub-branches activate when supported by claim facts
--> current-action requirements identify required-now and candidate fields
--> TurnPlan combines any useful response, form patches, lookups, and next step
--> Runtime applies only validated and authorised effects
--> the form and active branches are recalculated after every material change
-```
+The `safe/now/status` tuple contains three independent dimensions: whether the field can
+affect a safe action, whether it can be selected as `required_now` for a particular claim,
+and its catalogue/implementation status (`registered`, `candidate`, `record`, or
+`system-owned`). Runtime fact status (`proposed`, `confirmed`, `disputed`, `missing`, or
+`pending_generation`) must be stored separately. Applicability is explicit in the index
+below; `common` means stable meaning across all three paths, while `conditional` means the
+field is applicable only after a branch trigger.
 
-The resulting form is dynamic because its active subset changes with the claim. Its
-schema is controlled because every field, tag, branch, state, and rule reference must
-already exist in an approved contract. A model cannot invent a field code, private tag,
-branch, mandatory condition, or high-impact outcome.
-
-## Field Categories
+## Field categories
 
 | Category | Meaning | Collection rule |
 | --- | --- | --- |
-| Core FNOL | Information commonly relevant to initial notification | Consider for most claims, but collect only when missing and needed for the current safe action |
-| Conditional | Information relevant only when incident facts trigger it | Keep inactive until a supported condition activates it |
-| Claim-Specific | Information associated with a product or incident family | Activate only for an applicable motor, home, contents, or later approved branch |
-| System-Generated | Information produced by the service, insurer, or authorised staff | Never ask the claimant to manufacture it |
-| Later-Stage | Information normally produced during assessment, settlement, or payment | Keep outside current FNOL collection unless a later product contract introduces it |
+| Core FNOL | Information commonly relevant to initial notification | Consider for every path, but collect only when missing and needed for the current safe action |
+| Conditional | Information relevant only when an incident or support fact activates it | Keep inactive until a supported condition activates it |
+| Path-specific | Information associated with motor, home, or contents | Activate only for the applicable family branch |
+| System-generated | Information produced by identity, workflow, integration, staff, or audit | Never ask the claimant to manufacture it |
+| Separate record | Evidence, Handoff, WorkItem, Review, Consent, or Integration data | Keep in its own lifecycle and persistence boundary; do not flatten it into an unbounded form field |
+| Later-stage | Information normally produced during assessment, settlement, or payment | Keep outside the current FNOL collection unless a later contract explicitly introduces it |
 
-`Core FNOL` is not a global mandatory flag. A core field may remain unknown while an
+`Core FNOL` is not a global mandatory flag. A common field may remain unknown while an
 urgent handoff, evidence registration, support transfer, or another safe action proceeds.
 
-## Logical Field Model
+## Logical field model
 
-| Information area | Examples | Classification | Current architectural position |
-| --- | --- | --- | --- |
-| Reporter and customer | identity, relationship to policyholder, phone, email, contact preference | Core FNOL | Partly represented; authenticated customer context should supply known identity rather than cause repeated questions |
-| Policy | policy number, product, policyholder match, alternative identification | Core FNOL | Policy number is registered; product and customer matching belong behind structured policy lookup |
-| Incident | type, natural account, initial cause, sequence | Core FNOL | Type, description, and cause are registered; only a bounded subset participates in current intake |
-| Date and time | loss time, discovery time, report time | Core or Conditional | Occurrence time is registered; report time is system-generated; discovery time is a candidate concept |
-| Location | incident place, road or intersection, property address | Core FNOL with claim-specific shape | Incident location and property address are registered; branch context selects the applicable representation |
-| Damage and loss | damaged, lost, or stolen property, initial extent, continued usability | Core FNOL | General loss, vehicle damage, vehicle drivability, and property-area fields are partly registered |
-| Safety and mitigation | injury or danger, emergency assistance, towing, temporary repair, loss mitigation | Conditional | Injury or danger and emergency-contact status are registered; other mitigation details remain candidates |
-| Evidence | images, video, receipts, invoices, Police documents, estimates | Conditional | Owned by separate Evidence records and APIs, not embedded into form fields or messages |
-| Vehicle | registration, year, make, model, use, drivability, towing location | Motor-specific | Registration, damage description, and drivability are registered; remaining concepts are candidates |
-| Driver | identity, contact, insured relationship, permission, licence | Motor-specific | Candidate; no current registered field contract |
-| Other party | identity, contact, vehicle, insurer, affected property or people | Conditional and often motor-specific | Represented only by a bounded current field; a detailed structure requires a shared contract change |
-| Witness | existence, identity, phone, email | Conditional | Candidate; no current registered field contract |
-| Police and authorities | reported status, file reference, station or officer, emergency response | Conditional | Police reference and emergency-contact status are registered; other concepts remain candidates |
-| Injury | whether anyone is injured, bounded safety status, emergency response | Conditional | Current field records injury or danger without defining medical or identity detail |
-| Road and weather | road condition, weather, lighting, direction of travel | Motor-specific | Candidate; no current registered field contract |
-| Property and home | property address, affected areas, habitability, emergency repair, occupancy | Home-specific | Address and affected areas are registered; habitability, occupancy, and repair detail remain candidates |
-| Contents and items | item description, brand, model, serial, purchase date, initial value, ownership evidence | Contents-specific | Candidate; evidence remains separate even when related to an item |
-| Theft and burglary | discovery time, missing items, entry method, alarm, Police reference | Event-specific | Candidate except for reusable registered Police and loss fields |
-| Declaration and consent | factual declaration, privacy acknowledgement, representative authority | Core or Conditional | Requires an explicit identity, consent, and declaration contract; not implied by ordinary field confirmation |
-| Claim administration | received time, channel, claim number, status, assigned route | System-Generated | Owned by Claim State, workflow, integration results, and audit records rather than claimant form input |
-| Assessment and settlement | final repair report, approved quote, liability, bank account, settlement method | Later-Stage | Outside the current FNOL product boundary and not an Agent decision authority |
+The claimant starts with a natural account, not a pre-expanded questionnaire. The service
+builds a claim-specific projection by combining the common field baseline, active family
+branches, conditional branches, current WorkItems, and the next safe action:
 
-## Current Registered Field Coverage
+```text
+natural claimant account
+-> explicit facts and bounded classification proposals
+-> safety and support interruption checks
+-> family and conditional branch candidates
+-> published rules activate registered fields and records
+-> required-now and candidate-now selection
+-> Agent response, form patch, lookup, or handoff proposal
+-> runtime validation and authorised state effects
+-> recalculation after material facts, correction, evidence, resume, or handoff
+```
 
-The current implementation recognises these 18 form field codes:
+The model may propose a family, branch, field value, or tag, but it cannot invent a field
+code, mandatory condition, private tag, high-impact outcome, or provider-specific schema.
+The Dynamic Form is a projection of Claim State, not a second copy of the claim and not a
+fixed questionnaire.
 
-| Group | Registered fields |
+## Explicit applicability index
+
+| Applicability | Field codes |
 | --- | --- |
-| Policy and claimant | `policy.policy_number`, `claimant.role`, `claimant.contact_preference` |
-| Incident | `incident.type`, `incident.occurred_at`, `incident.location`, `incident.description`, `incident.injury_or_danger`, `incident.cause` |
-| Loss and parties | `loss.description`, `parties.other_parties` |
-| Authorities | `authorities.police_report_reference`, `authorities.emergency_services_notified` |
-| Motor | `vehicle.registration`, `vehicle.damage_description`, `vehicle.drivable` |
-| Property | `property.address`, `property.affected_areas` |
+| `common` | `claimant.role`, `claimant.client_number`, `claimant.contact_preference`, `policy.policy_number`, `claim.product_family`, `incident.type`, `incident.description`, `incident.occurred_at`, `incident.location`, `incident.cause`, `loss.description`, `incident.injury_or_danger`, `parties.other_parties`, `evidence.availability`, `declaration.factual_accuracy`, `consent.sharing_scope`, `report.channel`, `claim.created_at`, `claim.registry_version` |
+| `motor` | `vehicle.identity`, `vehicle.registration`, `vehicle.make`, `vehicle.model`, `vehicle.year`, `vehicle.use`, `vehicle.damage_description`, `vehicle.drivable`, `vehicle.towing_required`, `vehicle.towing_location`, `driver.identity`, `driver.relationship`, `driver.licence_status`, `collision.occurred`, `collision.impact_area`, `collision.movement`, `other_vehicle.identity`, `other_party.contact`, `witness.details`, `road.conditions`, `weather.visibility`, `authority.police_status`, `authority.police_reference`, `repairer.details`, `motor.evidence_refs` |
+| `home` | `property.address`, `property.occupancy_relationship`, `property.occupancy`, `property.affected_areas`, `property.building_damage`, `property.fixture_damage`, `property.cause_source`, `property.severity`, `property.ongoing_risk`, `property.habitable`, `property.utilities`, `mitigation.emergency_action`, `mitigation.temporary_repair`, `mitigation.contractor`, `accommodation.required`, `accommodation.details`, `weather.event`, `home.evidence_refs` |
+| `contents` | `contents.items`, `contents.item.description`, `contents.item.category`, `contents.item.quantity`, `contents.item.brand`, `contents.item.model`, `contents.item.serial_number`, `contents.item.ownership`, `contents.item.purchase_date`, `contents.item.purchase_source`, `contents.item.estimated_value`, `contents.item.replacement_need`, `contents.item.loss_type`, `contents.discovery_at`, `theft.entry_context`, `contents.receipt_availability`, `contents.proof_of_ownership`, `contents.police_status`, `contents.police_reference`, `contents.item.evidence_refs`, `contents.item_group` |
+| `conditional cross-path` | `incident.discovered_at`, `parties.other_parties`, `evidence.availability`, `declaration.factual_accuracy`, `consent.sharing_scope`, `collision.*`, `other_party.*`, `witness.*`, `authority.police_*`, `safety/injury`, `mitigation.*`, `accommodation.*`, `incident.theft_or_burglary`, `professional_review`, `human_support` |
 
-The current controlled intake actively sequences only incident description, incident
-location, loss description, and incident type. It does not yet implement the dynamic
-branch and field-selection model defined here. This limitation must remain visible until
-the registry, rules, orchestration, API, consumers, fixtures, and tests are updated
-together.
+`common` and `conditional cross-path` may both apply: common describes reusable meaning;
+conditional describes collection-time branch activation. A record code is an explicit
+reference/aggregate identity and must not be implemented as an unbounded form string.
 
-Lifecycle and operational fields such as claim status, next action, responsible party,
-WorkItems, follow-up due time, expiry, and purge status belong to Claim State and workflow
-records.
-They are not automatically claimant-facing FNOL fields and must not be confused with
-the dynamic information collected from the claimant.
+## Complete common field inventory
 
-## Content Branch Model
+The common set is derived by meaning across all three paths, not by unioning existing
+registrations. Evidence, consent, workflow, and registry metadata are shown here only to
+make their boundary explicit.
 
-### Content-branch dimensions
+| Code | Meaning | Applies/type/multi | src/NL/conf/infer | safe/now/status | Current implementation | vis/auth |
+| --- | --- | --- | --- | --- | --- | --- |
+| `claimant.role` | Reporter relationship to policyholder | common/enum/no | C/y/y/y | n/c/registered | Registry + form | C/S; privacy |
+| `claimant.client_number` | Authenticated customer reference | common/scalar/no | Y/n/n/n | n/n/registered | Registry; identity supplies value | S; privacy |
+| `claimant.contact_preference` | Preferred safe contact channel | common/enum/no | C/y/y/y | support/c/registered | Registry/profile | C/S; privacy |
+| `policy.policy_number` | Policy reference | common/scalar/no | C,P/y/y/y | lookup/c/registered | Registry; bounded lookup | C/S; privacy |
+| `claim.product_family` | Motor, home, or contents family | common/enum/no | C,Y/y/y/y | routing/y/registered | Registry + form; top-level `incident_type` remains the compatibility projection | C/S; authority |
+| `incident.type` | Collision, fire, water, theft, weather, etc. | common/enum/no | C/y/y/y | safety/y/registered | Registry + form | C/S; review if disputed |
+| `incident.description` | Natural account of what happened | common/scalar/no | C/y/n/y | y/c/registered | Registry + form | C/S; privacy |
+| `incident.occurred_at` | Loss occurrence date/time | common/date-time/no | C/y/y/y | safety/c/registered | Registry + form | C/S; privacy |
+| `incident.discovered_at` | Discovery time, especially theft | conditional/date-time/no | C/y/y/y | safety/c/candidate | No field/schema | C/S; privacy |
+| `incident.location` | Incident place or useful region | common/location/no | C/y/y/y | safety/y/registered | Registry + form | C/S; privacy |
+| `incident.cause` | Initial cause, not coverage conclusion | common/scalar/no | C,E/y/y/y | safety/c/registered | Registry; evidence proposal gap | C/S; review if conflict |
+| `loss.description` | Damaged, lost, or stolen subject | common/scalar/no | C,E/y/y/y | y/c/registered | Registry + form | C/S; privacy |
+| `incident.injury_or_danger` | Bounded injury/continuing danger signal | common/boolean/no | C/y/y/y | urgent/y/registered | Registry + interruption rules | C/S; safety |
+| `parties.other_parties` | Whether another person or organisation is involved | conditional/boolean/no | C/y/y/y | handoff/c/registered | Participant details remain a separate record | C/S; consent/privacy |
+| `evidence.availability` | Available, missing, incomplete, pending | common/enum/no | C,E,W/y/y/y | next action/y/candidate | Evidence projection, not form | C/S; privacy |
+| `declaration.factual_accuracy` | Claimant factual declaration | common/enum/no | C/y/y/y | authority/y/candidate | No declaration contract | C/S; authority |
+| `consent.sharing_scope` | Purpose and fields allowed to share | conditional/structured/no | C/y/y/y | external/y/record | Consent record exists | C/S; consent/privacy |
+| `report.channel` | Entry channel | common/enum/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
+| `claim.created_at` | System receipt time | common/date-time/no | Y/n/n/n | n/n/system-owned | Claim State | S; audit |
+| `claim.registry_version` | Registry snapshot used | common/scalar/no | Y/n/n/n | n/n/record | Persisted as separate Field Registry and branch-rule coordinates on Branch Evaluation records, not as a claimant form field | S; audit |
 
-The decision structure is a graph rather than one irreversible questionnaire path:
+## Motor field inventory
 
-| Dimension | Examples | Behaviour |
-| --- | --- | --- |
-| Claim family | motor, home, contents, unknown | Activates the relevant predefined field group and collection rules |
-| Incident type | collision, theft, fire, water, weather, accidental damage | Adds applicable incident facts, evidence needs, and question candidates |
-| Participant | another party, witness, Police, repairer, assessor | Adds only supported participant and coordination information |
-| Safety and support | injury, continuing danger, distress, accessibility | Supplies an interruption signal and changes support behaviour without becoming a workflow state |
-| Evidence state | available, missing, incomplete, unofficial, pending generation | Changes evidence responsibility without silently making unrelated fields mandatory |
-| Professional authority | coverage ambiguity, material conflict, review signal | Creates a bounded staff request and does not turn the signal into a decision |
+| Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
+| --- | --- | --- | --- | --- | --- | --- |
+| `vehicle.identity` | Insured vehicle identity/reference | object/no | C,P/y/y/y | routing/c/candidate | New registry/domain/API/persistence | C/S; privacy |
+| `vehicle.registration` | Registration/plate | scalar/no | C,E/y/y/y | provider/c/registered | Registered; validation/masking alignment | C/S; privacy |
+| `vehicle.make` | Make | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
+| `vehicle.model` | Model | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
+| `vehicle.year` | Model year | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
+| `vehicle.use` | Personal/business/commuting use | enum/no | C/y/y/y | routing/c/candidate | New bounded enum | C/S; policy/privacy |
+| `vehicle.damage_description` | Visible damage account | scalar/no | C,E/y/y/y | safety/y/registered | Registered; evidence link separate | C/S; privacy |
+| `vehicle.drivable` | Whether the vehicle is safe and able to be driven | boolean/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
+| `vehicle.towing_required` | Need for towing | enum/no | C,S/y/y/y | safety/y/candidate | Registry + WorkItem rule | C/S; consent |
+| `vehicle.towing_location` | Safe tow destination/current location | location/no | C/y/y/y | safety/c/candidate | Registry/API; provider task separate | C/S; privacy/consent |
+| `driver.identity` | Driver identity/reference | object/no | C,S/y/y/y | authority/c/candidate | Restricted object + visibility | S; privacy/authority |
+| `driver.relationship` | Driver relationship to policyholder | enum/no | C/y/y/y | authority/c/candidate | Registry/domain/API | C/S; authority |
+| `driver.licence_status` | Bounded licence signal | enum/no | C,E/y/y/y | review/pending/candidate | Restricted field + review boundary | S; privacy/review |
+| `collision.occurred` | Collision branch fact | enum/no | C/y/y/y | routing/y/candidate | Branch registry, not lifecycle | C/S; privacy |
+| `collision.impact_area` | Front/rear/side/other impact | enum/list/yes | C,E/y/y/y | evidence/c/candidate | Registry/list validation | C/S; privacy |
+| `collision.movement` | Direction/manoeuvre at impact | object/no | C/y/y/y | review/c/candidate | Domain object; no liability inference | S; review |
+| `other_vehicle.identity` | Other vehicle reference/details | object/yes | C,E/y/y/y | provider/pending/candidate | Participant structure + consent | S; privacy/consent |
+| `other_party.contact` | Other party contact | object/no | C/y/y/y | external/pending/candidate | Consent-scoped participant record | S; privacy/consent |
+| `witness.details` | Witness existence/contact | object/yes | C/y/y/y | evidence/pending/candidate | Participant record + consent | S; privacy/consent |
+| `road.conditions` | Surface, intersection, controls | object/no | C,E/y/y/y | review/c/candidate | Registry/domain/API | S; review |
+| `weather.visibility` | Weather, lighting, visibility | object/no | C,E/y/y/y | safety/c/candidate | Registry/domain/API | S; privacy |
+| `authority.police_status` | Police contacted/required/pending | enum/no | C,S/y/y/y | authority/y/candidate | Branch + authority record | C/S; authority |
+| `authority.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/c/registered | Bounded reference only | C/S; privacy/authority |
+| `repairer.details` | Repairer and quote status | object/no | C,S,P/y/y/y | external/pending/candidate | Integration/WorkItem record | S; consent |
+| `motor.evidence_refs` | Vehicle photo/video/estimate refs | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + item links | C/S; privacy |
 
-A claim may have a primary family branch and several simultaneous conditional branches.
-For example, a motor incident may also involve injury, another party, damaged property,
-pending Police evidence, and a professional-review need. One label must not erase another
-dimension.
+## Home field inventory
 
-Content branches do not include `draft`, `waiting`, `review`, `ready_to_create`, or
-`created`. Those belong to the Claim lifecycle. Current work and blockers are represented
-by lifecycle and independent WorkItems, not by adding another content branch.
+| Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
+| --- | --- | --- | --- | --- | --- | --- |
+| `property.address` | Insured property address | location/no | C,P/y/y/y | routing/y/registered | Registry + form | C/S; privacy |
+| `property.occupancy_relationship` | Owner, tenant, landlord, other | enum/no | C/y/y/y | authority/c/candidate | Registry/domain/API | C/S; privacy |
+| `property.occupancy` | Occupied, vacant, partial | enum/no | C/y/y/y | safety/c/candidate | Registry/domain/API | C/S; safety |
+| `property.affected_areas` | Rooms, structures, outdoor areas | list/yes | C,E/y/y/y | triage/y/registered | Registered; branch shape gap | C/S; privacy |
+| `property.building_damage` | Structural/building damage | scalar/no | C,E/y/y/y | safety/y/candidate | Registry/domain/API | C/S; safety/review |
+| `property.fixture_damage` | Fixtures and built-ins | list/yes | C,E/y/y/y | safety/c/candidate | Registry/domain/API | C/S; privacy |
+| `property.cause_source` | Water, fire, weather, impact source | enum/scalar/no | C,E/y/y/y | safety/y/candidate | Registry; no coverage inference | C/S; safety |
+| `property.severity` | Bounded extent/severity | enum/no | C,E/y/y/y | safety/c/candidate | Deterministic rules required | C/S; review |
+| `property.ongoing_risk` | Leak, fire, collapse, exposure | enum/no | C/y/y/y | urgent/y/candidate | Emergency branch | C/S; safety |
+| `property.habitable` | Safe/usable to occupy | enum/no | C,S/y/y/y | support/y/candidate | Restricted field + review | C/S; safety/review |
+| `property.utilities` | Power, gas, water, communications | object/no | C/y/y/y | safety/c/candidate | Structured value | C/S; safety |
+| `mitigation.emergency_action` | Emergency/mitigation taken | list/yes | C,S,E/y/y/y | safety/y/record | WorkItem/evidence + projection | C/S; consent |
+| `mitigation.temporary_repair` | Temporary repair details | object/yes | C,S,E/y/y/y | safety/pending/record | WorkItem/Integration record | S; consent |
+| `mitigation.contractor` | Contractor identity/work status | object/yes | C,S,P/y/y/y | external/pending/record | Provider/task record | S; consent |
+| `accommodation.required` | Temporary accommodation need | enum/no | C,S/y/y/y | support/y/candidate | Branch + WorkItem | C/S; privacy/consent |
+| `accommodation.details` | Location/occupants/duration | object/no | C/y/y/y | support/pending/candidate | Restricted field/projection | C/S; privacy |
+| `weather.event` | Storm, flood, earthquake, etc. | enum/no | C,E/y/y/y | routing/c/candidate | Branch + evidence link | C/S; safety |
+| `home.evidence_refs` | Property photos/invoices/reports | list/yes | E,C/y/y/y | evidence/y/record | Evidence API + area links | C/S; privacy |
 
-### Content-branch activation
+## Contents field inventory
 
-- Explicit claimant facts may satisfy a condition directly when the statement is clear
-  and the rule permits claimant-supplied confirmation.
-- A model may propose a claim family, condition, field value, or tag from natural
-  language. A proposal remains bounded by source, status, and confirmation policy.
-- Versioned deterministic rules decide which registered fields, tags, and sub-branches
-  become active. Model confidence alone cannot create a field, make it mandatory, or
-  authorise a high-impact action.
-- Ambiguous classification activates clarification or safe shared fields rather than
-  silently committing the claim to an incompatible branch.
-- A branch correction recalculates applicable work. It preserves prior values and source
-  history instead of deleting facts merely because they are no longer active questions.
-- The model records only a branch candidate, supporting facts, source references, and
-  uncertainty. The rule engine controls `proposed`, `active`, `suspended`, and
-  `exited/corrected` status.
+Contents is intentionally explicit: the current registry has almost no contents-specific
+coverage. Repeated item facts belong to item records, not a flat claim form.
 
-### Field selection states
+| Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
+| --- | --- | --- | --- | --- | --- | --- |
+| `contents.items` | Affected item collection | record/yes | C,E/y/y/y | evidence/y/record | New `ContentsItem` API/domain/persistence | C/S; privacy |
+| `contents.item.description` | Item description | scalar/no | C,E/y/y/y | evidence/y/candidate | Item schema/projection | C/S; privacy |
+| `contents.item.category` | Item category | enum/no | C,E/y/y/y | routing/c/candidate | Bounded enum registry | C/S; privacy |
+| `contents.item.quantity` | Count of similar items | scalar/no | C/y/y/y | evidence/c/candidate | Validation + grouping | C/S; privacy |
+| `contents.item.brand` | Brand | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
+| `contents.item.model` | Model/style | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
+| `contents.item.serial_number` | Serial/unique identifier | scalar/no | C,E/y/y/y | evidence/pending/candidate | Masked restricted field | S; privacy |
+| `contents.item.ownership` | Owned, leased, borrowed, gifted | enum/no | C,E/y/y/y | authority/c/candidate | Enum + authority rule | C/S; privacy |
+| `contents.item.purchase_date` | Approximate/exact purchase date | date-time/no | C,E/y/y/y | evidence/pending/candidate | Item schema | C/S; privacy |
+| `contents.item.purchase_source` | Retailer, private sale, gift | enum/scalar/no | C,E/y/y/y | evidence/pending/candidate | Bounded values | C/S; privacy |
+| `contents.item.estimated_value` | Claimant estimate, not settlement value | scalar/no | C,E/y/y/y | evidence/c/candidate | Money type + review boundary | C/S; review |
+| `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Item rule + WorkItem | C/S; privacy |
+| `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/candidate | Enum + theft branch | C/S; authority |
+| `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/candidate | Registry/domain field | C/S; privacy |
+| `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/candidate | Restricted theft branch | C/S; authority/privacy |
+| `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/candidate | Evidence projection | C/S; privacy |
+| `contents.proof_of_ownership` | Ownership evidence references | list/yes | E,C/y/y/y | evidence/c/record | Item/evidence mapping | C/S; privacy |
+| `contents.police_status` | Police status for theft/burglary | enum/no | C,S/y/y/y | authority/y/candidate | Authority record + branch | C/S; authority |
+| `contents.police_reference` | Police file/reference | scalar/no | C,E/y/y/y | authority/pending/candidate | Reuse bounded reference | C/S; privacy/authority |
+| `contents.item.evidence_refs` | Item photos/receipts/valuations | list/yes | E,C/y/y/y | evidence/y/record | Immutable item links | C/S; privacy |
+| `contents.item_group` | Similar-item grouping/provenance | record/yes | C,E,Y/y/y/y | evidence/c/record | Group record + provenance | S; privacy |
 
-For the current claim and action, a predefined field can be treated as:
+## Conditional branch matrix
 
-| Selection state | Meaning |
+| Branch | Trigger | Activates / promotes | Exit/correction | Visibility/lifecycle | Separate record |
+| --- | --- | --- | --- | --- | --- |
+| `incident.collision` | Impact described | Collision fields; safety/location may be required | Suspend on correction; retain source/revision | C sees questions; S sees history; no lifecycle change alone | Review if material conflict |
+| `participant.another_party` | Other person/vehicle mentioned | Participant candidate; consent before sharing | Withdrawal exits sharing; preserve prior fact | C sees scope; S sees restricted detail | Consent + participant/integration |
+| `participant.witness` | Witness exists | Witness/evidence pending | Mark unavailable; never invent contact | S detail unless consent | Participant + Evidence |
+| `authority.police` | Police called/required/reference | Status now; reference/document later | Correct with audit/history | C status; S reference | Authority + WorkItem |
+| `safety.injury_or_danger` | Injury/danger wording | Immediate safe action; normal fields stay candidate | Clear only from new authoritative fact | Both see safe step | Handoff/WorkItem; may interrupt |
+| `evidence.pending` | Missing/incomplete material | Evidence WorkItems | Upload/verification resolves | C request/status; S provenance | Evidence + WorkItem |
+| `mitigation.emergency` | Active leak/fire/exposure | Emergency/mitigation fields | Verified resolution; retain actions | Both safe instruction; S detail | WorkItem/Handoff |
+| `accommodation.temporary` | Home uninhabitable | Accommodation required for support | Habitability correction exits | C support status; S details | WorkItem/Handoff |
+| `incident.theft_or_burglary` | Stolen item/forced entry | Discovery, entry, Police, ownership evidence | Reclassify only with source | C status; S authority evidence | Authority + Evidence + Review |
+| `professional_review` | Material ambiguity/conflict | Review reason/source refs | Staff decision is immutable | C safe explanation; S full signal | Review; possibly Handoff |
+| `human_support` | Distress/accessibility/request | Support preference and handoff context | Authorised resolution/cancellation | C owner/status; S packet | Handoff + WorkItem |
+
+Branches may coexist, e.g. `family.motor + incident.collision + participant.another_party +
+authority.police + evidence.pending`. Runtime rules, not the model, control activation,
+correction, and exit.
+
+## VP branch rules v1
+
+The matrix above describes the business meaning of each branch. This section gives the
+first rule-set shape that an implementation can evaluate. It is intentionally a bounded
+VP baseline, not a Northwind production policy. The rule-set identifier is
+`vp-dynamic-form-branch-rules-v1`; a published registry snapshot must carry its identifier
+and version whenever a claim is evaluated.
+
+### Rule inputs and outputs
+
+The branch evaluator receives only provider-neutral, authorised inputs:
+
+| Input | Use |
 | --- | --- |
-| Required now | Missing information blocks the current safe action under an approved rule |
-| Candidate now | Relevant information may improve the current step but does not justify unnecessary claimant effort |
-| Pending later | Relevant to a known later action or unavailable evidence, but not a current blocker |
-| Inactive | Not supported by the active claim and condition branches |
-| System-owned | Supplied by identity, provider lookup, workflow, integration, staff, or audit rather than a claimant question |
+| Accepted Claim facts and their source references | Determine whether a trigger is explicit, confirmed, inferred, corrected, or conflicting |
+| Current proposed facts | Permit a branch candidate without treating a model interpretation as confirmed |
+| Current registered field and branch catalogue | Reject unknown codes and prevent a rule from activating an unregistered field |
+| Current action and open WorkItems | Decide whether an active field can be `required_now` or remains a candidate/pending item |
+| Safety, support, evidence, authority, and consent records | Activate interruption or conditional branches without copying those records into the form |
+| Registry and policy version | Keep an evaluation reproducible and prevent a stale rule from changing a newer claim |
 
-These are selection states, not replacements for the stored field states such as
-`proposed`, `confirmed`, `disputed`, `missing`, or `pending_generation`.
+The evaluator returns a deterministic result containing:
 
-### Question selection
+- active, suspended, exited, and candidate branches with rule IDs and source references;
+- the registered fields each branch adds or removes from the active projection;
+- selection state for each relevant field (`required_now`, `candidate_now`, `pending_later`,
+  `inactive`, or `system_owned`);
+- WorkItem, Handoff, Evidence, Review, Consent, or Integration records to create or update;
+- the primary runtime control signal, if a safety or support interruption applies; and
+- a recomputation reason and the Claim revision against which the result was calculated.
 
-The Agent and orchestration layer choose the next useful interaction from active fields
-and WorkItems by:
+The result is a proposal for Runtime execution. It is not a direct model instruction and it
+does not itself mutate Claim State.
 
-1. handling an explicit safety or support interruption first;
-2. reusing authenticated, retrieved, confirmed, or clearly claimant-supplied information;
-3. excluding inactive, system-owned, already confirmed, and later-stage fields;
-4. identifying missing fields required for the current next action;
-5. resolving one material ambiguity or conflict when it blocks selection;
-6. combining an answer, explanation, lookup, or several supported fact proposals in the
-   same turn when useful;
-7. asking one focused question with the highest current value only when an answer is
-   needed; and
-8. progressing without further questions when the next action is safe.
+### Evaluation order
 
-The system must not interpret the field taxonomy as a reason to complete every possible
-field in one interaction.
+Rules are evaluated in this order, while branch activation remains additive:
 
-## Motor Branch Example
+1. **Safety interruption:** explicit injury, continuing danger, or emergency conditions are
+   evaluated first. They may interrupt ordinary collection and create an urgent handoff.
+2. **Support interruption:** repeated human requests, distress, or accessibility needs are
+   evaluated next. A first ordinary request follows the configured/versioned rule.
+3. **Family classification:** activate at most the supported family candidates for `motor`,
+   `home`, and `contents`; an unresolved conflict keeps the candidates proposed and uses
+   shared fields only.
+4. **Incident and participant dimensions:** collision, theft/burglary, another party,
+   witness, Police, and other conditional branches are evaluated independently.
+5. **Evidence and mitigation:** pending evidence, emergency mitigation, towing, repair, and
+   temporary accommodation create their own records and do not turn every related field into
+   a blocker.
+6. **Professional review:** material ambiguity or conflict creates an internal review record
+   and may pause a high-impact action without exposing the internal signal to the claimant.
+7. **Field selection:** only after active branches and WorkItems are known are fields promoted
+   to `required_now`, `candidate_now`, or `pending_later` for the current action.
 
-Given a claimant statement such as a rear-end collision description:
+The first two steps select the primary Runtime control directive. The later steps may still
+add useful fact proposals, evidence records, or questions without overriding that directive.
 
-1. the natural account is stored with its source;
-2. explicit injury, danger, human-support, and accessibility signals are evaluated;
-3. `incident.type = motor` may be proposed from supported wording;
-4. the approved motor rule activates existing motor fields such as registration, damage
-   description, and drivability;
-5. another-party, Police, evidence, towing, or property sub-branches activate only when
-   supported;
-6. fields already explicit in the claimant's account are not mechanically asked again;
-7. only missing fields required for the current safe action become mandatory now; and
-8. the next action is recalculated after every accepted fact, correction, evidence state,
-   or handoff.
+### Rule catalogue
 
-If the incident is later corrected to home or contents, the system changes active
-branches without rewriting the claimant's original account or deleting traceable facts.
+| Rule ID | Condition | Activation result | Exit/correction | Current-action effect |
+| --- | --- | --- | --- | --- |
+| `BR-FAMILY-MOTOR-001` | Explicit vehicle/road/driver wording, a supported collision description, or an authorised lookup identifies motor context | Activate `family.motor`; add the motor field set and retain the common baseline | A clear claimant correction or conflicting authoritative lookup suspends motor-only candidates and preserves their source history | Only mobility, routing, or current-action fields can become `required_now` |
+| `BR-FAMILY-HOME-001` | Explicit building, property, room, fixture, or home-damage wording, or an authorised lookup identifies home context | Activate `family.home`; add the home field set and retain the common baseline | A clear correction or authoritative conflict suspends home-only candidates without deleting facts | Only location, safety, habitability, mitigation, or current-action fields can become `required_now` |
+| `BR-FAMILY-CONTENTS-001` | Explicit item, belongings, theft, loss, or contents wording, or an authorised lookup identifies contents context | Activate `family.contents`; add the contents item set and item/evidence records | A clear correction or authoritative conflict suspends contents candidates while retaining item facts and provenance | Only item identity, evidence, authority, or current-action fields can become `required_now` |
+| `BR-COLLISION-001` | Impact, crash, rear-end, or collision is explicitly described | Activate `incident.collision`; add collision, participant, road, and possible Police/evidence candidates | Correction to a non-collision incident suspends the branch, preserves its sources, and recalculates candidates | Do not require movement, road, or other-party details unless they block the current safe action |
+| `BR-PARTICIPANT-OTHER-001` | Another person, vehicle, property owner, or organisation is mentioned | Activate `participant.another_party`; add participant candidates and a consent check before disclosure | A correction or consent withdrawal exits sharing while retaining the original statement | Contact or identity is `required_now` only for an authorised next action |
+| `BR-PARTICIPANT-WITNESS-001` | A witness is mentioned or requested for the next action | Activate `participant.witness`; create a participant/evidence work item | Mark unavailable when the claimant cannot provide details; never invent contact data | Witness details normally remain `candidate_now` or `pending_later` |
+| `BR-AUTHORITY-POLICE-001` | Police contact, a Police report, theft/burglary, or pending Police generation is mentioned | Activate `authority.police`; track status/reference and an evidence WorkItem | Correction or verified inapplicability exits the branch with audit history | A missing report remains `pending_later` unless a current authorised action explicitly requires it |
+| `BR-SAFETY-001` | Explicit injury, continuing danger, or an emergency condition is present | Activate `safety.injury_or_danger`; create urgent handoff/WorkItem and bounded safe response | Clear only from a new authoritative fact; preserve the original safety statement | Interrupt ordinary questions; do not wait for the complete form |
+| `BR-EVIDENCE-PENDING-001` | Expected material is missing, incomplete, unofficial, or not yet generated | Activate `evidence.pending`; create or update an evidence WorkItem with responsibility | Supplied evidence can resolve the item; rejection keeps the limitation explicit | Do not block unrelated safe progress or erase accepted facts |
+| `BR-MITIGATION-001` | Active leak, fire, exposure, unsafe property, towing, or emergency repair is described | Activate the relevant mitigation branch and record safe actions separately | Verified resolution closes the WorkItem but retains action history | Ask only the minimum safety or mitigation information needed now |
+| `BR-ACCOMMODATION-001` | A home is not safely habitable or temporary accommodation is requested | Activate `accommodation.temporary`; create a support WorkItem | Habitability correction or staff resolution exits the branch | Accommodation details remain support/workflow data unless needed for the current action |
+| `BR-THEFT-001` | Stolen item, forced entry, burglary, or unknown disappearance is described | Activate theft/discovery, ownership-evidence, and possible Police branches | Reclassification requires a source-backed correction; preserve prior item facts | Discovery, entry context, and Police status may become current candidates; no fraud conclusion is inferred |
+| `BR-REVIEW-001` | Material conflict, coverage ambiguity, or another approved review trigger exists | Create an internal Review record and, where necessary, a professional handoff | Staff records an immutable decision or resolves the conflict | Do not expose the internal signal as a claimant conclusion |
+| `BR-HUMAN-SUPPORT-001` | Repeated human request, distress, accessibility need, or configured first-request condition | Create or reuse a Handoff and preserve the structured packet | Staff resolution/cancellation ends the active support branch | Claimant sees safe status and responsibility; staff receives context and requested action |
 
-## Field Value, Source, and Confirmation
+### Field-state promotion
 
-The same information value has different authority depending on its source:
+After branch evaluation, the rule engine applies this order to each active registered field:
 
-| Source mode | Expected treatment |
+| Condition | Selection state |
 | --- | --- |
-| Explicit claimant statement | Record as claimant-supplied; ask again only when ambiguity, conflict, declaration, or consequence makes confirmation necessary |
-| Model interpretation | Keep proposed when the interpretation is material; retain the source message |
+| Field is supplied by authenticated identity, workflow, provider, integration, staff, or audit | `system_owned` |
+| Field is not supported by an active branch | `inactive` |
+| Field is relevant only to a later action or unavailable evidence | `pending_later` |
+| Field is relevant but missing does not block the current safe action | `candidate_now` |
+| Field is missing and a published rule says the current safe action cannot proceed without it | `required_now` |
+
+Stored fact status remains separate from selection state. A `required_now` field may still be
+`proposed`, `missing`, or `disputed`; it is not silently confirmed merely because the rule
+engine selected it for the next question.
+
+### Runtime integration boundary
+
+The Agent does not fetch or execute this Markdown directly. The intended integration is:
+
+```text
+published Branch/Field Registry snapshot
+        ↓
+provider-neutral BranchRuleEvaluator
+        ↓
+active branches + field selection + WorkItems + interruption result
+        ↓
+bounded Claim Context supplied to Agent Runtime
+        ↓
+Agent proposes conversation moves, form patches, lookups, or handoff actions
+        ↓
+Runtime validates the proposal and applies authorised effects
+```
+
+In the target architecture, the evaluator reads a versioned Field/Content Branch Registry
+through the configuration or registry port. It does not call a model, database, or provider
+directly. The Agent receives the evaluated active branches, allowed registered fields,
+current selection states, relevant WorkItems, and permitted actions as bounded context. The
+Agent may suggest a branch candidate or field patch, but the evaluator and Runtime remain the
+authority for activation, `required_now`, Claim State mutation, visibility, and side effects.
+
+For the VP implementation, the same boundary may initially be backed by a checked-in,
+versioned rule definition or a local registry adapter. That is an implementation choice; the
+contract must remain replaceable so a later Control Plane publication can provide the active
+snapshot without changing Agent code.
+
+## Required-now selection rules
+
+1. Handle injury, danger, distress, accessibility, and explicit support requests first.
+2. Reuse authenticated, confirmed, retrieved, and prior source-backed facts.
+3. Activate only supported branches; keep unrelated fields inactive.
+4. Mark `required_now` only when a published rule says it blocks the current safe action.
+5. Keep ambiguity candidate until a focused clarification or staff review is justified.
+6. Keep Evidence, Consent, Handoff, Provider, and Review records in their own state machines.
+7. Recalculate after facts, corrections, evidence, handoff, or resume.
+
+## Field value, source, and confirmation
+
+The same value has different authority depending on its source:
+
+| Source | Treatment |
+| --- | --- |
+| Explicit claimant statement | Record the original wording and claimant provenance; ask again only when ambiguity, conflict, declaration, or consequence makes confirmation necessary |
+| Authenticated identity or structured lookup | Reuse within its permitted purpose; do not ask the claimant to recreate system-owned information |
+| Model interpretation | Keep proposed when material; retain the source message and require the applicable confirmation or review |
 | Evidence extraction | Keep proposed with evidence provenance until the required claimant or staff decision |
-| Structured provider result | Preserve typed source and limitations; do not convert it into a high-impact conclusion |
-| System or staff result | Record actor and authority; expose only the role-appropriate projection |
+| Provider result | Preserve typed source, version, and limitations; never convert it directly into a coverage, liability, fraud, or approval conclusion |
+| Staff or workflow result | Record actor, authority, reason, and source references; expose only the role-appropriate projection |
 
-The internal form may translate natural language into professional field structure, but
-it must not change meaning or make the claimant review every low-impact internal field.
+Runtime validates every field patch independently. One valid patch does not authorise an
+unrelated side effect, and one invalid patch must not be repaired by parsing model prose.
 
-A form-patch proposal records the field code, proposed value and status, source type and
-references, confidence state where applicable, confirmation need, and intended operation
-such as add or correct. Runtime validates each patch independently. One invalid patch
-does not make the model's remaining text authoritative, and one valid patch does not
-authorise unrelated proposed side effects.
+## Handoff, resume, and correction
 
-## Tags and Review Signals
-
-Dynamic branches may activate registered processing tags or propose review signals, but
-tags remain separate from form facts:
-
-- a tag or signal requires a predefined code, source, purpose, visibility, lifecycle,
-  and rule reference;
-- internal-only tags never enter claimant projections;
-- a claim-family or workflow tag may support selection without becoming coverage,
-  liability, fraud, approval, or rejection authority;
-- evidence-linked review signals remain proposals for professional attention; and
-- changing a branch cannot silently erase a staff decision or audit history.
-
-The approved tag catalogue and executable rule representation remain open implementation
-decisions and are not defined by this document.
-
-## Handoff and Resume
-
-- Resume recalculates active branches from the latest authoritative Claim State rather
-  than replaying a fixed questionnaire or copying stale session state.
+- Resume recalculates active branches from the latest authoritative Claim State rather than
+  replaying a fixed questionnaire or copying stale session state.
 - Confirmed fields, source history, unresolved work, evidence state, and prior commitments
   survive resume and branch correction.
+- A branch correction suspends or exits no-longer-supported candidates without deleting the
+  original account, source references, evidence history, or staff decisions.
 - A structured handoff packet contains confirmed facts, source references, active gaps,
   evidence, branches, responsibility, prior commitments, and the requested staff action.
-- Complete messages remain available under staff access, while the packet uses relevant
-  message references so a professional is not forced to read the complete transcript
-  before understanding the claim.
-- Resume also reloads lifecycle and WorkItems. Changing lifecycle or completing a
-  WorkItem may change the current purpose and permitted tools, but it does not rewrite
-  incident facts or content branches.
+- Complete messages remain available under authorised staff access, while the packet uses
+  relevant message references so a professional can understand the claim without reading
+  the complete transcript first.
 
-## Contract Change Boundary
+## Contract change boundary
 
-Adding a field code, changing its type or visibility, changing stored status semantics,
-or exposing it through claimant or staff APIs is a shared contract change. It requires
-the field model, API contract, domain validation, persistence mapping, claimant and staff
+Adding a field code, changing its type or visibility, changing stored status semantics, or
+exposing it through claimant or staff APIs is a shared contract change. It requires the
+field model, API contract, domain validation, persistence mapping, claimant and staff
 projections, fixtures, and tests to change together.
 
-Changing a question's wording or candidate priority is not automatically a schema change,
-but it still follows Agent Policy publication and evaluation. Making a field required for
-claim creation, urgent handling, or another high-impact action is a controlled business
-rule and requires Northwind authority.
+Changing question wording or candidate priority is not automatically a schema change, but
+it still follows Agent Policy publication and evaluation. Making a field required for claim
+creation, urgent handling, external disclosure, or another high-impact action is a
+controlled business rule and requires the applicable Northwind authority.
 
-Adding lifecycle states, follow-up fields, retention fields, or Customer Memory fields
-is a separate data and persistence contract change; it does not turn those fields into
-ordinary claimant questions.
+Lifecycle states, WorkItems, Evidence, Handoff, Review, Consent, and Integration records
+remain separate data contracts. They must not be represented as ordinary claimant fields
+merely to make a Dynamic Form table appear complete.
 
-## Open Decisions
+## Implementation gap table
 
-- Which candidate fields enter the MVP registry for motor, home, and contents claims.
-- The approved branch and tag catalogue and the representation of rule conditions.
-- Which explicit claimant statements may become confirmed without a separate confirmation
-  turn.
-- Northwind's minimum fields for each safe next action and claim-creation route.
-- How multi-product incidents and corrected claim-family classifications are represented.
-- Which field-definition and collection-policy changes may be published through the
-  Control Plane without a code and schema migration.
+| Area | Current backend | Current API | Current persistence | Needed consumer | Owner candidate |
+| --- | --- | --- | --- | --- | --- |
+| Common subset | 19 registry codes; bounded form | Partial claim/form schemas | Generic `WorkingClaim.form` | Agent, claimant, staff | `liyang6620`; backend owner |
+| Motor extensions | Registration/damage/drivable only | No complete motor schema | Generic form | Dynamic Form, Agent, staff | `liyang6620` + Agent owner |
+| Home extensions | Address/areas only | No complete home schema | Generic form | Dynamic Form, claimant, staff | `liyang6620` + backend owner |
+| Contents extensions | Dedicated fields absent | No item API | No item/group mapping | Dynamic Form, evidence, staff | `liyang6620` + backend owner |
+| Branch registry | Concepts documented, runtime incomplete | No branch endpoint | Branch history incomplete | Agent/runtime/projections | Agent owner + `liyang6620` |
+| Required-now projection | Partial current-action logic | No complete selection response | Selection history absent | Agent, Dynamic Form, UI | Agent + backend owners |
+| Item/evidence provenance | Evidence API exists | Item links absent | New immutable mapping | Evidence, claimant, staff | `bdfa123` + `liyang6620` |
+| Consent/declaration | External consent exists; declaration absent | Route-specific only | Consent record; catalogue scopes absent | Agent/integrations/UI | `liyang6620` + backend owner |
+| Registry versioning | Constant exists | No publication API | Claim version not retained | Agent/audit/staff | `liyang6620` + Control Plane owner |
+
+## API/domain/persistence/projection impact
+
+- Add shared field definitions, branch/selection states, typed contents item objects, and
+  role-safe projections together; never create route-private enums.
+- A persistence change must update access patterns, `docs/persistence-schema.md`, protocols,
+  adapters, revisions, ownership checks, fixtures, and contract tests.
+- Evidence keeps object reference, checksum, source, version, visibility, and item/area
+  provenance; original bytes never enter `WorkingClaim.form`.
+- Agent/Dynamic Form consumes a published registry snapshot and deterministic rules. Model
+  output remains a proposal; runtime validates and applies it.
+- Claimant sees friendly labels, current questions, safe next step, consent scope, and
+  evidence status. Staff sees structured facts, sources, corrections, pending work,
+  restricted review signals, and handoff context.
+
+## Open decisions
+
+1. Approve initial fields and enum values for each family.
+2. Confirm policy lookup and identity-match inputs without inventing provider schemas.
+3. Approve minimum `required_now` sets for intake, emergency support, evidence, and routing.
+4. Approve retention/visibility for participant, Police, licence, serial, and value data.
+5. Decide whether contents uses one record per item, grouped records, or both with IDs.
+6. Define publication/rollback behavior for in-progress claims.
+7. Define professional-review thresholds and staff-authority decisions.
+
+## Current implementation statement
+
+The backend is a partial implementation, not a complete three-path schema. Contents
+coverage is largely absent from the current registry. This document is a design input for
+later field, branch, API, persistence, Dynamic Form, Agent, and projection work; no listed
+candidate is implemented until its contract, tests, and role projections exist.

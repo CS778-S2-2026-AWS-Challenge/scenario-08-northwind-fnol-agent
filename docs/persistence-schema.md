@@ -8,9 +8,10 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, Agent Decision, Evidence metadata,
-Retrieval, Review Signal, Handoff, Staff Action, Customer Update, Signal Decision, and
-Idempotency records. Mock-backed tests verify document mapping, ownership filters,
+method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Evidence metadata,
+External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
+Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
+document mapping, ownership filters,
 relationship checks, revision conflicts, and mutation ordering. The local replica-set smoke
 verifies real multi-document writes, restart recovery, and stale-revision refusal. The additional
 shared transaction-boundary hardening in PR #288 remains a merge dependency and is not duplicated
@@ -42,10 +43,16 @@ collection names, table names, partition keys, indexes, bucket keys, vector-inde
 provider payloads, or SDK types.
 
 The TurnPlan, namespaced ActionEnvelope, WorkItem, Model Profile, and complete external
-request lifecycle described below are target logical contracts. The current persistence
-implementation still stores the legacy Agent Decision shape and must not be represented
-as supporting the target records until migrations, repository methods, API projections,
-fixtures, and transaction tests change together.
+request lifecycle described below are target logical contracts. The implemented external-task
+slice stores the task's claim, service/action, source class, operation and delivery state,
+failure/provider reference, timestamps, one immutable originating task per evidence item, and
+one `erq_` request per task. The request records its purpose, disclosed field names, independent
+Northwind-authority and claimant-consent references, authorised Claim revision, preparation
+time, first send time, and stable operation identity. It does not yet store the later attempt,
+provider-result, verification, or reconciliation records.
+The current persistence implementation still stores the legacy Agent Decision shape and must not
+be represented as supporting those target records until migrations, repository methods, API
+projections, fixtures, and transaction tests change together.
 
 ## Logical Record Groups
 
@@ -64,14 +71,41 @@ fixtures, and transaction tests change together.
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
 | Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
-| External request | capability and requirement versions, request type, disclosure manifest, consent and authority, idempotency, provider reference, status, verified response, reconciliation result | `claim_id`, `external_request_id` |
+| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
+| Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
 the active profile's object or document store. Domain records retain protected references
 and checksums rather than embedding those bytes.
+
+## Audit Event Contract
+
+The provider-neutral structural envelope is defined by `AuditEventEnvelope` in
+`backend/domain/audit.py`. Its generated JSON Schema is committed at
+`docs/contracts/audit-event.schema.json`; run `py -3.12 scripts/export_audit_contract.py`
+to regenerate it, or add `--check` to detect drift. The snapshot is a mechanical shape
+check and does not replace this semantic contract.
+
+Each event is an immutable fact, not a second Claim State record. The envelope records a
+controlled event type and outcome, the logical subject, actor and authentication source,
+bounded reason and source references, applicable permission and consent references,
+visibility, correlation or idempotency identity, the resulting Claim revision when the
+subject is a claim, and the server-created timestamp. Raw provider payloads, secrets,
+tokens, and unrestricted model context are excluded.
+
+The initial event vocabulary is intentionally bounded to consent, permission, action,
+and access outcomes. New event types or changes to field meaning require an explicit
+contract update; additive optional fields are structural changes detected by CI. Claim,
+integration, and configuration mutations must add their events within the applicable
+transaction boundary once their repository adapters consume this envelope.
+
+The existing configuration-only `backend.domain.configuration.AuditEvent` projection is
+kept compatible with the Admin API. It is not yet the cross-domain repository
+implementation of this envelope; migration of that projection and the generic
+Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
 
 ## Required Access Patterns
 
@@ -105,6 +139,11 @@ and checksums rather than embedding those bytes.
     browser-supplied customer identifier to alter the authenticated principal.
 22. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
+23. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+    each task to its single request and single-origin evidence links without exposing another
+    Claim.
+24. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+    order without allowing an evaluation to overwrite Claim State.
 
 ## Development/Test Identity Invariants
 
@@ -148,6 +187,23 @@ and checksums rather than embedding those bytes.
   routing result, and then completes the missing idempotency response.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
+- A Branch Evaluation is evidence of a deterministic calculation, not a second Claim State. It
+  records separate Field Registry and branch-rule versions, rule/source coordinates, the Claim
+  revision it evaluated, and the resulting revision.
+- An applied evaluation is written atomically with the resulting Claim revision for Agent turns,
+  form updates and confirmations, session resume, evidence updates, handoff creation, claimant
+  consent changes, and integration results. An evaluation based on another revision cannot be
+  attached to the mutation.
+- A material recalculation reads the newest applied evaluation at or before the pre-mutation Claim
+  revision. When a previously active or candidate conditional branch loses support, the new
+  evaluation records the registered suspended or exited transition with the earlier rule and
+  source references plus the correction source. The earlier evaluation remains immutable.
+- The standalone Branch Evaluation write accepts only non-applied evaluation evidence calculated
+  against the stored current Claim revision. It cannot publish an `applied` record; that status is
+  valid only inside the atomic Claim-mutation boundary.
+- Evaluation identities and payloads are immutable in both fixture and MongoDB repositories. An
+  older record remains audit evidence but is ineligible for a current Dynamic Form projection;
+  later status reporting must not rewrite the original calculation.
 
 ## Session and Resume Invariants
 
@@ -287,6 +343,24 @@ and checksums rather than embedding those bytes.
   until non-submission is confirmed or an idempotent replay is proven safe.
 - An external response cannot mutate Claim State until provenance, request linkage,
   schema, current revision, field conflicts, and required authority are validated.
+- An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
+  integration source, status, and timestamps are stored with the claim association. A
+  task keeps its original claim, service, action, source class, and creation time across status
+  updates, and a changed state must advance `updated_at` so a stale concurrent write fails. A
+  task-to-evidence link is accepted only when the named Evidence record exists under the same
+  claim and customer. It is immutable for `(claim_id, evidence_id)` and cannot name a task on
+  another claim; repeated material cannot acquire a second external origin.
+- An implemented external request uses an opaque `erq_` identifier derived deterministically
+  from the reserved assessor operation identity so crash recovery and explicit retry cannot mint
+  a second request. The request and task must agree on claim, service, and action. Persistence
+  verifies the parent claim/customer, task, named claimant consent, Northwind authority, and
+  authorised revision before accepting it. One task has at most one request.
+- Request preparation is immutable. Its stakeholder, purpose, disclosed field names,
+  authorisation pair, authorised revision, and preparation time cannot be rewritten. The only
+  permitted update records the first `sent_at` and the already-reserved operation identity;
+  neither field can be cleared or replaced. `sent_at` records that Northwind handed the request
+  to the selected service entry. Provider receipt remains the separate task `delivery` state and
+  requires named delivery evidence.
 
 ## Configuration and Control Plane Invariants
 

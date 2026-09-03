@@ -1,17 +1,29 @@
 import json
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.knowledge import (
+    KnowledgeRetrievalUnavailable,
+    KnowledgeRetriever,
+    KnowledgeSearch,
+)
 from backend.domain.model_gateway import (
+    CLAIMANT_AGENT_PRIVACY_CLASS,
+    CLAIMANT_AGENT_PURPOSE,
     ModelAgentProposal,
+    ModelBranchContext,
     ModelCapabilities,
     ModelClaimContext,
     ModelClaimStateContext,
     ModelCompletionStatus,
+    ModelFieldSelectionContext,
     ModelFormFieldContext,
     ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
+    ModelKnowledgeCitation,
     ModelMessage,
     ModelRequest,
     ModelRole,
@@ -26,13 +38,14 @@ from backend.domain.models import (
     ProposedFormChange,
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
-from backend.services.agent import AgentProposal, AgentTurnContext
+from backend.services.agent import AgentProposal, AgentTurnContext, AgentTurnProvider
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
+        'claim.product_family',
         'incident.type',
         'incident.occurred_at',
         'incident.description',
@@ -46,8 +59,28 @@ _MODEL_CONTEXT_FIELD_CODES = frozenset(
 )
 
 
+def _knowledge_product(incident_type: str | None) -> str | None:
+    """Resolve the canonical knowledge product scope for a Claim Context type.
+
+    Args:
+        incident_type: Claim Context incident/product family.
+
+    Returns:
+        The provider-neutral knowledge product scope, or ``None`` until the Claim Context
+        identifies a supported product family.
+    """
+    return {
+        'motor': 'motor',
+        'home': 'home',
+        # ``property`` is retained as a compatibility alias for older fixtures.
+        'property': 'home',
+        'contents': 'contents',
+    }.get(incident_type or '')
+
+
 def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
     claim = context.claim
+    branch = context.branch_evaluation
     return ModelTurnContext(
         claim=ModelClaimContext(
             channel=claim.channel,
@@ -83,6 +116,51 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
         professional_review_required=context.professional_review_required,
+        branch=(
+            ModelBranchContext(
+                field_registry_version=branch.field_registry_version,
+                branch_rules_version=branch.branch_rules_version,
+                selected_family=branch.selected_family,
+                unresolved_family_conflict=branch.unresolved_family_conflict,
+                active_branches=branch.active_branches,
+                candidate_branches=branch.candidate_branches,
+                allowed_field_codes=sorted(
+                    item.field_code
+                    for item in branch.field_selection
+                    if item.selection_state.value not in {'inactive', 'system_owned'}
+                ),
+                field_selection=[
+                    ModelFieldSelectionContext(
+                        field_code=item.field_code,
+                        selection_state=item.selection_state,
+                        value_state=item.value_state,
+                    )
+                    for item in branch.field_selection
+                    if item.selection_state.value not in {'inactive', 'system_owned'}
+                ],
+                work_item_intents=branch.work_item_intents,
+                interruption_result=branch.interruption_result,
+                permitted_actions=branch.permitted_actions,
+                permitted_tools=branch.permitted_tools,
+            )
+            if branch is not None
+            else None
+        ),
+        knowledge_status=context.knowledge_status,
+        knowledge_citations=[
+            ModelKnowledgeCitation(
+                document_id=chunk.document_id,
+                chunk_id=chunk.chunk_id,
+                title=chunk.title,
+                section_path=chunk.section_path,
+                source_uri=chunk.source_uri,
+                version=chunk.version,
+                checksum=chunk.checksum,
+                text=chunk.text,
+            )
+            for chunk in context.knowledge_results
+        ],
+        knowledge_limitations=list(context.knowledge_limitations),
     )
 
 
@@ -130,9 +208,9 @@ class GatewayAgent:
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         request = ModelRequest(
-            purpose='agent_turn',
+            purpose=CLAIMANT_AGENT_PURPOSE,
             prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
-            privacy_class='synthetic_fnol',
+            privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
             required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
                 ModelMessage(role=ModelRole.SYSTEM, content=_SYSTEM_INSTRUCTION),
@@ -165,4 +243,55 @@ class GatewayAgent:
             proposal,
             provider_model=response.provider_model,
             provider_request_id=response.provider_request_id,
+        )
+
+
+class KnowledgeGroundedAgent:
+    """Retrieve scoped approved knowledge before delegating a model turn."""
+
+    def __init__(self, provider: AgentTurnProvider, retriever: KnowledgeRetriever) -> None:
+        self._provider = provider
+        self._retriever = retriever
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        if not context.message_text or not context.message_text.strip():
+            return self._provider.propose_turn(context)
+        product = _knowledge_product(context.claim.incident_type)
+        if product is None:
+            return self._provider.propose_turn(context)
+        status = 'evidence_found'
+        limitations: tuple[str, ...] = ()
+        try:
+            chunks = tuple(
+                self._retriever.search(
+                    KnowledgeSearch(
+                        text=context.message_text,
+                        jurisdiction='NZ',
+                        visibility='customer_and_staff',
+                        authority='northwind_synthetic_demo',
+                        version='MVP-2026.1',
+                        insurer='Northwind Insurance',
+                        product=product,
+                        effective_at=datetime.now(UTC),
+                        limit=3,
+                    )
+                )
+            )
+        except KnowledgeRetrievalUnavailable:
+            chunks = ()
+            status = 'unavailable'
+            limitations = ('Approved knowledge retrieval is temporarily unavailable.',)
+        else:
+            if not chunks:
+                status = 'no_evidence'
+                limitations = (
+                    'No applicable approved knowledge was found for the supplied scope and date.',
+                )
+        return self._provider.propose_turn(
+            replace(
+                context,
+                knowledge_results=chunks,
+                knowledge_status=status,
+                knowledge_limitations=limitations,
+            )
         )

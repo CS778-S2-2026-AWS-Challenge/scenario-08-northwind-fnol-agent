@@ -2095,6 +2095,69 @@
         "title": "DemoSeedResponse",
         "type": "object"
       },
+      "DynamicFormProjection": {
+        "additionalProperties": false,
+        "description": "Claimant-safe projection of the latest valid branch evaluation.",
+        "properties": {
+          "active_branches": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Branches",
+            "type": "array"
+          },
+          "branch_rules_version": {
+            "minLength": 1,
+            "title": "Branch Rules Version",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "field_registry_version": {
+            "minLength": 1,
+            "title": "Field Registry Version",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldSelectionResult"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "selected_family": {
+            "anyOf": [
+              {
+                "enum": [
+                  "motor",
+                  "home",
+                  "contents"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Family"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "field_registry_version",
+          "branch_rules_version"
+        ],
+        "title": "DynamicFormProjection",
+        "type": "object"
+      },
       "EvidenceCompleteResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2716,6 +2779,374 @@
           "withdrawn"
         ],
         "title": "ExternalServiceConsentStatus",
+        "type": "string"
+      },
+      "ExternalTaskAuthorisation": {
+        "additionalProperties": false,
+        "description": "The two independent authorities one external request needs.\n\n`docs/claim-creation-boundary.md` requires both a current Northwind rule or\nstaff decision and a matching active claimant-consent record, and states\nthat neither substitutes for the other. They are separate fields here for\nthat reason: a request holding only one of them is not authorised, and no\ncode path can satisfy the pair by supplying the same reference twice.",
+        "properties": {
+          "authorised_revision": {
+            "minimum": 1.0,
+            "title": "Authorised Revision",
+            "type": "integer"
+          },
+          "claimant_consent_ref": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claimant Consent Ref",
+            "type": "string"
+          },
+          "northwind_authority_ref": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Northwind Authority Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "northwind_authority_ref",
+          "claimant_consent_ref",
+          "authorised_revision"
+        ],
+        "title": "ExternalTaskAuthorisation",
+        "type": "object"
+      },
+      "ExternalTaskDelivery": {
+        "description": "Whether one external task request reached the provider before it failed.\n\nDelivery is one input to recovery classification. Only failures whose\ncanonical contract treats post-submission state as ambiguous become an\nunknown outcome.",
+        "enum": [
+          "not_submitted",
+          "submitted"
+        ],
+        "title": "ExternalTaskDelivery",
+        "type": "string"
+      },
+      "ExternalTaskFailureCode": {
+        "description": "Provider-neutral failure reasons for one external task invocation.\n\nThe six values are the failure classes named in the Failure Behaviour\nsection of `docs/claim-creation-boundary.md`.",
+        "enum": [
+          "timeout",
+          "unavailable",
+          "access_denied",
+          "malformed",
+          "partial",
+          "conflicting"
+        ],
+        "title": "ExternalTaskFailureCode",
+        "type": "string"
+      },
+      "ExternalTaskItem": {
+        "additionalProperties": false,
+        "description": "Operational task state with its request and material-origin links.",
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task": {
+            "$ref": "#/components/schemas/ExternalTaskRecord"
+          }
+        },
+        "required": [
+          "task",
+          "evidence_ids"
+        ],
+        "title": "ExternalTaskItem",
+        "type": "object"
+      },
+      "ExternalTaskListResponse": {
+        "additionalProperties": false,
+        "description": "Internal projection of external tasks and their material links.",
+        "properties": {
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalTaskItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "claim_id",
+          "items",
+          "page"
+        ],
+        "title": "ExternalTaskListResponse",
+        "type": "object"
+      },
+      "ExternalTaskOperationStatus": {
+        "description": "Lifecycle of one external task operation, held separately from Claim State.\n\n`UNKNOWN_OUTCOME` is deliberately not a failure: the request may have been\naccepted, so the operation must be reconciled rather than reported as either\na success or a loss.",
+        "enum": [
+          "prepared",
+          "accepted",
+          "retryable_failure",
+          "terminal_failure",
+          "unknown_outcome"
+        ],
+        "title": "ExternalTaskOperationStatus",
+        "type": "string"
+      },
+      "ExternalTaskRecord": {
+        "additionalProperties": false,
+        "description": "One third-party task, recorded separately from Claim State.\n\nThe record carries its own claim association, source class, status, and\ntimestamps so a task can be interpreted without reading Claim State, and so\na fixture result can never be read as a configured-service result.\n\nDelivery defaults to `NOT_SUBMITTED` and may only be raised to `SUBMITTED`\nby naming the evidence that the request reached the provider. No adapter in\nthis repository records that evidence yet, so the default preserves the\ndocumented assessor behaviour, and a caller cannot escalate a timeout to an\nunknown outcome on an assumption. `docs/claim-creation-boundary.md` requires\ntrustworthy delivery evidence before a timeout is classified as submitted.",
+        "properties": {
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/ExternalTaskDelivery",
+            "default": "not_submitted"
+          },
+          "delivery_evidence": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Evidence"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "integration_source": {
+            "$ref": "#/components/schemas/IntegrationSource"
+          },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
+          "requested_action": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Requested Action",
+            "type": "string"
+          },
+          "service_identity": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Service Identity",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExternalTaskOperationStatus"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "claim_id",
+          "service_identity",
+          "requested_action",
+          "integration_source",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExternalTaskRecord",
+        "type": "object"
+      },
+      "ExternalTaskRequest": {
+        "additionalProperties": false,
+        "description": "What one external task will disclose, to whom, under what authority, and why.\n\nThe five properties the card requires are each their own field rather than a\nfree-form payload: the stakeholder, the claim, the fields actually disclosed,\nthe authorisation, and the purpose a claimant can read. A request that cannot\nsay all five is not preparable.\n\nPreparation and sending are separate states. An unsent request holds no\noperation identity, because the identity is what makes a retry the same\nrequest rather than a second one.",
+        "properties": {
+          "authorisation": {
+            "$ref": "#/components/schemas/ExternalTaskAuthorisation"
+          },
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "disclosed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Disclosed Fields",
+            "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "prepared_at": {
+            "format": "date-time",
+            "title": "Prepared At",
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_action": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Requested Action",
+            "type": "string"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "service_identity": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Service Identity",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "claim_id",
+          "service_identity",
+          "requested_action",
+          "purpose",
+          "disclosed_fields",
+          "authorisation",
+          "prepared_at"
+        ],
+        "title": "ExternalTaskRequest",
+        "type": "object"
+      },
+      "FieldSelectionResult": {
+        "additionalProperties": false,
+        "description": "Selection state kept separate from a field's stored value state.",
+        "properties": {
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "selection_state": {
+            "$ref": "#/components/schemas/FieldSelectionState"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FormSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_state": {
+            "$ref": "#/components/schemas/FormStatus"
+          }
+        },
+        "required": [
+          "field_code",
+          "selection_state",
+          "value_state",
+          "reason"
+        ],
+        "title": "FieldSelectionResult",
+        "type": "object"
+      },
+      "FieldSelectionState": {
+        "description": "Runtime relevance of a registered field for the current safe action.",
+        "enum": [
+          "required_now",
+          "candidate_now",
+          "pending_later",
+          "inactive",
+          "system_owned"
+        ],
+        "title": "FieldSelectionState",
         "type": "string"
       },
       "FormChange": {
@@ -3593,6 +4024,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
               },
               {
                 "type": "null"
@@ -9872,6 +10313,92 @@
           }
         },
         "summary": "Complete Evidence Processing Integration",
+        "tags": [
+          "internal-integrations"
+        ]
+      }
+    },
+    "/internal/v1/claims/{claim_id}/external-tasks": {
+      "get": {
+        "description": "List one claim's operational external tasks for an integration service.\n\nArgs:\n    claim_id: Working Claim whose external tasks are requested.\n    request: Authenticated HTTP request carrying the correlation identifier.\n    _principal: Verified integration-service principal supplied by FastAPI.\n    limit: Requested page size; values above 100 are truncated.\n    cursor: Opaque cursor returned by an earlier list response.\n\nReturns:\n    One stable page of task records with mapped evidence identifiers.\n\nRaises:\n    ApiError: The claim or cursor is unavailable or invalid.",
+        "operationId": "read_external_tasks_integration_internal_v1_claims__claim_id__external_tasks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalTaskListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read External Tasks Integration",
         "tags": [
           "internal-integrations"
         ]

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
@@ -16,6 +17,14 @@ from backend.adapters.model_gateway import (
 from backend.app import create_app
 from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, Settings
+from backend.core.model_gateway import ConfigurationBackedModelGateway
+from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.configuration import (
+    ConfigurationImpact,
+    ConfigurationRecord,
+    ConfigurationState,
+    now_utc,
+)
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -38,6 +47,7 @@ from backend.domain.models import (
     AuthorityOutcome,
     Channel,
     CustomerNextStep,
+    FieldSelectionState,
     FormSource,
     FormStatus,
     FraudSignal,
@@ -46,6 +56,8 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import (
     AgentTurnContext,
@@ -1018,7 +1030,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
             gateway_config(
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v2',
+                prompt_version='northwind-fnol-motor-claimant-v4',
             ),
             transport=transport,
         )
@@ -1042,7 +1054,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v2',
+                prompt_version='northwind-fnol-motor-claimant-v4',
             ),
             transport=transport,
         )
@@ -1256,12 +1268,20 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert gateway.last_request.response_schema is not None
     model_context = json.loads(gateway.last_request.messages[1].content)
     assert set(model_context) == {
+        'branch',
         'claim',
         'message_text',
         'evidence_reference_count',
         'professional_review_required',
+        'knowledge_status',
+        'knowledge_citations',
+        'knowledge_limitations',
     }
+    assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 1
+    assert model_context['knowledge_status'] == 'not_requested'
+    assert model_context['knowledge_citations'] == []
+    assert model_context['knowledge_limitations'] == []
     assert set(model_context['claim']) == {
         'channel',
         'locale',
@@ -1307,12 +1327,92 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v2'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v4'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(proposal, authority) == []
+
+
+def test_gateway_agent_receives_bounded_branch_context() -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output={
+                'action': 'ASK',
+                'reason_codes': ['CONTINUE_INTAKE'],
+                'customer_reason': 'More information is required.',
+                'customer_response': 'Where did the incident happen?',
+                'customer_next_step': {
+                    'status': 'information_required',
+                    'summary': 'Provide the incident location.',
+                    'responsible_party': 'claimant',
+                    'required_items': ['incident.location'],
+                },
+                'form_changes': [],
+                'state_changes': [],
+                'proposed_signals': [],
+                'required_tools': [],
+                'next_action_requirements': [],
+                'handoff_priority': None,
+            }
+        )
+    )
+    agent = GatewayAgent(gateway)
+    timestamp = datetime.now(UTC)
+    claim = _working_claim().model_copy(
+        update={
+            'incident_type': 'motor',
+            'form': {
+                'incident.type': _form_field('collision', timestamp),
+                'incident.description': _form_field('A rear-end collision.', timestamp),
+            },
+        }
+    )
+    branch = BranchRuleEvaluator().evaluate(claim, recomputation_reason='model_context')
+    branch = branch.model_copy(
+        update={
+            'field_selection': [
+                item.model_copy(update={'selection_state': FieldSelectionState.SYSTEM_OWNED})
+                if item.field_code == 'claimant.client_number'
+                else item
+                for item in branch.field_selection
+            ]
+        }
+    )
+
+    agent.propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses-gateway',
+            trigger_message_id='msg-gateway',
+            message_text='Continue my motor claim.',
+            evidence_refs=[],
+            branch_evaluation=branch,
+        )
+    )
+
+    assert gateway.last_request is not None
+    model_context = json.loads(gateway.last_request.messages[1].content)
+    assert model_context['branch']['selected_family'] == 'motor'
+    assert 'family.motor' in model_context['branch']['active_branches']
+    assert 'vehicle.registration' in model_context['branch']['allowed_field_codes']
+    assert 'property.address' not in model_context['branch']['allowed_field_codes']
+    assert 'claimant.client_number' not in model_context['branch']['allowed_field_codes']
+    assert set(model_context['branch']) == {
+        'field_registry_version',
+        'branch_rules_version',
+        'selected_family',
+        'unresolved_family_conflict',
+        'active_branches',
+        'candidate_branches',
+        'allowed_field_codes',
+        'field_selection',
+        'work_item_intents',
+        'interruption_result',
+        'permitted_actions',
+        'permitted_tools',
+    }
 
 
 @pytest.mark.parametrize(
@@ -1764,7 +1864,8 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
                     'required_items': ['loss.description'],
                 },
                 'form_changes': [
-                    {'field_code': 'incident.type', 'value': 'motor'},
+                    {'field_code': 'claim.product_family', 'value': 'motor'},
+                    {'field_code': 'incident.type', 'value': 'collision'},
                     {
                         'field_code': 'incident.description',
                         'value': 'Another car hit the rear of mine on Queen Street.',
@@ -2016,6 +2117,95 @@ def test_custom_protocol_registration_composes_without_route_changes() -> None:
 
     assert readiness.json()['checks']['agent'] == 'configured'
     assert all('model' not in path for path in openapi['paths'])
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('base_url', 'https://unapproved.example/v1'),
+        ('credential_environment_variable', 'UNAPPROVED_PROCESS_SECRET'),
+        ('purpose', 'batch_evaluation'),
+        ('privacy_class', 'unrestricted'),
+        ('prompt_version', 'northwind-fnol-motor-claimant-v2'),
+        ('structured_output', False),
+    ],
+)
+def test_published_model_cannot_override_runtime_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    settings = Settings(
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_base_url='https://approved-model.example/v1',
+        model_identifier='approved-model',
+        model_api_key_env='NORTHWIND_MODEL_API_KEY',
+    )
+    repository = ConfigurationRepository()
+    values: dict[str, object] = {
+        'protocol': 'openai_compatible',
+        'provider': 'untrusted-provider',
+        'model_identifier': 'untrusted-model',
+        'base_url': 'https://approved-model.example/v1',
+        'credential_environment_variable': 'NORTHWIND_MODEL_API_KEY',
+        'profile_id': 'untrusted-profile',
+        'purpose': 'agent_turn',
+        'privacy_class': 'synthetic_fnol',
+        'prompt_version': 'northwind-fnol-motor-claimant-v4',
+        'evaluation_status': 'configured',
+        'timeout_seconds': 30,
+        'structured_output': True,
+        'tools': False,
+    }
+    values[field] = value
+    repository.create(
+        ConfigurationRecord(
+            configuration_id='cfg_malicious',
+            revision=3,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            domain='model',
+            values=values,
+            secret_references={},
+            author='adm_demo',
+            reason='Simulate a storage-boundary bypass.',
+            effective_time=now_utc(),
+            updated_at=now_utc(),
+        )
+    )
+    registry = ModelGatewayRegistry()
+    provider_constructions: list[ModelGatewayConfig] = []
+    environment_reads: list[str] = []
+
+    def record_environment_read(name: str) -> str | None:
+        environment_reads.append(name)
+        return 'must-not-be-read'
+
+    def record_provider_construction(config: ModelGatewayConfig) -> ModelGateway:
+        provider_constructions.append(config)
+        return OpenAICompatibleModelGateway(config)
+
+    monkeypatch.setattr(os, 'getenv', record_environment_read)
+    registry.register('openai_compatible', record_provider_construction)
+    gateway = ConfigurationBackedModelGateway(settings, repository, registry)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete(ModelRequest(messages=[]))
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+    assert provider_constructions == []
+    assert environment_reads == []
+
+
+def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
+    prompt = load_motor_claimant_prompt()
+
+    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-motor-claimant-v4'
+    assert 'Prompt ID: `northwind-fnol-motor-claimant-v4`' in prompt
+    assert '`knowledge_citations` from approved retrieval' in prompt
+    assert 'untrusted reference material' in prompt
+    assert 'do not invent a policy or knowledge answer' in prompt
 
 
 def test_gateway_agent_requires_structured_output_at_composition() -> None:

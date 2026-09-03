@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +10,7 @@ from backend.domain.models import (
     CustomerSupport,
     EvidenceState,
     EvidenceSummary,
+    FieldSelectionState,
     FormSource,
     FormStatus,
     NeededFor,
@@ -17,6 +18,9 @@ from backend.domain.models import (
     Urgency,
     WorkflowState,
 )
+
+CLAIMANT_AGENT_PURPOSE = 'agent_turn'
+CLAIMANT_AGENT_PRIVACY_CLASS = 'synthetic_fnol'
 
 
 class ModelContract(BaseModel):
@@ -95,9 +99,13 @@ class ModelRequest(ModelContract):
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
-    purpose: str = Field(default='agent_turn', min_length=1, max_length=100)
+    purpose: str = Field(default=CLAIMANT_AGENT_PURPOSE, min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
-    privacy_class: str = Field(default='synthetic_fnol', min_length=1, max_length=100)
+    privacy_class: str = Field(
+        default=CLAIMANT_AGENT_PRIVACY_CLASS,
+        min_length=1,
+        max_length=100,
+    )
     required_capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
 
 
@@ -139,11 +147,49 @@ class ModelClaimContext(ModelContract):
     customer_next_step: CustomerNextStep
 
 
+class ModelFieldSelectionContext(ModelContract):
+    field_code: str
+    selection_state: FieldSelectionState
+    value_state: FormStatus
+
+
+class ModelBranchContext(ModelContract):
+    field_registry_version: str
+    branch_rules_version: str
+    selected_family: str | None = None
+    unresolved_family_conflict: list[str] = Field(default_factory=list)
+    active_branches: list[str] = Field(default_factory=list)
+    candidate_branches: list[str] = Field(default_factory=list)
+    allowed_field_codes: list[str] = Field(default_factory=list)
+    field_selection: list[ModelFieldSelectionContext] = Field(default_factory=list)
+    work_item_intents: list[dict[str, Any]] = Field(default_factory=list)
+    interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
+
+
 class ModelTurnContext(ModelContract):
     claim: ModelClaimContext
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
+    branch: ModelBranchContext | None = None
+    knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
+        'not_requested'
+    )
+    knowledge_citations: list['ModelKnowledgeCitation'] = Field(default_factory=list)
+    knowledge_limitations: list[str] = Field(default_factory=list)
+
+
+class ModelKnowledgeCitation(ModelContract):
+    document_id: str
+    chunk_id: str
+    title: str
+    section_path: str
+    source_uri: str
+    version: str
+    checksum: str
+    text: str
 
 
 class ModelProposedFormChange(ModelContract):

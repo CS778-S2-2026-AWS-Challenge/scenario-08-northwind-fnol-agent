@@ -6,6 +6,8 @@ request, or submitting a review.
 
 Before taking ownership of an Issue, the agent MUST explain its understanding of the Issue to the current user; if any requirement, scope, authority, trade-off, or other decision is ambiguous or needs confirmation, it MUST stop and ask, MUST NOT accept a hands-off or vague answer, and MUST refuse documentation or code work when the user has clearly not thought through the request.
 
+Task definition, decomposition, boundary changes, and handoffs MUST leave a durable written record before implementation begins: an Issue body or comment is sufficient for ordinary work, while governance, design, architecture, API, and cross-owner decisions MUST update the applicable current document. When relaying a review-ready PR or handoff through the current user, lead with the PR number and exact current head; mention the Issue number as context, and use the Issue number first only for operations concerning the Issue itself.
+
 For an intentionally collaborative Issue with multiple assignees, any assignee may, without maintainer approval, ask another assignee in the Issue comments to complete an explicitly bounded remaining slice; the completing assignee's PR may use `Closes #N` when that PR, together with prior `Refs #N` deliveries, satisfies the Issue's full acceptance criteria.
 
 The sole current source of governance rules is the repository governance skill:

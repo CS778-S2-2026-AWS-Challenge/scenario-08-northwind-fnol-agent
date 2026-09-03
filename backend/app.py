@@ -28,9 +28,10 @@ from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Setting
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
-from backend.core.model_gateway import build_model_gateway
+from backend.core.model_gateway import ConfigurationBackedModelGateway
 from backend.core.runtime_profiles import (
     DataRuntimeBundle,
+    RuntimeCapabilityStatus,
     build_data_runtime_bundle,
     validate_data_runtime_bundle,
 )
@@ -40,7 +41,11 @@ from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
-from backend.services.model_agent import GatewayAgent
+from backend.services.external_service_entry import (
+    assert_adapter_matches_entry,
+    resolve_external_service_entry,
+)
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 
 
 def create_app(
@@ -55,6 +60,7 @@ def create_app(
     data_runtime_bundle: DataRuntimeBundle | None = None,
     model_gateway_registry: ModelGatewayRegistry | None = None,
     identity_repository: IdentityRepository | None = None,
+    configuration_repository: ConfigurationRepository | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     injected_data_dependencies = any(
@@ -100,7 +106,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.identity_repository = identity_repository or FixtureIdentityRepository()
-    app.state.configuration_repository = ConfigurationRepository()
+    app.state.configuration_repository = configuration_repository or ConfigurationRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
     app.state.knowledge_retriever = bundle.knowledge_retrieval
@@ -114,17 +120,42 @@ def create_app(
             raise ValueError(
                 'agent_turn_provider cannot override the configured model gateway runtime.'
             )
-        model_gateway = build_model_gateway(resolved_settings, model_gateway_registry)
+        model_gateway = ConfigurationBackedModelGateway(
+            resolved_settings,
+            app.state.configuration_repository,
+            model_gateway_registry,
+        )
         if not model_gateway.capabilities.structured_output:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        base_agent_turn_provider: AgentTurnProvider = GatewayAgent(model_gateway)
+        base_agent_turn_provider: AgentTurnProvider = KnowledgeGroundedAgent(
+            GatewayAgent(model_gateway),
+            bundle.knowledge_retrieval,
+        )
         app.state.agent_runtime_status = 'configured'
     else:
         base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
     app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
-    app.state.assessor_service_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
+    resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
+    fixture_assessor = resolved_settings.data_runtime_profile is DataRuntimeProfile.FIXTURE
+    assessor_service_entry = resolve_external_service_entry(
+        capability_status=(
+            RuntimeCapabilityStatus.USING_FIXTURE
+            if fixture_assessor
+            else RuntimeCapabilityStatus.PENDING_CONFIRMATION
+        ),
+        allow_test_fixture=fixture_assessor,
+    )
+    # The entry and the adapter are chosen independently above, so the composition
+    # is checked rather than assumed: a runtime that would answer through one
+    # source class while recording another must not assemble at all.
+    assert_adapter_matches_entry(
+        resolved_assessor_adapter.integration_source,
+        assessor_service_entry,
+    )
+    app.state.assessor_service_adapter = resolved_assessor_adapter
+    app.state.assessor_service_entry = assessor_service_entry
     app.state.evidence_storage = bundle.evidence_storage
     app.state.policy_history_adapter = bundle.policy_history
     app.state.handoff_dispatch_adapter = handoff_dispatch_adapter or MockHandoffDispatchAdapter()

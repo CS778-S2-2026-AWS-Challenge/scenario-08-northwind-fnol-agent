@@ -54,7 +54,19 @@ class ClaimsServiceAdapter(Protocol):
 
 
 class AssessorServiceAdapter(Protocol):
-    """Stable assessor boundary without assumptions about a future AWS schema."""
+    """Stable assessor boundary without assumptions about a future AWS schema.
+
+    An implementation declares the source class its answers carry. The entry
+    decision and the installed adapter are chosen separately at startup, so
+    without a declaration nothing could tell a fixture double from a configured
+    service, and a mismatched pair would be indistinguishable from a correct one.
+    The declaration is required rather than defaulted: an implementation that
+    forgot to state its source would otherwise be read as whichever value the
+    default happened to be, which is the mislabelling this boundary exists to
+    prevent.
+    """
+
+    integration_source: IntegrationSource
 
     def route_assessor(
         self,
@@ -104,7 +116,14 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
 
 
 class MockAssessorServiceAdapter(AssessorServiceAdapter):
-    """Deterministic mock route keyed by the authorised requested action."""
+    """Deterministic mock route keyed by the authorised requested action.
+
+    Its answers are synthetic: the assessor reference is fixture-prefixed and the
+    result states that no production assessor was contacted. It declares `FIXTURE`
+    so a composition cannot present those answers as a configured service's.
+    """
+
+    integration_source = IntegrationSource.FIXTURE
 
     def __init__(
         self,

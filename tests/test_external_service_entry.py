@@ -14,6 +14,8 @@ from backend.services.external_service_entry import (
     ExternalServiceEntry,
     ExternalServiceEntryDecision,
     ForgedIntegrationSourceError,
+    MismatchedServiceAdapterError,
+    assert_adapter_matches_entry,
     assert_task_matches_entry,
     resolve_external_service_entry,
 )
@@ -221,3 +223,61 @@ def test_matching_source_and_entry_pass() -> None:
 
     assert_task_matches_entry(_task(IntegrationSource.CONFIGURED_SERVICE), live)
     assert_task_matches_entry(_task(IntegrationSource.FIXTURE), fixture)
+
+
+def _decision(entry: ExternalServiceEntry) -> ExternalServiceEntryDecision:
+    sources = {
+        ExternalServiceEntry.LIVE: IntegrationSource.CONFIGURED_SERVICE,
+        ExternalServiceEntry.TEST_FIXTURE: IntegrationSource.FIXTURE,
+        ExternalServiceEntry.UNAVAILABLE: None,
+    }
+    return ExternalServiceEntryDecision(
+        entry=entry,
+        integration_source=sources[entry],
+        limitation=(
+            'The assessment service is not configured.' if sources[entry] is None else None
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ('entry', 'adapter_source'),
+    [
+        (ExternalServiceEntry.TEST_FIXTURE, IntegrationSource.FIXTURE),
+        (ExternalServiceEntry.LIVE, IntegrationSource.CONFIGURED_SERVICE),
+    ],
+)
+def test_an_adapter_that_provides_what_the_entry_promises_is_accepted(
+    entry: ExternalServiceEntry,
+    adapter_source: IntegrationSource,
+) -> None:
+    assert_adapter_matches_entry(adapter_source, _decision(entry))
+
+
+@pytest.mark.parametrize(
+    ('entry', 'adapter_source'),
+    [
+        (ExternalServiceEntry.LIVE, IntegrationSource.FIXTURE),
+        (ExternalServiceEntry.TEST_FIXTURE, IntegrationSource.CONFIGURED_SERVICE),
+    ],
+)
+def test_an_adapter_that_cannot_provide_what_the_entry_promises_is_refused(
+    entry: ExternalServiceEntry,
+    adapter_source: IntegrationSource,
+) -> None:
+    """Both directions are wrong: one mislabels synthetic answers, the other withholds real ones."""
+
+    with pytest.raises(MismatchedServiceAdapterError):
+        assert_adapter_matches_entry(adapter_source, _decision(entry))
+
+
+@pytest.mark.parametrize(
+    'adapter_source',
+    [IntegrationSource.FIXTURE, IntegrationSource.CONFIGURED_SERVICE],
+)
+def test_an_unavailable_entry_accepts_any_adapter_beside_it(
+    adapter_source: IntegrationSource,
+) -> None:
+    """No call is made through an unavailable entry, so an unused adapter is not a mismatch."""
+
+    assert_adapter_matches_entry(adapter_source, _decision(ExternalServiceEntry.UNAVAILABLE))

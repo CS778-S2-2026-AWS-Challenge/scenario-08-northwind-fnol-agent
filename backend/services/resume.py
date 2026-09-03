@@ -15,7 +15,7 @@ from backend.domain.models import (
     StartSessionRequest,
     WorkingClaim,
 )
-from backend.repositories.protocols import ClaimRepository, PersistenceRepository
+from backend.repositories.protocols import PersistenceRepository
 from backend.services.claims import start_session
 from backend.services.support import require_idempotency_key
 
@@ -288,7 +288,7 @@ def start_session_with_recovery(
     )
     overlay = _ResumeOverlayRepository(repository, source.session_id, resume)
     return start_session(
-        cast(ClaimRepository, overlay),
+        cast(PersistenceRepository, overlay),
         principal,
         claim_id,
         payload,

@@ -121,11 +121,21 @@ updates the same backend claim state.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
+Developer mode uses separate synthetic administrator and release-approver tokens. The
+administrator may author and validate configuration, while
+`NORTHWIND_SYNTHETIC_RELEASE_APPROVER_TOKEN` represents the independent identity required to
+publish a high-impact configuration. These synthetic tokens are local test identities only and
+must not be used as a production approval mechanism.
+
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests and coverage, PR policy, GitHub automation, documentation, and the claimant
-client for every pull request.
+linting, types, tests, PR policy, GitHub automation, documentation, and the claimant client for
+every pull request. Backend pull requests use impact-scoped tests selected by
+`scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
+suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
+only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.
+The `main` branch retains the complete backend suite with coverage enforcement.
 
 For focused local backend verification while developing, run the checks affected by the change:
 

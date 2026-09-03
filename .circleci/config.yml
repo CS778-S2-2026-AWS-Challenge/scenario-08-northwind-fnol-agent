@@ -7,31 +7,90 @@ jobs:
     resource_class: small
     steps:
       - checkout
+      - run:
+          name: Select backend impact
+          command: |
+            git fetch origin main
+            echo "export BACKEND_QUALITY_MODE=$(python scripts/select_backend_tests.py --mode)" >> "$BASH_ENV"
+            echo "export BACKEND_QUALITY_OPENAPI=$(python scripts/select_backend_tests.py --needs-openapi)" >> "$BASH_ENV"
+            echo "export BACKEND_QUALITY_AUDIT=$(python scripts/select_backend_tests.py --needs-audit-contract)" >> "$BASH_ENV"
       - restore_cache:
           keys:
             - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
       - run:
           name: Install backend dependencies
-          command: python -m pip install -r backend/requirements-dev.txt
+          command: |
+            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then
+              echo "No backend behavior changed; Python dependencies skipped."
+              exit 0
+            fi
+            python -m pip install -r backend/requirements-dev.txt
       - save_cache:
           key: v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
           paths:
             - ~/.cache/pip
       - run:
           name: Check backend formatting
-          command: python -m ruff format --check .
+          command: |
+            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
+              python -m ruff format --check .
+            else
+              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+            fi
       - run:
           name: Lint backend
-          command: python -m ruff check .
+          command: |
+            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
+              python -m ruff check .
+            else
+              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+            fi
       - run:
           name: Type-check backend
-          command: python -m mypy backend tests
+          command: |
+            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
+              python -m mypy backend tests
+            else
+              python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
+            fi
       - run:
           name: Test backend
-          command: python -m pytest --cov=backend --cov-report=term-missing
+          command: |
+            mode="$BACKEND_QUALITY_MODE"
+            case "$mode" in
+              full)
+                python -m pytest --cov=backend --cov-report=term-missing tests
+                ;;
+              scoped)
+                python -m pytest $(python scripts/select_backend_tests.py --tests)
+                ;;
+              skip)
+                echo "No backend behavior changed; backend pytest skipped."
+                ;;
+              *)
+                echo "Unknown backend test selection mode: $mode"
+                exit 1
+                ;;
+            esac
       - run:
           name: Check OpenAPI snapshot drift
-          command: python scripts/export_openapi.py --check
+          command: |
+            if [ "$BACKEND_QUALITY_OPENAPI" = "true" ]; then
+              python scripts/export_openapi.py --check
+            else
+              echo "OpenAPI contract unaffected; check skipped."
+            fi
+      - run:
+          name: Check AuditEvent contract snapshot drift
+          command: |
+            if [ "$BACKEND_QUALITY_AUDIT" = "true" ]; then
+              python scripts/export_audit_contract.py --check
+            else
+              echo "AuditEvent contract unaffected; check skipped."
+            fi
 
   customer-quality:
     docker:
@@ -144,6 +203,10 @@ jobs:
             modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
             if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
               echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
+              exit 1
+            fi
+            if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
+              echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
               exit 1
             fi
             echo "Path coupling satisfied."

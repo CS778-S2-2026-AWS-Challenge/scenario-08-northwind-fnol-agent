@@ -2,12 +2,19 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from backend.domain.intake import infer_controlled_incident_type, next_controlled_intake_field
+from backend.domain.intake import (
+    CONTROLLED_INTAKE_FIELDS,
+    PRODUCT_FAMILY_INTAKE_FIELD,
+    infer_controlled_product_family,
+    next_controlled_intake_field,
+)
+from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
     AgentAction,
     AgentAuthority,
     AgentProposalSource,
     AuthorityOutcome,
+    BranchEvaluationResult,
     CustomerNextStep,
     FormSource,
     FormStatus,
@@ -18,6 +25,11 @@ from backend.domain.models import (
     StateChange,
     WorkingClaim,
 )
+from backend.domain.support_intent import (
+    SupportIntent,
+    detect_support_intent,
+    support_need_for_intent,
+)
 
 HIGH_IMPACT_ACTIONS = frozenset(
     {
@@ -27,7 +39,14 @@ HIGH_IMPACT_ACTIONS = frozenset(
         AgentAction.CREATE_CLAIM,
     }
 )
-CONTROLLED_HANDOFF_REASONS = frozenset({'EXPLICIT_SAFETY_SIGNAL', 'HUMAN_SUPPORT_REQUESTED'})
+CONTROLLED_HANDOFF_REASONS = frozenset(
+    {
+        'EXPLICIT_SAFETY_SIGNAL',
+        'HUMAN_SUPPORT_REQUESTED',
+        'ACCESSIBILITY_SUPPORT_REQUESTED',
+        'DISTRESS_SUPPORT_REQUESTED',
+    }
+)
 SUPPORTED_AGENT_STATE_PATHS = frozenset({'claim_state.next_action'})
 
 PERSON_SUBJECT = (
@@ -93,16 +112,6 @@ DANGER_NEGATION_PATTERNS = (
         re.IGNORECASE,
     ),
 )
-HUMAN_REQUEST_PATTERNS = (
-    re.compile(
-        r'\b(?:speak|talk)\s+(?:to|with)\s+(?:a\s+)?(?:person|human|representative)\b',
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r'\b(?:want|need|request)\s+(?:a\s+)?(?:person|human|representative)\b', re.IGNORECASE
-    ),
-    re.compile(r'\bhuman\s+(?:help|support)\b', re.IGNORECASE),
-)
 PENDING_POLICE_REPORT_PATTERNS = (
     re.compile(
         r'\bpolice\b[^.!?]{0,100}\b(?:report|reference)\b[^.!?]{0,100}'
@@ -149,6 +158,10 @@ class AgentTurnContext:
     message_text: str | None
     evidence_refs: list[str]
     professional_review_required: bool = False
+    branch_evaluation: BranchEvaluationResult | None = None
+    knowledge_results: tuple[KnowledgeChunk, ...] = ()
+    knowledge_status: str = 'not_requested'
+    knowledge_limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,14 +204,25 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
             confidence=1.0,
         )
     ]
-    inferred_incident_type = (
-        infer_controlled_incident_type(message_text) if incident_type is None else None
+    inferred_product_family = (
+        infer_controlled_product_family(message_text) if incident_type is None else None
     )
-    if inferred_incident_type is not None:
+    if inferred_product_family is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='claim.product_family',
+                value=inferred_product_family,
+                source=FormSource.INFERENCE,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.95,
+            )
+        )
+    if any(pattern.search(message_text) for pattern in REAR_END_COLLISION_PATTERNS):
         changes.append(
             ProposedFormChange(
                 field_code='incident.type',
-                value=inferred_incident_type,
+                value='collision',
                 source=FormSource.INFERENCE,
                 status=FormStatus.PROPOSED,
                 needed_for=NeededFor.CURRENT_ACTION,
@@ -235,16 +259,16 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
 def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
     description = claim.form.get('incident.description')
     candidate = str(description.value) if description is not None else message_text
-    inferred_type = claim.form.get('incident.type')
+    inferred_family = claim.form.get('claim.product_family')
     if description is None:
         is_motor = (
-            claim.incident_type is None and infer_controlled_incident_type(candidate) == 'motor'
+            claim.incident_type is None and infer_controlled_product_family(candidate) == 'motor'
         )
     else:
         is_motor = (
-            inferred_type is not None
-            and inferred_type.value == 'motor'
-            and inferred_type.source is FormSource.INFERENCE
+            inferred_family is not None
+            and inferred_family.value == 'motor'
+            and inferred_family.source is FormSource.INFERENCE
         )
     return is_motor and any(pattern.search(candidate) for pattern in REAR_END_COLLISION_PATTERNS)
 
@@ -405,7 +429,8 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
 def _confirmation_response(changes: list[ProposedFormChange]) -> str:
     labels = {
         'incident.description': 'what happened',
-        'incident.type': 'the incident type',
+        'claim.product_family': 'the claim type',
+        'incident.type': 'the incident subtype',
         'incident.location': 'where it happened',
         'loss.description': 'what was damaged or lost',
     }
@@ -460,24 +485,59 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='urgent',
             controlled_rule_authorised=True,
         )
-    if not active_handoff and any(
-        pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS
-    ):
-        return AgentProposal(
-            action=AgentAction.HANDOFF,
-            reason_codes=['HUMAN_SUPPORT_REQUESTED'],
-            customer_reason='You asked to continue with a person.',
-            customer_response=(
-                'I will transfer this report to a Northwind staff member. The facts, evidence '
-                'status, and messages already recorded will go with it, so you should not need '
-                'to start again.'
-            ),
-            customer_next_step=CustomerNextStep(
-                status='human_support_queued',
-                summary=(
+    support_intent = detect_support_intent(message_text)
+    support_need = support_need_for_intent(support_intent)
+    if not active_handoff and support_need is not None:
+        reason_code, customer_reason, customer_response, next_step_summary, priority = {
+            SupportIntent.EXPLICIT_HUMAN_REQUEST: (
+                'HUMAN_SUPPORT_REQUESTED',
+                'You asked to continue with a person.',
+                (
+                    'I will transfer this report to a Northwind staff member. The facts, evidence '
+                    'status, and messages already recorded will go with it, so you should not need '
+                    'to start again.'
+                ),
+                (
                     'A Northwind support request has been queued with the details already '
                     'provided. You do not need to restart your report.'
                 ),
+                'standard',
+            ),
+            SupportIntent.ACCESSIBILITY_NEED: (
+                'ACCESSIBILITY_SUPPORT_REQUESTED',
+                'You described an accessibility or communication support need.',
+                (
+                    'I will prioritise a Northwind staff member to continue with the details '
+                    'already recorded and support your communication needs.'
+                ),
+                (
+                    'A Northwind accessibility support request has been prioritised with the '
+                    'details already provided.'
+                ),
+                'high',
+            ),
+            SupportIntent.DISTRESS: (
+                'DISTRESS_SUPPORT_REQUESTED',
+                'You described distress and asked for support continuing the report.',
+                (
+                    'I will prioritise a Northwind staff member to continue with the details '
+                    'already recorded.'
+                ),
+                (
+                    'A Northwind support request has been prioritised with the details already '
+                    'provided.'
+                ),
+                'high',
+            ),
+        }[support_intent]
+        return AgentProposal(
+            action=AgentAction.HANDOFF,
+            reason_codes=[reason_code],
+            customer_reason=customer_reason,
+            customer_response=customer_response,
+            customer_next_step=CustomerNextStep(
+                status='human_support_queued',
+                summary=next_step_summary,
                 responsible_party=ResponsibleParty.NORTHWIND,
             ),
             form_changes=[],
@@ -485,7 +545,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
-            handoff_priority='standard',
+            handoff_priority=priority,
             controlled_rule_authorised=True,
         )
     if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):
@@ -599,6 +659,26 @@ class ControlledAgent:
             if guided is not None:
                 return guided
         intake_field = next_controlled_intake_field(context.claim)
+        if context.branch_evaluation is not None:
+            allowed_codes = {
+                item.field_code
+                for item in context.branch_evaluation.field_selection
+                if item.selection_state.value not in {'inactive', 'system_owned'}
+            }
+            if intake_field is not None and intake_field.field_code not in allowed_codes:
+                intake_field = next(
+                    (
+                        item
+                        for item in (*CONTROLLED_INTAKE_FIELDS, PRODUCT_FAMILY_INTAKE_FIELD)
+                        if item.field_code in allowed_codes
+                        and (
+                            item.field_code not in context.claim.form
+                            or context.claim.form[item.field_code].status
+                            is not FormStatus.CONFIRMED
+                        )
+                    ),
+                    None,
+                )
         if context.message_text is not None and intake_field is not None:
             changes = (
                 _initial_form_changes(message_text, context.claim.incident_type)

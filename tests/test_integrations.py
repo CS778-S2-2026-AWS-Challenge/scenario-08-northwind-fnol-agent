@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -97,7 +97,12 @@ class AssessorCASConflictRepository(FixtureRepository):
         super().__init__()
         self.conflict_injected = False
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: Any = None,
+    ) -> None:
         if claim.assessor_routing is not None and not self.conflict_injected:
             current = self.get_claim_internal(claim.claim_id)
             assert current is not None
@@ -111,7 +116,7 @@ class AssessorCASConflictRepository(FixtureRepository):
                 ),
                 expected_revision,
             )
-        super().save_claim(claim, expected_revision)
+        super().save_claim(claim, expected_revision, branch_evaluation)
 
 
 def create_working_claim(client: TestClient, key: str = 'working-claim') -> dict[str, object]:
@@ -471,7 +476,7 @@ def test_claim_creation_returns_complete_result_and_deduplicates_by_working_clai
         headers={'Authorization': 'Bearer synthetic-claimant'},
     )
 
-    assert first.status_code == 201
+    assert first.status_code == 201, first.text
     assert replay.status_code == 200
     assert replay.json() == first.json()
     body = first.json()
@@ -1146,7 +1151,7 @@ def test_provider_success_is_recovered_after_claim_revision_race() -> None:
         )
 
     assert conflicted.status_code == 409
-    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT', conflicted.text
     assert recovered.status_code == 200
     assert replay.status_code == 200
     assert replay.json() == recovered.json()
@@ -1173,7 +1178,7 @@ def test_queued_assessor_result_preserves_queue_state_without_claiming_assignmen
             json=payload,
         )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
     assert response.json()['routing_status'] == 'queued'
     assert response.json()['assessor_reference'] is None
     stored = repository.get_claim_internal(str(payload['claim_id']))

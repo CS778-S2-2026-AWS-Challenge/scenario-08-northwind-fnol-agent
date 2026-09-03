@@ -16,12 +16,21 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.external_services import (
+    ExternalTaskEvidenceLink,
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+    assert_disclosure_within_consent,
+    assert_request_matches_task,
+)
 from backend.domain.models import (
     ActorType,
     AgentDecisionRecord,
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
     AuthorityOutcome,
+    BranchEvaluationRecord,
+    BranchEvaluationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -142,7 +151,7 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
             client.close()
 
 
-IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision', 'branch_evaluation'})
 """Child records whose identity may never be rebound or rewritten once persisted."""
 
 
@@ -177,6 +186,10 @@ class MongoDBRepository:
                 'record_type': 'message',
                 'client_message_id': {'$type': 'string'},
             },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
+            name='branch_evaluation_claim_created',
         )
 
     def connection_status(self) -> str:
@@ -337,7 +350,23 @@ class MongoDBRepository:
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
+        if branch_evaluation is not None:
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._atomic(
+                lambda mongo_session: self._save_claim_with_evaluation(
+                    claim,
+                    expected_revision,
+                    branch_evaluation,
+                    mongo_session,
+                )
+            )
+            return
         self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
         if claim.revision != expected_revision + 1:
             raise KeyError(claim.claim_id)
@@ -363,11 +392,37 @@ class MongoDBRepository:
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
 
+    def _save_claim_with_evaluation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord,
+        mongo_session: Any,
+    ) -> None:
+        self._reject_branch_evaluation_identity_conflict(
+            branch_evaluation,
+            mongo_session=mongo_session,
+        )
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
+        if self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session) == 0:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+        self._put(
+            'branch_evaluation',
+            branch_evaluation.evaluation_id,
+            branch_evaluation,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+            session=mongo_session,
+        )
+
     def save_claim_mutation(
         self,
         claim: WorkingClaim,
         expected_revision: int,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -376,13 +431,19 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = []
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[],
+                records=records,
             )
         )
 
@@ -546,6 +607,52 @@ class MongoDBRepository:
             decision,
             customer_id=customer_id,
             claim_id=decision.claim_id,
+        )
+
+    def save_branch_evaluation(
+        self,
+        evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self.get_claim(evaluation.claim_id, customer_id)
+        if claim is None:
+            raise KeyError(evaluation.claim_id)
+        if evaluation.status is BranchEvaluationStatus.APPLIED:
+            raise ValueError(
+                'Applied branch evaluations must be persisted with their Claim mutation.'
+            )
+        if evaluation.evaluated_against_claim_revision != claim.revision:
+            raise RevisionConflict(claim.revision)
+        existing = self._get(
+            'branch_evaluation',
+            evaluation.evaluation_id,
+            BranchEvaluationRecord,
+            customer_id=customer_id,
+        )
+        if existing is not None:
+            if existing == evaluation:
+                return
+            raise IdempotencyConflict(evaluation.evaluation_id)
+        self._put(
+            'branch_evaluation',
+            evaluation.evaluation_id,
+            evaluation,
+            customer_id=customer_id,
+            claim_id=evaluation.claim_id,
+        )
+
+    def list_branch_evaluations(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[BranchEvaluationRecord]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+        return self._list(
+            'branch_evaluation',
+            BranchEvaluationRecord,
+            {'claim_id': claim_id, 'customer_id': customer_id},
+            'created_at',
         )
 
     def get_agent_decision(
@@ -758,6 +865,334 @@ class MongoDBRepository:
             EvidenceRecord,
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
+        )
+
+    def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
+        """Create or conditionally advance one claim-owned external task.
+
+        Args:
+            task: External task state to create or advance.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim is missing or not owned by the customer.
+            IdempotencyConflict: The write changes immutable identity or is stale.
+        """
+        if not self._claim_owned(task.claim_id, customer_id):
+            raise KeyError(task.claim_id)
+        record_id = self._record_id('external_task', task.task_id)
+        document = {
+            **task.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task',
+            'customer_id': customer_id,
+            'claim_id': task.claim_id,
+        }
+        stored = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+        if stored is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError:
+                stored = self._collection.find_one(
+                    {'_id': record_id, 'record_type': 'external_task'}
+                )
+        existing = self._model_from_document(stored, ExternalTaskRecord)
+        if (
+            stored is None
+            or stored.get('customer_id') != customer_id
+            or stored.get('claim_id') != task.claim_id
+            or existing is None
+        ):
+            raise IdempotencyConflict(task.task_id)
+        immutable_identity = (
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'integration_source',
+            'created_at',
+        )
+        if existing == task:
+            return
+        if any(getattr(existing, name) != getattr(task, name) for name in immutable_identity):
+            raise IdempotencyConflict(task.task_id)
+        if task.updated_at <= existing.updated_at:
+            raise IdempotencyConflict(task.task_id)
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task',
+                'customer_id': customer_id,
+                'claim_id': task.claim_id,
+                'updated_at': stored.get('updated_at'),
+            },
+            document,
+        )
+        if result.matched_count == 0:
+            current = self._collection.find_one({'_id': record_id, 'record_type': 'external_task'})
+            same_owner = current is not None and (
+                current.get('customer_id') == customer_id
+                and current.get('claim_id') == task.claim_id
+            )
+            if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
+                raise IdempotencyConflict(task.task_id)
+
+    def save_external_task_request(
+        self,
+        request: ExternalTaskRequest,
+        customer_id: str,
+    ) -> None:
+        """Persist a claim-owned request preparation or its first send record.
+
+        Args:
+            request: Request state to create or advance from prepared to sent.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, consent, or authority is unavailable.
+            IdempotencyConflict: Identity changes, a send is rewritten, or the
+                task already has another request.
+        """
+        claim = self.get_claim(request.claim_id, customer_id)
+        task = self._get(
+            'external_task',
+            request.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if claim is None or task is None or task.claim_id != request.claim_id:
+            raise KeyError(request.claim_id)
+        try:
+            assert_request_matches_task(request, task)
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+        consent = next(
+            (
+                record
+                for record in claim.external_service_consents
+                if record.consent_ref == request.authorisation.claimant_consent_ref
+            ),
+            None,
+        )
+        decision = self._get(
+            'agent_decision',
+            request.authorisation.northwind_authority_ref,
+            AgentDecisionRecord,
+            customer_id=customer_id,
+        )
+        if (
+            consent is None
+            or decision is None
+            or decision.claim_id != request.claim_id
+            or decision.resulting_revision != request.authorisation.authorised_revision
+            or decision.authority.outcome is not AuthorityOutcome.AUTHORISED
+        ):
+            raise KeyError(request.request_id)
+        try:
+            assert_disclosure_within_consent(
+                request,
+                consent,
+                claim_customer_id=customer_id,
+            )
+        except ValueError as conflict:
+            raise IdempotencyConflict(request.request_id) from conflict
+
+        record_id = self._record_id('external_task_request', request.task_id)
+        document = {
+            **request.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_request',
+            'customer_id': customer_id,
+            'claim_id': request.claim_id,
+        }
+        stored = self._collection.find_one(
+            {'_id': record_id, 'record_type': 'external_task_request'}
+        )
+        if stored is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError:
+                stored = self._collection.find_one(
+                    {'_id': record_id, 'record_type': 'external_task_request'}
+                )
+        existing = self._model_from_document(stored, ExternalTaskRequest)
+        if (
+            stored is None
+            or stored.get('customer_id') != customer_id
+            or stored.get('claim_id') != request.claim_id
+            or existing is None
+        ):
+            raise IdempotencyConflict(request.request_id)
+        if existing == request:
+            return
+        immutable_identity = (
+            'request_id',
+            'task_id',
+            'claim_id',
+            'service_identity',
+            'requested_action',
+            'purpose',
+            'disclosed_fields',
+            'authorisation',
+            'prepared_at',
+        )
+        changed_identity = any(
+            getattr(existing, name) != getattr(request, name) for name in immutable_identity
+        )
+        first_send = (
+            existing.sent_at is None
+            and existing.operation_id is None
+            and request.sent_at is not None
+            and request.operation_id is not None
+        )
+        if changed_identity or not first_send:
+            raise IdempotencyConflict(request.request_id)
+        result = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': request.claim_id,
+                'sent_at': None,
+                'operation_id': None,
+            },
+            document,
+        )
+        if result.matched_count == 0:
+            current = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task_request'}
+            )
+            same_owner = current is not None and (
+                current.get('customer_id') == customer_id
+                and current.get('claim_id') == request.claim_id
+            )
+            if not same_owner or self._model_from_document(current, ExternalTaskRequest) != request:
+                raise IdempotencyConflict(request.request_id)
+
+    def list_external_task_requests_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskRequest]:
+        """List request records for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose requests are requested.
+
+        Returns:
+            Requests in stable preparation order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task_request',
+            ExternalTaskRequest,
+            {'claim_id': claim_id},
+            'prepared_at',
+        )
+
+    def save_external_task_evidence_link(
+        self,
+        link: ExternalTaskEvidenceLink,
+        customer_id: str,
+    ) -> None:
+        """Save one claim-owned evidence origin after validating its task and record.
+
+        Args:
+            link: Task-to-evidence relationship to persist.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, task, or evidence record is missing or not owned.
+            IdempotencyConflict: The evidence already has a different origin.
+        """
+        if not self._claim_owned(link.claim_id, customer_id):
+            raise KeyError(link.claim_id)
+        task = self._get(
+            'external_task',
+            link.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if task is None or task.claim_id != link.claim_id:
+            raise KeyError(link.task_id)
+        if self.get_evidence(link.claim_id, link.evidence_id, customer_id) is None:
+            raise KeyError(link.evidence_id)
+
+        identifier = f'{link.claim_id}:{link.evidence_id}'
+        record_id = self._record_id('external_task_evidence_link', identifier)
+        document = {
+            **link.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_evidence_link',
+            'customer_id': customer_id,
+            'claim_id': link.claim_id,
+        }
+        try:
+            self._collection.insert_one(document)
+        except DuplicateKeyError as error:
+            existing = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'external_task_evidence_link'}
+            )
+            same_owner = existing is not None and (
+                existing.get('customer_id') == customer_id
+                and existing.get('claim_id') == link.claim_id
+            )
+            if (
+                not same_owner
+                or self._model_from_document(existing, ExternalTaskEvidenceLink) != link
+            ):
+                raise IdempotencyConflict(link.evidence_id) from error
+
+    def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
+        """List task records for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose tasks are requested.
+
+        Returns:
+            Task records in stable creation order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task',
+            ExternalTaskRecord,
+            {'claim_id': claim_id},
+            'created_at',
+        )
+
+    def list_external_task_evidence_links_internal(
+        self,
+        claim_id: str,
+    ) -> list[ExternalTaskEvidenceLink]:
+        """List evidence-origin links for an authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose evidence links are requested.
+
+        Returns:
+            Links in stable linkage order.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task_evidence_link',
+            ExternalTaskEvidenceLink,
+            {'claim_id': claim_id},
+            'linked_at',
         )
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:
@@ -1023,6 +1458,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -1050,6 +1486,14 @@ class MongoDBRepository:
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
             and (evidence is None or evidence.claim_id == claim.claim_id)
+            and (
+                branch_evaluation is None
+                or (
+                    branch_evaluation.claim_id == claim.claim_id
+                    and branch_evaluation.evaluated_against_claim_revision == claim.revision
+                    and branch_evaluation.resulting_claim_revision == claim.revision
+                )
+            )
         )
         if not records_match:
             raise KeyError(claim.claim_id)
@@ -1064,6 +1508,7 @@ class MongoDBRepository:
                 idempotency,
                 handoff,
                 evidence,
+                branch_evaluation,
                 mongo_session,
             )
         )
@@ -1079,6 +1524,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None,
         evidence: EvidenceRecord | None,
+        branch_evaluation: BranchEvaluationRecord | None,
         mongo_session: Any,
     ) -> None:
         if claimant_message.client_message_id is not None:
@@ -1101,6 +1547,10 @@ class MongoDBRepository:
             records.append(('handoff', handoff.handoff_id, handoff))
         if evidence is not None:
             records.append(('evidence', evidence.evidence_id, evidence))
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._save_child_mutation(
             claim,
             expected_revision,
@@ -1116,6 +1566,7 @@ class MongoDBRepository:
         expected_revision: int,
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -1125,13 +1576,19 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = [('evidence', evidence.evidence_id, evidence)]
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[('evidence', evidence.evidence_id, evidence)],
+                records=records,
             )
         )
 
@@ -1141,6 +1598,7 @@ class MongoDBRepository:
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -1151,13 +1609,19 @@ class MongoDBRepository:
             or idempotency.handoff_id != handoff.handoff_id
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = [('handoff', handoff.handoff_id, handoff)]
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[('handoff', handoff.handoff_id, handoff)],
+                records=records,
             )
         )
 
@@ -1365,11 +1829,18 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_session_mutation(claim, expected_revision, session, idempotency)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         self._atomic(
             lambda mongo_session: self._save_session_mutation(
-                claim, expected_revision, session, idempotency, mongo_session
+                claim,
+                expected_revision,
+                session,
+                idempotency,
+                branch_evaluation,
+                mongo_session,
             )
         )
 
@@ -1399,6 +1870,7 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None,
         mongo_session: Any,
     ) -> None:
         if (
@@ -1407,6 +1879,11 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(session.session_id)
         self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        if branch_evaluation is not None:
+            self._reject_branch_evaluation_identity_conflict(
+                branch_evaluation,
+                mongo_session=mongo_session,
+            )
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -1438,7 +1915,47 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        if branch_evaluation is not None:
+            self._put(
+                'branch_evaluation',
+                branch_evaluation.evaluation_id,
+                branch_evaluation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         self._save_idempotency(record=idempotency, session=mongo_session)
+
+    @staticmethod
+    def _validate_branch_evaluation(
+        claim: WorkingClaim,
+        branch_evaluation: BranchEvaluationRecord | None,
+    ) -> None:
+        if branch_evaluation is None:
+            return
+        if (
+            branch_evaluation.claim_id != claim.claim_id
+            or branch_evaluation.evaluated_against_claim_revision != claim.revision
+            or branch_evaluation.resulting_claim_revision != claim.revision
+        ):
+            raise KeyError(claim.claim_id)
+
+    def _reject_branch_evaluation_identity_conflict(
+        self,
+        branch_evaluation: BranchEvaluationRecord,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        existing = self._collection.find_one(
+            {
+                '_id': self._record_id('branch_evaluation', branch_evaluation.evaluation_id),
+                'record_type': 'branch_evaluation',
+            },
+            projection={'_id': 1},
+            session=mongo_session,
+        )
+        if existing is not None:
+            raise IdempotencyConflict(branch_evaluation.evaluation_id)
 
     def _save_idempotency(self, record: IdempotencyRecord, session: Any) -> None:
         query = {

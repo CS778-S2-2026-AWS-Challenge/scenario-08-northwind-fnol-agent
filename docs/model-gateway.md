@@ -156,10 +156,12 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-motor-claimant-v2`, stored under
+The executable claimant prompt is `northwind-fnol-motor-claimant-v4`, stored under
 `backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
-current minimum Claim projection and response schema; the adapter does not own FNOL behaviour.
-Changing the prompt requires a new prompt identifier and regression evidence.
+current minimum Claim projection, bounded knowledge citations, retrieval status, and response
+schema; the adapter does not own FNOL behaviour. Prompt v1 through v3 remain immutable historical
+artifacts. Changing executable prompt content requires another prompt identifier and regression
+evidence.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
@@ -175,6 +177,8 @@ py -3.12 -m scripts.verify_model_gateway_live
 
 The verifier requires a complete structured response and reports only bounded metadata,
 capabilities, and usage. It never prints the credential or full provider output.
+When the profile is not enabled or the provider call fails, it prints a bounded machine-readable
+failure status and exits non-zero without exposing a traceback or provider response.
 
 ## Custom Protocols
 

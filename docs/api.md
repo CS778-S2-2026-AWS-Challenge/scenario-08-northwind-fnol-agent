@@ -45,6 +45,7 @@ The API does not authorise the agent to approve or reject claims, make an unrevi
 | Claims professional | Assigned or permitted workbench claims, internal evidence, handoffs, signals, staff actions, and claimant updates |
 | Claims operations | Workbench data, routing and service metrics, subject to operational role permissions |
 | System administrator | Versioned system configuration, knowledge, integrations, access, evaluation, health, and audit through a separately contracted Admin API |
+| Release approver | Independent publication approval for high-impact configuration; must not be the configuration's sole author |
 | Agent service | Claim-scoped orchestration commands and approved internal tools; no unlimited decision authority |
 | Integration service | Narrow adapter operation for policy, history, claim creation, evidence storage, or assessor systems |
 
@@ -187,7 +188,9 @@ Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or 
 Validation accepts explicit results for each named scenario, including evidence. A failed result
 is recorded and returns `422 VALIDATION_FAILED` without changing the configuration state. A normal-
 impact draft publishes after all supplied scenarios pass; a high-impact draft moves to
-`awaiting_approval` and requires an explicit publish operation. Every transition, including a
+`awaiting_approval` and requires an explicit publish operation by an identity other than its sole
+author. An author publication attempt returns `403 CONFIGURATION_APPROVER_CONFLICT` and leaves the
+record awaiting approval. Every transition, including a
 rejected transition, records actor, reason, outcome, revision, prior revision when applicable,
 top-level changed fields, and timestamp in the audit collection. Changed-field metadata names
 fields only and never copies configuration or secret values. State-changing POST requests require
@@ -207,10 +210,31 @@ mongodb, and aws profiles may be retained as drafts for configuration review, bu
 returns `422 PROVIDER_CONFIGURATION_UNAVAILABLE` and they cannot be published. Invalid fields or
 combinations return `422 PROVIDER_CONFIGURATION_INVALID`.
 
+For the `model` domain, `values` is a closed provider-neutral object containing
+`protocol`, `provider`, `model_identifier`, `base_url`, `credential_environment_variable`,
+`profile_id`, `purpose`, `privacy_class`, `prompt_version`, `evaluation_status`,
+`timeout_seconds`, `structured_output`, and `tools`. The credential field contains only an
+environment-variable name; the secret itself remains outside the configuration record. Every
+model configuration must declare `impact=high`; an omitted or normal impact returns `422
+PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation permits
+publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
+environment-variable name match the deployment-owned startup settings; and purpose, privacy
+class, executable prompt identifier, and structured-output capability match the claimant Runtime
+contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v4`. A
+degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
+PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
+return `422 PROVIDER_CONFIGURATION_INVALID`.
+
 Runtime consumers use the provider-neutral configuration service to read the single active
 `published` record for a domain. Draft, awaiting-approval, withdrawn, superseded, and unverified
-provider records are never returned by that boundary; a domain without a publication fails with
-`ACTIVE_CONFIGURATION_NOT_FOUND` rather than falling back to another profile.
+provider records are never returned by that boundary. The model runtime resolves the active
+published `model` record before each provider request, so a configuration published after startup
+becomes effective for the next turn. A process without a published model record may use its
+explicit startup model settings as a bootstrap-only compatibility path; it never combines fields
+from a draft or superseded record. The runtime repeats the deployment-binding check before
+constructing a provider adapter or reading a credential environment variable. A stored published
+record cannot redirect a deployment-approved credential to another endpoint or weaken the
+claimant Runtime's purpose, privacy, prompt-version, or structured-output boundary.
 
 ## Claimant Identity and Account API
 
@@ -273,6 +297,8 @@ Examples use readable prefixes, but clients MUST treat all identifiers as opaque
 | Session | `ses_01J4Y7RPN8` |
 | Message | `msg_01J4Y7T1KC` |
 | Evidence | `evd_01J4Y7V5QJ` |
+| External task | `tsk_01J4Y7VZ82` |
+| External request | `erq_4d29a6dbafdf5ed57152f15c` |
 | Decision | `dec_01J4Y7W90S` |
 | Handoff | `hnd_01J4Y7XG2C` |
 | Signal | `sig_01J4Y7Z0EH` |
@@ -339,7 +365,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `revision` | integer | Yes | Starts at `1` and increases on every material state change |
 | `channel` | enum | Yes | Initial value `web_agent`; future channels require a contract change |
 | `locale` | string | Yes | BCP 47 language tag such as `en-NZ` |
-| `incident_type` | string | No | Registered claim type; may be unknown at creation |
+| `incident_type` | string | No | Compatibility projection of the registered product family; may be unknown at creation. Branch evaluation reconciles it with the source-aware `claim.product_family` form field. The independent `incident.type` field records the event subtype. |
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
@@ -477,17 +503,18 @@ Initial common field codes:
 | Field code | Type | Purpose |
 |---|---|---|
 | `policy.policy_number` | string | Locate the relevant policy |
-| `claimant.client_number` | string | Claimant-facing Northwind client reference |
+| `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
-| `incident.type` | string | Motor, home, contents, or configured subtype |
+| `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
+| `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
 | `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
-| `parties.other_parties` | array | Other involved parties when known |
+| `parties.other_parties` | boolean | Whether another person or organisation is involved; participant details use separate records |
 | `authorities.police_report_reference` | string | Reference if already issued |
 | `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
@@ -929,11 +956,34 @@ Response `200`:
     "customer_reason": "Please check the incident details before I continue.",
     "customer_next_step": {}
   },
-  "handoff": null
+  "handoff": null,
+  "dynamic_form": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "claim_revision": 3,
+    "field_registry_version": "3",
+    "branch_rules_version": "vp-dynamic-form-branch-rules-v1",
+    "selected_family": "motor",
+    "active_branches": ["family.motor", "incident.collision"],
+    "fields": [
+      {
+        "field_code": "incident.occurred_at",
+        "selection_state": "required_now",
+        "value_state": "missing",
+        "source": null,
+        "reason": "Missing and required for the current safe action."
+      }
+    ]
+  }
 }
 ```
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
+
+`dynamic_form` is a claimant-safe projection of the latest applied branch evaluation whose
+evaluated and resulting revision both equal the current Claim revision. It exposes only active,
+claimant-visible fields; inactive and system-owned fields remain outside this response. Selection
+state (`required_now`, `candidate_now`, or `pending_later` in this projection) is separate from the
+stored value state. The projection is omitted when no current-revision evaluation exists.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
@@ -1118,8 +1168,13 @@ the same operation identity for an unchanged permitted retry. Automatic retry co
 unapproved; the claimant client offers only an explicit retry for retryable failures.
 
 The authorised decision and prepared operation identity are persisted together before the
-provider call. A timeout retry reuses that durable authority record rather than replacing it
-with a new timestamp. If provider acceptance and the Claim update succeed but saving the public
+provider call. The service also persists one operational `tsk_` task and its `erq_` request,
+including the selected stakeholder, readable purpose, disclosed field names, separate Northwind
+authority and claimant-consent references, authorised Claim revision, preparation time, first
+send time, and stable operation identity. The request is available only through the protected
+internal task projection; raw authority, consent, delivery evidence, and provider references do
+not enter this claimant response. A timeout retry reuses that durable authority and request
+record rather than replacing either with a new identity or timestamp. If provider acceptance and the Claim update succeed but saving the public
 idempotency response fails, the same request restores the authoritative assigned or queued state;
 the claimant client also reloads that state before presenting a failure message.
 If provider acceptance is durable but a concurrent Claim mutation wins the following
@@ -1684,6 +1739,7 @@ Internal endpoints are service-to-service only. The backend MAY implement an ada
 | `POST` | `/internal/v1/knowledge/search` | Retrieve applicable approved knowledge chunks with exact citations |
 | `POST` | `/internal/v1/claim-history/search` | Retrieve relevant history evidence |
 | `POST` | `/internal/v1/claims/create` | Create a claim through the configured claims adapter |
+| `GET` | `/internal/v1/claims/{claim_id}/external-tasks` | List operational third-party tasks with their request and linked evidence identifiers |
 | `POST` | `/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing` | Record completed evidence extraction |
 | `POST` | `/internal/v1/assessors/route` | Request a rule-authorised assessor action |
 
@@ -1935,6 +1991,79 @@ rejection, and leaves the claim unchanged. Registering evidence the claimant
 does not yet hold does not touch the object store, so that path keeps working
 during an outage.
 
+### `GET /internal/v1/claims/{claim_id}/external-tasks`
+
+Lists the provider-neutral operational tasks recorded for one Working Claim. The route requires
+integration-service credentials and is not a claimant or browser projection. Each item carries
+the task's claim association, service identity, requested action, integration source, operation
+status, delivery state, bounded failure or provider reference when present, creation and update
+times, the request preparation/send record when one exists, and the evidence identifiers mapped
+to that task. `request` remains nullable for task records created before request persistence was
+introduced.
+
+The query accepts a positive `limit`, defaulting to 25, and an opaque `cursor`. Values above 100
+are truncated to 100; values below 1 return `422 VALIDATION_ERROR`. Results use the stable
+`(created_at, task_id)` ascending order and return the next cursor in `page.next_cursor`. Clients
+must reuse the returned cursor unchanged.
+
+```json
+{
+  "claim_id": "clm_01J4Y7Q2AW",
+  "items": [
+    {
+      "task": {
+        "task_id": "tsk_01J4Y7VZ82",
+        "claim_id": "clm_01J4Y7Q2AW",
+        "service_identity": "vehicle_damage_assessment_routing",
+        "requested_action": "vehicle_damage_assessment",
+        "integration_source": "fixture",
+        "status": "accepted",
+        "delivery": "submitted",
+        "delivery_evidence": "fixture routing acknowledgement: asr_fixture_11d35f649a",
+        "failure_code": null,
+        "provider_reference": "asr_fixture_11d35f649a",
+        "created_at": "2026-09-02T01:01:00Z",
+        "updated_at": "2026-09-02T01:01:01Z"
+      },
+      "request": {
+        "request_id": "erq_4d29a6dbafdf5ed57152f15c",
+        "task_id": "tsk_01J4Y7VZ82",
+        "claim_id": "clm_01J4Y7Q2AW",
+        "service_identity": "vehicle_damage_assessment_routing",
+        "requested_action": "vehicle_damage_assessment",
+        "purpose": "Route the vehicle damage assessment request using the confirmed incident region. This does not decide coverage or approve repairs.",
+        "disclosed_fields": [
+          "authorisation_ref",
+          "claim_id",
+          "claimant_consent_ref",
+          "external_claim_id",
+          "location.region",
+          "requested_action"
+        ],
+        "authorisation": {
+          "northwind_authority_ref": "dec_01J4Y7V7B2",
+          "claimant_consent_ref": "cns_01J4Y7V8PT",
+          "authorised_revision": 8
+        },
+        "prepared_at": "2026-09-02T01:01:00Z",
+        "sent_at": "2026-09-02T01:01:01Z",
+        "operation_id": "asr_op_b6bd9fb0b17ec1138d914c5d"
+      },
+      "evidence_ids": ["evd_01J4Y7V5QJ"]
+    }
+  ],
+  "page": {"next_cursor": null}
+}
+```
+
+The task record stays outside shared Claim State. A fixture task remains labelled `fixture`, and
+the route never converts an unavailable or unverified provider capability into
+`configured_service`. Provider references and delivery evidence are operational fields and must
+not be copied into claimant projections. `request.sent_at` means Northwind invoked the selected
+service entry; it does not by itself prove provider receipt. Task `delivery=submitted` is recorded
+only when the entry returns a named acknowledgement. In the fixture profile that acknowledgement
+and provider reference remain explicitly synthetic.
+
 ### `POST /internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing`
 
 Records the typed result of image or document extraction after an accepted
@@ -2126,6 +2255,9 @@ All errors use one envelope:
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
+| `CONFIGURATION_APPROVER_CONFLICT` | `403` | A high-impact configuration's sole author attempted publication |
+| `PROVIDER_CONFIGURATION_INVALID` | `422` | Provider configuration is incomplete or structurally invalid |
+| `PROVIDER_CONFIGURATION_UNAVAILABLE` | `422` | Provider configuration is unverified or outside deployment authority |
 | `SECRET_VALUE_FORBIDDEN` | `422` | Secret values must use protected references |
 | `ACTIVE_SESSION_EXISTS` | `409` | A conflicting active session exists |
 | `UNSUPPORTED_MEDIA_TYPE` | `415` | File type is not allowed |

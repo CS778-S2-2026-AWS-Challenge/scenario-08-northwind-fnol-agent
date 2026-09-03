@@ -127,7 +127,7 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     monkeypatch.setenv('MODEL_PROVIDER', 'local-runtime')
     monkeypatch.setenv('MODEL_PURPOSE', 'agent_turn')
     monkeypatch.setenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol')
-    monkeypatch.setenv('MODEL_PROMPT_VERSION', 'northwind-fnol-motor-claimant-v2')
+    monkeypatch.setenv('MODEL_PROMPT_VERSION', 'northwind-fnol-motor-claimant-v4')
     monkeypatch.setenv('MODEL_EVALUATION_STATUS', 'configured')
     monkeypatch.setenv('MODEL_TIMEOUT_SECONDS', '12.5')
     monkeypatch.setenv('MODEL_SUPPORTS_STRUCTURED_OUTPUT', 'true')
@@ -143,7 +143,7 @@ def test_model_gateway_settings_use_only_a_secret_environment_reference(
     assert settings.model_provider == 'local-runtime'
     assert settings.model_purpose == 'agent_turn'
     assert settings.model_privacy_class == 'synthetic_fnol'
-    assert settings.model_prompt_version == 'northwind-fnol-motor-claimant-v2'
+    assert settings.model_prompt_version == 'northwind-fnol-motor-claimant-v4'
     assert settings.model_evaluation_status == 'configured'
     assert settings.model_timeout_seconds == 12.5
     assert settings.model_supports_structured_output is True

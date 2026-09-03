@@ -23,7 +23,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Select backend impact
+        id: impact
+        run: |
+          git fetch origin main
+          echo "mode=$(python3 scripts/select_backend_tests.py --mode)" >> "$GITHUB_OUTPUT"
+          echo "openapi=$(python3 scripts/select_backend_tests.py --needs-openapi)" >> "$GITHUB_OUTPUT"
+          echo "audit=$(python3 scripts/select_backend_tests.py --needs-audit-contract)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Python
+        if: steps.impact.outputs.mode != 'skip'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -31,22 +40,62 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
 
       - name: Install backend dependencies
+        if: steps.impact.outputs.mode != 'skip'
         run: python -m pip install -r backend/requirements-dev.txt
 
       - name: Check backend formatting
-        run: python -m ruff format --check .
+        if: steps.impact.outputs.mode != 'skip'
+        run: |
+          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
+            python -m ruff format --check .
+          else
+            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
+          fi
 
       - name: Lint backend
-        run: python -m ruff check .
+        if: steps.impact.outputs.mode != 'skip'
+        run: |
+          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
+            python -m ruff check .
+          else
+            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
+          fi
 
       - name: Type-check backend
-        run: python -m mypy backend tests
+        if: steps.impact.outputs.mode != 'skip'
+        run: |
+          if [ "${{ steps.impact.outputs.mode }}" = "full" ]; then
+            python -m mypy backend tests
+          else
+            python3 scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
+          fi
 
       - name: Test backend
-        run: python -m pytest --cov=backend --cov-report=term-missing
+        run: |
+          mode="${{ steps.impact.outputs.mode }}"
+          case "$mode" in
+            full)
+              python -m pytest --cov=backend --cov-report=term-missing tests
+              ;;
+            scoped)
+              python -m pytest $(python scripts/select_backend_tests.py --tests)
+              ;;
+            skip)
+              echo "No backend behavior changed; backend pytest skipped."
+              ;;
+            *)
+              echo "Unknown backend test selection mode: $mode"
+              exit 1
+              ;;
+          esac
 
       - name: Check OpenAPI snapshot drift
+        if: steps.impact.outputs.openapi == 'true'
         run: python scripts/export_openapi.py --check
+
+      - name: Check AuditEvent contract snapshot drift
+        if: steps.impact.outputs.audit == 'true'
+        run: python scripts/export_audit_contract.py --check
 
   customer-quality:
     name: Customer quality
@@ -119,6 +168,10 @@ jobs:
           if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
             echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
             echo "Update docs/api.md together with the API change (see ci-checks.md in the governance skill)."
+            exit 1
+          fi
+          if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
+            echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
             exit 1
           fi
           echo "Path coupling satisfied."
