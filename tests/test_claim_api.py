@@ -803,9 +803,20 @@ def test_family_confirmation_uses_same_atomic_projection_as_patch(
         },
         json={'field_codes': ['claim.product_family']},
     )
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-home-family',
+            'If-Match': str(proposed.json()['revision']),
+        },
+        json={'field_codes': ['claim.product_family']},
+    )
 
     assert proposed.status_code == 200
     assert response.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
     stored = repository.get_claim(claim_id, 'cus_demo')
     evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
     assert stored is not None
@@ -813,6 +824,25 @@ def test_family_confirmation_uses_same_atomic_projection_as_patch(
     assert stored.incident_type == 'home'
     assert evaluations[-1].selected_family == 'home'
     assert evaluations[-1].resulting_claim_revision == stored.revision
+
+    history_before_stale_write = list(evaluations)
+    stale = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(proposed.json()['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': 'claim.product_family',
+                    'value': 'contents',
+                    'correction_reason': 'Synthetic stale correction.',
+                }
+            ]
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert repository.get_claim(claim_id, 'cus_demo') == stored
+    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == history_before_stale_write
 
 
 def test_created_claim_rejects_family_change_without_partial_state(
