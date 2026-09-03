@@ -581,7 +581,11 @@ class FixtureRepository(PersistenceRepository):
                 for record in self._branch_evaluations.values()
                 if record.claim_id == claim_id
             ),
-            key=lambda record: (record.created_at, record.evaluation_id),
+            key=lambda record: (
+                record.resulting_claim_revision or 0,
+                record.created_at,
+                record.evaluation_id,
+            ),
         )
 
     def get_assessor_routing_operation(

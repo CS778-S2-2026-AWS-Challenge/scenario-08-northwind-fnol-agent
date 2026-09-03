@@ -671,11 +671,19 @@ class MongoDBRepository:
     ) -> list[BranchEvaluationRecord]:
         if not self._claim_owned(claim_id, customer_id):
             return []
-        return self._list(
+        records = self._list(
             'branch_evaluation',
             BranchEvaluationRecord,
             {'claim_id': claim_id, 'customer_id': customer_id},
             'created_at',
+        )
+        return sorted(
+            records,
+            key=lambda record: (
+                record.resulting_claim_revision or 0,
+                record.created_at,
+                record.evaluation_id,
+            ),
         )
 
     def get_agent_decision(
