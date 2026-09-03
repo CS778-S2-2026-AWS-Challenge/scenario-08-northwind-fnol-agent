@@ -90,6 +90,11 @@ def search_knowledge(
             results=[],
             limitations=[message],
         )
+    # Re-check after the call so a provider that lost its verified state while
+    # handling the request cannot release evidence from that uncertain window.
+    connection_state = _connection_state(retriever)
+    if connection_state is DataConnectionState.UNAVAILABLE:
+        return _unavailable_response()
     if not chunks:
         return KnowledgeSearchResponse(
             status='no_evidence',

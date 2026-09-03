@@ -303,7 +303,7 @@ def test_connection_state_drift_fails_closed_before_persisting_retrieval(
     assert response.json()['facts'] is None
     assert response.json()['source'] is None
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
-    assert retrieval_adapter._lookups == 0
+    assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 0
 
     monkeypatch.setattr(retrieval_adapter, 'connection_status', lambda: 'pending_confirmation')
     with retrieval_client as client:
@@ -323,7 +323,83 @@ def test_connection_state_drift_fails_closed_before_persisting_retrieval(
     assert history_response.json()['facts'] is None
     assert history_response.json()['source'] is None
     assert retrieval_repository.list_retrieval_records(history_claim_id, 'cus_demo') == []
-    assert retrieval_adapter._lookups == 0
+    assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 0
+
+
+@pytest.mark.parametrize('operation', ['policy', 'history'])
+def test_connection_drift_during_retrieval_discards_evidence_before_persistence(
+    operation: str,
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    retrieval_adapter: MockPolicyHistoryAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method_name = f'search_{operation}' if operation == 'policy' else 'search_claim_history'
+    original_search = getattr(retrieval_adapter, method_name)
+
+    def search_then_drift(command: object) -> object:
+        envelope = original_search(command)
+        monkeypatch.setattr(retrieval_adapter, 'connection_status', lambda: 'pending_confirmation')
+        return envelope
+
+    monkeypatch.setattr(retrieval_adapter, method_name, search_then_drift)
+    with retrieval_client as client:
+        claim_id = create_claim(client, f'{operation}-mid-query-drift')
+        if operation == 'policy':
+            endpoint = POLICY_SEARCH
+            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+        else:
+            endpoint = HISTORY_SEARCH
+            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+        response = client.post(endpoint, headers=INTEGRATION_AUTH, json=payload)
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['connection_state'] == 'unavailable'
+    assert response.json()['facts'] is None
+    assert response.json()['source'] is None
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_adapter.reset_demo_state()['mock_retrieval_lookups'] == 1
+
+
+@pytest.mark.parametrize('operation', ['policy', 'history'])
+def test_ready_provider_timeout_is_projected_without_persisting_evidence(
+    operation: str,
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    retrieval_adapter: MockPolicyHistoryAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method_name = f'search_{operation}' if operation == 'policy' else 'search_claim_history'
+
+    def time_out(_: object) -> object:
+        raise RetrievalUnavailable(code='PROVIDER_TIMEOUT', detail='secret provider timeout')
+
+    monkeypatch.setattr(retrieval_adapter, method_name, time_out)
+    with retrieval_client as client:
+        claim_id = create_claim(client, f'{operation}-timeout')
+        if operation == 'policy':
+            endpoint = POLICY_SEARCH
+            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+            expected_message = 'The policy provider did not respond within the request budget.'
+        else:
+            endpoint = HISTORY_SEARCH
+            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+            expected_message = (
+                'The claim-history provider did not respond within the request budget.'
+            )
+        response = client.post(endpoint, headers=INTEGRATION_AUTH, json=payload)
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'timeout'
+    assert response.json()['connection_state'] == 'degraded'
+    assert response.json()['errors'] == [
+        {'code': 'timeout', 'message': expected_message, 'retryable': True}
+    ]
+    assert response.json()['facts'] is None
+    assert response.json()['source'] is None
+    assert 'secret provider timeout' not in response.text
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
 
 
 def test_demo_reset_clears_retrieval_state_and_restores_the_provider(

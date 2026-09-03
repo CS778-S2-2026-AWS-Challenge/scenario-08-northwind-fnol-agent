@@ -22,10 +22,12 @@ class ControlledRetriever:
         chunks: list[KnowledgeChunk] | None = None,
         failure_code: str | None = None,
         connection_state: str = 'configured_service',
+        connection_state_after_search: str | None = None,
     ) -> None:
         self.chunks = chunks or []
         self.failure_code = failure_code
         self.connection_state = connection_state
+        self.connection_state_after_search = connection_state_after_search
         self.last_request: KnowledgeSearch | None = None
 
     def connection_status(self) -> str:
@@ -37,6 +39,8 @@ class ControlledRetriever:
             raise KnowledgeRetrievalUnavailable(
                 'Traceback: access_key=secret-provider-detail', code=self.failure_code
             )
+        if self.connection_state_after_search is not None:
+            self.connection_state = self.connection_state_after_search
         return self.chunks
 
 
@@ -202,3 +206,16 @@ def test_knowledge_connection_state_drift_fails_closed_before_provider_call(
     assert response.json()['results'] == []
     assert response.json()['errors'][0]['code'] == 'unavailable'
     assert retriever.last_request is None
+
+
+def test_knowledge_connection_drift_during_search_discards_provider_evidence() -> None:
+    retriever = ControlledRetriever(
+        [citation_chunk()], connection_state_after_search='pending_confirmation'
+    )
+    with client_for(retriever) as client:
+        response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['connection_state'] == 'unavailable'
+    assert response.json()['results'] == []
+    assert retriever.last_request is not None

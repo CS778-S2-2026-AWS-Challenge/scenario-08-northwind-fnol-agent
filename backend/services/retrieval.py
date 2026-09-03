@@ -65,6 +65,38 @@ def _connection_state(adapter: PolicyHistoryAdapter) -> DataConnectionState:
         return DataConnectionState.UNAVAILABLE
 
 
+def _policy_unavailable_response(result_id: str) -> PolicySearchResponse:
+    _, connection_state, errors, limitations = _failure_projection(
+        'PROVIDER_UNAVAILABLE',
+        timeout_message=POLICY_TIMEOUT_LIMITATION,
+        unavailable_message=POLICY_UNAVAILABLE_LIMITATION,
+    )
+    return PolicySearchResponse(
+        result_id=result_id,
+        status=RetrievalStatus.UNAVAILABLE,
+        connection_state=connection_state,
+        errors=errors,
+        limitations=limitations,
+        retrieved_at=now_utc(),
+    )
+
+
+def _history_unavailable_response(result_id: str) -> ClaimHistorySearchResponse:
+    _, connection_state, errors, limitations = _failure_projection(
+        'PROVIDER_UNAVAILABLE',
+        timeout_message=HISTORY_TIMEOUT_LIMITATION,
+        unavailable_message=HISTORY_UNAVAILABLE_LIMITATION,
+    )
+    return ClaimHistorySearchResponse(
+        result_id=result_id,
+        status=RetrievalStatus.UNAVAILABLE,
+        connection_state=connection_state,
+        errors=errors,
+        limitations=limitations,
+        retrieved_at=now_utc(),
+    )
+
+
 def _claim(repository: PersistenceRepository, claim_id: str) -> WorkingClaim:
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
@@ -98,19 +130,7 @@ def search_policy(
     # fixture, or configured-service state.
     connection_state = _connection_state(adapter)
     if connection_state is DataConnectionState.UNAVAILABLE:
-        _, connection_state, errors, limitations = _failure_projection(
-            'PROVIDER_UNAVAILABLE',
-            timeout_message=POLICY_TIMEOUT_LIMITATION,
-            unavailable_message=POLICY_UNAVAILABLE_LIMITATION,
-        )
-        return PolicySearchResponse(
-            result_id=result_id,
-            status=RetrievalStatus.UNAVAILABLE,
-            connection_state=connection_state,
-            errors=errors,
-            limitations=limitations,
-            retrieved_at=now_utc(),
-        )
+        return _policy_unavailable_response(result_id)
 
     try:
         envelope = adapter.search_policy(payload)
@@ -129,6 +149,9 @@ def search_policy(
             retrieved_at=now_utc(),
         )
     except LookupError:
+        connection_state = _connection_state(adapter)
+        if connection_state is DataConnectionState.UNAVAILABLE:
+            return _policy_unavailable_response(result_id)
         return PolicySearchResponse(
             result_id=result_id,
             status=RetrievalStatus.NO_EVIDENCE,
@@ -137,6 +160,9 @@ def search_policy(
             retrieved_at=now_utc(),
         )
 
+    connection_state = _connection_state(adapter)
+    if connection_state is DataConnectionState.UNAVAILABLE:
+        return _policy_unavailable_response(result_id)
     record = map_policy_provider_payload(
         retrieval_id=result_id,
         claim_id=claim.claim_id,
@@ -165,19 +191,7 @@ def search_claim_history(
     result_id = new_id('his')
     connection_state = _connection_state(adapter)
     if connection_state is DataConnectionState.UNAVAILABLE:
-        _, connection_state, errors, limitations = _failure_projection(
-            'PROVIDER_UNAVAILABLE',
-            timeout_message=HISTORY_TIMEOUT_LIMITATION,
-            unavailable_message=HISTORY_UNAVAILABLE_LIMITATION,
-        )
-        return ClaimHistorySearchResponse(
-            result_id=result_id,
-            status=RetrievalStatus.UNAVAILABLE,
-            connection_state=connection_state,
-            errors=errors,
-            limitations=limitations,
-            retrieved_at=now_utc(),
-        )
+        return _history_unavailable_response(result_id)
 
     try:
         envelope = adapter.search_claim_history(payload)
@@ -196,6 +210,9 @@ def search_claim_history(
             retrieved_at=now_utc(),
         )
     except LookupError:
+        connection_state = _connection_state(adapter)
+        if connection_state is DataConnectionState.UNAVAILABLE:
+            return _history_unavailable_response(result_id)
         return ClaimHistorySearchResponse(
             result_id=result_id,
             status=RetrievalStatus.NO_EVIDENCE,
@@ -204,6 +221,9 @@ def search_claim_history(
             retrieved_at=now_utc(),
         )
 
+    connection_state = _connection_state(adapter)
+    if connection_state is DataConnectionState.UNAVAILABLE:
+        return _history_unavailable_response(result_id)
     record = map_history_provider_payload(
         retrieval_id=result_id,
         claim_id=claim.claim_id,
