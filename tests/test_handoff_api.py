@@ -89,6 +89,8 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
         'I hurt the bumper.',
         'Everyone is safe and we are no longer in danger.',
         'A support person emailed me yesterday.',
+        'I do not need to speak to a person.',
+        'Another person saw the collision.',
         (
             'My parked car was hit from behind on Queen Street at 10:30 this morning. '
             'No one was injured and there is no continuing danger. The rear bumper is damaged.'
@@ -205,6 +207,13 @@ def test_explicit_human_request_preserves_confirmed_context(
     assert handoff.packet.form_snapshot['incident.description'].status.value == 'confirmed'
     assert handoff.packet.low_confidence_items == []
     assert handoff.requested_action.startswith('Contact the claimant')
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    support_branch = next(
+        item for item in evaluation.branch_results if item.branch_id == 'human_support'
+    )
+    assert support_branch.status == 'active'
+    assert turn['claimant_message']['message_id'] in support_branch.source_refs  # type: ignore[index]
+    assert evaluation.handoff_intents[0]['support_need'] == 'human_requested'
 
     repeated = submit_message(
         client,
@@ -217,6 +226,63 @@ def test_explicit_human_request_preserves_confirmed_context(
     )
     assert repeated['decision']['reason_codes'] == ['HANDOFF_ALREADY_QUEUED']  # type: ignore[index]
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
+
+
+@pytest.mark.parametrize(
+    ('message', 'expected_need', 'expected_reason'),
+    [
+        ('I need an interpreter to continue.', 'accessibility_required', 'accessibility_need'),
+        ('I am overwhelmed and cannot cope.', 'distress', 'distress_signal'),
+    ],
+)
+def test_accessibility_and_distress_create_high_priority_source_linked_handoff(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    message: str,
+    expected_need: str,
+    expected_reason: str,
+) -> None:
+    key = f'{expected_need}-message'
+    created = create_claim(client, auth_headers, f'{expected_need}-claim')
+    claim = created['claim']
+    session = created['session']
+    assert isinstance(claim, dict)
+    assert isinstance(session, dict)
+    claim_id = str(claim['claim_id'])
+    session_id = str(session['session_id'])
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        message,
+        key=key,
+    )
+    replay = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        message,
+        key=key,
+    )
+
+    assert replay == turn
+    assert turn['decision']['action'] == 'HANDOFF'  # type: ignore[index]
+    assert turn['handoff']['support_need'] == expected_need  # type: ignore[index]
+    assert turn['handoff']['priority'] == 'high'  # type: ignore[index]
+    handoffs = repository.list_handoffs(claim_id, 'cus_demo')
+    assert len(handoffs) == 1
+    assert handoffs[0].trigger.value == expected_reason
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    support_branch = next(
+        item for item in evaluation.branch_results if item.branch_id == 'human_support'
+    )
+    assert support_branch.status == 'active'
+    assert turn['claimant_message']['message_id'] in support_branch.source_refs  # type: ignore[index]
+    assert evaluation.handoff_intents[0]['support_need'] == expected_need
 
 
 def test_support_endpoint_is_revision_protected_idempotent_and_claimant_safe(

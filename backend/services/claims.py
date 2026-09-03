@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import datetime
 
 from backend.core.auth import Principal
@@ -72,6 +73,56 @@ def _session_not_found() -> ApiError:
         code='RESOURCE_NOT_FOUND',
         message='The session was not found.',
     )
+
+
+def _apply_product_family_transition(
+    claim: WorkingClaim,
+    changed_fields: Mapping[str, StructuredFormField],
+) -> str | None:
+    """Project a confirmed form family onto the legacy top-level Claim field.
+
+    Args:
+        claim: The authoritative Claim snapshot before the mutation.
+        changed_fields: Validated fields being written in the same Claim revision.
+
+    Returns:
+        The product family to persist in ``WorkingClaim.incident_type``.
+
+    Raises:
+        ApiError: If an ordinary form mutation attempts to reclassify a created Claim.
+    """
+
+    changed_family = changed_fields.get('claim.product_family')
+    if (
+        changed_family is None
+        or changed_family.status is not FormStatus.CONFIRMED
+        or not isinstance(changed_family.value, str)
+    ):
+        return claim.incident_type
+    target_family = changed_family.value.strip().lower()
+    if (
+        claim.external_claim is not None
+        or claim.claim_state.workflow_state is WorkflowState.CREATED
+    ) and claim.incident_type != target_family:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='A created claim cannot change product family through the ordinary form flow.',
+            details=[
+                ErrorDetail(
+                    field='claim.product_family',
+                    reason='Use the approved correction or professional-review path.',
+                )
+            ],
+        )
+    return target_family
+
+
+def _field_transition_refs(claim: WorkingClaim, field_codes: Mapping[str, object]) -> list[str]:
+    return [
+        f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:{field_code}'
+        for field_code in sorted(field_codes)
+    ]
 
 
 def _claimant_form(
@@ -284,7 +335,7 @@ def list_claims(
 
 
 def start_session(
-    repository: ClaimRepository,
+    repository: PersistenceRepository,
     principal: Principal,
     claim_id: str,
     payload: StartSessionRequest,
@@ -392,6 +443,7 @@ def start_session(
                 idempotency=idempotency,
                 branch_evaluation=build_applied_branch_evaluation(
                     updated_claim,
+                    repository=repository,
                     recomputation_reason='session_resumed',
                     session_id=session.session_id,
                 ),
@@ -429,7 +481,7 @@ def get_session(
 
 
 def update_form(
-    repository: ClaimRepository,
+    repository: PersistenceRepository,
     principal: Principal,
     claim_id: str,
     payload: FormPatchRequest,
@@ -494,15 +546,20 @@ def update_form(
         updated_fields[update.field_code] = StructuredFormField(
             value=update.value,
             source=FormSource.CLAIMANT,
+            source_refs=[
+                f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:{update.field_code}'
+            ],
             status=update.status,
             needed_for=NeededFor.CURRENT_ACTION,
             updated_at=timestamp,
             updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
         )
 
+    incident_type = _apply_product_family_transition(claim, updated_fields)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **updated_fields},
+            'incident_type': incident_type,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
@@ -513,7 +570,9 @@ def update_form(
             expected_revision=expected_revision,
             branch_evaluation=build_applied_branch_evaluation(
                 updated_claim,
+                repository=repository,
                 recomputation_reason='form_updated',
+                trigger_source_refs=_field_transition_refs(claim, updated_fields),
             ),
         )
     except RevisionConflict as conflict:
@@ -610,10 +669,7 @@ def confirm_form_fields(
         )
         for field_code in payload.field_codes
     }
-    incident_type = claim.incident_type
-    confirmed_product_family = confirmed_fields.get('claim.product_family')
-    if confirmed_product_family is not None and isinstance(confirmed_product_family.value, str):
-        incident_type = confirmed_product_family.value.strip().lower()
+    incident_type = _apply_product_family_transition(claim, confirmed_fields)
     projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
@@ -637,8 +693,10 @@ def confirm_form_fields(
             expected_revision=expected_revision,
             branch_evaluation=build_applied_branch_evaluation(
                 updated_claim,
+                repository=repository,
                 recomputation_reason='form_confirmed',
                 current_action=AgentAction.CONFIRM,
+                trigger_source_refs=_field_transition_refs(claim, confirmed_fields),
             ),
         )
     except RevisionConflict as conflict:

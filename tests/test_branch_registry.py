@@ -41,6 +41,7 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
 )
+from backend.services.branching import build_applied_branch_evaluation
 
 FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
 
@@ -275,6 +276,198 @@ def test_branch_results_retain_rule_and_source_coordinates() -> None:
     assert motor.source_refs == ['msg_source']
     assert result.field_registry_version == FIELD_REGISTRY_VERSION
     assert result.branch_rules_version == 'vp-dynamic-form-branch-rules-v1'
+
+
+def test_collision_correction_suspends_previous_branch_with_both_sources() -> None:
+    previous_claim = make_claim(incident_type='motor').model_copy(
+        update={'form': {'incident.type': field('collision')}}
+    )
+    previous = evaluation_record(previous_claim)
+    corrected_subtype = field('other').model_copy(update={'source_refs': ['msg_correction']})
+    corrected_claim = previous_claim.model_copy(
+        update={'revision': 2, 'form': {'incident.type': corrected_subtype}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(
+        corrected_claim,
+        previous_evaluation=previous,
+        trigger_source_refs=['msg_correction'],
+        recomputation_reason='form_updated',
+    )
+    collision = next(
+        item for item in result.branch_results if item.branch_id == 'incident.collision'
+    )
+
+    assert collision.status == 'suspended'
+    assert collision.rule_id == 'BR-COLLISION-001'
+    assert collision.source_refs == ['msg_correction', 'msg_source']
+    assert 'incident.collision' in result.suspended_branches
+    assert 'incident.collision' not in (
+        result.active_branches + result.candidate_branches + result.exited_branches
+    )
+    assert (
+        next(
+            item for item in previous.branch_results if item.branch_id == 'incident.collision'
+        ).status
+        == 'active'
+    )
+
+
+def test_other_party_correction_exits_previous_branch_without_rewriting_history() -> None:
+    previous_claim = make_claim(incident_type='motor').model_copy(
+        update={'form': {'parties.other_parties': field(True)}}
+    )
+    previous = evaluation_record(previous_claim)
+    corrected_party = field(False).model_copy(update={'source_refs': ['msg_party_correction']})
+    corrected_claim = previous_claim.model_copy(
+        update={'revision': 2, 'form': {'parties.other_parties': corrected_party}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(
+        corrected_claim,
+        previous_evaluation=previous,
+        trigger_source_refs=['msg_party_correction'],
+        recomputation_reason='form_updated',
+    )
+    participant = next(
+        item for item in result.branch_results if item.branch_id == 'participant.another_party'
+    )
+
+    assert participant.status == 'exited'
+    assert participant.rule_id == 'BR-PARTICIPANT-OTHER-001'
+    assert participant.source_refs == ['msg_party_correction', 'msg_source']
+    assert 'participant.another_party' in result.exited_branches
+    assert (
+        next(
+            item
+            for item in previous.branch_results
+            if item.branch_id == 'participant.another_party'
+        ).status
+        == 'active'
+    )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_repository_history_reconciles_branch_corrections_for_both_profiles(
+    repository_kind: str,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'branch_transitions')
+        mongo_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo_repository
+    base = make_claim()
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=base.claim_id,
+        customer_id=base.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    repository.create_claim(base, session)
+    collision_claim = base.model_copy(
+        update={
+            'revision': 2,
+            'form': {'incident.type': field('collision')},
+        }
+    )
+    first_evaluation = build_applied_branch_evaluation(
+        collision_claim,
+        repository=repository,
+        recomputation_reason='form_updated',
+        trigger_source_refs=['msg_source'],
+        created_at=FIXED_TIME,
+    )
+    repository.save_claim(collision_claim, 1, first_evaluation)
+    corrected_claim = collision_claim.model_copy(
+        update={
+            'revision': 3,
+            'form': {
+                'incident.type': field('other').model_copy(
+                    update={'source_refs': ['msg_correction']}
+                )
+            },
+        }
+    )
+    second_evaluation = build_applied_branch_evaluation(
+        corrected_claim,
+        repository=repository,
+        recomputation_reason='form_updated',
+        trigger_source_refs=['msg_correction'],
+        created_at=FIXED_TIME,
+    )
+    repository.save_claim(corrected_claim, 2, second_evaluation)
+
+    history = sorted(
+        repository.list_branch_evaluations(base.claim_id, base.customer_id),
+        key=lambda record: record.resulting_claim_revision or 0,
+    )
+    first_collision = next(
+        item for item in history[0].branch_results if item.branch_id == 'incident.collision'
+    )
+    current_collision = next(
+        item for item in history[1].branch_results if item.branch_id == 'incident.collision'
+    )
+    assert first_collision.status == 'active'
+    assert current_collision.status == 'suspended'
+    assert current_collision.source_refs == ['msg_correction', 'msg_source']
+    assert history[0].resulting_claim_revision == 2
+    assert history[1].resulting_claim_revision == 3
+
+
+@pytest.mark.parametrize(
+    ('message', 'support_need', 'reason'),
+    [
+        ('I need to speak to a person.', 'human_requested', 'explicit_human_request'),
+        ('I need an interpreter to continue.', 'accessibility_required', 'accessibility_need'),
+        ('I am overwhelmed and cannot cope.', 'distress', 'distress'),
+    ],
+)
+def test_claimant_support_message_enters_deterministic_branch_boundary(
+    message: str,
+    support_need: str,
+    reason: str,
+) -> None:
+    result = BranchRuleEvaluator().evaluate(
+        make_claim(incident_type='motor'),
+        latest_message=message,
+        trigger_source_refs=['msg_support'],
+    )
+    support = next(item for item in result.branch_results if item.branch_id == 'human_support')
+
+    assert support.status == 'candidate'
+    assert support.source_refs == ['msg_support']
+    assert result.handoff_intents == [
+        {
+            'type': 'human_support',
+            'support_need': support_need,
+            'required': True,
+            'source_refs': ['msg_support'],
+        }
+    ]
+    assert result.interruption_result == {'control': 'handoff', 'reason': reason}
+
+
+@pytest.mark.parametrize(
+    'message',
+    [
+        'I do not need to speak to a person.',
+        'Another person saw the collision.',
+        'I am not distressed and can continue.',
+    ],
+)
+def test_non_support_wording_does_not_enter_handoff_boundary(message: str) -> None:
+    result = BranchRuleEvaluator().evaluate(
+        make_claim(incident_type='motor'),
+        latest_message=message,
+        trigger_source_refs=['msg_no_support'],
+    )
+
+    assert all(item.branch_id != 'human_support' for item in result.branch_results)
+    assert result.handoff_intents == []
+    assert result.interruption_result == {'control': 'continue'}
 
 
 def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None:

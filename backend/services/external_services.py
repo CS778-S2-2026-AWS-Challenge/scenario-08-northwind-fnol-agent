@@ -298,6 +298,7 @@ def grant_assessor_consent(
             idempotency=idempotency,
             branch_evaluation=build_applied_branch_evaluation(
                 updated,
+                repository=repository,
                 recomputation_reason='external_consent_granted',
                 trigger_source_refs=[consent.consent_ref],
             ),

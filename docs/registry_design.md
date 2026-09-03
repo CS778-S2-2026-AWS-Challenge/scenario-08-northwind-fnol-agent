@@ -620,6 +620,19 @@ retains the selection state independently from the stored field's value state. A
 also retain bounded rule diagnostics, but never secrets, raw provider payloads, hidden model
 reasoning, or unrestricted Claim State.
 
+Each material recalculation compares the new Claim snapshot with the latest valid applied
+evaluation. A conditional branch that was active or candidate and then loses support is retained
+in the new evaluation as `suspended` or `exited` according to its registered correction rule. The
+transition retains the original rule and source references and adds the source coordinate for the
+correction. Branches that have never been supported are not manufactured as conditional exits.
+
+The bounded current claimant message is also evaluated for explicit human-support,
+accessibility, and distress signals before ordinary field selection. A shared deterministic
+classifier supplies the same signal to the controlled Agent and branch evaluator. Negated requests
+and ordinary references to another person do not create a support branch. A qualifying signal
+produces a source-linked handoff intent and takes precedence over ordinary questioning; after the
+handoff mutation, authoritative Claim State activates the same branch in the applied evaluation.
+
 The authority relationship is:
 
 ```text

@@ -25,6 +25,11 @@ from backend.domain.models import (
     StateChange,
     WorkingClaim,
 )
+from backend.domain.support_intent import (
+    SupportIntent,
+    detect_support_intent,
+    support_need_for_intent,
+)
 
 HIGH_IMPACT_ACTIONS = frozenset(
     {
@@ -34,7 +39,14 @@ HIGH_IMPACT_ACTIONS = frozenset(
         AgentAction.CREATE_CLAIM,
     }
 )
-CONTROLLED_HANDOFF_REASONS = frozenset({'EXPLICIT_SAFETY_SIGNAL', 'HUMAN_SUPPORT_REQUESTED'})
+CONTROLLED_HANDOFF_REASONS = frozenset(
+    {
+        'EXPLICIT_SAFETY_SIGNAL',
+        'HUMAN_SUPPORT_REQUESTED',
+        'ACCESSIBILITY_SUPPORT_REQUESTED',
+        'DISTRESS_SUPPORT_REQUESTED',
+    }
+)
 SUPPORTED_AGENT_STATE_PATHS = frozenset({'claim_state.next_action'})
 
 PERSON_SUBJECT = (
@@ -99,16 +111,6 @@ DANGER_NEGATION_PATTERNS = (
         r'\bno\s+longer\s+(?:in\s+)?(?:danger|dangerous|unsafe)\b',
         re.IGNORECASE,
     ),
-)
-HUMAN_REQUEST_PATTERNS = (
-    re.compile(
-        r'\b(?:speak|talk)\s+(?:to|with)\s+(?:a\s+)?(?:person|human|representative)\b',
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r'\b(?:want|need|request)\s+(?:a\s+)?(?:person|human|representative)\b', re.IGNORECASE
-    ),
-    re.compile(r'\bhuman\s+(?:help|support)\b', re.IGNORECASE),
 )
 PENDING_POLICE_REPORT_PATTERNS = (
     re.compile(
@@ -483,24 +485,59 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             handoff_priority='urgent',
             controlled_rule_authorised=True,
         )
-    if not active_handoff and any(
-        pattern.search(message_text) for pattern in HUMAN_REQUEST_PATTERNS
-    ):
-        return AgentProposal(
-            action=AgentAction.HANDOFF,
-            reason_codes=['HUMAN_SUPPORT_REQUESTED'],
-            customer_reason='You asked to continue with a person.',
-            customer_response=(
-                'I will transfer this report to a Northwind staff member. The facts, evidence '
-                'status, and messages already recorded will go with it, so you should not need '
-                'to start again.'
-            ),
-            customer_next_step=CustomerNextStep(
-                status='human_support_queued',
-                summary=(
+    support_intent = detect_support_intent(message_text)
+    support_need = support_need_for_intent(support_intent)
+    if not active_handoff and support_need is not None:
+        reason_code, customer_reason, customer_response, next_step_summary, priority = {
+            SupportIntent.EXPLICIT_HUMAN_REQUEST: (
+                'HUMAN_SUPPORT_REQUESTED',
+                'You asked to continue with a person.',
+                (
+                    'I will transfer this report to a Northwind staff member. The facts, evidence '
+                    'status, and messages already recorded will go with it, so you should not need '
+                    'to start again.'
+                ),
+                (
                     'A Northwind support request has been queued with the details already '
                     'provided. You do not need to restart your report.'
                 ),
+                'standard',
+            ),
+            SupportIntent.ACCESSIBILITY_NEED: (
+                'ACCESSIBILITY_SUPPORT_REQUESTED',
+                'You described an accessibility or communication support need.',
+                (
+                    'I will prioritise a Northwind staff member to continue with the details '
+                    'already recorded and support your communication needs.'
+                ),
+                (
+                    'A Northwind accessibility support request has been prioritised with the '
+                    'details already provided.'
+                ),
+                'high',
+            ),
+            SupportIntent.DISTRESS: (
+                'DISTRESS_SUPPORT_REQUESTED',
+                'You described distress and asked for support continuing the report.',
+                (
+                    'I will prioritise a Northwind staff member to continue with the details '
+                    'already recorded.'
+                ),
+                (
+                    'A Northwind support request has been prioritised with the details already '
+                    'provided.'
+                ),
+                'high',
+            ),
+        }[support_intent]
+        return AgentProposal(
+            action=AgentAction.HANDOFF,
+            reason_codes=[reason_code],
+            customer_reason=customer_reason,
+            customer_response=customer_response,
+            customer_next_step=CustomerNextStep(
+                status='human_support_queued',
+                summary=next_step_summary,
                 responsible_party=ResponsibleParty.NORTHWIND,
             ),
             form_changes=[],
@@ -508,7 +545,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             proposed_signals=[],
             required_tools=[],
             next_action_requirements=[],
-            handoff_priority='standard',
+            handoff_priority=priority,
             controlled_rule_authorised=True,
         )
     if any(pattern.search(message_text) for pattern in PENDING_POLICE_REPORT_PATTERNS):

@@ -177,6 +177,7 @@ def _persist(
             idempotency,
             branch_evaluation=build_applied_branch_evaluation(
                 claim,
+                repository=repository,
                 recomputation_reason='evidence_changed',
                 trigger_source_refs=[evidence.evidence_id],
             ),

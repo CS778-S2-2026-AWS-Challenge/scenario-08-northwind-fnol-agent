@@ -194,6 +194,10 @@ Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
   form updates and confirmations, session resume, evidence updates, handoff creation, claimant
   consent changes, and integration results. An evaluation based on another revision cannot be
   attached to the mutation.
+- A material recalculation reads the newest applied evaluation at or before the pre-mutation Claim
+  revision. When a previously active or candidate conditional branch loses support, the new
+  evaluation records the registered suspended or exited transition with the earlier rule and
+  source references plus the correction source. The earlier evaluation remains immutable.
 - The standalone Branch Evaluation write accepts only non-applied evaluation evidence calculated
   against the stored current Claim revision. It cannot publish an `applied` record; that status is
   valid only inside the atomic Claim-mutation boundary.

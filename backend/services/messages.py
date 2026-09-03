@@ -53,6 +53,7 @@ from backend.domain.retrieval import (
     PolicySearchRequest,
     RetrievalStatus,
 )
+from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -66,6 +67,7 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
+from backend.services.branching import latest_applied_branch_evaluation
 from backend.services.handoffs import (
     build_handoff,
     claimant_handoff,
@@ -858,12 +860,14 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    previous_evaluation = latest_applied_branch_evaluation(repository, claim)
     branch_evaluation = BranchRuleEvaluator().evaluate(
         claim,
         latest_message=(payload.content.text if payload.content is not None else None),
         trigger_source_refs=[claimant_message.message_id],
         current_action=claim.claim_state.next_action,
         recomputation_reason='claimant_message',
+        previous_evaluation=previous_evaluation,
     )
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
     proposal = agent.propose_turn(
@@ -961,10 +965,11 @@ def submit_message(
         AgentAction.HANDOFF,
         AgentAction.URGENT_HANDOFF,
     }:
+        detected_support_need = support_need_for_intent(detect_support_intent(message_text))
         support_need = (
             SupportNeed.URGENT
             if proposal.action is AgentAction.URGENT_HANDOFF
-            else SupportNeed.HUMAN_REQUESTED
+            else detected_support_need or SupportNeed.HUMAN_REQUESTED
         )
         handoff, effective_next_step = build_handoff(
             repository,
@@ -1115,6 +1120,7 @@ def submit_message(
         trigger_source_refs=[claimant_message.message_id],
         current_action=updated_claim.claim_state.next_action,
         recomputation_reason='agent_turn_applied',
+        previous_evaluation=previous_evaluation,
     )
     evaluation_record = BranchEvaluationRecord(
         evaluation_id=new_id('brn'),

@@ -11,12 +11,48 @@ from backend.domain.models import (
     BranchEvaluationStatus,
     WorkingClaim,
 )
+from backend.repositories.protocols import PersistenceRepository
 from backend.services.support import now_utc
+
+
+def latest_applied_branch_evaluation(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> BranchEvaluationRecord | None:
+    """Return the newest immutable applied evaluation valid before or at a Claim revision.
+
+    Args:
+        repository: The selected provider-neutral persistence boundary.
+        claim: The Claim snapshot whose evaluation history is being reconciled.
+
+    Returns:
+        The newest applicable record, or ``None`` when the Claim has no prior evaluation.
+    """
+
+    eligible = [
+        record
+        for record in repository.list_branch_evaluations(claim.claim_id, claim.customer_id)
+        if record.status is BranchEvaluationStatus.APPLIED
+        and record.resulting_claim_revision is not None
+        and record.resulting_claim_revision <= claim.revision
+    ]
+    if not eligible:
+        return None
+    return max(
+        eligible,
+        key=lambda record: (
+            record.resulting_claim_revision or 0,
+            record.created_at,
+            record.evaluation_id,
+        ),
+    )
 
 
 def build_applied_branch_evaluation(
     claim: WorkingClaim,
     *,
+    repository: PersistenceRepository | None = None,
+    previous_evaluation: BranchEvaluationRecord | None = None,
     recomputation_reason: str,
     session_id: str | None = None,
     turn_id: str | None = None,
@@ -26,11 +62,14 @@ def build_applied_branch_evaluation(
 ) -> BranchEvaluationRecord:
     """Build immutable evidence for an evaluation of the resulting Claim revision."""
 
+    if previous_evaluation is None and repository is not None:
+        previous_evaluation = latest_applied_branch_evaluation(repository, claim)
     evaluated = BranchRuleEvaluator().evaluate(
         claim,
         trigger_source_refs=trigger_source_refs,
         current_action=current_action or claim.claim_state.next_action,
         recomputation_reason=recomputation_reason,
+        previous_evaluation=previous_evaluation,
     )
     return BranchEvaluationRecord(
         evaluation_id=new_id('brn'),
@@ -57,3 +96,6 @@ def build_applied_branch_evaluation(
         status=BranchEvaluationStatus.APPLIED,
         created_at=created_at or now_utc(),
     )
+
+
+__all__ = ['build_applied_branch_evaluation', 'latest_applied_branch_evaluation']

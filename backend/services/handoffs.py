@@ -409,6 +409,7 @@ def create_support_request(
             idempotency,
             branch_evaluation=build_applied_branch_evaluation(
                 updated_claim,
+                repository=repository,
                 recomputation_reason='handoff_created',
                 trigger_source_refs=[handoff.handoff_id],
             ),

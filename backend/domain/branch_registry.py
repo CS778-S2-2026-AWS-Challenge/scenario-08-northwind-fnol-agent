@@ -17,6 +17,11 @@ from backend.domain.models import (
     FormStatus,
     WorkingClaim,
 )
+from backend.domain.support_intent import (
+    SupportIntent,
+    detect_support_intent,
+    support_need_for_intent,
+)
 
 BRANCH_RULES_VERSION = 'vp-dynamic-form-branch-rules-v1'
 FAMILY_NAMES = ('motor', 'home', 'contents')
@@ -24,6 +29,19 @@ FAMILY_RULE_IDS = {
     'motor': 'BR-FAMILY-MOTOR-001',
     'home': 'BR-FAMILY-HOME-001',
     'contents': 'BR-FAMILY-CONTENTS-001',
+}
+CONDITIONAL_TRANSITION_STATUS = {
+    'incident.collision': 'suspended',
+    'participant.another_party': 'exited',
+    'participant.witness': 'exited',
+    'authority.police': 'suspended',
+    'evidence.pending': 'exited',
+    'accommodation.temporary': 'exited',
+    'contents.theft': 'suspended',
+    'safety.injury_or_danger': 'suspended',
+    'mitigation.emergency': 'exited',
+    'professional_review': 'exited',
+    'human_support': 'exited',
 }
 
 # Only fields already supported by the generic form contract are executable here.
@@ -237,8 +255,10 @@ class BranchRuleEvaluator:
         trigger_source_refs: Sequence[str] = (),
         current_action: AgentAction | str | None = None,
         recomputation_reason: str = 'turn',
+        previous_evaluation: BranchEvaluationRecord | None = None,
     ) -> BranchEvaluationResult:
         text = latest_message or ''
+        support_intent = detect_support_intent(text)
         selected_family, family_candidates, family_sources = self._family_state(
             claim, text, trigger_source_refs
         )
@@ -247,35 +267,41 @@ class BranchRuleEvaluator:
             if selected_family is None and len(family_candidates) > 1
             else []
         )
-        active: list[str] = []
-        candidate: list[str] = []
-        exited: list[str] = []
         branch_results: list[BranchResult] = []
 
         for family in FAMILY_NAMES:
             branch = self.registry.branch_by_id[f'family.{family}']
             if selected_family == family:
                 status = 'active'
-                active.append(branch.branch_id)
                 reason = 'A confirmed family fact activates this mutually exclusive branch.'
             elif family in family_candidates:
                 status = 'candidate'
-                candidate.append(branch.branch_id)
                 reason = 'Proposed or message evidence identifies a family candidate.'
             else:
                 status = 'exited'
-                exited.append(branch.branch_id)
                 reason = 'No current evidence supports this family.'
             branch_results.append(
                 self._branch_result(branch, status, reason, family_sources.get(family, []))
             )
 
-        for result in self._conditional_branches(selected_family, claim, text, trigger_source_refs):
-            branch_results.append(result)
-            if result.status == 'active':
-                active.append(result.branch_id)
-            elif result.status == 'candidate':
-                candidate.append(result.branch_id)
+        branch_results.extend(
+            self._conditional_branches(
+                selected_family,
+                claim,
+                text,
+                trigger_source_refs,
+                support_intent,
+            )
+        )
+        branch_results = self._reconcile_previous_conditional_branches(
+            branch_results,
+            previous_evaluation,
+            trigger_source_refs,
+        )
+        active = [result.branch_id for result in branch_results if result.status == 'active']
+        candidate = [result.branch_id for result in branch_results if result.status == 'candidate']
+        suspended = [result.branch_id for result in branch_results if result.status == 'suspended']
+        exited = [result.branch_id for result in branch_results if result.status == 'exited']
 
         permitted_fields = set(COMMON_FIELDS & self.registry.field_codes)
         for branch_id in active:
@@ -304,16 +330,20 @@ class BranchRuleEvaluator:
             unresolved_family_conflict=unresolved_conflict,
             active_branches=active,
             candidate_branches=candidate,
-            suspended_branches=[],
+            suspended_branches=suspended,
             exited_branches=exited,
             branch_results=branch_results,
             field_selection=selections,
             work_item_intents=self._work_item_intents(selections),
-            handoff_intents=self._handoff_intents(claim),
+            handoff_intents=self._handoff_intents(
+                claim,
+                support_intent,
+                trigger_source_refs,
+            ),
             evidence_intents=self._evidence_intents(claim),
             consent_intents=[],
             integration_intents=[],
-            interruption_result=self._interruption(claim),
+            interruption_result=self._interruption(claim, support_intent),
             permitted_actions=list(AgentAction),
             permitted_tools=[],
             recomputation_reason=recomputation_reason,
@@ -366,6 +396,7 @@ class BranchRuleEvaluator:
         claim: WorkingClaim,
         text: str,
         trigger_source_refs: Sequence[str],
+        support_intent: SupportIntent,
     ) -> list[BranchResult]:
         results: list[BranchResult] = []
 
@@ -570,11 +601,20 @@ class BranchRuleEvaluator:
             'human_requested',
             'accessibility_required',
         }:
+            support_refs = [f'claim:{claim.claim_id}:claim_state.customer_support']
+            if support_intent is not SupportIntent.NONE:
+                support_refs.extend(trigger_source_refs)
             add(
                 'human_support',
                 'active',
                 'Authoritative Claim State requires human support.',
-                source_refs=[f'claim:{claim.claim_id}:claim_state.customer_support'],
+                source_refs=support_refs,
+            )
+        elif support_intent is not SupportIntent.NONE:
+            add(
+                'human_support',
+                'candidate',
+                'The current claimant message explicitly requires human support.',
             )
 
         review_sources: list[str] = []
@@ -592,6 +632,39 @@ class BranchRuleEvaluator:
                 source_refs=review_sources,
             )
         return results
+
+    @staticmethod
+    def _reconcile_previous_conditional_branches(
+        current_results: list[BranchResult],
+        previous_evaluation: BranchEvaluationRecord | None,
+        trigger_source_refs: Sequence[str],
+    ) -> list[BranchResult]:
+        if previous_evaluation is None:
+            return current_results
+        current_branch_ids = {result.branch_id for result in current_results}
+        reconciled = list(current_results)
+        for previous in previous_evaluation.branch_results:
+            transition_status = CONDITIONAL_TRANSITION_STATUS.get(previous.branch_id)
+            if (
+                transition_status is None
+                or previous.status not in {'active', 'candidate'}
+                or previous.branch_id in current_branch_ids
+            ):
+                continue
+            reconciled.append(
+                previous.model_copy(
+                    update={
+                        'status': transition_status,
+                        'reason': (
+                            'The previously supported branch lost support after a source-backed '
+                            'Claim correction or recalculation.'
+                        ),
+                        'source_refs': sorted(set(previous.source_refs) | set(trigger_source_refs)),
+                        'registered_fields': [],
+                    }
+                )
+            )
+        return reconciled
 
     @staticmethod
     def _branch_result(
@@ -705,15 +778,35 @@ class BranchRuleEvaluator:
         ]
 
     @staticmethod
-    def _handoff_intents(claim: WorkingClaim) -> list[dict[str, object]]:
+    def _handoff_intents(
+        claim: WorkingClaim,
+        support_intent: SupportIntent,
+        trigger_source_refs: Sequence[str],
+    ) -> list[dict[str, object]]:
         intents: list[dict[str, object]] = []
         if claim.claim_state.urgency.value in {'urgent', 'immediate_safety_risk'}:
             intents.append({'type': 'urgent_support', 'required': True})
-        if claim.claim_state.customer_support.value in {
+        support_need = support_need_for_intent(support_intent)
+        if support_need is not None:
+            intents.append(
+                {
+                    'type': 'human_support',
+                    'support_need': support_need.value,
+                    'required': True,
+                    'source_refs': sorted(set(trigger_source_refs)),
+                }
+            )
+        elif claim.claim_state.customer_support.value in {
             'human_requested',
             'accessibility_required',
         }:
-            intents.append({'type': 'human_support', 'required': True})
+            intents.append(
+                {
+                    'type': 'human_support',
+                    'support_need': claim.claim_state.customer_support.value,
+                    'required': True,
+                }
+            )
         if claim.claim_state.workflow_state.value == 'professional_review':
             intents.append({'type': 'professional_review', 'required': True})
         return intents
@@ -725,9 +818,14 @@ class BranchRuleEvaluator:
         return []
 
     @staticmethod
-    def _interruption(claim: WorkingClaim) -> dict[str, object]:
+    def _interruption(
+        claim: WorkingClaim,
+        support_intent: SupportIntent,
+    ) -> dict[str, object]:
         if claim.claim_state.urgency.value in {'urgent', 'immediate_safety_risk'}:
             return {'control': 'interrupt', 'reason': 'urgent_safety'}
+        if support_intent is not SupportIntent.NONE:
+            return {'control': 'handoff', 'reason': support_intent.value}
         if claim.claim_state.customer_support.value in {
             'human_requested',
             'accessibility_required',

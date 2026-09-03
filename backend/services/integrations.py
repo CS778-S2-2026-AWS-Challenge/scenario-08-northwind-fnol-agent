@@ -272,6 +272,7 @@ def _save_claim(
             expected_revision,
             branch_evaluation=build_applied_branch_evaluation(
                 claim,
+                repository=repository,
                 recomputation_reason='integration_result_changed',
             ),
         )
