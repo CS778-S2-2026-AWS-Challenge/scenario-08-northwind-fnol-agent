@@ -8,6 +8,17 @@ from backend.adapters.claims_service import (
     ClaimsServiceAdapter,
 )
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditPermission,
+    AuditPermissionOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
@@ -613,6 +624,49 @@ def route_assessor(
             created_at=timestamp,
             updated_at=timestamp,
         )
+        permission_audit_events: tuple[AuditEventEnvelope, ...] = ()
+        if authorisation_decision is not None:
+            permission_audit_events = (
+                AuditEventEnvelope(
+                    event_id=(
+                        'aud_'
+                        + request_fingerprint(
+                            {
+                                'event_type': AuditEventType.PERMISSION_AUTHORISED.value,
+                                'decision_id': decision.decision_id,
+                            }
+                        )[:24]
+                    ),
+                    event_type=AuditEventType.PERMISSION_AUTHORISED,
+                    outcome=AuditOutcome.SUCCEEDED,
+                    subject=AuditSubject(
+                        subject_type=AuditSubjectType.CLAIM,
+                        subject_id=claim.claim_id,
+                        claim_id=claim.claim_id,
+                    ),
+                    actor=AuditActor(
+                        actor_type=ActorType.SYSTEM,
+                        actor_id=decision.authority.proposed_by,
+                        auth_source=decision.authority.validated_by,
+                    ),
+                    reason=decision.customer_reason,
+                    source_refs=[
+                        decision.decision_id,
+                        decision.trigger_message_id,
+                        consent.consent_ref,
+                    ],
+                    permission=AuditPermission(
+                        required_permission=payload.requested_action,
+                        outcome=AuditPermissionOutcome.AUTHORISED,
+                    ),
+                    consent_ref=consent.consent_ref,
+                    consent_state=consent.status.value,
+                    visibility=AuditVisibility.AUDIT_ONLY,
+                    correlation_id=operation.operation_id,
+                    claim_revision=claim.revision,
+                    created_at=timestamp,
+                ),
+            )
         try:
             if authorisation_decision is None:
                 repository.save_assessor_routing_operation(operation)
@@ -621,6 +675,7 @@ def route_assessor(
                     operation,
                     authorisation_decision,
                     claim.customer_id,
+                    audit_events=permission_audit_events,
                 )
         except IdempotencyConflict as conflict:
             raise _idempotency_error() from conflict

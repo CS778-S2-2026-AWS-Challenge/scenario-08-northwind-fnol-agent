@@ -7,6 +7,13 @@ from fastapi.testclient import TestClient
 from backend.adapters.claims_service import AssessorFixtureFailure, MockAssessorServiceAdapter
 from backend.app import create_app
 from backend.core.runtime_profiles import RuntimeCapabilityStatus
+from backend.domain.audit import (
+    AuditEventType,
+    AuditPermissionOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -275,6 +282,22 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
         'requested_action',
         'location.region',
     }
+    audit_subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    consent_events = repository.list_audit_events_internal(audit_subject)
+    assert len(consent_events) == 1
+    consent_event = consent_events[0]
+    assert consent_event.event_type is AuditEventType.CONSENT_GRANTED
+    assert consent_event.actor.actor_type is ActorType.CLAIMANT
+    assert consent_event.actor.actor_id == 'cus_demo'
+    assert consent_event.actor.auth_source == 'developer:synthetic_claimant'
+    assert consent_event.consent_ref == consent.consent_ref
+    assert consent_event.consent_state == 'granted'
+    assert consent_event.claim_revision == revision + 1
+    assert consent_event.visibility is AuditVisibility.AUDIT_ONLY
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH).json()
     assert 'external_service_consents' not in claimant
     assert 'consent_ref' not in str(claimant)
@@ -282,14 +305,15 @@ def test_claimant_consent_is_bounded_persisted_and_idempotent(
 
 def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> None:
     class FailingConsentRepository(FixtureRepository):
-        def save_claim_mutation(
+        def save_claim_mutation_with_audit(
             self,
             claim: Any,
             expected_revision: int,
             idempotency: IdempotencyRecord,
+            audit_events: tuple[Any, ...],
             branch_evaluation: Any = None,
         ) -> None:
-            del claim, expected_revision, idempotency, branch_evaluation
+            del claim, expected_revision, idempotency, audit_events, branch_evaluation
             raise RuntimeError('injected consent transaction failure')
 
     repository = FailingConsentRepository()
@@ -312,6 +336,12 @@ def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> No
 
     assert response.status_code == 500
     assert repository.get_claim_internal(claim_id) == before
+    audit_subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    assert repository.list_audit_events_internal(audit_subject) == []
     assert (
         repository.find_idempotency(
             'cus_demo',
@@ -334,14 +364,15 @@ def test_claimant_consent_maps_atomic_repository_conflicts(
     expected_code: str,
 ) -> None:
     class ConflictingConsentRepository(FixtureRepository):
-        def save_claim_mutation(
+        def save_claim_mutation_with_audit(
             self,
             claim: Any,
             expected_revision: int,
             idempotency: IdempotencyRecord,
+            audit_events: tuple[Any, ...],
             branch_evaluation: Any = None,
         ) -> None:
-            del claim, expected_revision, idempotency, branch_evaluation
+            del claim, expected_revision, idempotency, audit_events, branch_evaluation
             raise failure
 
     repository = ConflictingConsentRepository()
@@ -459,6 +490,24 @@ def test_claimant_assessor_request_creates_current_authority_and_safe_success(
         == stored.external_service_consents[-1].consent_ref
     )
     assert request.authorisation.authorised_revision == consent['revision']
+    audit_subject = AuditSubject(
+        subject_type=AuditSubjectType.CLAIM,
+        subject_id=claim_id,
+        claim_id=claim_id,
+    )
+    audit_events = repository.list_audit_events_internal(audit_subject)
+    permission_event = next(
+        event for event in audit_events if event.event_type is AuditEventType.PERMISSION_AUTHORISED
+    )
+    assert permission_event.actor.actor_type is ActorType.SYSTEM
+    assert permission_event.actor.actor_id == 'controlled_assessor_routing_rule'
+    assert permission_event.actor.auth_source == 'deterministic_rule_engine'
+    assert permission_event.permission is not None
+    assert permission_event.permission.required_permission == 'vehicle_damage_assessment'
+    assert permission_event.permission.outcome is AuditPermissionOutcome.AUTHORISED
+    assert permission_event.consent_ref == stored.external_service_consents[-1].consent_ref
+    assert permission_event.claim_revision == consent['revision']
+    assert permission_event.visibility is AuditVisibility.AUDIT_ONLY
     repository.save_external_task_request(request, 'cus_demo')
     with pytest.raises(IdempotencyConflict):
         repository.save_external_task_request(
@@ -545,6 +594,7 @@ def test_claimant_route_maps_atomic_preparation_conflict() -> None:
             operation: Any,
             decision: Any,
             customer_id: str,
+            audit_events: tuple[Any, ...] = (),
         ) -> None:
             raise IdempotencyConflict('routing-preparation-conflict')
 
