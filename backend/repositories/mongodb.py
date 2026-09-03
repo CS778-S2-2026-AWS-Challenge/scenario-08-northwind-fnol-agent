@@ -335,7 +335,10 @@ class MongoDBRepository:
         for event in audit_events:
             if event.subject.claim_id != claim.claim_id:
                 raise KeyError(claim.claim_id)
-            if event.subject.subject_type.value == 'claim' and event.claim_revision != claim.revision:
+            if (
+                event.subject.subject_type.value == 'claim'
+                and event.claim_revision != claim.revision
+            ):
                 raise KeyError(claim.claim_id)
             incoming = prepared.get(event.event_id)
             if incoming is not None and incoming != event:
@@ -437,9 +440,7 @@ class MongoDBRepository:
             query['created_at'] = time_range
 
         events: list[AuditEventEnvelope] = []
-        for document in self._collection.find(query).sort(
-            [('created_at', 1), ('_id', 1)]
-        ):
+        for document in self._collection.find(query).sort([('created_at', 1), ('_id', 1)]):
             event = self._model_from_document(document, AuditEventEnvelope)
             if event is not None:
                 events.append(event)

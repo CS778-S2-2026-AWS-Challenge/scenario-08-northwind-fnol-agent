@@ -161,7 +161,10 @@ class FixtureRepository(PersistenceRepository):
         for event in audit_events:
             if event.subject.claim_id != claim.claim_id:
                 raise KeyError(claim.claim_id)
-            if event.subject.subject_type.value == 'claim' and event.claim_revision != claim.revision:
+            if (
+                event.subject.subject_type.value == 'claim'
+                and event.claim_revision != claim.revision
+            ):
                 raise KeyError(claim.claim_id)
             incoming = prepared.get(event.event_id)
             if incoming is not None and incoming != event:

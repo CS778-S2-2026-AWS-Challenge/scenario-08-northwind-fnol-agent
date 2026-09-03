@@ -63,9 +63,7 @@ def test_fixture_audit_event_is_append_only_and_idempotent() -> None:
     stored = repository.list_audit_events_internal(event.subject)
     assert stored == [event]
 
-    conflicting = event.model_copy(
-        update={'reason': 'Attempted to rewrite the immutable event.'}
-    )
+    conflicting = event.model_copy(update={'reason': 'Attempted to rewrite the immutable event.'})
     with pytest.raises(IdempotencyConflict):
         repository.append_audit_event(conflicting)
 
