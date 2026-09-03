@@ -27,6 +27,14 @@ def _connection_state(retriever: KnowledgeRetriever) -> DataConnectionState:
         return DataConnectionState.UNAVAILABLE
 
 
+def _provider_ready(state: DataConnectionState) -> bool:
+    return state in {
+        DataConnectionState.USING_FIXTURE,
+        DataConnectionState.VERIFIED,
+        DataConnectionState.CONFIGURED_SERVICE,
+    }
+
+
 def _unavailable_response() -> KnowledgeSearchResponse:
     return KnowledgeSearchResponse(
         status='unavailable',
@@ -49,7 +57,7 @@ def search_knowledge(
     # Check readiness before handing claimant data to any provider.  Unknown,
     # pending, and unavailable states must fail closed without a retrieval call.
     connection_state = _connection_state(retriever)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _unavailable_response()
     try:
         chunks = retriever.search(
@@ -93,7 +101,7 @@ def search_knowledge(
     # Re-check after the call so a provider that lost its verified state while
     # handling the request cannot release evidence from that uncertain window.
     connection_state = _connection_state(retriever)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _unavailable_response()
     if not chunks:
         return KnowledgeSearchResponse(

@@ -65,6 +65,14 @@ def _connection_state(adapter: PolicyHistoryAdapter) -> DataConnectionState:
         return DataConnectionState.UNAVAILABLE
 
 
+def _provider_ready(state: DataConnectionState) -> bool:
+    return state in {
+        DataConnectionState.USING_FIXTURE,
+        DataConnectionState.VERIFIED,
+        DataConnectionState.CONFIGURED_SERVICE,
+    }
+
+
 def _policy_unavailable_response(result_id: str) -> PolicySearchResponse:
     _, connection_state, errors, limitations = _failure_projection(
         'PROVIDER_UNAVAILABLE',
@@ -129,7 +137,7 @@ def search_policy(
     # Never invoke a provider whose connection has not reached a verified,
     # fixture, or configured-service state.
     connection_state = _connection_state(adapter)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _policy_unavailable_response(result_id)
 
     try:
@@ -150,7 +158,7 @@ def search_policy(
         )
     except LookupError:
         connection_state = _connection_state(adapter)
-        if connection_state is DataConnectionState.UNAVAILABLE:
+        if not _provider_ready(connection_state):
             return _policy_unavailable_response(result_id)
         return PolicySearchResponse(
             result_id=result_id,
@@ -161,7 +169,7 @@ def search_policy(
         )
 
     connection_state = _connection_state(adapter)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _policy_unavailable_response(result_id)
     record = map_policy_provider_payload(
         retrieval_id=result_id,
@@ -190,7 +198,7 @@ def search_claim_history(
     claim = _claim(repository, payload.claim_id)
     result_id = new_id('his')
     connection_state = _connection_state(adapter)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _history_unavailable_response(result_id)
 
     try:
@@ -211,7 +219,7 @@ def search_claim_history(
         )
     except LookupError:
         connection_state = _connection_state(adapter)
-        if connection_state is DataConnectionState.UNAVAILABLE:
+        if not _provider_ready(connection_state):
             return _history_unavailable_response(result_id)
         return ClaimHistorySearchResponse(
             result_id=result_id,
@@ -222,7 +230,7 @@ def search_claim_history(
         )
 
     connection_state = _connection_state(adapter)
-    if connection_state is DataConnectionState.UNAVAILABLE:
+    if not _provider_ready(connection_state):
         return _history_unavailable_response(result_id)
     record = map_history_provider_payload(
         retrieval_id=result_id,
