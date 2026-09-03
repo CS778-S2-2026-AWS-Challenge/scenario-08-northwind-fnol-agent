@@ -43,7 +43,24 @@ jobs:
         run: python -m mypy backend tests
 
       - name: Test backend
-        run: python -m pytest --cov=backend --cov-report=term-missing
+        run: |
+          git fetch origin main
+          mode=$(python scripts/select_backend_tests.py --mode)
+          case "$mode" in
+            full)
+              python -m pytest --cov=backend --cov-report=term-missing tests
+              ;;
+            scoped)
+              python -m pytest $(python scripts/select_backend_tests.py --tests)
+              ;;
+            skip)
+              echo "No backend behavior changed; backend pytest skipped."
+              ;;
+            *)
+              echo "Unknown backend test selection mode: $mode"
+              exit 1
+              ;;
+          esac
 
       - name: Check OpenAPI snapshot drift
         run: python scripts/export_openapi.py --check

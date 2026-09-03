@@ -130,8 +130,10 @@ must not be used as a production approval mechanism.
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests and coverage, PR policy, GitHub automation, documentation, and the claimant
-client for every pull request.
+linting, types, tests, PR policy, GitHub automation, documentation, and the claimant client for
+every pull request. Backend pull requests use impact-scoped tests selected by
+`scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
+suite. The `main` branch retains the complete backend suite with coverage enforcement.
 
 For focused local backend verification while developing, run the checks affected by the change:
 
