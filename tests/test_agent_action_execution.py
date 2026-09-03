@@ -53,7 +53,7 @@ def _seed_claim(
     return claim
 
 
-def _fact_patch_command(*, expected_revision: int = 0) -> ClaimContextCommand:
+def _fact_patch_command(*, expected_revision: int = 1) -> ClaimContextCommand:
     return build_claim_context_command(
         'claim.apply_fact_patch',
         {
@@ -107,7 +107,7 @@ def test_execution_gate_applies_only_after_current_state_checks() -> None:
     assert result.status is ClaimContextExecutionStatus.APPLIED
     assert result.reason_code == 'APPLIED'
     assert result.claim_id == 'clm_execution'
-    assert result.resulting_revision == 1
+    assert result.resulting_revision == 2
     assert result.failure_policy is None
 
 
@@ -116,18 +116,18 @@ def test_stale_revision_is_rejected_before_handler_side_effect() -> None:
     claim = _seed_claim(repository)
     updated = claim.model_copy(
         update={
-            'revision': 1,
+            'revision': 2,
             'updated_at': datetime.now(UTC),
         }
     )
-    repository.save_claim(updated, expected_revision=0)
-    command = _fact_patch_command(expected_revision=0)
+    repository.save_claim(updated, expected_revision=1)
+    command = _fact_patch_command(expected_revision=1)
     calls = 0
 
     def should_not_run(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         nonlocal calls
         calls += 1
-        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=2)
+        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=3)
 
     result = execute_claim_context_command(
         repository,
@@ -143,7 +143,7 @@ def test_stale_revision_is_rejected_before_handler_side_effect() -> None:
     assert calls == 0
     assert result.status is ClaimContextExecutionStatus.REJECTED
     assert result.reason_code == 'REVISION_CONFLICT'
-    assert result.resulting_revision == 1
+    assert result.resulting_revision == 2
     assert result.retryable is True
     assert result.failure_policy == command.failure_policy
 
@@ -157,7 +157,7 @@ def test_changed_workflow_state_is_rejected_before_handler_side_effect() -> None
     def should_not_run(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
         nonlocal calls
         calls += 1
-        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=1)
+        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=2)
 
     result = execute_claim_context_command(
         repository,
@@ -189,7 +189,7 @@ def test_handler_must_match_command_tool_allow_list() -> None:
                 tool_name='claims_service.create_claim',
                 handler=lambda _command: ClaimContextHandlerOutcome(
                     claim_id='clm_execution',
-                    resulting_revision=1,
+                    resulting_revision=2,
                 ),
             )
         },
@@ -252,7 +252,7 @@ def test_dependency_failure_does_not_claim_execution_succeeded() -> None:
 
     stored = repository.get_claim_internal('clm_execution')
     assert stored is not None
-    assert stored.revision == 0
+    assert stored.revision == 1
     assert result.status is ClaimContextExecutionStatus.FAILED
     assert result.reason_code == 'DEPENDENCY_UNAVAILABLE'
     assert result.retryable is True
@@ -272,7 +272,7 @@ def test_unpersisted_handler_success_is_rejected_as_invalid_execution_result() -
                 tool_name='claim_store.compare_and_set',
                 handler=lambda _command: ClaimContextHandlerOutcome(
                     claim_id='clm_execution',
-                    resulting_revision=1,
+                    resulting_revision=2,
                 ),
             )
         },
