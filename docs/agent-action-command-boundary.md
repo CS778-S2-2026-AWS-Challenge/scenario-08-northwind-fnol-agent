@@ -9,7 +9,7 @@ This note defines the bounded backend execution hand-off introduced for Sprint 3
 - `build_claim_context_command` validates the published action input schema, proposer role, authority requirement, lifecycle state, revision metadata, and idempotency metadata.
 - The resulting command keeps a recursively immutable snapshot of the validated mapping and sequence payload so later caller mutation cannot change approved execution intent.
 - `execute_claim_context_command` re-resolves the authoritative Claim immediately before execution and rejects a command whose workflow state or expected revision is stale.
-- Execution uses an explicit action-to-handler binding. The bound internal tool must be present in the command's registry-derived `permitted_tools`; a mismatched or unsupported handler is rejected before execution.
+- Execution uses an explicit action-to-handler binding. When a command exposes registered tools, the bound internal tool must be present in its registry-derived `permitted_tools`. A registered tool-free command binds `None` and may execute only while its `permitted_tools` remains empty. Mismatched or unsupported bindings are rejected before execution.
 - Action-specific handlers continue to own their existing compare-and-set/idempotency transaction boundaries. The execution gate does not duplicate Claim, handoff, evidence, staff, or external-service persistence logic.
 - After a handler reports success, the execution gate re-reads authoritative Claim State and verifies that the reported revision was actually persisted. A Claim mutation or handoff must advance the Claim revision; a non-mutating Claim proposal must not advance it unexpectedly.
 - Conversation-only, runtime-control, and external-service actions do not become Claim Context commands through this boundary. Their owners retain their existing runtime or adapter execution paths.
@@ -51,6 +51,7 @@ The command exposes only tools that are already allow-listed by the approved act
 `tests/test_agent_action_execution.py` covers:
 
 - a valid allow-listed handler persisting exactly one authoritative revision transition;
+- a registered tool-free Claim proposal completing without an unexpected revision mutation;
 - stale revision and stale workflow-state rejection before handler execution;
 - handler/tool allow-list enforcement;
 - bounded repository revision-conflict handling;
