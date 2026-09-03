@@ -51,6 +51,16 @@ one:
   Coupling on the whole `backend/` directory may over-report; narrow it to the
   route/model subdirectories when implementing.
 
+- **Impact-scoped backend tests**: pull requests use
+  `scripts/select_backend_tests.py` to select direct consumer tests from the
+  changed paths. Documentation-only changes may skip backend pytest. Shared
+  domain models, repository protocols, runtime composition, dependency
+  manifests, and unmapped backend changes select the complete suite. The
+  `main` branch always runs the complete suite with coverage enforcement.
+  Scoped PR runs intentionally omit the global coverage threshold; the full
+  coverage gate remains on `main`. The selector is itself covered by tests and
+  must never return an empty selection for a backend behavior change.
+
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing
   documents, to avoid an enormous first run).
