@@ -166,6 +166,7 @@ Demonstration:
 
 - [Issue #371 RAG and Structured-Query Acceptance Evidence](archive/sprint-3/validation/issue-371-rag-structured-query-evidence.md)
 - [Issue #389 Query Source and No-Result Validation](archive/sprint-3/validation/issue-389-query-source-and-no-result.md)
+- [Issue #465 RAG, Provider Isolation, and Control Plane Validation](archive/sprint-3/validation/issue-465-rag-provider-control-validation.md)
 
 Static demonstrators and earlier scripts under `prototype/` and `pre_archive/` are also historical
 evidence. They must not silently override current requirements or contracts.
