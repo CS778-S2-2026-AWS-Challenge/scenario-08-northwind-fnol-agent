@@ -30,7 +30,7 @@ def _claim(repository: FixtureRepository, suffix: str) -> WorkingClaim:
         customer_next_step=CustomerNextStep(
             status='staff_review',
             summary='Northwind staff are reviewing the claim.',
-            responsible_party=ResponsibleParty.NORTHWIND,
+            responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
         ),
         created_at=FIXED_TIME,
         updated_at=FIXED_TIME,

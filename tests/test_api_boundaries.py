@@ -31,19 +31,23 @@ def test_non_health_routes_declare_the_expected_authentication_boundary(app: Fas
         '/api/claims/message': require_claimant,
     }
     health_paths = {'/health', '/health/live', '/health/ready'}
-    public_paths = {'/api/v1/auth/sessions'}
+    public_routes = {
+        ('/api/v1/auth/sessions', 'POST'),
+        ('/api/v1/auth/accounts', 'POST'),
+        ('/api/v1/staff/auth/sessions', 'POST'),
+    }
 
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in health_paths:
             continue
 
         dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-        if route.path in public_paths:
+        if any((route.path, method) in public_routes for method in route.methods):
             assert not dependency_calls, f'Public route {route.path} unexpectedly requires auth.'
             continue
 
         expected: Callable[..., object] | None
-        if route.path.startswith('/api/v1/workbench/'):
+        if route.path.startswith(('/api/v1/workbench/', '/api/v1/staff/')):
             expected = require_staff
         elif route.path.startswith(('/api/v1/auth/', '/api/v1/account')):
             expected = require_claimant_session

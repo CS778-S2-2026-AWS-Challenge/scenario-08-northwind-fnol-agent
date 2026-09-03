@@ -121,10 +121,19 @@ def _validate_staff_update(
     if stored.assigned_to is not None and handoff.assigned_to != stored.assigned_to:
         raise _conflict('An accepted handoff cannot be reassigned by overwriting its owner.')
 
+    active_coworker_ids = {
+        item.staff_id for item in repository.list_claim_coworkers(claim.claim_id)
+    }
+    coworker_progress = (
+        idempotency.actor_id in active_coworker_ids
+        and handoff.status is HandoffStatus.IN_PROGRESS
+        and stored.status in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}
+    )
     if (
         stored.status in {HandoffStatus.ACCEPTED, HandoffStatus.IN_PROGRESS}
         and stored.assigned_to is not None
         and idempotency.actor_id != stored.assigned_to
+        and not coworker_progress
     ):
         raise _conflict('Only the persisted handoff owner can continue or resolve the work.')
 

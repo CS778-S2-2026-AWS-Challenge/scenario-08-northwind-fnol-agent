@@ -11,10 +11,15 @@ from backend.adapters.claims_service import (
 )
 from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter, MockHandoffDispatchAdapter
-from backend.adapters.identity import FixtureIdentityRepository
+from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.adapters.policy_history import PolicyHistoryAdapter
+from backend.adapters.staff_identity import (
+    FixtureStaffIdentityRepository,
+    SQLiteStaffIdentityRepository,
+)
 from backend.api.admin import router as admin_router
+from backend.api.capabilities import router as capabilities_router
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
 from backend.api.evidence import router as evidence_router
@@ -23,29 +28,40 @@ from backend.api.health import router as health_router
 from backend.api.identity import router as identity_router
 from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
+from backend.api.staff_agent import router as staff_agent_router
+from backend.api.staff_identity import router as staff_identity_router
+from backend.api.workbench import conversation_router as workbench_conversation_router
 from backend.api.workbench import router as workbench_router
 from backend.core.config import AgentRuntimeProfile, DataRuntimeProfile, Settings
 from backend.core.cors import configure_cors
 from backend.core.errors import register_exception_handlers
 from backend.core.middleware import RequestIdMiddleware
-from backend.core.model_gateway import ConfigurationBackedModelGateway
+from backend.core.model_gateway import ConfigurationBackedModelGateway, build_scoped_model_gateway
 from backend.core.runtime_profiles import (
     DataRuntimeBundle,
     RuntimeCapabilityStatus,
     build_data_runtime_bundle,
     validate_data_runtime_bundle,
 )
-from backend.domain.model_gateway import ModelGatewayError, ModelGatewayErrorCode
+from backend.domain.model_gateway import (
+    STAFF_AGENT_PRIVACY_CLASS,
+    STAFF_AGENT_PURPOSE,
+    ModelGatewayError,
+    ModelGatewayErrorCode,
+)
+from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
     resolve_external_service_entry,
 )
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
+from backend.services.staff_agent import GatewayStaffAgent, StaffAgentTurnProvider
 
 
 def create_app(
@@ -61,6 +77,8 @@ def create_app(
     model_gateway_registry: ModelGatewayRegistry | None = None,
     identity_repository: IdentityRepository | None = None,
     configuration_repository: ConfigurationRepository | None = None,
+    staff_identity_repository: StaffIdentityRepository | None = None,
+    staff_agent_turn_provider: StaffAgentTurnProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
     injected_data_dependencies = any(
@@ -105,7 +123,26 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings
-    app.state.identity_repository = identity_repository or FixtureIdentityRepository()
+    if identity_repository is not None:
+        app.state.identity_repository = identity_repository
+    elif resolved_settings.developer_mode:
+        app.state.identity_repository = FixtureIdentityRepository()
+    else:
+        app.state.identity_repository = SQLiteIdentityRepository(resolved_settings.identity_db_path)
+    if staff_identity_repository is not None:
+        app.state.staff_identity_repository = staff_identity_repository
+    elif resolved_settings.developer_mode:
+        app.state.staff_identity_repository = FixtureStaffIdentityRepository()
+    else:
+        staff_repository = SQLiteStaffIdentityRepository(resolved_settings.staff_identity_db_path)
+        if resolved_settings.staff_bootstrap_email:
+            staff_repository.provision_account(
+                resolved_settings.staff_bootstrap_email,
+                resolved_settings.staff_bootstrap_password,
+                resolved_settings.staff_bootstrap_display_name,
+                ('claims_professional',),
+            )
+        app.state.staff_identity_repository = staff_repository
     app.state.configuration_repository = configuration_repository or ConfigurationRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
@@ -132,9 +169,20 @@ def create_app(
             bundle.knowledge_retrieval,
         )
         app.state.agent_runtime_status = 'configured'
+        app.state.staff_agent_turn_provider = staff_agent_turn_provider or GatewayStaffAgent(
+            build_scoped_model_gateway(
+                resolved_settings,
+                purpose=STAFF_AGENT_PURPOSE,
+                privacy_class=STAFF_AGENT_PRIVACY_CLASS,
+                prompt_version=STAFF_ASSISTANT_PROMPT_ID,
+                profile_suffix='staff-assistant',
+                registry=model_gateway_registry,
+            )
+        )
     else:
         base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
+        app.state.staff_agent_turn_provider = staff_agent_turn_provider
     app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
@@ -166,11 +214,15 @@ def create_app(
 
     app.include_router(health_router)
     app.include_router(identity_router)
+    app.include_router(staff_identity_router)
+    app.include_router(staff_agent_router)
     app.include_router(legacy_router)
+    app.include_router(capabilities_router)
     app.include_router(claims_router)
     app.include_router(integrations_router)
     app.include_router(evidence_router)
     app.include_router(workbench_router)
+    app.include_router(workbench_conversation_router)
     app.include_router(demo_router)
     app.include_router(handoffs_router)
     app.include_router(admin_router)

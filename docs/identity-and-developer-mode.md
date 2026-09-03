@@ -75,6 +75,23 @@ staff, administrator, or integration credentials. Health endpoints may remain av
 for diagnosis. If readiness later includes identity capability, it must report the
 missing verifier honestly rather than imply protected requests are usable.
 
+### Implemented Local Staff Sessions
+
+The current normal-mode local runtime has a separate persistent staff account and session adapter.
+It stores staff accounts and revocable session hashes in a dedicated SQLite database, distinct
+from claimant accounts and claimant sessions. The staff login route returns an opaque token once;
+the server resolves it to a provider-neutral `staff` principal with the Workbench scopes.
+
+Initial local provisioning is explicit through the paired
+`NORTHWIND_STAFF_BOOTSTRAP_EMAIL`/`NORTHWIND_STAFF_BOOTSTRAP_PASSWORD` settings. The account is
+created only when that email is absent, and only the salted scrypt password hash is persisted.
+The bootstrap secret should be removed from the process environment after provisioning.
+
+Developer mode instead provides one isolated fixture staff account and still accepts the bounded
+synthetic compatibility token for existing tests. Neither path is a claim that enterprise staff
+identity is complete. An approved production IdP, SSO/MFA, recovery, account lifecycle,
+organisation/role provisioning, and per-Claim entitlement policy remain separate work.
+
 ## Principal Contract
 
 The application-level principal is provider-neutral. A verified token, session, mTLS
@@ -293,7 +310,7 @@ security migration, not a flag rename. #247 and its consumers must preserve thes
 The current customer client has a synthetic claimant fallback, the static Employee
 Workbench contains a synthetic staff token, and the shared test fixtures construct
 `Settings()` while using synthetic credentials. These are explicit migration inputs for
-#247, not evidence that developer mode should remain implicitly enabled.
+Issue #247 is not evidence that developer mode should remain implicitly enabled.
 
 ## Authentication and Authorisation Order
 
@@ -410,7 +427,7 @@ principal and its base scope, preserves existing caller/domain checks, and must 
 `tools:invoke` into wildcard operation authority. It does not need to complete the future
 operation/purpose policy in order to satisfy the bounded Day-2 identity slice.
 
-#247 must not be described as completing production identity, staff entitlement policy,
+Issue #247 must not be described as completing production identity, staff entitlement policy,
 operation-specific integration authorisation, or persisted access audit unless those
 capabilities and their tests are deliberately added to that issue's scope. The contract
 exists so those boundaries cannot be accidentally erased while the first implementation

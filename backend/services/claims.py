@@ -296,6 +296,25 @@ def get_claim(
     return _claimant_claim(repository, claim)
 
 
+def promote_anonymous_claim(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    anonymous_session: str,
+) -> ClaimantClaim:
+    """Attach the current anonymous conversation to the authenticated account."""
+    if not anonymous_session:
+        raise _claim_not_found()
+    promoted = repository.promote_claim_owner(
+        claim_id,
+        f'anonymous:{anonymous_session}',
+        principal.subject,
+    )
+    if promoted is None:
+        raise _claim_not_found()
+    return _claimant_claim(repository, promoted)
+
+
 def list_claims(
     repository: ClaimRepository,
     principal: Principal,
@@ -368,7 +387,11 @@ def start_session(
         raise _claim_not_found()
 
     active_session = repository.get_active_session(claim_id, principal.subject)
-    if active_session is not None and active_session.status is SessionStatus.ACTIVE:
+    if (
+        payload.intent != 'new'
+        and active_session is not None
+        and active_session.status is SessionStatus.ACTIVE
+    ):
         session = active_session
         try:
             repository.save_idempotency(
@@ -420,6 +443,14 @@ def start_session(
             started_at=timestamp,
             last_active_at=timestamp,
         )
+        if active_session is not None and active_session.status is SessionStatus.ACTIVE:
+            # A claim has one active conversation at a time. Preserve the old
+            # transcript while closing it before promoting the new session.
+            repository.save_session(
+                active_session.model_copy(
+                    update={'status': SessionStatus.CLOSED, 'closed_at': timestamp}
+                )
+            )
         updated_claim = claim.model_copy(
             update={
                 'active_session_id': session.session_id,
