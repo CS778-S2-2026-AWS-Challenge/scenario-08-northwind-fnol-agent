@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from uuid import UUID
 
 from fastapi import Header, Request
 
@@ -121,29 +122,47 @@ def _resolve_principal(
         raise _authentication_required(required_message)
 
     settings: Settings = request.app.state.settings
-    if settings.identity_mode is IdentityMode.NORMAL:
-        # No production verifier is configured in this bounded Week-4 slice. Normal mode
-        # is deliberately fail-closed instead of falling back to synthetic credentials.
-        raise _authentication_required(failure_message)
-
     session = request.app.state.identity_repository.get_session(sha256(token.encode()).hexdigest())
     principal = (
         Principal(
             subject=session.customer_id,
             actor_type='claimant',
             scopes=CLAIMANT_SCOPES,
-            auth_source='developer:claimant_session',
-            synthetic=True,
+            auth_source=(
+                'developer:claimant_session'
+                if settings.identity_mode is IdentityMode.DEVELOPER
+                else 'runtime:claimant_session'
+            ),
+            synthetic=settings.identity_mode is IdentityMode.DEVELOPER,
             expires_at=session.expires_at,
         )
         if session is not None
         else None
     )
 
-    for profile in _synthetic_profiles(settings):
-        if principal is None and profile.token == token:
-            principal = profile.principal
-            break
+    if principal is None:
+        staff_session = request.app.state.staff_identity_repository.get_session(
+            sha256(token.encode()).hexdigest()
+        )
+        if staff_session is not None:
+            principal = Principal(
+                subject=staff_session.staff_id,
+                actor_type='staff',
+                scopes=STAFF_SCOPES,
+                auth_source=(
+                    'developer:staff_session'
+                    if settings.identity_mode is IdentityMode.DEVELOPER
+                    else 'runtime:staff_session'
+                ),
+                synthetic=settings.identity_mode is IdentityMode.DEVELOPER,
+                expires_at=staff_session.expires_at,
+            )
+
+    if settings.identity_mode is IdentityMode.DEVELOPER:
+        for profile in _synthetic_profiles(settings):
+            if principal is None and profile.token == token:
+                principal = profile.principal
+                break
 
     if principal is None:
         raise _authentication_required(failure_message)
@@ -176,7 +195,23 @@ def _verify_principal(
 def require_claimant(
     request: Request,
     authorization: str | None = Header(default=None),
+    anonymous_session: str | None = Header(default=None, alias='X-Northwind-Anonymous-Session'),
 ) -> Principal:
+    # Anonymous claimant sessions are deliberately limited to the claimant API. They let a
+    # visitor start a report before authentication; the browser must generate and retain the
+    # high-entropy session identifier. Account and staff boundaries still require real auth.
+    if not authorization and anonymous_session:
+        try:
+            UUID(anonymous_session)
+        except (ValueError, AttributeError):
+            raise _authentication_required('The anonymous claimant session is invalid.') from None
+        return Principal(
+            subject=f'anonymous:{anonymous_session}',
+            actor_type='claimant',
+            scopes=CLAIMANT_SCOPES,
+            auth_source='anonymous:browser_session',
+            synthetic=True,
+        )
     return _verify_principal(
         request,
         authorization,
@@ -197,7 +232,7 @@ def require_claimant_session(
         required_scopes=CLAIMANT_SCOPES,
         credential_label='claimant',
     )
-    if principal.auth_source != 'developer:claimant_session':
+    if principal.auth_source not in {'developer:claimant_session', 'runtime:claimant_session'}:
         raise _authentication_required('An active claimant session is required.')
     return principal
 

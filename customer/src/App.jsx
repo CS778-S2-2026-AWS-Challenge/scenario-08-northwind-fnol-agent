@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiRequestError,
   confirmClaimFields,
@@ -6,15 +6,25 @@ import {
   createExternalClaim,
   grantAssessorConsent,
   getAuthenticatedAccount,
+  hasClaimantAccessToken,
   getClaim,
   getClaimMessages,
+  getClaimEvidence,
+  getRuntimeCapabilities,
   listClaims,
   loginClaimant,
   logoutClaimant,
   requestId,
   requestHumanSupport,
+  promoteAnonymousClaim,
   requestAssessorRouting,
+  registerClaimant,
+  requestEvidenceUpload,
+  uploadEvidenceContent,
+  completeEvidenceUpload,
   resumeClaimSession,
+  startClaimSession,
+  streamClaimUpdates,
   submitClaimMessage,
   setClaimantAccessToken,
   updateAccountPreferences,
@@ -22,7 +32,9 @@ import {
   updateClaimField,
 } from './api.js'
 import './App.css'
-import GuidedMotorClaim from './GuidedMotorClaim.jsx'
+import './styles/frontend-refactor.css'
+import MessageComposer from './components/MessageComposer.jsx'
+import ExternalServiceAction from './components/ExternalServiceAction.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
@@ -34,27 +46,6 @@ const INPUT_LABELS = {
   describe_incident: 'Incident description',
   provide_incident_location: 'Incident location',
   describe_loss: 'Damage or loss',
-}
-
-const CLAIM_MATERIALS = {
-  motor: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
-    ['Incident details', 'The date, time, location and a short account of what happened.'],
-    ['Vehicle and driver details', 'Registration plates and contact details, if available.'],
-    ['Photos or video', 'Damage and the wider scene, when it is safe to take them.'],
-  ],
-  home: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
-    ['Incident details', 'When it happened, what caused it and the affected areas.'],
-    ['Photos or video', 'Clear views of the damage and likely source, when safe.'],
-    ['Emergency work records', 'Invoices or reports for urgent work already completed.'],
-  ],
-  contents: [
-    ['Policy or client number', 'Helpful for finding your cover quickly.'],
-    ['Affected items', 'The brand, model, age and what happened to each item.'],
-    ['Proof of ownership', 'Receipts, photos or account statements, if available.'],
-    ['Photos of damage', 'Clear images of affected items and the surrounding area.'],
-  ],
 }
 
 const HANDOFF_STATUS_LABELS = {
@@ -128,7 +119,15 @@ function claimProgress(nextStep, form) {
 }
 
 function App() {
-  const [page, setPage] = useState('home')
+  const initialPage = (() => {
+    const path = globalThis.location?.pathname || '/'
+    if (path === '/auth/login') return 'login'
+    if (path === '/auth/register') return 'register'
+    if (path === '/account') return 'account'
+    if (path === '/how-it-works') return 'how-it-works'
+    return 'home'
+  })()
+  const [page, setPageState] = useState(initialPage)
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
@@ -145,6 +144,13 @@ function App() {
   const [editValue, setEditValue] = useState('')
   const [handoff, setHandoff] = useState(null)
   const [savedReports, setSavedReports] = useState(null)
+  const [detailsOpen, setDetailsOpen] = useState(true)
+  const [mobileView, setMobileView] = useState('chat')
+  const [workspaceView, setWorkspaceView] = useState('chat')
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState({ claim_types: ['motor', 'home', 'contents'], models: [] })
+  const [selectedModel, setSelectedModel] = useState('')
+  const [attachments, setAttachments] = useState([])
+  const [evidenceItems, setEvidenceItems] = useState([])
   const [resumeContext, setResumeContext] = useState(null)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
@@ -159,6 +165,81 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const hasStarted = claim !== null
+
+  useEffect(() => {
+    if (!hasClaimantAccessToken()) return
+    getAuthenticatedAccount()
+      .then((currentAccount) => setAccount(currentAccount))
+      .catch(() => setClaimantAccessToken(null))
+  }, [])
+
+  useEffect(() => {
+    if (account && (page === 'login' || page === 'register')) {
+      setPage('home', { replace: true })
+    }
+  // setPage is a stable local navigation helper; keep this guard tied to auth state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, page])
+
+  function routeForPage(nextPage) {
+    if (nextPage === 'login') return '/auth/login'
+    if (nextPage === 'register') return '/auth/register'
+    if (nextPage === 'account') return '/account'
+    if (nextPage === 'how-it-works') return '/how-it-works'
+    if (claim?.claim_id) return `/claims/${claim.claim_id}`
+    return '/'
+  }
+
+  function setPage(nextPage, { replace = false } = {}) {
+    setPageState(nextPage)
+    const nextPath = routeForPage(nextPage)
+    if (globalThis.location?.pathname !== nextPath) {
+      globalThis.history?.[replace ? 'replaceState' : 'pushState']({ northwindRoute: nextPage }, '', nextPath)
+    }
+  }
+
+  function pageForPath(pathname) {
+    if (pathname === '/auth/login') return 'login'
+    if (pathname === '/auth/register') return 'register'
+    if (pathname === '/account') return account ? 'account' : 'login'
+    if (pathname === '/how-it-works') return hasStarted ? 'home' : 'how-it-works'
+    if (pathname.startsWith('/claims/')) return claim?.claim_id ? 'home' : 'home'
+    return 'home'
+  }
+
+  useEffect(() => {
+    const onPopState = () => {
+      const path = globalThis.location?.pathname || '/'
+      const nextPage = pageForPath(path)
+      setPageState(nextPage)
+      const canonicalPath = nextPage === 'home' && claim?.claim_id
+        ? `/claims/${claim.claim_id}`
+        : routeForPage(nextPage)
+      if (path !== canonicalPath) {
+        globalThis.history?.replaceState({ northwindRoute: nextPage }, '', canonicalPath)
+      }
+    }
+    globalThis.addEventListener?.('popstate', onPopState)
+    return () => globalThis.removeEventListener?.('popstate', onPopState)
+  // The handlers intentionally read the latest route state when this effect is rebound.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, claim?.claim_id, hasStarted, page])
+
+  useEffect(() => {
+    const expectedPath = page === 'login'
+      ? '/auth/login'
+      : page === 'register'
+        ? '/auth/register'
+        : page === 'account'
+          ? '/account'
+          : page === 'how-it-works'
+            ? '/how-it-works'
+            : claim?.claim_id ? `/claims/${claim.claim_id}` : '/'
+    if (globalThis.location?.pathname !== expectedPath) {
+      globalThis.history?.replaceState({ northwindRoute: page }, '', expectedPath)
+    }
+  }, [page, claim?.claim_id])
 
   const isBusy = [
     'starting',
@@ -166,7 +247,6 @@ function App() {
     'confirming',
     'saving',
     'requesting-support',
-    'refreshing',
     'creating-claim',
     'loading-reports',
     'resuming',
@@ -181,7 +261,6 @@ function App() {
     () => Object.entries(form).filter(([, field]) => field.status === 'confirmed'),
     [form],
   )
-  const hasStarted = claim !== null
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
   const progress = useMemo(() => claimProgress(nextStep, form), [nextStep, form])
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
@@ -206,17 +285,162 @@ function App() {
     }))
   }
 
-  const claimTypePrompts = {
-    motor: 'For example: Another car reversed into mine while it was parked.',
-    home: 'For example: A pipe burst overnight and damaged the kitchen floor.',
-    contents: 'For example: My laptop and camera were stolen from my apartment.',
-  }
-
   useEffect(() => {
     if (claim?.revision) {
       latestRevision.current = Math.max(latestRevision.current, claim.revision)
     }
   }, [claim?.revision])
+
+  useEffect(() => {
+    if (!claim?.claim_id || !sessionId) return undefined
+    const controller = new AbortController()
+    let active = true
+    let reconnectDelay = 1000
+
+    async function applyLiveUpdate(event) {
+      if (!active || event.claim_revision <= latestRevision.current) return
+      const [currentClaim, conversation] = await Promise.all([
+        getClaim(claim.claim_id),
+        getClaimMessages(claim.claim_id, sessionId),
+      ])
+      if (!active) return
+      latestRevision.current = currentClaim.revision
+      setClaim(currentClaim)
+      setForm(currentClaim.form)
+      setNextStep(currentClaim.customer_next_step)
+      setHandoff(currentClaim.handoff || null)
+      setMessages(conversation.items)
+      reconnectDelay = 1000
+    }
+
+    async function connect() {
+      while (active && !controller.signal.aborted) {
+        try {
+          await streamClaimUpdates({
+            claimId: claim.claim_id,
+            sessionId,
+            afterRevision: latestRevision.current,
+            signal: controller.signal,
+            onEvent: applyLiveUpdate,
+          })
+        } catch (streamFailure) {
+          if (!active || controller.signal.aborted) return
+          if (
+            streamFailure instanceof ApiRequestError
+            && streamFailure.code === 'INVALID_EVENT_CURSOR'
+            && streamFailure.currentRevision
+          ) {
+            latestRevision.current = streamFailure.currentRevision
+          }
+        }
+        if (!active || controller.signal.aborted) return
+        await new Promise((resolve) => globalThis.setTimeout(resolve, reconnectDelay))
+        reconnectDelay = Math.min(reconnectDelay * 2, 8000)
+      }
+    }
+
+    connect()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [claim?.claim_id, sessionId])
+
+  useEffect(() => {
+    if (!account) return undefined
+    let active = true
+    listClaims()
+      .then((response) => {
+        if (active) setSavedReports(response.items.filter((item) => item.can_resume))
+      })
+      .catch(() => {
+        if (active) setSavedReports(null)
+      })
+    return () => { active = false }
+  }, [account])
+
+  useEffect(() => {
+    let active = true
+    getRuntimeCapabilities()
+      .then((capabilities) => {
+        if (!active) return
+        setRuntimeCapabilities(capabilities)
+        setSelectedModel(capabilities.models?.[0]?.id || '')
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!claim?.claim_id) {
+      setEvidenceItems([])
+      setAttachments([])
+      return undefined
+    }
+    let active = true
+    getClaimEvidence(claim.claim_id)
+      .then((response) => {
+        if (active) {
+          setEvidenceItems(response.items || [])
+          setAttachments((current) => current.some((item) => item.status === 'uploading')
+            ? current
+            : (response.items || []).map((item) => ({
+              id: item.evidence_id,
+              evidenceId: item.evidence_id,
+              name: item.original_filename || item.kind,
+              status: item.file_status === 'awaiting_upload' ? 'failed' : 'uploaded',
+              statusLabel: item.file_status === 'awaiting_upload' ? 'Upload incomplete' : (item.file_status || 'Uploaded'),
+            })))
+          setClaim((current) => current ? { ...current, revision: response.revision } : current)
+        }
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [claim?.claim_id])
+
+  async function handleFileSelected(file) {
+    if (isBusy) return
+    setError('')
+    const localId = requestId('file')
+    setAttachments((current) => [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+    try {
+      let activeClaim = claim
+      if (!activeClaim) {
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType })
+        activeClaim = created.claim
+        setClaim(activeClaim)
+        setSessionId(created.session.session_id)
+        setForm(activeClaim.form)
+        setNextStep(activeClaim.customer_next_step)
+      }
+      const requested = await requestEvidenceUpload({
+        claimId: activeClaim.claim_id,
+        revision: activeClaim.revision,
+        file,
+        kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
+      })
+      setClaim((current) => current ? { ...current, revision: requested.revision } : current)
+      await uploadEvidenceContent({ upload: requested.upload, file })
+      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+      const checksum = `sha256:${Array.from(new Uint8Array(checksumBuffer), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+      const completed = await completeEvidenceUpload({
+        claimId: activeClaim.claim_id,
+        evidenceId: requested.evidence_id,
+        revision: requested.revision,
+        checksum,
+      })
+      setClaim((current) => current ? { ...current, revision: completed.revision } : current)
+      setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
+      setAttachments((current) => current.map((item) => item.id === localId
+        ? { ...item, status: 'uploaded', statusLabel: 'Uploaded', evidenceId: completed.evidence.evidence_id }
+        : item))
+    } catch (requestError) {
+      setAttachments((current) => current.map((item) => item.id === localId
+        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file) }
+        : item))
+      showError(requestError)
+    }
+  }
 
   async function refreshAfterConflict() {
     if (!claim) return
@@ -225,49 +449,6 @@ function App() {
     setForm(current.form)
     setNextStep(current.customer_next_step)
   }
-
-  const refreshClaimStatus = useCallback(async ({ silent = false } = {}) => {
-    if (!claim) return
-    if (!silent) {
-      setError('')
-      setStatus('refreshing')
-    }
-    try {
-      const current = await getClaim(claim.claim_id)
-      if (current.revision < latestRevision.current) return
-      latestRevision.current = current.revision
-      setClaim(current)
-      setForm(current.form)
-      setNextStep(current.customer_next_step)
-      setHandoff(current.handoff || null)
-      if (current.customer_next_step?.status === 'staff_update') setHandoff(null)
-      if (sessionId) {
-        const latest = await getClaimMessages(claim.claim_id, sessionId)
-        setMessages(latest.items)
-      }
-      if (!silent) setStatus('idle')
-    } catch (requestError) {
-      if (!silent) {
-        setError(requestError.message || 'We could not refresh your report. Please try again.')
-        setStatus('error')
-      }
-    }
-  }, [claim, sessionId])
-
-  useEffect(() => {
-    if (!claim || !sessionId) return undefined
-    const refreshVisibleConversation = () => {
-      if (document.visibilityState === 'visible') {
-        refreshClaimStatus({ silent: true })
-      }
-    }
-    window.addEventListener('focus', refreshVisibleConversation)
-    document.addEventListener('visibilitychange', refreshVisibleConversation)
-    return () => {
-      window.removeEventListener('focus', refreshVisibleConversation)
-      document.removeEventListener('visibilitychange', refreshVisibleConversation)
-    }
-  }, [claim, sessionId, refreshClaimStatus])
 
   function showError(requestError) {
     if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
@@ -287,6 +468,7 @@ function App() {
     setError('')
     setFailedMessage(null)
     setStatus(hasStarted ? 'sending' : 'starting')
+    let messageWasSubmitted = Boolean(claim)
     try {
       if (pendingSubmission.current?.text !== text) {
         pendingSubmission.current = {
@@ -297,7 +479,7 @@ function App() {
         }
       }
       const operation = pendingSubmission.current
-      setPendingMessage({ text, audience: 'Northwind claim team' })
+      setPendingMessage({ text })
       let activeClaim = claim
       let activeSessionId = sessionId
       if (!activeClaim) {
@@ -308,6 +490,7 @@ function App() {
         setSessionId(activeSessionId)
         setForm(created.claim.form)
         setNextStep(created.claim.customer_next_step)
+        messageWasSubmitted = true
       }
 
       const turn = await submitClaimMessage({
@@ -337,13 +520,67 @@ function App() {
       const knownRejection = requestError instanceof ApiRequestError
         && requestError.status >= 400
         && requestError.status < 500
-      setFailedMessage({
-        text,
-        sender: 'You',
-        audience: 'Northwind claim team',
-        delivery: knownRejection ? 'Rejected before delivery' : 'Delivery outcome unknown',
-        retry: knownRejection ? 'Correct the issue and retry' : 'Retry to confirm delivery safely',
-      })
+      if (messageWasSubmitted) {
+        setFailedMessage({
+          text,
+          sender: 'You',
+          message: knownRejection
+            ? 'We could not send that message. Please try again.'
+            : 'We could not confirm delivery. Please try again.',
+        })
+      }
+      showError(requestError)
+    }
+  }
+
+  async function startNewChat() {
+    if (isBusy) return
+    const hasConversationContent = messages.length > 0
+      || Object.keys(form).length > 0
+      || attachments.length > 0
+      || Boolean(handoff)
+    if (claim && !hasConversationContent) {
+      setDraft('')
+      setError('')
+      setFailedMessage(null)
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      return
+    }
+    setError('')
+    setFailedMessage(null)
+    setStatus('starting')
+    try {
+      if (claim && hasConversationContent) {
+        const session = await startClaimSession({ claimId: claim.claim_id, intent: 'new' })
+        const refreshedClaim = await getClaim(claim.claim_id)
+        setClaim(refreshedClaim)
+        setForm(refreshedClaim.form)
+        setNextStep(refreshedClaim.customer_next_step)
+        setSessionId(session.session_id)
+        setMessages([])
+        setResumeContext(null)
+        setHandoff(null)
+        setWorkspaceView('chat')
+        setMobileView('chat')
+        setDraft('')
+        setStatus('idle')
+        return
+      }
+      const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+      setClaim(created.claim)
+      setSessionId(created.session.session_id)
+      setMessages([])
+      setForm(created.claim.form)
+      setNextStep(created.claim.customer_next_step)
+      setHandoff(null)
+      setEvidenceItems([])
+      setAttachments([])
+      setWorkspaceView('chat')
+      setMobileView('chat')
+      setDraft('')
+      setStatus('idle')
+    } catch (requestError) {
       showError(requestError)
     }
   }
@@ -624,8 +861,68 @@ function App() {
         password: formData.get('password'),
       })
       setClaimantAccessToken(session.access_token)
+      if (claim?.claim_id && !account) {
+        try {
+          const promoted = await promoteAnonymousClaim(claim.claim_id)
+          setClaim(promoted)
+          setForm(promoted.form)
+          setNextStep(promoted.customer_next_step)
+        } catch (promotionError) {
+          if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
+        }
+      }
       setAccount(await getAuthenticatedAccount())
-      setPage('account'); setAuthStatus('idle')
+      if (!claim) {
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+        setClaim(created.claim)
+        setSessionId(created.session.session_id)
+        setForm(created.claim.form)
+        setNextStep(created.claim.customer_next_step)
+      }
+      setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
+    } catch (requestError) {
+      setClaimantAccessToken(null)
+      setAuthError(requestError.message)
+      setAuthStatus('idle')
+    }
+  }
+
+  async function signUp(event) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    const password = String(formData.get('password') || '')
+    const confirmPassword = String(formData.get('confirm_password') || '')
+    if (password !== confirmPassword) {
+      setAuthError('Passwords do not match.')
+      return
+    }
+    setAuthStatus('loading'); setAuthError('')
+    try {
+      const session = await registerClaimant({
+        display_name: formData.get('display_name'),
+        email: formData.get('email'),
+        password,
+      })
+      setClaimantAccessToken(session.access_token)
+      if (claim?.claim_id && !account) {
+        try {
+          const promoted = await promoteAnonymousClaim(claim.claim_id)
+          setClaim(promoted)
+          setForm(promoted.form)
+          setNextStep(promoted.customer_next_step)
+        } catch (promotionError) {
+          if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
+        }
+      }
+      setAccount(await getAuthenticatedAccount())
+      if (!claim) {
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+        setClaim(created.claim)
+        setSessionId(created.session.session_id)
+        setForm(created.claim.form)
+        setNextStep(created.claim.customer_next_step)
+      }
+      setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
     } catch (requestError) {
       setClaimantAccessToken(null)
       setAuthError(requestError.message)
@@ -636,7 +933,21 @@ function App() {
   async function signOut() {
     setAuthStatus('loading'); setAuthError('')
     try { await logoutClaimant() } catch (requestError) { setAuthError(requestError.message) }
-    setAccount(null); setPage('home'); setAuthStatus('idle')
+    setAccount(null)
+    setSavedReports(null)
+    setClaim(null)
+    setSessionId(null)
+    setMessages([])
+    setForm({})
+    setNextStep(null)
+    setHandoff(null)
+    setAttachments([])
+    setEvidenceItems([])
+    setResumeContext(null)
+    setWorkspaceView('chat')
+    setMobileView('chat')
+    setPage('home', { replace: true })
+    setAuthStatus('idle')
   }
 
   async function openSavedClaims() {
@@ -669,51 +980,44 @@ function App() {
   }
 
   return (
-    <div className="customer-app">
-      <header className="product-header">
+    <div className={`customer-app ${!hasStarted && page === 'home' ? 'entry-shell' : ''}`}>
+      <header className={`product-header ${hasStarted && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
         <a className="brand" href="/" onClick={(event) => { event.preventDefault(); setPage('home') }} aria-label="Northwind home">
           <span className="brand-mark">N</span>
           <span>Northwind Insurance</span>
         </a>
-        {!hasStarted && page === 'home' && (
-          <nav className="public-nav" aria-label="Main navigation">
-            <a href="#claims">Claims</a>
-            <a href="#how-it-works">How it works</a>
-            <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
-              {account ? 'My account' : 'Log in'}
-            </button>
-          </nav>
+        {!hasStarted && page !== 'home' && page !== 'how-it-works' && (
+          <button className="login-button" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
+            {account ? 'My account' : 'Log in'}
+          </button>
         )}
-        {hasStarted && (
+        {hasStarted && !['login', 'register'].includes(page) && (
           <div className="header-actions">
-            <span className="draft-label">Draft report</span>
-            <button
-              className="support-button"
-              type="button"
-              onClick={requestSupport}
-              disabled={isBusy || Boolean(handoff)}
-            >
-              {status === 'requesting-support' ? 'Requesting support...' : 'Request human support'}
+            <button className="aux-link" type="button" onClick={() => setPage('home')}>Use the traditional web form</button>
+            <button className="support-button" type="button" onClick={requestSupport} disabled={isBusy || Boolean(handoff)}>
+              {status === 'requesting-support' ? 'Opening staff assistance...' : 'Staff Assistance'}
             </button>
           </div>
         )}
       </header>
 
-      {!hasStarted && page === 'guided-motor' ? (
-        <GuidedMotorClaim
-          initialDescription={draft}
-          onExit={(description) => {
-            setDraft(description)
-            setPage('home')
-          }}
-        />
+      {!hasStarted && page === 'how-it-works' ? (
+        <main className="how-it-works-page">
+          <section className="how-it-works-card" aria-labelledby="how-it-works-title">
+            <button className="back-link" type="button" onClick={() => setPage('home')}>← Back</button>
+            <p className="eyebrow">A calmer way to start</p>
+            <h1 id="how-it-works-title">How this works</h1>
+            <p>Tell us what happened in your own words. You do not need to know the right insurance terms or follow a fixed questionnaire.</p>
+            <p>Our claims assistant keeps track of the details, asks only for what is still needed, and explains the next step clearly. You can start without an account and log in later if you want to save your progress.</p>
+          </section>
+        </main>
       ) : !hasStarted && page === 'account' && account ? (
-        <main className="login-page">
+        <main className="auth-page auth-page-account">
           <section className="login-card account-card" aria-labelledby="account-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
-            <p className="eyebrow">Development account</p>
+            <p className="eyebrow">Northwind account</p>
             <h1 id="account-title">Your account</h1>
-            <p className="prototype-note" role="note">This authenticated account uses anonymous synthetic development data. It is not a production Northwind identity.</p>
+            <p className="prototype-note" role="note">Manage your profile and communication preferences.</p>
             <form className="login-form" onSubmit={saveProfile}>
               <label htmlFor="account-name">Display name</label>
               <input id="account-name" name="display_name" defaultValue={account.profile.display_name} required />
@@ -735,22 +1039,44 @@ function App() {
             <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
           </section>
         </main>
-      ) : !hasStarted && page === 'login' ? (
-        <main className="login-page">
+      ) : (page === 'login' || page === 'register') ? (
+        <main className="auth-page auth-page-login">
           <section className="login-card" aria-labelledby="login-title">
             <button className="back-link" type="button" onClick={() => setPage('home')}>← Back to claims</button>
             <p className="eyebrow">Your Northwind account</p>
-            <h1 id="login-title">Welcome back</h1>
-            <p className="login-intro">Sign in to view an existing claim or continue a saved report.</p>
-            <form className="login-form" onSubmit={signIn}>
-              <label htmlFor="customer-email">Email address</label>
-              <input id="customer-email" name="email" type="email" autoComplete="email" />
-              <label htmlFor="customer-password">Password</label>
-              <input id="customer-password" name="password" type="password" autoComplete="current-password" />
-              <button className="primary-button login-submit" type="submit" disabled={authStatus !== 'idle'}>{authStatus === 'loading' ? 'Logging in…' : 'Log in'}</button>
-              <p className="prototype-note" role="note">Development/test login only. Accounts and displayed data are anonymous and synthetic; no production identity provider is connected.</p>
-              {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
-            </form>
+            {page === 'login' ? (
+              <>
+                <h1 id="login-title">Welcome back</h1>
+                <p className="login-intro">Sign in to view an existing claim or continue a saved claim.</p>
+                <form className="login-form" onSubmit={signIn}>
+                  <label htmlFor="customer-email">Email address</label>
+                  <input id="customer-email" name="email" type="email" autoComplete="email" required />
+                  <label htmlFor="customer-password">Password</label>
+                  <input id="customer-password" name="password" type="password" autoComplete="current-password" required />
+                  <button className="primary-button login-submit" type="submit" disabled={authStatus !== 'idle'}>{authStatus === 'loading' ? 'Logging in…' : 'Log in'}</button>
+                  {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+                </form>
+                <p className="auth-switch">New to Northwind? <button className="text-link" type="button" onClick={() => { setAuthError(''); setPage('register') }}>Create an account</button></p>
+              </>
+            ) : (
+              <>
+                <h1 id="login-title">Create your account</h1>
+                <p className="login-intro">Save your claim progress and return when you are ready.</p>
+                <form className="login-form" onSubmit={signUp}>
+                  <label htmlFor="customer-name">Your name</label>
+                  <input id="customer-name" name="display_name" autoComplete="name" required />
+                  <label htmlFor="customer-register-email">Email address</label>
+                  <input id="customer-register-email" name="email" type="email" autoComplete="email" required />
+                  <label htmlFor="customer-register-password">Password</label>
+                  <input id="customer-register-password" name="password" type="password" autoComplete="new-password" minLength="8" required />
+                  <label htmlFor="customer-confirm-password">Confirm password</label>
+                  <input id="customer-confirm-password" name="confirm_password" type="password" autoComplete="new-password" minLength="8" required />
+                  <button className="primary-button login-submit" type="submit" disabled={authStatus !== 'idle'}>{authStatus === 'loading' ? 'Creating account…' : 'Create account'}</button>
+                  {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+                </form>
+                <p className="auth-switch">Already have an account? <button className="text-link" type="button" onClick={() => { setAuthError(''); setPage('login') }}>Log in</button></p>
+              </>
+            )}
             <button className="secondary-button start-without-login" type="button" onClick={() => setPage('home')}>
               Start a claim without logging in
             </button>
@@ -762,129 +1088,168 @@ function App() {
         </main>
       ) : !hasStarted ? (
         <main className="entry-page">
-          <section className="entry-main">
+          <section className="entry-hero" aria-labelledby="entry-title">
             <div className="entry-content">
-              <p className="eyebrow">Claims, made a little easier</p>
-              <h1>We&apos;ll help you get back on track</h1>
-              <p className="entry-intro">
-                Start your claim online in a few minutes. No account or insurance jargon needed.
-              </p>
+              <p className="entry-brand-line" id="entry-title">Understand insurance. Understand you better.</p>
+              <p className="entry-intro">Tell us what happened — we&apos;ll take it from there.</p>
               <section id="claims" className="claim-starter" aria-labelledby="claim-starter-title">
-                <h2 id="claim-starter-title">Tell us what happened</h2>
+                <h1 id="claim-starter-title">Tell us what happened</h1>
                 <MessageComposer
                   draft={draft}
                   setDraft={setDraft}
                   onSubmit={sendMessage}
                   inputLabel="Incident description"
                   busy={isBusy}
-                  buttonLabel={status === 'starting' ? 'Starting report...' : failedMessage ? 'Retry claim message' : 'Continue claim'}
+                  buttonLabel={status === 'starting' ? 'Starting claim...' : failedMessage ? 'Retry claim message' : 'Start claim'}
                   error={error}
-                  placeholder={claimTypePrompts[claimType]}
+                  placeholder="Tell us what happened…"
+                  claimType={claimType}
+                  setClaimType={setClaimType}
+                  claimTypes={runtimeCapabilities.claim_types}
+                  models={runtimeCapabilities.models}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                  attachments={attachments}
+                  onFileSelected={handleFileSelected}
                 />
+                <div className="entry-hint-row">
+                  <span>Press Enter to start, or ask anything about a claim</span>
+                  <button className="text-link" type="button" onClick={() => setPage('how-it-works')}>How it works</button>
+                </div>
                 {failedMessage && (
                   <article className="message message-claimant is-failed">
                     <p className="message-author">{failedMessage.sender}</p>
                     <p>{failedMessage.text}</p>
-                    <p className="message-state">
-                      Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
-                    </p>
+                    <p className="message-state">{failedMessage.message}</p>
                   </article>
                 )}
-                <div className="choice-divider"><span>Optional guided claim</span></div>
-                <h3 id="claim-type-heading">Choose a claim type for guided help</h3>
-                <fieldset className="claim-tabs" aria-label="Claim type" aria-describedby="claim-type-heading">
-                  {['motor', 'home', 'contents'].map((type) => (
-                    <label
-                      key={type}
-                      className={`claim-option ${claimType === type ? 'is-selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="claim-type"
-                        value={type}
-                        checked={claimType === type}
-                        onChange={() => setClaimType(type)}
-                      />
-                      <span className="claim-tab-icon" aria-hidden="true">{type === 'motor' ? '↗' : type === 'home' ? '⌂' : '◇'}</span>
-                      {type[0].toUpperCase() + type.slice(1)}
-                    </label>
-                  ))}
-                </fieldset>
-              <div className="preparation-list">
-                <h3>Helpful to have ready for your {claimType} claim</h3>
-                <p>These items are useful, not required. You can start above without them and add missing information later.</p>
-                <ul>
-                  {CLAIM_MATERIALS[claimType].map(([title, description]) => (
-                    <li key={title}>
-                      <span className="material-check" aria-hidden="true">✓</span>
-                      <span><strong>{title}</strong><small>{description}</small></span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {claimType === 'motor' && (
-                <button className="guided-start-button" type="button" onClick={() => setPage('guided-motor')}>
-                  Start guided Motor claim
-                  <span>Three clear steps with draft saving</span>
-                </button>
-              )}
-              {claimType !== 'motor' && (
-                <p className="guided-unavailable">Guided submission is not configured for this claim type yet. You can still describe what happened above.</p>
-              )}
               </section>
-              <div className="resume-entry">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={loadSavedReports}
-                  disabled={isBusy}
-                >
-                  {status === 'loading-reports' ? 'Loading reports...' : 'Resume a saved report'}
+              <div className="entry-secondary-actions">
+                <button className="text-link entry-login-link" type="button" onClick={() => setPage(account ? 'account' : 'login')}>
+                  {account ? 'My account' : 'Log in'}
                 </button>
-                {savedReports !== null && (
-                  <section className="saved-reports" aria-labelledby="saved-reports-title">
-                    <h2 id="saved-reports-title">Saved reports</h2>
-                    {savedReports.length === 0 ? (
-                      <p>No saved reports are available to resume.</p>
-                    ) : (
-                      <ul>
-                        {savedReports.map((report) => (
-                          <li key={report.claim_id}>
-                            <div>
-                              <strong>{report.incident_type || 'Incident report'}</strong>
-                              <span>{report.customer_next_step.summary}</span>
-                            </div>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => resumeSavedReport(report.claim_id)}
-                              disabled={isBusy}
-                            >
-                              {status === 'resuming' ? 'Resuming...' : 'Resume report'}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                )}
+                {!account && <button className="text-link" type="button" onClick={() => setPage('register')}>Create an account</button>}
+                {account && savedReports?.length > 0 && <button className="text-link" type="button" onClick={() => loadSavedReports()} disabled={isBusy}>
+                  {status === 'loading-reports' ? 'Loading claims...' : 'Resume a claim'}
+                </button>}
               </div>
-              <div id="how-it-works" className="trust-row" aria-label="Claim service benefits">
-                <span>Securely saved</span>
-                <span>Pause anytime</span>
-                <span>Human help available</span>
-              </div>
+              {savedReports !== null && (
+                <section className="saved-reports" aria-labelledby="saved-reports-title">
+                  <h2 id="saved-reports-title">Claims in progress</h2>
+                  {savedReports.length === 0 ? (
+                    <p>No claims in progress need your attention.</p>
+                  ) : (
+                    <ul>
+                      {savedReports.map((report) => (
+                        <li key={report.claim_id}>
+                          <div>
+                            <strong>{report.incident_type || 'Incident report'}</strong>
+                            <span>{report.customer_next_step.summary}</span>
+                          </div>
+                          <button className="secondary-button" type="button" onClick={() => resumeSavedReport(report.claim_id)} disabled={isBusy}>
+                            {status === 'resuming' ? 'Resuming...' : 'Resume claim'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
             </div>
           </section>
-          <HelpfulDetails />
         </main>
       ) : (
-        <main className="intake-page">
-          <section className="conversation-panel" aria-labelledby="conversation-title">
+        <main className={`intake-page ${detailsOpen ? 'details-open' : 'details-closed'}`}>
+          <nav className="mobile-intake-tabs" aria-label="Claim workspace sections">
+            {[
+              ['history', 'History'],
+              ['chat', 'Chat'],
+              ['details', 'Details'],
+            ].map(([view, label]) => (
+              <button key={view} type="button" aria-selected={mobileView === view} onClick={() => setMobileView(view)}>
+                {label}
+              </button>
+            ))}
+          </nav>
+          <aside className={`intake-history mobile-view-${mobileView}`} aria-label="Conversation history">
+            <div className="history-actions" aria-label="Claim tools">
+              <button type="button" onClick={startNewChat} disabled={isBusy}>New chat</button>
+              <button type="button" onClick={() => setWorkspaceView('privacy')}>Privacy policy</button>
+              <button type="button" onClick={() => setWorkspaceView('history')}>Claim history</button>
+              <button type="button" onClick={() => setWorkspaceView('files')}>Uploaded files</button>
+            </div>
+            <div className="intake-history-label">Conversation history</div>
+            <div className="intake-history-list">
+              <button className="intake-history-item is-active" type="button" aria-current="page">
+                <span className="intake-history-title">Current claim</span>
+                <span className="intake-history-meta">{claim.incident_type || 'New report'} · {claim.claim_id}</span>
+              </button>
+            </div>
+            <div className="intake-history-bottom">
+              <button className="intake-profile" type="button" onClick={() => {
+                if (account) { setWorkspaceView('account'); setPage('account') }
+                else setPage('login')
+              }}>
+                <span className="intake-profile-avatar">{account?.profile?.display_name?.slice(0, 2).toUpperCase() || 'YU'}</span>
+                <span className="intake-profile-copy">
+                  <span>{account?.profile?.display_name || 'Log in to save your chat'}</span>
+                  <small>{account?.profile?.email || 'Account and preferences'}</small>
+                </span>
+              </button>
+            </div>
+          </aside>
+          <section className={`conversation-panel mobile-view-${mobileView} ${workspaceView !== 'chat' ? 'is-utility' : ''}`} aria-labelledby="conversation-title">
+            <div className="workspace-utility-page" hidden={workspaceView === 'chat'}>
+              <button className="back-link" type="button" onClick={() => { setWorkspaceView('chat'); setPage('home') }}>← Back to conversation</button>
+              <h1>{workspaceView === 'privacy' ? 'Privacy policy' : workspaceView === 'history' ? 'Claim history' : workspaceView === 'account' ? 'Your account' : 'Uploaded files'}</h1>
+              <p>{workspaceView === 'privacy' ? 'We only use the information needed to handle your claim and show you what has been recorded.' : workspaceView === 'history' ? 'Your claim conversations will appear here as they are saved.' : workspaceView === 'account' ? 'Manage your profile and communication preferences.' : 'Files you share for this claim appear here with their upload and processing status.'}</p>
+              {workspaceView === 'account' && account && (
+                <div className="workspace-account-content">
+                  <form className="login-form" onSubmit={saveProfile}>
+                    <label htmlFor="workspace-account-name">Display name</label>
+                    <input id="workspace-account-name" name="display_name" defaultValue={account.profile.display_name} required />
+                    <label htmlFor="workspace-account-email">Email address</label>
+                    <input id="workspace-account-email" value={account.profile.email} readOnly />
+                    <label htmlFor="workspace-account-phone">Phone</label>
+                    <input id="workspace-account-phone" name="phone" defaultValue={account.profile.phone} />
+                    <button className="primary-button" disabled={authStatus !== 'idle'}>Save profile</button>
+                  </form>
+                  <form className="login-form" onSubmit={savePreferences}>
+                    <label><input name="email" type="checkbox" defaultChecked={account.preferences.email} /> Email updates</label>
+                    <label><input name="sms" type="checkbox" defaultChecked={account.preferences.sms} /> SMS updates</label>
+                    <button className="secondary-button" disabled={authStatus !== 'idle'}>Save preferences</button>
+                  </form>
+                  <button className="secondary-button" type="button" onClick={signOut} disabled={authStatus !== 'idle'}>Log out</button>
+                  {authError && <p className="backend-status is-error" role="alert">{authError}</p>}
+                </div>
+              )}
+              {workspaceView === 'files' && (
+                evidenceItems.length > 0 ? (
+                  <ul className="uploaded-files-list">
+                    {evidenceItems.map((item) => (
+                      <li key={item.evidence_id} className="uploaded-file-row">
+                        <div><strong>{item.original_filename || item.kind}</strong><span>{item.media_type || 'File'} · {item.file_status || item.status}</span></div>
+                        <span className="file-status">{item.file_status === 'processing' ? 'Processing' : item.status === 'received' ? 'Received' : item.file_status}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : attachments.length > 0 ? (
+                  <ul className="uploaded-files-list">
+                    {attachments.map((item) => (
+                      <li key={item.id} className="uploaded-file-row">
+                        <div><strong>{item.name}</strong><span>Claim evidence</span></div>
+                        <span className="file-status">{item.statusLabel}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="empty-details">No files have been uploaded for this claim.</p>
+              )}
+            </div>
             <div className="conversation-heading">
-              <p className="eyebrow">Your report</p>
-              <h1 id="conversation-title">Let&apos;s build the details together</h1>
-              {handoff?.status !== 'in_progress' && <p>{nextStep?.summary}</p>}
+              <div>
+                <div className="claim-status">{claim.incident_type || 'Claim'} · {handoff ? 'Support requested' : 'In progress'}</div>
+                <h1 id="conversation-title">{claim.claim_id}</h1>
+              </div>
             </div>
 
             <section
@@ -905,36 +1270,41 @@ function App() {
             </section>
 
             <div className="message-list" aria-live="polite">
-              {messages.map((message) => (
-                <article className={`message message-${message.actor}`} key={message.message_id}>
-                  <p className="message-author">{message.actor === 'claimant' ? 'You' : 'Northwind'}</p>
-                  <p>{messageText(message)}</p>
-                  <p className="message-state">
-                    Sender: {message.actor === 'claimant' ? 'You' : 'Northwind'} · Audience: Shared claim conversation · Delivered
-                  </p>
+              {messages.map((message) => message.actor === 'claimant' ? (
+                <article className="msg-user" key={message.message_id}>
+                  <div>
+                    <div className="user-bubble">{messageText(message)}</div>
+                    <div className="msg-meta">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                  </div>
+                </article>
+              ) : (
+                <article className="msg-agent" key={message.message_id}>
+                  <div className="agent-bar" />
+                  <div className="agent-body">
+                    <div className="agent-label">Claims assistant</div>
+                    <div className="agent-text"><p>{messageText(message)}</p><button className="listen-message" type="button" onClick={() => { if (globalThis.speechSynthesis) { globalThis.speechSynthesis.cancel(); globalThis.speechSynthesis.speak(new SpeechSynthesisUtterance(messageText(message))) } }}>Listen</button></div>
+                  </div>
                 </article>
               ))}
               {status === 'sending' && pendingMessage && (
                 <article className="message message-claimant is-pending" aria-label="Message sending">
                   <p className="message-author">You</p>
                   <p>{pendingMessage.text}</p>
-                  <p className="message-state">Audience: {pendingMessage.audience} · Sending…</p>
+                  <p className="message-state">Sending…</p>
                 </article>
               )}
               {failedMessage && (
                 <article className="message message-claimant is-failed" role="alert">
                   <p className="message-author">{failedMessage.sender}</p>
                   <p>{failedMessage.text}</p>
-                  <p className="message-state">
-                    Audience: {failedMessage.audience} · {failedMessage.delivery} · {failedMessage.retry}
-                  </p>
+                  <p className="message-state">{failedMessage.message}</p>
                 </article>
               )}
             </div>
 
             {resumeContext && (
               <section className="resume-summary" aria-labelledby="resume-summary-title">
-                <p className="transfer-label">Report resumed</p>
+                <p className="transfer-label">Claim resumed</p>
                 <h2 id="resume-summary-title">Continue where you left off</h2>
                 {resumeContext.summary && <p>{resumeContext.summary}</p>}
                 {resumeContext.pending_items.length > 0 && (
@@ -975,18 +1345,31 @@ function App() {
                     <dd>Northwind support</dd>
                   </div>
                   <div>
-                    <dt>Your report</dt>
+                    <dt>Your claim</dt>
                     <dd>Saved with the details already provided</dd>
                   </div>
                 </dl>
-                <p>Your message will be saved for Northwind support. Start with @agent when you need an Agent response.</p>
+                <p>Your message will be saved for Northwind support. You can continue here, or ask for human help again if you need it.</p>
               </section>
             )}
 
             {handoff?.status === 'in_progress' && (
-              <div className="system-notice" role="status">
-                A Northwind staff member is now assisting you.
-              </div>
+              <section className="transfer-state" role="status" aria-labelledby="active-support-title">
+                <p className="transfer-label">Staff assistance</p>
+                <h2 id="active-support-title">You are connected with Northwind</h2>
+                <p className="handoff-status">Status: {HANDOFF_STATUS_LABELS[handoff.status]}</p>
+                <p>{nextStep?.summary || 'A claims professional is continuing this conversation with you.'}</p>
+                <dl>
+                  <div>
+                    <dt>Conversation</dt>
+                    <dd>New staff messages appear here automatically</dd>
+                  </div>
+                  <div>
+                    <dt>Your claim</dt>
+                    <dd>Saved with the details already provided</dd>
+                  </div>
+                </dl>
+              </section>
             )}
 
             {!handoff && nextStep?.status === 'staff_update' && (
@@ -1034,26 +1417,42 @@ function App() {
                 : null}
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
               error={error}
+              variant="workspace"
+              claimType={claimType}
+              setClaimType={setClaimType}
+              claimTypes={runtimeCapabilities.claim_types}
+              models={runtimeCapabilities.models}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+              attachments={attachments}
+              onFileSelected={handleFileSelected}
             />
-            <button
-              className="secondary-button refresh-button"
-              type="button"
-              onClick={() => refreshClaimStatus()}
-              disabled={isBusy}
-            >
-              {status === 'refreshing' ? 'Refreshing conversation...' : 'Refresh conversation'}
-            </button>
           </section>
 
-          <aside className="claim-panel" aria-labelledby="claim-details-title">
+          {!detailsOpen && workspaceView === 'chat' && (
+            <button className="details-reopen" type="button" onClick={() => setDetailsOpen(true)} aria-label="Show claim details" title="Show claim details">‹</button>
+          )}
+          <aside className={`claim-panel intake-details-panel mobile-view-${mobileView} ${detailsOpen && workspaceView === 'chat' ? 'is-open' : 'is-collapsed'} ${workspaceView !== 'chat' ? 'is-hidden' : ''}`} aria-labelledby="claim-details-title">
             <div className="claim-panel-heading">
               <div>
                 <p className="eyebrow">Structured report</p>
-                <h2 id="claim-details-title">Claim details</h2>
+                <h2 id="claim-details-title">What we have so far</h2>
+                <p className="panel-subtitle">Review or correct anything here</p>
               </div>
-              <span className="revision-label">Revision {claim.revision}</span>
+              <div className="details-panel-actions">
+                <span className="revision-label">Revision {claim.revision}</span>
+                <button
+                  className="details-toggle"
+                  type="button"
+                  aria-expanded={detailsOpen}
+                  aria-controls="claim-details-body"
+                  onClick={() => setDetailsOpen((open) => !open)}
+                >
+                  {detailsOpen ? 'Collapse' : 'Details'}
+                </button>
+              </div>
             </div>
-
+            <div id="claim-details-body" hidden={!detailsOpen}>
             {Object.keys(form).length === 0 ? (
               <p className="empty-details">Details from your conversation will appear here.</p>
             ) : (
@@ -1149,193 +1548,11 @@ function App() {
                 )}
               </div>
             )}
+            </div>
           </aside>
         </main>
       )}
     </div>
   )
 }
-
-function ExternalServiceAction({
-  action,
-  consentChecked,
-  setConsentChecked,
-  onRequest,
-  status,
-  error,
-}) {
-  const isRecordingConsent = status === 'granting-service-consent'
-  const isRequesting = status === 'requesting-assessor'
-  const isBusy = isRecordingConsent || isRequesting
-  const needsConsent = action.status === 'consent_required'
-  const routing = action.routing
-  const succeeded = action.status === 'assigned' || action.status === 'queued'
-
-  return (
-    <section className="external-service" aria-labelledby="external-service-title">
-      <p className="transfer-label">Optional next step</p>
-      <h2 id="external-service-title">Request a vehicle damage assessment</h2>
-      <p>{action.purpose}</p>
-      <dl className="service-details">
-        <div>
-          <dt>Service</dt>
-          <dd>{action.service_name}</dd>
-        </div>
-        <div>
-          <dt>Provider</dt>
-          <dd>{action.provider}</dd>
-        </div>
-      </dl>
-
-      <h3>What Northwind will share</h3>
-      <ul className="shared-data-list">
-        {action.shared_data_summary.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-
-      {needsConsent && (
-        <label className="service-consent">
-          <input
-            type="checkbox"
-            checked={consentChecked}
-            onChange={(event) => setConsentChecked(event.target.checked)}
-            disabled={isBusy}
-          />
-          <span>
-            I give Northwind permission to share only these details for this assessment request.
-          </span>
-        </label>
-      )}
-
-      {isBusy && (
-        <div className="service-progress" role="status">
-          <span className="status-dot" />
-          <span>
-            {isRecordingConsent
-              ? 'Recording your permission...'
-              : 'Sending the assessment request...'}
-          </span>
-        </div>
-      )}
-
-      {error && (
-        <div className="service-result is-error" role="alert">
-          <strong>Assessment request not sent</strong>
-          <p>{error.message}</p>
-          <p>Your claim is saved, and no assessor has been assigned.</p>
-          {!error.retryable && <p>Northwind needs to review this before another request.</p>}
-        </div>
-      )}
-
-      {succeeded && routing && (
-        <div className="service-result is-success" role="status">
-          <strong>
-            {action.status === 'assigned'
-              ? 'Assessor assigned'
-              : 'Request accepted into the assessor queue'}
-          </strong>
-          <p>{routing.next_step}</p>
-          <dl>
-            {routing.assessor_reference && (
-              <div><dt>Assessor reference</dt><dd>{routing.assessor_reference}</dd></div>
-            )}
-            {routing.queue_reference && (
-              <div><dt>Queue reference</dt><dd>{routing.queue_reference}</dd></div>
-            )}
-            {routing.expected_by && (
-              <div>
-                <dt>Expected by</dt>
-                <dd>{new Date(routing.expected_by).toLocaleString()}</dd>
-              </div>
-            )}
-          </dl>
-          {routing.limitations.map((limitation) => (
-            <p className="service-limitation" key={limitation}>{limitation}</p>
-          ))}
-        </div>
-      )}
-
-      {action.can_request && (!error || error.retryable) && (
-        <button
-          className="primary-button"
-          type="button"
-          onClick={onRequest}
-          disabled={isBusy || (needsConsent && !consentChecked)}
-        >
-          {isRecordingConsent
-            ? 'Recording permission...'
-            : isRequesting
-              ? 'Sending request...'
-              : error?.retryable
-                ? 'Retry assessment request'
-                : needsConsent
-                  ? 'Agree and request assessor'
-                  : 'Request assessor'}
-        </button>
-      )}
-    </section>
-  )
-}
-
-function MessageComposer({
-  draft,
-  setDraft,
-  onSubmit,
-  inputLabel,
-  busy,
-  disabled = false,
-  disabledNote = 'Confirm or correct the details before continuing.',
-  hint = null,
-  buttonLabel,
-  error,
-  placeholder = 'Write the details you know...',
-}) {
-  return (
-    <form className="report-box" onSubmit={onSubmit}>
-      <label htmlFor="incident-input">{inputLabel}</label>
-      <textarea
-        id="incident-input"
-        className="report-text"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder={placeholder}
-        rows="4"
-        disabled={busy || disabled}
-      />
-      {disabled && <p className="composer-note">{disabledNote}</p>}
-      {hint && !disabled && <p className="composer-note">{hint}</p>}
-      {error && (
-        <div className="backend-status is-error" role="alert">
-          <span className="status-dot" />
-          <span>{error}</span>
-        </div>
-      )}
-      <div className="report-actions">
-        <button
-          className="primary-button"
-          type="submit"
-          disabled={!draft.trim() || busy || disabled}
-        >
-          {buttonLabel}
-        </button>
-      </div>
-    </form>
-  )
-}
-
-function HelpfulDetails() {
-  return (
-    <aside className="entry-side" aria-labelledby="helpful-details-title">
-      <div className="side-content">
-        <p className="side-label">When available</p>
-        <h2 id="helpful-details-title">Helpful details to include</h2>
-        <ul className="detail-list">
-          <li>When and where the incident happened</li>
-          <li>Who or what was involved</li>
-          <li>Any damage, injuries, or immediate safety concerns</li>
-        </ul>
-      </div>
-    </aside>
-  )
-}
-
 export default App

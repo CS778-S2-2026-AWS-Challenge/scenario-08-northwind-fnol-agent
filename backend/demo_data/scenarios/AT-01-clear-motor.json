@@ -38,7 +38,7 @@
     "customer_next_step": {
       "status": "ready_to_create",
       "summary": "Your confirmed report is ready for claim creation.",
-      "responsible_party": "northwind",
+      "responsible_party": "system",
       "can_resume": true,
       "required_items": []
     },

@@ -54,8 +54,15 @@ def _keys(value: Any) -> set[str]:
 
 
 def _signal(body: dict[str, Any], signal_id: str) -> dict[str, Any]:
-    signals = cast(list[dict[str, Any]], body['signals'])
+    signals = cast(list[dict[str, Any]], body['items'])
     return next(item for item in signals if item.get('signal_id') == signal_id)
+
+
+def _assign_fixture_staff(repository: FixtureRepository, claim_id: str) -> None:
+    """Model a Claim already accepted by the synthetic staff principal."""
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository._claims[claim_id] = claim.model_copy(update={'assignee_id': 'stf_demo'})
 
 
 def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
@@ -65,6 +72,7 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
     repository: FixtureRepository,
 ) -> None:
     claim_id = _create_claim(client, auth_headers)
+    _assign_fixture_staff(repository, claim_id)
     initial_claim = repository.get_claim(claim_id, 'cus_demo')
     assert initial_claim is not None
     assert initial_claim.revision == 1
@@ -118,7 +126,11 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
     )
     assert workbench.status_code == 200
     workbench_body = cast(dict[str, Any], workbench.json())
-    projected_signal = _signal(workbench_body, review_signal.signal_id)
+    signals_response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+    )
+    assert signals_response.status_code == 200
+    projected_signal = _signal(signals_response.json(), review_signal.signal_id)
     assert projected_signal['source_refs'] == review_signal.source_refs
     assert projected_signal['reason_codes'] == review_signal.reason_codes
     assert projected_signal['source_evidence'] == [retrieval.model_dump(mode='json')]

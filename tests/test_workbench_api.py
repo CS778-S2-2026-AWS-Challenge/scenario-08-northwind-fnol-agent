@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.domain.models import (
@@ -22,14 +23,73 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.support import now_utc
 
 
+def _provision_staff(
+    app: FastAPI,
+    client: TestClient,
+    *,
+    email: str,
+    display_name: str,
+) -> tuple[str, dict[str, str]]:
+    password = 'workbench-test-password'
+    account = app.state.staff_identity_repository.provision_account(
+        email,
+        password,
+        display_name,
+        ('claims_professional',),
+    )
+    response = client.post(
+        '/api/v1/staff/auth/sessions',
+        json={'email': email, 'password': password},
+    )
+    assert response.status_code == 201
+    return account.staff_id, {
+        'Authorization': f'Bearer {response.json()["access_token"]}',
+    }
+
+
+def _request_staff_support(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    *,
+    key_suffix: str = '',
+) -> tuple[str, str, int]:
+    claim_id, _ = _create_claim_with_context(
+        client,
+        auth_headers,
+        repository,
+        key_suffix=key_suffix,
+    )
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'support-{claim_id}',
+            'If-Match': str(claim.revision),
+        },
+        json={
+            'reason': 'I need a claims professional to help me continue.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'in_app',
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    return claim_id, body['handoff']['handoff_id'], body['revision']
+
+
 def _create_claim_with_context(
     client: TestClient,
     auth_headers: dict[str, str],
     repository: FixtureRepository,
+    *,
+    key_suffix: str = '',
 ) -> tuple[str, str]:
     created = client.post(
         '/api/v1/claims',
-        headers={**auth_headers, 'Idempotency-Key': 'workbench-claim'},
+        headers={**auth_headers, 'Idempotency-Key': f'workbench-claim{key_suffix}'},
         json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
     ).json()
     claim_id = created['claim']['claim_id']
@@ -39,11 +99,11 @@ def _create_claim_with_context(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={
             **auth_headers,
-            'Idempotency-Key': 'workbench-message',
+            'Idempotency-Key': f'workbench-message{key_suffix}',
             'If-Match': '1',
         },
         json={
-            'client_message_id': 'workbench-message',
+            'client_message_id': f'workbench-message{key_suffix}',
             'content': {
                 'type': 'text',
                 'text': 'A synthetic rear-end incident with no reported injuries.',
@@ -55,7 +115,7 @@ def _create_claim_with_context(
         f'/api/v1/claims/{claim_id}/evidence',
         headers={
             **auth_headers,
-            'Idempotency-Key': 'workbench-evidence',
+            'Idempotency-Key': f'workbench-evidence{key_suffix}',
             'If-Match': str(turn['claim_revision']),
         },
         json={
@@ -151,7 +211,7 @@ def _create_claim_with_context(
     return claim_id, session_id
 
 
-def test_staff_reads_complete_claim_detail_from_shared_state(
+def test_staff_reads_progressive_claim_detail_and_paged_resources(
     client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
@@ -171,21 +231,36 @@ def test_staff_reads_complete_claim_detail_from_shared_state(
     assert detail['claim_id'] == stored_claim.claim_id
     assert detail['revision'] == stored_claim.revision
     assert detail['claim_state'] == stored_claim.claim_state.model_dump(mode='json')
-    assert detail['route'] == stored_claim.route
-    assert detail['active_session_id'] == session_id
-    assert detail['form'] == stored_claim.model_dump(mode='json')['form']
-    assert detail['evidence_summary'] == stored_claim.evidence_summary.model_dump(mode='json')
-    assert detail['sessions'][0]['summary'].startswith('The claimant confirmed')
-    assert detail['sessions'][0]['unresolved_questions'] == ['confirm:vehicle.drivable']
-    assert detail['sessions'][0]['pending_items'] == ['police_report']
-    assert detail['evidence'][0]['provenance']['internal_object_ref'].startswith('fixture://')
-    assert detail['decisions'][0]['required_tools'][0]['tool'] == 'claim_history_lookup'
-    assert detail['retrievals'] == []
-    assert detail['signals'][0]['code'] == 'HISTORY_INCONSISTENCY_REVIEW'
-    assert any(message['message_id'] == 'msg_internal_note' for message in detail['messages'])
-    assert detail['handoffs'] == []
-    assert detail['staff_actions'] == []
-    assert detail['customer_updates'] == []
+    assert detail['incident']['family'] == 'motor'
+    assert detail['lifecycle_state'] == 'professional_review'
+    assert detail['section_summaries']['fields']['total'] == len(stored_claim.form)
+    assert 'form' not in detail
+    assert 'evidence' not in detail
+    assert 'messages' not in detail
+
+    fields = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/fields', headers=staff_auth_headers
+    ).json()
+    sessions = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions', headers=staff_auth_headers
+    ).json()
+    messages = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=staff_auth_headers,
+    ).json()
+    evidence = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/evidence', headers=staff_auth_headers
+    ).json()
+    signals = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+    ).json()
+    assert {item['code'] for item in fields['items']} == set(stored_claim.form)
+    assert sessions['items'][0]['summary'].startswith('The claimant confirmed')
+    assert sessions['items'][0]['unresolved_questions'] == ['confirm:vehicle.drivable']
+    assert sessions['items'][0]['pending_items'] == ['police_report']
+    assert evidence['items'][0]['provenance']['internal_object_ref'].startswith('fixture://')
+    assert signals['items'][0]['code'] == 'HISTORY_INCONSISTENCY_REVIEW'
+    assert any(item['message_id'] == 'msg_internal_note' for item in messages['items'])
 
 
 def test_staff_lists_claims_for_workbench_queue(
@@ -202,15 +277,55 @@ def test_staff_lists_claims_for_workbench_queue(
     payload = response.json()
     assert payload['page'] == {'next_cursor': None}
     item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
-    assert item['customer_reference'] == 'cus_demo'
-    assert item['queue'] == 'professional_review'
-    assert item['priority'] == 'standard'
-    assert item['next_action'] == 'CONFIRM'
-    assert item['route'] == 'professional_review'
-    assert item['evidence_state'] == 'pending_generation'
-    assert item['next_action_summary']
-    assert item['responsible_party'] == 'claimant'
-    assert item['evidence_summary']['pending'] == 1
+    assert item['claimant']['customer_id'] == 'cus_demo'
+    assert item['work_summary']['queue_key'] == 'professional_review'
+    assert item['priority_projection']['level'] == 'standard'
+    assert item['work_summary']['primary_action_code'] == 'CONFIRM'
+    assert item['incident']['family'] == 'motor'
+    assert item['work_summary']['missing_information']
+    assert 'pending_evidence' not in item
+
+
+def test_staff_workbench_queue_uses_bounded_cursor_pagination(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+) -> None:
+    for index in range(3):
+        created = client.post(
+            '/api/v1/claims',
+            headers={**auth_headers, 'Idempotency-Key': f'workbench-page-{index}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+
+    first = client.get(
+        '/api/v1/workbench/claims?limit=2',
+        headers=staff_auth_headers,
+    )
+    assert first.status_code == 200
+    first_page = first.json()
+    assert len(first_page['items']) == 2
+    assert first_page['page']['next_cursor'] is not None
+
+    second = client.get(
+        f'/api/v1/workbench/claims?limit=2&cursor={first_page["page"]["next_cursor"]}',
+        headers=staff_auth_headers,
+    )
+    assert second.status_code == 200
+    second_page = second.json()
+    assert second_page['items']
+    assert {item['claim_id'] for item in first_page['items']}.isdisjoint(
+        item['claim_id'] for item in second_page['items']
+    )
+    assert second_page['page']['next_cursor'] is None
+
+    invalid = client.get(
+        '/api/v1/workbench/claims?limit=2&cursor=not-a-cursor',
+        headers=staff_auth_headers,
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()['error']['code'] == 'VALIDATION_ERROR'
 
 
 def test_workbench_claim_list_rejects_claimant_credentials(
@@ -250,7 +365,8 @@ def test_created_claim_route_does_not_override_workbench_queue(
 
     assert response.status_code == 200
     item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['queue'] == 'created_routed'
+    assert item['work_summary']['queue_key'] == 'created_routed'
+    assert item['lifecycle_state'] == 'created'
 
 
 def test_workbench_claim_detail_returns_documented_not_found(
@@ -306,9 +422,16 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
     ).json()
 
     assert staff['claim_state']['fraud_signal'] == 'review_required'
-    assert staff['route'] == 'professional_review'
-    assert staff['signals']
-    assert any(message['visibility'] == 'internal_only' for message in staff['messages'])
+    staff_signals = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+    ).json()
+    staff_messages = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+        headers=staff_auth_headers,
+    ).json()
+    assert staff['work_summary']['risk_signals']
+    assert staff_signals['items']
+    assert any(message['visibility'] == 'internal_only' for message in staff_messages['items'])
     assert 'claim_state' not in claimant_claim
     assert 'route' not in claimant_claim
     assert 'signals' not in claimant_claim
@@ -354,7 +477,11 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
     claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
 
     assert staff_response.status_code == 200
-    staff_handoff = staff_response.json()['handoffs'][0]
+    handoffs_response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs', headers=staff_auth_headers
+    )
+    assert handoffs_response.status_code == 200
+    staff_handoff = handoffs_response.json()['items'][0]
     assert staff_handoff == stored_handoffs[0].model_dump(mode='json')
     assert staff_handoff['queue'] == 'claimant_support'
     assert staff_handoff['reason_codes'] == ['HUMAN_SUPPORT_REQUESTED']
@@ -436,7 +563,7 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
         customer_next_step=CustomerNextStep(
             status='authorised',
             summary='The claim can be created.',
-            responsible_party=ResponsibleParty.NORTHWIND,
+            responsible_party=ResponsibleParty.SYSTEM,
         ),
         authority=AgentAuthority(
             proposed_by='fixture_rule',
@@ -543,27 +670,343 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     final_claim = repository.get_claim_internal(claim_id)
     assert final_claim is not None
     assert detail['revision'] == final_claim.revision
-    assert detail['route'] == creation['route']
     assert detail['claim_state']['workflow_state'] == 'created'
-    assert detail['external_claim'] == creation
-    assert detail['external_claim']['creation_status'] == 'created'
-    assert detail['external_claim']['next_step'] == 'Claims intake review'
-    assert detail['external_claim']['expected_by'] is not None
-    assert detail['external_service_consents'] == [consent.model_dump(mode='json')]
-    assert detail['assessor_routing'] == routing
+    assert detail['integration_summary']['claim_creation_status'] == 'created'
+    assert detail['integration_summary']['assessor_routing_status'] == 'assigned'
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
-    assert {decision['decision_id'] for decision in detail['decisions']} == {
-        create_decision.decision_id,
-        route_decision.decision_id,
-    }
-    assert {decision['trigger_message_id'] for decision in detail['decisions']} == {
-        'msg_workbench_create',
-        'msg_workbench_assessor',
-    }
-    assert detail['messages'] == []
     queue_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
     queue_item = next(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
-    assert queue_item['assignee_id'] == 'stf_demo'
+    assert queue_item['ownership']['primary_assignee']['staff_id'] == 'stf_demo'
+
+
+def test_handoff_acceptance_is_atomic_revision_safe_and_idempotent(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    headers = {
+        **staff_auth_headers,
+        'Idempotency-Key': 'accept-handoff-once',
+        'If-Match': str(revision),
+    }
+
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers=headers,
+        json={},
+    )
+    replay = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers=headers,
+        json={},
+    )
+
+    assert accepted.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == accepted.json()
+    claim = repository.get_claim_internal(claim_id)
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert claim is not None
+    assert handoff is not None
+    assert claim.assignee_id == 'stf_demo'
+    assert claim.revision == revision + 1
+    assert handoff.status.value == 'accepted'
+    assert handoff.assigned_to == 'stf_demo'
+
+    stale = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/requeue',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'stale-requeue',
+            'If-Match': str(revision),
+        },
+        json={'reason': 'This request intentionally uses a stale revision.'},
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert stale.json()['error']['current_revision'] == claim.revision
+
+
+def test_claim_conversations_list_only_sessions_held_by_current_staff(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    other_id, other_headers = _provision_staff(
+        app,
+        client,
+        email='conversation-owner@example.invalid',
+        display_name='Conversation Owner',
+    )
+    owned_claim, owned_handoff, owned_revision = _request_staff_support(
+        client, auth_headers, repository, key_suffix='-conversation-owned'
+    )
+    owned = client.post(
+        f'/api/v1/workbench/claims/{owned_claim}/handoffs/{owned_handoff}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'conversation-demo-owner',
+            'If-Match': str(owned_revision),
+        },
+        json={},
+    )
+    assert owned.status_code == 200
+
+    other_claim, other_handoff, other_revision = _request_staff_support(
+        client, auth_headers, repository, key_suffix='-conversation-other'
+    )
+    other = client.post(
+        f'/api/v1/workbench/claims/{other_claim}/handoffs/{other_handoff}/accept',
+        headers={
+            **other_headers,
+            'Idempotency-Key': 'conversation-other-owner',
+            'If-Match': str(other_revision),
+        },
+        json={},
+    )
+    assert other.status_code == 200
+    other_stored = repository.get_claim_internal(other_claim)
+    assert other_stored is not None
+    assert other_stored.assignee_id == other_id
+
+    listing = client.get('/api/v1/workbench/conversations', headers=staff_auth_headers)
+
+    assert listing.status_code == 200
+    assert listing.json()['page'] == {'next_cursor': None}
+    assert {item['claim_id'] for item in listing.json()['items']} == {owned_claim}
+    assert all(item['kind'] == 'claim' for item in listing.json()['items'])
+    assert all(item['conversation_id'].startswith('claim:ses_') for item in listing.json()['items'])
+
+
+def test_non_owner_cowork_request_owner_approval_and_coworker_message(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    coworker_id, coworker_headers = _provision_staff(
+        app,
+        client,
+        email='coworker@example.invalid',
+        display_name='Cowork Claims Professional',
+    )
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'cowork-owner-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    )
+    assert accepted.status_code == 200
+
+    requested = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'cowork-request',
+            'If-Match': str(accepted.json()['revision']),
+        },
+        json={'reason': 'I can help with the claimant conversation.'},
+    )
+    assert requested.status_code == 201
+    request_body = requested.json()
+    assert request_body['request']['requested_by'] == coworker_id
+    assert request_body['request']['target_staff_id'] == coworker_id
+    assert request_body['request']['primary_owner_id'] == 'stf_demo'
+
+    approved = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
+        f'{request_body["request"]["request_id"]}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'cowork-approve',
+            'If-Match': str(request_body['revision']),
+        },
+        json={'decision': 'accepted'},
+    )
+    assert approved.status_code == 200
+    assert approved.json()['coworker']['staff_id'] == coworker_id
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers)
+    assert detail.status_code == 200
+    assert detail.json()['ownership']['current_staff_access'] == 'coworker'
+    assert detail.json()['ownership']['pending_cowork_requests'] == 0
+    assert any(
+        action['action_code'] == 'conversation.send_claimant_message'
+        for action in detail.json()['allowed_actions']
+    )
+
+    sent = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/messages',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'cowork-message',
+            'If-Match': str(approved.json()['revision']),
+        },
+        json={'content': {'type': 'text', 'text': 'I am helping with your Claim now.'}},
+    )
+    assert sent.status_code == 200, sent.json()
+    assert sent.json()['message']['actor'] == 'staff'
+    assert sent.json()['message']['visibility'] == 'shared'
+
+
+def test_transfer_acceptance_updates_handoff_and_revokes_existing_coworkers(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    coworker_id, coworker_headers = _provision_staff(
+        app,
+        client,
+        email='existing-coworker@example.invalid',
+        display_name='Existing Coworker',
+    )
+    target_id, target_headers = _provision_staff(
+        app,
+        client,
+        email='transfer-target@example.invalid',
+        display_name='Transfer Target',
+    )
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transfer-owner-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    ).json()
+    invited = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'owner-invites-coworker',
+            'If-Match': str(accepted['revision']),
+        },
+        json={
+            'staff_id': coworker_id,
+            'reason': 'Help review the active claimant conversation.',
+        },
+    ).json()
+    cowork_accepted = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
+        f'{invited["request"]["request_id"]}',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'coworker-accepts-invite',
+            'If-Match': str(invited['revision']),
+        },
+        json={'decision': 'accepted'},
+    ).json()
+
+    transfer = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/transfer-requests',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'owner-transfer-request',
+            'If-Match': str(cowork_accepted['revision']),
+        },
+        json={
+            'target_staff_id': target_id,
+            'reason': 'The target staff member will continue this Claim.',
+        },
+    )
+    assert transfer.status_code == 201
+    transfer_body = transfer.json()
+
+    transfer_accepted = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
+        f'{transfer_body["request"]["request_id"]}',
+        headers={
+            **target_headers,
+            'Idempotency-Key': 'target-accepts-transfer',
+            'If-Match': str(transfer_body['revision']),
+        },
+        json={'decision': 'accepted'},
+    )
+    assert transfer_accepted.status_code == 200
+
+    claim = repository.get_claim_internal(claim_id)
+    handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    coworkers = [item for item in repository._claim_coworkers.values() if item.claim_id == claim_id]
+    assert claim is not None
+    assert handoff is not None
+    assert claim.assignee_id == target_id
+    assert handoff.assigned_to == target_id
+    assert coworkers
+    assert all(not item.active and item.revoked_at is not None for item in coworkers)
+    former_coworker = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers
+    ).json()
+    target = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=target_headers).json()
+    assert former_coworker['ownership']['current_staff_access'] == 'read_only'
+    assert target['ownership']['current_staff_access'] == 'primary'
+
+
+def test_requeue_refuses_while_protected_staff_work_is_active(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(client, auth_headers, repository)
+    accepted = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'protected-owner-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    ).json()
+    action = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'protected-action',
+            'If-Match': str(accepted['revision']),
+        },
+        json={
+            'action_type': 'claimant_support',
+            'requested_outcome': 'Continue the accepted claimant support request.',
+            'source_refs': [handoff_id],
+        },
+    )
+    assert action.status_code == 201
+    action_body = action.json()
+    in_progress = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action_body["action"]["action_id"]}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'start-protected-action',
+            'If-Match': str(action_body['revision']),
+        },
+        json={'status': 'in_progress'},
+    )
+    assert in_progress.status_code == 200
+
+    requeue = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/requeue',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'blocked-requeue',
+            'If-Match': str(in_progress.json()['revision']),
+        },
+        json={'reason': 'Return this Claim for another professional.'},
+    )
+    assert requeue.status_code == 409
+    assert requeue.json()['error']['code'] == 'OWNERSHIP_CONFLICT'

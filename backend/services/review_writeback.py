@@ -7,16 +7,17 @@ from backend.domain.models import (
     SignalDecisionRecord,
     SignalDecisionRequest,
     SignalDecisionResponse,
-    WorkbenchClaimDetail,
     WorkingClaim,
 )
 from backend.domain.retrieval import ReviewSignalRecord
+from backend.domain.workbench import WorkbenchClaimDetail
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.staff_access import require_claim_collaborator
 from backend.services.staff_actions import decide_signal
 from backend.services.support import (
     now_utc,
@@ -115,51 +116,12 @@ def _save_decision(
         ) from conflict
 
 
-def _source_evidence(
-    repository: PersistenceRepository,
-    claim: WorkingClaim,
-    signal: ReviewSignalRecord,
-) -> list[dict[str, Any]]:
-    records = repository.list_retrieval_records(claim.claim_id, claim.customer_id)
-    by_id = {record.retrieval_id: record for record in records}
-    return [
-        by_id[source_ref].model_dump(mode='json')
-        for source_ref in signal.source_refs
-        if source_ref in by_id
-    ]
-
-
 def get_review_connected_workbench_detail(
     repository: PersistenceRepository,
     principal: Principal,
     claim_id: str,
 ) -> WorkbenchClaimDetail:
-    detail = get_workbench_claim_detail(repository, principal, claim_id)
-    claim = _staff_claim(repository, principal, claim_id)
-    persisted_signals = repository.list_review_signals(claim_id, claim.customer_id)
-
-    signals_by_id: dict[str, dict[str, Any]] = {}
-    signal_order: list[str] = []
-    for existing_signal in detail.signals:
-        signal_id = str(existing_signal.get('signal_id') or existing_signal.get('code') or '')
-        if not signal_id:
-            continue
-        signals_by_id[signal_id] = dict(existing_signal)
-        signal_order.append(signal_id)
-
-    for persisted_signal in persisted_signals:
-        value: dict[str, Any] = persisted_signal.model_dump(mode='json')
-        value['source_evidence'] = _source_evidence(repository, claim, persisted_signal)
-        existing = signals_by_id.get(persisted_signal.signal_id)
-        if existing is not None and isinstance(existing.get('decisions'), list):
-            value['decisions'] = existing['decisions']
-        if persisted_signal.signal_id not in signals_by_id:
-            signal_order.append(persisted_signal.signal_id)
-        signals_by_id[persisted_signal.signal_id] = value
-
-    return detail.model_copy(
-        update={'signals': [signals_by_id[signal_id] for signal_id in signal_order]}
-    )
+    return get_workbench_claim_detail(repository, principal, claim_id)
 
 
 def decide_review_signal(
@@ -172,6 +134,7 @@ def decide_review_signal(
     if_match: str | None,
 ) -> SignalDecisionResponse:
     claim = _staff_claim(repository, principal, claim_id)
+    require_claim_collaborator(repository, claim, principal)
     signal = _persisted_signal(repository, claim, signal_id)
     if signal is None:
         return decide_signal(

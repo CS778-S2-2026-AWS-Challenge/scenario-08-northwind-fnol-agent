@@ -133,8 +133,8 @@ def test_synthetic_login_fails_closed_outside_development_and_test() -> None:
             json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
         )
 
-    assert response.status_code == 503
-    assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert response.status_code == 401
+    assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
 
 
 def test_synthetic_login_requires_explicit_developer_identity_mode() -> None:
@@ -144,5 +144,5 @@ def test_synthetic_login_requires_explicit_developer_identity_mode() -> None:
             json={'email': 'claimant.one@example.invalid', 'password': 'northwind-demo-one'},
         )
 
-    assert response.status_code == 503
-    assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+    assert response.status_code == 401
+    assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'

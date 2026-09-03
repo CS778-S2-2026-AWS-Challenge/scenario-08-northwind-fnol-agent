@@ -1,4 +1,6 @@
 from copy import deepcopy
+from dataclasses import replace
+from typing import Any
 
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
@@ -15,6 +17,8 @@ from backend.domain.models import (
     AuthorityOutcome,
     BranchEvaluationRecord,
     BranchEvaluationStatus,
+    ClaimCollaborationRequest,
+    ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -27,6 +31,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
+from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -42,6 +47,8 @@ class FixtureRepository(PersistenceRepository):
         self._claims: dict[str, WorkingClaim] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
+        self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
+        self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
@@ -54,6 +61,8 @@ class FixtureRepository(PersistenceRepository):
         self._staff_actions: dict[str, StaffActionRecord] = {}
         self._customer_updates: dict[str, CustomerUpdateRecord] = {}
         self._signal_decisions: dict[str, SignalDecisionRecord] = {}
+        self._collaboration_requests: dict[str, ClaimCollaborationRequest] = {}
+        self._claim_coworkers: dict[str, ClaimCoworkerRecord] = {}
         self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
@@ -67,6 +76,8 @@ class FixtureRepository(PersistenceRepository):
             'claims': len(self._claims),
             'sessions': len(self._sessions),
             'messages': len(self._messages),
+            'staff_agent_sessions': len(self._staff_agent_sessions),
+            'staff_agent_messages': len(self._staff_agent_messages),
             'agent_decisions': len(self._decisions),
             'branch_evaluations': len(self._branch_evaluations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
@@ -79,12 +90,16 @@ class FixtureRepository(PersistenceRepository):
             'staff_actions': len(self._staff_actions),
             'customer_updates': len(self._customer_updates),
             'signal_decisions': len(self._signal_decisions),
+            'collaboration_requests': len(self._collaboration_requests),
+            'claim_coworkers': len(self._claim_coworkers),
             'handoffs': len(self._handoffs),
             'idempotency_records': len(self._idempotency),
         }
         self._claims.clear()
         self._sessions.clear()
         self._messages.clear()
+        self._staff_agent_sessions.clear()
+        self._staff_agent_messages.clear()
         self._decisions.clear()
         self._branch_evaluations.clear()
         self._assessor_routing_operations.clear()
@@ -97,6 +112,8 @@ class FixtureRepository(PersistenceRepository):
         self._staff_actions.clear()
         self._customer_updates.clear()
         self._signal_decisions.clear()
+        self._collaboration_requests.clear()
+        self._claim_coworkers.clear()
         self._handoffs.clear()
         self._idempotency.clear()
         return cleared
@@ -110,6 +127,46 @@ class FixtureRepository(PersistenceRepository):
         if claim is None or claim.customer_id != customer_id:
             return None
         return deepcopy(claim)
+
+    def promote_claim_owner(
+        self,
+        claim_id: str,
+        anonymous_customer_id: str,
+        customer_id: str,
+    ) -> WorkingClaim | None:
+        claim = self._claims.get(claim_id)
+        if claim is None or claim.customer_id != anonymous_customer_id:
+            return None
+        self._claims[claim_id] = claim.model_copy(update={'customer_id': customer_id})
+        stores: tuple[dict[str, Any], ...] = (
+            self._sessions,
+            self._messages,
+            self._decisions,
+            self._assessor_routing_operations,
+            self._evidence,
+            self._retrievals,
+            self._review_signals,
+            self._staff_actions,
+            self._customer_updates,
+            self._signal_decisions,
+            self._collaboration_requests,
+            self._claim_coworkers,
+            self._handoffs,
+        )
+        for store in stores:
+            for record_key, record in list(store.items()):
+                if getattr(record, 'claim_id', None) == claim_id:
+                    store[record_key] = (
+                        record.model_copy(update={'customer_id': customer_id})
+                        if 'customer_id' in type(record).model_fields
+                        else record
+                    )
+        for idempotency_key, record in list(self._idempotency.items()):
+            if record.claim_id == claim_id and record.actor_id == anonymous_customer_id:
+                self._idempotency.pop(idempotency_key, None)
+                promoted_record = replace(record, actor_id=customer_id)
+                self._idempotency[(customer_id, record.route, record.key)] = promoted_record
+        return deepcopy(self._claims[claim_id])
 
     def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
         claim = self._claims.get(claim_id)
@@ -310,6 +367,82 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(message.claim_id)
         self._messages[message.message_id] = deepcopy(message)
+
+    def save_staff_agent_session(self, session: StaffAgentSession) -> None:
+        existing = self._staff_agent_sessions.get(session.session_id)
+        if existing is not None and existing != session:
+            raise IdempotencyConflict(session.session_id)
+        self._staff_agent_sessions[session.session_id] = deepcopy(session)
+
+    def get_staff_agent_session(self, session_id: str, staff_id: str) -> StaffAgentSession | None:
+        session = self._staff_agent_sessions.get(session_id)
+        if session is None or session.staff_id != staff_id:
+            return None
+        return deepcopy(session)
+
+    def list_staff_agent_sessions(self, staff_id: str) -> list[StaffAgentSession]:
+        return deepcopy(
+            [item for item in self._staff_agent_sessions.values() if item.staff_id == staff_id]
+        )
+
+    def list_staff_agent_messages(self, session_id: str, staff_id: str) -> list[StaffAgentMessage]:
+        if self.get_staff_agent_session(session_id, staff_id) is None:
+            return []
+        return deepcopy(
+            [
+                item
+                for item in self._staff_agent_messages.values()
+                if item.session_id == session_id and item.staff_id == staff_id
+            ]
+        )
+
+    def find_staff_agent_message_by_client_id(
+        self, session_id: str, staff_id: str, client_message_id: str
+    ) -> StaffAgentMessage | None:
+        return deepcopy(
+            next(
+                (
+                    item
+                    for item in self._staff_agent_messages.values()
+                    if item.session_id == session_id
+                    and item.staff_id == staff_id
+                    and item.client_message_id == client_message_id
+                ),
+                None,
+            )
+        )
+
+    def save_staff_agent_turn(
+        self,
+        session: StaffAgentSession,
+        staff_message: StaffAgentMessage,
+        assistant_message: StaffAgentMessage,
+    ) -> None:
+        stored = self.get_staff_agent_session(session.session_id, session.staff_id)
+        if stored is None:
+            raise KeyError(session.session_id)
+        if (
+            staff_message.session_id != session.session_id
+            or assistant_message.session_id != session.session_id
+            or staff_message.staff_id != session.staff_id
+            or assistant_message.staff_id != session.staff_id
+            or assistant_message.in_reply_to != staff_message.message_id
+        ):
+            raise KeyError(session.session_id)
+        for message in (staff_message, assistant_message):
+            existing = self._staff_agent_messages.get(message.message_id)
+            if existing is not None and existing != message:
+                raise IdempotencyConflict(message.message_id)
+        duplicate = self.find_staff_agent_message_by_client_id(
+            session.session_id,
+            session.staff_id,
+            staff_message.client_message_id or '',
+        )
+        if duplicate is not None and duplicate.message_id != staff_message.message_id:
+            raise IdempotencyConflict(staff_message.client_message_id or '')
+        self._staff_agent_sessions[session.session_id] = deepcopy(session)
+        self._staff_agent_messages[staff_message.message_id] = deepcopy(staff_message)
+        self._staff_agent_messages[assistant_message.message_id] = deepcopy(assistant_message)
 
     def save_message_mutation(
         self,
@@ -1102,6 +1235,63 @@ class FixtureRepository(PersistenceRepository):
             ],
             key=lambda item: (item.created_at, item.signal_decision_id),
         )
+
+    def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
+        return sorted(
+            [
+                deepcopy(item)
+                for item in self._collaboration_requests.values()
+                if item.claim_id == claim_id
+            ],
+            key=lambda item: (item.created_at, item.request_id),
+        )
+
+    def list_claim_coworkers(self, claim_id: str) -> list[ClaimCoworkerRecord]:
+        return sorted(
+            [
+                deepcopy(item)
+                for item in self._claim_coworkers.values()
+                if item.claim_id == claim_id and item.active
+            ],
+            key=lambda item: (item.granted_at, item.coworker_id),
+        )
+
+    def save_ownership_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        collaboration_request: ClaimCollaborationRequest,
+        coworkers: list[ClaimCoworkerRecord] | None = None,
+        handoff: HandoffRecord | None = None,
+    ) -> None:
+        self._validate_claim_mutation(claim, expected_revision)
+        coworker_records = coworkers or []
+        if (
+            collaboration_request.claim_id != claim.claim_id
+            or any(item.claim_id != claim.claim_id for item in coworker_records)
+            or (handoff is not None and handoff.claim_id != claim.claim_id)
+            or idempotency.claim_id != claim.claim_id
+        ):
+            raise KeyError(claim.claim_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if existing_idempotency is not None:
+            if existing_idempotency.request_fingerprint != idempotency.request_fingerprint:
+                raise IdempotencyConflict(idempotency.key)
+            return
+        existing_request = self._collaboration_requests.get(collaboration_request.request_id)
+        if existing_request is not None and existing_request.claim_id != claim.claim_id:
+            raise IdempotencyConflict(collaboration_request.request_id)
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._collaboration_requests[collaboration_request.request_id] = deepcopy(
+            collaboration_request
+        )
+        for coworker in coworker_records:
+            self._claim_coworkers[coworker.coworker_id] = deepcopy(coworker)
+        if handoff is not None:
+            self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_staff_mutation(
         self,

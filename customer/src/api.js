@@ -1,7 +1,32 @@
 let claimantToken = import.meta.env.VITE_NORTHWIND_CLAIMANT_TOKEN || ''
+try {
+  claimantToken = claimantToken || globalThis.localStorage?.getItem('northwind.claimantToken') || ''
+} catch { /* storage may be unavailable in privacy-restricted browsers */ }
+function createAnonymousSessionId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  const bytes = globalThis.crypto?.getRandomValues?.(new Uint8Array(16))
+  if (bytes) {
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  return '00000000-0000-4000-8000-' + `${Date.now()}${Math.random()}`.replace(/\D/g, '').padEnd(12, '0').slice(-12)
+}
+
+let anonymousSession = sessionStorage.getItem('northwind.anonymousSession') || createAnonymousSessionId()
+sessionStorage.setItem('northwind.anonymousSession', anonymousSession)
 
 export function setClaimantAccessToken(token) {
   claimantToken = token || ''
+  try {
+    if (claimantToken) globalThis.localStorage?.setItem('northwind.claimantToken', claimantToken)
+    else globalThis.localStorage?.removeItem('northwind.claimantToken')
+  } catch { /* storage may be unavailable in privacy-restricted browsers */ }
+}
+
+export function hasClaimantAccessToken() {
+  return Boolean(claimantToken)
 }
 
 export class ApiRequestError extends Error {
@@ -26,7 +51,8 @@ async function apiRequest(path, options = {}) {
     response = await fetch(path, {
       ...options,
       headers: {
-        Authorization: `Bearer ${claimantToken}`,
+        ...(claimantToken ? { Authorization: `Bearer ${claimantToken}` } : {}),
+        ...(!claimantToken && anonymousSession ? { 'X-Northwind-Anonymous-Session': anonymousSession } : {}),
         'Content-Type': 'application/json',
         ...options.headers,
       },
@@ -54,11 +80,122 @@ async function apiRequest(path, options = {}) {
   return payload
 }
 
+function claimantHeaders(headers = {}) {
+  return {
+    ...(claimantToken ? { Authorization: `Bearer ${claimantToken}` } : {}),
+    ...(!claimantToken && anonymousSession ? { 'X-Northwind-Anonymous-Session': anonymousSession } : {}),
+    ...headers,
+  }
+}
+
+function streamError(message, options) {
+  return new ApiRequestError(message, options)
+}
+
+export async function streamClaimUpdates({
+  claimId,
+  sessionId,
+  afterRevision,
+  signal,
+  onEvent,
+}) {
+  const params = new URLSearchParams({ after_revision: String(afterRevision) })
+  let response
+  try {
+    response = await fetch(
+      `/api/v1/claims/${claimId}/sessions/${sessionId}/events?${params}`,
+      {
+        headers: claimantHeaders({ Accept: 'text/event-stream' }),
+        signal,
+      },
+    )
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    throw streamError(
+      'Live claim updates are temporarily disconnected. We will keep trying.',
+      { code: 'NETWORK_ERROR', retryable: true },
+    )
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw streamError(
+      payload?.error?.message || 'Live claim updates could not be started.',
+      {
+        code: payload?.error?.code || 'HTTP_ERROR',
+        status: response.status,
+        retryable: payload?.error?.retryable,
+        currentRevision: payload?.error?.current_revision,
+      },
+    )
+  }
+  if (!response.body) {
+    throw streamError(
+      'This browser could not keep the claim connected for live updates.',
+      { code: 'STREAM_UNAVAILABLE', retryable: true },
+    )
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (!signal?.aborted) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+      buffer = buffer.replaceAll('\r\n', '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const lines = frame.split('\n')
+        const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+        const data = lines
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n')
+        if (event === 'claim.updated' && data) {
+          try {
+            await onEvent(JSON.parse(data))
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw streamError(
+                'A live claim update could not be read. We will reconnect.',
+                { code: 'INVALID_STREAM_EVENT', retryable: true },
+              )
+            }
+            throw error
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+      if (done) return
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export function promoteAnonymousClaim(claimId) {
+  return apiRequest(`/api/v1/claims/${claimId}/promote`, {
+    method: 'POST',
+    headers: { 'X-Northwind-Anonymous-Session': anonymousSession },
+  })
+}
+
 export function loginClaimant({ email, password }) {
   return apiRequest('/api/v1/auth/sessions', {
     method: 'POST',
     headers: { Authorization: '' },
     body: JSON.stringify({ email, password }),
+  })
+}
+
+export function registerClaimant({ email, password, display_name }) {
+  return apiRequest('/api/v1/auth/accounts', {
+    method: 'POST',
+    headers: { Authorization: '' },
+    body: JSON.stringify({ email, password, display_name }),
   })
 }
 
@@ -93,6 +230,12 @@ export function createClaim({ idempotencyKey = requestId('claim'), incidentType 
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ', incident_type: incidentType }),
+  })
+}
+
+export function getRuntimeCapabilities() {
+  return apiRequest('/api/v1/claims/capabilities', {
+    headers: { 'X-Northwind-Anonymous-Session': anonymousSession },
   })
 }
 
@@ -158,6 +301,14 @@ export function resumeClaimSession({
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ intent: 'resume' }),
+  })
+}
+
+export function startClaimSession({ claimId, intent = 'new', idempotencyKey = requestId('session') }) {
+  return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ intent }),
   })
 }
 

@@ -1204,7 +1204,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
                 'customer_next_step': {
                     'status': 'review_required',
                     'summary': 'Northwind must review claim creation.',
-                    'responsible_party': 'northwind',
+                    'responsible_party': 'claims_professional',
                     'required_items': [],
                 },
                 'form_changes': [
@@ -1511,7 +1511,7 @@ def test_model_signal_injection_is_rejected_before_workbench_persistence() -> No
         Principal(subject='stf_demo', actor_type='staff'),
         claim_id,
     )
-    assert detail.signals == []
+    assert detail.work_summary.risk_signals == []
 
 
 def test_model_provenance_is_persisted_without_claimant_exposure() -> None:
@@ -1559,7 +1559,7 @@ def test_gateway_agent_cannot_claim_controlled_rule_authority() -> None:
                 'customer_next_step': {
                     'status': 'review_required',
                     'summary': 'Northwind must review the proposed handoff.',
-                    'responsible_party': 'northwind',
+                    'responsible_party': 'claims_professional',
                     'required_items': [],
                 },
                 'form_changes': [],
@@ -2014,7 +2014,10 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
         assert gateway.call_count == 1
 
         detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff).json()
-        handoff_id = detail['handoffs'][0]['handoff_id']
+        handoffs = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/handoffs', headers=staff
+        ).json()['items']
+        handoff_id = handoffs[0]['handoff_id']
         accepted = client.post(
             f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
             headers={

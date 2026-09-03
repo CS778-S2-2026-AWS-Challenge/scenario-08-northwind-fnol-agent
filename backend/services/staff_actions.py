@@ -38,6 +38,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -152,11 +153,24 @@ def accept_handoff(
     handoff = _handoff(repository, claim, handoff_id)
     if handoff.status is not HandoffStatus.QUEUED:
         raise _validation('Only a queued handoff can be accepted.')
+    requested_assignee = payload.assignee_id or principal.subject
+    if requested_assignee != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Staff can accept a Claim only for their own account.',
+        )
+    if claim.assignee_id not in {None, principal.subject}:
+        raise ApiError(
+            status_code=409,
+            code='OWNERSHIP_CONFLICT',
+            message='The Claim is already assigned to another staff member.',
+        )
     timestamp = now_utc()
     accepted = handoff.model_copy(
         update={
             'status': HandoffStatus.ACCEPTED,
-            'assigned_to': payload.assignee_id or principal.subject,
+            'assigned_to': requested_assignee,
             'accepted_at': timestamp,
         }
     )
@@ -164,6 +178,7 @@ def accept_handoff(
         update={
             'revision': claim.revision + 1,
             'updated_at': timestamp,
+            'assignee_id': requested_assignee,
             'customer_next_step': CustomerNextStep(
                 status=(
                     'professional_review_in_progress'
@@ -175,11 +190,7 @@ def accept_handoff(
                     if handoff.type is HandoffType.PROFESSIONAL_REVIEW
                     else 'A Northwind staff member is now assisting you.'
                 ),
-                responsible_party=(
-                    'claims_professional'
-                    if handoff.type is HandoffType.PROFESSIONAL_REVIEW
-                    else 'northwind'
-                ),
+                responsible_party='claims_professional',
             ),
         }
     )
@@ -244,11 +255,12 @@ def send_staff_message(
     )
     if active is None:
         raise _validation('An accepted handoff is required before sending a staff message.')
-    if active.assigned_to != principal.subject:
+    coworker_ids = {item.staff_id for item in repository.list_claim_coworkers(claim_id)}
+    if active.assigned_to != principal.subject and principal.subject not in coworker_ids:
         raise ApiError(
             status_code=403,
             code='ACCESS_DENIED',
-            message='The handoff is assigned to another staff member.',
+            message='The Claim is assigned to another staff member and cowork access is required.',
         )
     if payload.in_reply_to is not None:
         referenced = repository.get_message(
@@ -429,6 +441,7 @@ def create_staff_action(
     if replay is not None:
         return StaffActionMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
+    access = require_claim_collaborator(repository, claim, principal)
     if claim.revision != expected:
         raise ApiError(
             status_code=409,
@@ -438,12 +451,31 @@ def create_staff_action(
             current_revision=claim.revision,
         )
     timestamp = now_utc()
+    assigned_to = payload.assigned_to or principal.subject
+    permitted_assignees = {
+        claim.assignee_id,
+        *(item.staff_id for item in repository.list_claim_coworkers(claim_id)),
+    }
+    if assigned_to not in permitted_assignees:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message=(
+                'Staff actions can be assigned only to the primary owner or an active coworker.'
+            ),
+        )
+    if access is ClaimStaffAccess.COWORKER and assigned_to != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='A coworker can create a staff action only for their own account.',
+        )
     action = StaffActionRecord(
         action_id=new_id('act'),
         claim_id=claim_id,
         action_type=payload.action_type,
         status=StaffActionStatus.OPEN,
-        assigned_to=payload.assigned_to or principal.subject,
+        assigned_to=assigned_to,
         requested_outcome=payload.requested_outcome,
         source_refs=payload.source_refs,
         created_at=timestamp,
@@ -500,9 +532,16 @@ def update_staff_action(
     if replay is not None:
         return StaffActionMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
+    access = require_claim_collaborator(repository, claim, principal)
     action = repository.get_staff_action(claim_id, action_id)
     if action is None:
         raise _not_found('The staff action was not found.')
+    if access is ClaimStaffAccess.COWORKER and action.assigned_to != principal.subject:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='A coworker can update only a staff action assigned to their account.',
+        )
     if claim.revision != expected:
         raise ApiError(
             status_code=409,
@@ -592,6 +631,7 @@ def decide_signal(
     if replay is not None:
         return SignalDecisionResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
+    require_claim_collaborator(repository, claim, principal)
     if claim.revision != expected:
         raise ApiError(
             status_code=409,

@@ -23,12 +23,12 @@ def _staff_client(repository: FixtureRepository) -> TestClient:
 
 def _handoff_card(repository: FixtureRepository, claim_id: str) -> dict[str, object]:
     with _staff_client(repository) as client:
-        detail = client.get(
-            f'/api/v1/workbench/claims/{claim_id}',
+        response = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/handoffs',
             headers={'Authorization': 'Bearer synthetic-staff'},
         )
-    assert detail.status_code == 200
-    handoffs = detail.json()['handoffs']
+    assert response.status_code == 200
+    handoffs = response.json()['items']
     assert len(handoffs) == 1
     return handoffs[0]  # type: ignore[no-any-return]
 
@@ -111,8 +111,8 @@ def test_queue_list_surfaces_open_handoff_priority_per_claim() -> None:
             )
         assert listing.status_code == 200
         item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
-        assert item['priority'] == expected_priority
-        assert item['open_handoff_count'] == 1
+        assert item['priority_projection']['level'] == expected_priority
+        assert item['work_summary']['current_work_item'] is not None
 
 
 def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> None:
@@ -138,6 +138,10 @@ def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> Non
         ).json()['items']
 
     relevant = [item for item in all_items if item['claim_id'] in claim_ids.values()]
-    assert [item['priority'] for item in relevant] == ['urgent', 'high', 'standard']
+    assert [item['priority_projection']['level'] for item in relevant] == [
+        'urgent',
+        'high',
+        'standard',
+    ]
     assert [item['claim_id'] for item in urgent_items] == [claim_ids['AT-04-urgent']]
     assert [item['claim_id'] for item in human_items] == [claim_ids['AT-05-human-request']]

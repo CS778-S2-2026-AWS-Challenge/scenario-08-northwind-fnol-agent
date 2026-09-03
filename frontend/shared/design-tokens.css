@@ -1,0 +1,89 @@
+:root {
+  --font-family-base: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-caption: 14px;
+  --font-size-body: 16px;
+  --font-size-message: 18px;
+  --font-size-control: 16px;
+  --font-size-section: 20px;
+  --font-size-page: 24px;
+  --font-size-hero: 28px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-round: 999px;
+
+  --color-page: #F7F4EF;
+  --color-surface: #FFFDF9;
+  --color-sidebar: #EAE6DE;
+  --color-panel: #E0DCD3;
+  --color-divider: #C8C4BB;
+  --color-text-primary: #1A1814;
+  --color-text-secondary: #3D3A35;
+  --color-text-muted: #8C8880;
+  --color-text-faint: #B0ACA4;
+  --color-accent: #7A9E8E;
+  --color-accent-strong: #5F7F72;
+  --color-accent-soft: #E7EFEA;
+  --color-accent-light: #B9CEC4;
+  --color-danger: #B83228;
+  --color-danger-soft: #F7E9E6;
+  --color-warning: #A3682F;
+  --color-warning-soft: #F4EBDD;
+  --color-overlay: rgba(26, 24, 20, .35);
+  --color-on-accent: #FFFDF9;
+  --color-workbench-nav: #24211D;
+  --color-workbench-nav-muted: #BDB6AA;
+  --color-workbench-nav-active: #FFFDF9;
+  --color-risk-notice: #76512F;
+  --color-risk-notice-soft: #F1E7D9;
+  --color-risk-review: #923F35;
+  --color-risk-review-soft: #F4E1DC;
+  --color-info: #536670;
+  --color-info-soft: #E5EBED;
+
+  --border-region: 2px solid var(--color-divider);
+  --border-component: 1.5px solid var(--color-divider);
+  --border-focus: 1.5px solid var(--color-accent);
+  --border-action: 1.5px solid var(--color-accent-light);
+  --border-danger: 1.5px solid var(--color-danger);
+  --shadow-none: none;
+  --shadow-subtle: 0 1px 3px rgba(26, 24, 20, .08);
+  --shadow-popover: 0 8px 24px rgba(26, 24, 20, .14);
+  --shadow-modal: 0 16px 40px rgba(26, 24, 20, .18);
+  --opacity-disabled: .55;
+
+  /* Workbench density tokens: the staff client may be denser, but component spacing
+     remains semantic and shared instead of being tuned with local magic numbers. */
+  --density-workbench-font-meta: 14px;
+  --density-workbench-font-body: 15px;
+  --density-workbench-font-control: 15px;
+  --density-workbench-font-section: 19px;
+  --density-workbench-font-page: 25px;
+  --density-workbench-row-compact: 36px;
+  --density-workbench-row-default: 44px;
+  --density-workbench-region-gap: 12px;
+  --density-workbench-section-gap: 18px;
+  --density-workbench-inline-gap: 8px;
+  --density-workbench-nav-width: 216px;
+  --density-workbench-queue-width: 340px;
+  --density-workbench-agent-width: 400px;
+  --density-workbench-agent-height: 600px;
+  --density-workbench-record-label-width: 160px;
+}

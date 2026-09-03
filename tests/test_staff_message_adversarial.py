@@ -83,35 +83,24 @@ def test_staff_message_rejects_wrong_handoff_assignee_without_mutation(
     claim_id, session_id, handoff_id, revision = _queued_handoff(
         client, auth_headers, 'wrong-assignee'
     )
-    accepted_revision = _accept(
-        client,
-        staff_auth_headers,
-        claim_id,
-        handoff_id,
-        revision,
-        'wrong-assignee',
-        assignee_id='stf_other',
+    response = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'wrong-assignee-accept',
+            'If-Match': str(revision),
+        },
+        json={'assignee_id': 'stf_other'},
     )
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
     claim = repository.get_claim_internal(claim_id)
     assert claim is not None
     before_messages = repository.list_messages(claim_id, session_id, claim.customer_id)
     before_handoffs = repository.list_handoffs(claim_id, claim.customer_id)
-
-    response = client.post(
-        f'/api/v1/workbench/claims/{claim_id}/messages',
-        headers={
-            **staff_auth_headers,
-            'Idempotency-Key': 'wrong-assignee-send',
-            'If-Match': str(accepted_revision),
-        },
-        json={'content': {'type': 'text', 'text': 'This sender is not assigned.'}},
-    )
-
-    assert response.status_code == 403
-    assert response.json()['error']['code'] == 'ACCESS_DENIED'
     after = repository.get_claim_internal(claim_id)
     assert after is not None
-    assert after.revision == accepted_revision
+    assert after.revision == revision
     assert repository.list_messages(claim_id, session_id, claim.customer_id) == before_messages
     assert repository.list_handoffs(claim_id, claim.customer_id) == before_handoffs
 

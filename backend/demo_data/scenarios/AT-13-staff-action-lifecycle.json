@@ -37,7 +37,7 @@
     "customer_next_step": {
       "status": "review_completed",
       "summary": "A claims professional has completed the review and your claim can continue.",
-      "responsible_party": "northwind",
+      "responsible_party": "claims_professional",
       "can_resume": true,
       "required_items": []
     },
@@ -164,7 +164,7 @@
       "update_id": "upd_at13_review_complete",
       "claim_id": "clm_fixture_at13",
       "summary": "A claims professional has completed the review and your claim can continue.",
-      "responsible_party": "northwind",
+      "responsible_party": "claims_professional",
       "related_refs": [],
       "created_by": "stf_casey",
       "created_at": "2026-08-12T03:30:00Z"

@@ -1,11 +1,16 @@
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_claimant
+from backend.core.errors import ApiError
 from backend.domain.models import (
     ClaimantClaim,
     ClaimantExternalServiceResponse,
@@ -28,11 +33,13 @@ from backend.domain.models import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.agent import AgentTurnProvider
 from backend.services.claim_creation import create_claim_from_confirmed_report
+from backend.services.claimant_events import claimant_change_after, claimant_event_revision
 from backend.services.claims import (
     confirm_form_fields,
     get_claim,
     get_session,
     list_claims,
+    promote_anonymous_claim,
     start_claim,
     update_form,
 )
@@ -43,6 +50,21 @@ from backend.services.messages import submit_message
 from backend.services.resume import start_session_with_recovery
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
+
+
+def _sse_event(event: str, data: dict[str, object], event_id: str | None = None) -> str:
+    lines = []
+    if event_id is not None:
+        lines.append(f'id: {event_id}')
+    lines.extend(
+        (
+            f'event: {event}',
+            f'data: {json.dumps(data, separators=(",", ":"))}',
+            '',
+            '',
+        )
+    )
+    return '\n'.join(lines)
 
 
 def repository_for(request: Request) -> PersistenceRepository:
@@ -105,6 +127,24 @@ def read_claim(
     principal: Principal = Depends(require_claimant),
 ) -> ClaimantClaim:
     return get_claim(repository_for(request), principal, claim_id)
+
+
+@router.post('/{claim_id}/promote', response_model=ClaimantClaim)
+def promote_claim(
+    claim_id: str,
+    request: Request,
+    anonymous_session: str | None = Header(default=None, alias='X-Northwind-Anonymous-Session'),
+    principal: Principal = Depends(require_claimant),
+) -> ClaimantClaim:
+    if principal.auth_source == 'anonymous:browser_session':
+        raise ApiError(
+            status_code=401,
+            code='AUTHENTICATION_REQUIRED',
+            message='An authenticated claimant session is required.',
+        )
+    return promote_anonymous_claim(
+        repository_for(request), principal, claim_id, anonymous_session or ''
+    )
 
 
 @router.post(
@@ -261,6 +301,58 @@ def read_messages(
         cursor=cursor,
         before=before,
         after=after,
+    )
+
+
+@router.get(
+    '/{claim_id}/sessions/{session_id}/events',
+    response_class=StreamingResponse,
+    responses={200: {'content': {'text/event-stream': {}}}},
+)
+def read_claim_events(
+    claim_id: str,
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    after_revision: int = Query(default=0, ge=0),
+) -> StreamingResponse:
+    repository = repository_for(request)
+    current_revision = claimant_event_revision(repository, principal, claim_id, session_id)
+    if after_revision > current_revision:
+        claimant_change_after(repository, principal, claim_id, session_id, after_revision)
+
+    async def stream() -> AsyncIterator[str]:
+        cursor = after_revision
+        heartbeat_at = asyncio.get_running_loop().time()
+        yield 'retry: 1500\n: connected\n\n'
+        while not await request.is_disconnected():
+            change = claimant_change_after(
+                repository,
+                principal,
+                claim_id,
+                session_id,
+                cursor,
+            )
+            if change is not None:
+                cursor = change.claim_revision
+                yield _sse_event(
+                    'claim.updated',
+                    change.model_dump(mode='json'),
+                    change.event_id,
+                )
+            now = asyncio.get_running_loop().time()
+            if now - heartbeat_at >= 15:
+                yield ': keep-alive\n\n'
+                heartbeat_at = now
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream(),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+        },
     )
 
 

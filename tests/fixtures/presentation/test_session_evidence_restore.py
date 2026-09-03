@@ -182,7 +182,11 @@ def test_new_session_preserves_saved_evidence_state_provenance_and_visibility(
     )
     assert staff_detail.status_code == 200
     staff_evidence = next(
-        item for item in staff_detail.json()['evidence'] if item['evidence_id'] == evidence_id
+        item
+        for item in client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence', headers=staff_auth_headers
+        ).json()['items']
+        if item['evidence_id'] == evidence_id
     )
     assert staff_evidence['status'] == 'received'
     assert staff_evidence['file_status'] == 'ready'
