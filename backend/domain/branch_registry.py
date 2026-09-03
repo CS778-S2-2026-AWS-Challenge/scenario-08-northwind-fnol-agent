@@ -42,12 +42,12 @@ COMMON_FIELDS = frozenset(
         'incident.injury_or_danger',
         'incident.cause',
         'loss.description',
+        'parties.other_parties',
     }
 )
 FAMILY_FIELDS = {
     'motor': frozenset(
         {
-            'parties.other_parties',
             'authorities.police_report_reference',
             'authorities.emergency_services_notified',
             'vehicle.registration',
@@ -58,7 +58,8 @@ FAMILY_FIELDS = {
     'home': frozenset({'property.address', 'property.affected_areas'}),
     'contents': frozenset(),
 }
-SYSTEM_OWNED_FIELDS: frozenset[str] = frozenset()
+SYSTEM_OWNED_FIELDS = frozenset({'claimant.client_number'})
+CLAIMANT_HIDDEN_FIELDS = frozenset({'claimant.client_number'})
 FAMILY_PATTERNS = {
     'motor': re.compile(
         r'\b(car|vehicle|motor|driv(?:e|ing)|collision|crash|road|traffic)\b', re.I
@@ -115,6 +116,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
                 family for family, family_fields in FAMILY_FIELDS.items() if code in family_fields
             ),
             system_owned=code in SYSTEM_OWNED_FIELDS,
+            claimant_visible=code not in CLAIMANT_HIDDEN_FIELDS,
         )
         for code in sorted(executable_codes)
     )
@@ -271,21 +273,46 @@ class BranchRuleEvaluator:
     def _family_state(
         self, claim: WorkingClaim, text: str, trigger_source_refs: Sequence[str]
     ) -> tuple[str | None, set[str], dict[str, list[str]]]:
-        selected: str | None = None
+        authoritative: set[str] = set()
         candidates: set[str] = set()
         sources: dict[str, list[str]] = {family: [] for family in FAMILY_NAMES}
-        incident_type = claim.form.get('incident.type')
-        if incident_type is not None and incident_type.value in FAMILY_NAMES:
-            family = str(incident_type.value)
-            sources[family].extend(incident_type.source_refs)
-            if incident_type.status is FormStatus.CONFIRMED:
-                selected = family
-            elif incident_type.status is FormStatus.PROPOSED:
-                candidates.add(family)
+        incident_type_field = claim.form.get('incident.type')
+        form_family: str | None = None
+        if incident_type_field is not None and isinstance(incident_type_field.value, str):
+            normalised = incident_type_field.value.strip().lower()
+            if normalised in FAMILY_NAMES:
+                form_family = normalised
+                sources[form_family].extend(incident_type_field.source_refs)
+                if incident_type_field.status is FormStatus.CONFIRMED:
+                    authoritative.add(form_family)
+                elif incident_type_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}:
+                    candidates.add(form_family)
+
+        canonical_family = (
+            claim.incident_type.strip().lower()
+            if isinstance(claim.incident_type, str)
+            and claim.incident_type.strip().lower() in FAMILY_NAMES
+            else None
+        )
+        if canonical_family is not None:
+            matching_unconfirmed_form = (
+                form_family == canonical_family
+                and incident_type_field is not None
+                and incident_type_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
+            )
+            if matching_unconfirmed_form:
+                candidates.add(canonical_family)
+            else:
+                authoritative.add(canonical_family)
+                sources[canonical_family].append(f'claim:{claim.claim_id}:incident_type')
+
         for family, pattern in FAMILY_PATTERNS.items():
             if pattern.search(text):
                 candidates.add(family)
                 sources[family].extend(trigger_source_refs)
+        selected = next(iter(authoritative)) if len(authoritative) == 1 else None
+        if len(authoritative) > 1:
+            candidates.update(authoritative)
         if selected is not None:
             candidates.discard(selected)
         for family in sources:

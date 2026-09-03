@@ -473,6 +473,16 @@ family.motor
 This is additive branch state, not one flattened route label. Shared fields are never copied
 into `motor.*`, `home.*`, or `contents.*` variants merely because a family was selected.
 
+The evaluator reconciles the existing top-level `WorkingClaim.incident_type` projection with
+the source-aware `incident.type` form field. A request-supplied top-level value can select the
+current family when no form value exists. A confirmed form value can also select it, and matching
+authoritative values coalesce. Conflicting authoritative values produce an unresolved family
+conflict instead of silently choosing one. When the top-level compatibility projection matches a
+`proposed` or `disputed` form value, it remains only a family candidate until that form value
+crosses the applicable confirmation boundary. The top-level value therefore remains compatible
+with existing claimant and staff projections without allowing model inference to bypass field
+authority.
+
 ### Two independent field-state dimensions
 
 The evaluator must keep field selection state separate from stored value state.

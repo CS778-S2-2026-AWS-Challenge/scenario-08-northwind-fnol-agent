@@ -40,13 +40,14 @@ from backend.repositories.protocols import (
 FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
 
 
-def make_claim(*, revision: int = 1) -> WorkingClaim:
+def make_claim(*, revision: int = 1, incident_type: str | None = None) -> WorkingClaim:
     return WorkingClaim(
         claim_id='clm_branch',
         customer_id='cus_branch',
         revision=revision,
         channel=Channel.WEB_AGENT,
         locale='en-NZ',
+        incident_type=incident_type,
         active_session_id='ses_branch',
         customer_next_step=CustomerNextStep(
             status='describe_incident',
@@ -129,6 +130,40 @@ def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
     assert 'family.contents' not in result.active_branches
 
 
+@pytest.mark.parametrize('family', ['motor', 'home', 'contents'])
+def test_canonical_claim_type_selects_family_when_form_is_empty(family: str) -> None:
+    claim = make_claim(incident_type=family)
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family == family
+    selected = next(item for item in result.branch_results if item.branch_id == f'family.{family}')
+    assert selected.source_refs == [f'claim:{claim.claim_id}:incident_type']
+
+
+def test_matching_proposed_form_keeps_inferred_claim_type_as_candidate() -> None:
+    claim = make_claim(incident_type='contents').model_copy(
+        update={'form': {'incident.type': field('contents', FormStatus.PROPOSED)}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family is None
+    assert result.unresolved_family_conflict == []
+    assert 'family.contents' in result.candidate_branches
+
+
+def test_conflicting_authoritative_family_sources_require_resolution() -> None:
+    claim = make_claim(incident_type='motor').model_copy(
+        update={'form': {'incident.type': field('home')}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family is None
+    assert result.unresolved_family_conflict == ['home', 'motor']
+
+
 def test_conflicting_family_candidates_use_shared_fields_only() -> None:
     result = BranchRuleEvaluator().evaluate(
         make_claim(),
@@ -199,20 +234,19 @@ def test_branch_results_retain_rule_and_source_coordinates() -> None:
 def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None:
     claim = make_claim().model_copy(update={'form': {'incident.type': field('motor')}})
     evaluation = evaluation_record(claim)
-    evaluation = evaluation.model_copy(
-        update={
-            'field_selection_results': [
-                item.model_copy(update={'selection_state': FieldSelectionState.SYSTEM_OWNED})
-                if item.field_code == 'claimant.client_number'
-                else item
-                for item in evaluation.field_selection_results
-            ]
-        }
-    )
 
     projected = claimant_projection_fields(evaluation)
     projected_codes = {item.field_code for item in projected}
+    client_number = next(
+        item
+        for item in evaluation.field_selection_results
+        if item.field_code == 'claimant.client_number'
+    )
 
+    assert client_number.selection_state is FieldSelectionState.SYSTEM_OWNED
+    assert (
+        build_default_registry().field_by_code['claimant.client_number'].claimant_visible is False
+    )
     assert 'vehicle.registration' in projected_codes
     assert 'property.address' not in projected_codes
     assert 'claimant.client_number' not in projected_codes

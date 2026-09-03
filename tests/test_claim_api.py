@@ -9,6 +9,7 @@ from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLo
 from backend.domain.models import (
     AgentAction,
     CustomerNextStep,
+    FormSource,
     FormStatus,
     MessageRecord,
     MessageVisibility,
@@ -45,6 +46,29 @@ class HighImpactAgent:
             state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
             proposed_signals=[],
             required_tools=[{'tool': 'claim_creation', 'status': 'requested'}],
+            next_action_requirements=[],
+        )
+
+
+class OtherPartyAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['OTHER_PARTY_RECORDED'],
+            customer_reason='The claimant reported another party.',
+            customer_response='I have recorded that another party was involved.',
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[
+                ProposedFormChange(
+                    field_code='parties.other_parties',
+                    value=True,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                )
+            ],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
             next_action_requirements=[],
         )
 
@@ -88,12 +112,14 @@ def create_claim(
     client: TestClient,
     auth_headers: dict[str, str],
     key: str = 'claim-1',
+    *,
+    incident_type: str = 'motor',
 ) -> Response:
     headers = {**auth_headers, 'Idempotency-Key': key}
     return client.post(
         '/api/v1/claims',
         headers=headers,
-        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': incident_type},
     )
 
 
@@ -143,6 +169,76 @@ def test_create_claim_returns_claim_and_first_session(
     assert session['status'] == 'active'
     assert 'customer_id' not in claim
     assert 'fraud_signal' not in claim
+
+
+@pytest.mark.parametrize('incident_type', ['home', 'contents'])
+def test_cross_path_other_party_proposal_passes_branch_validation(
+    client: TestClient,
+    app: FastAPI,
+    auth_headers: dict[str, str],
+    incident_type: str,
+) -> None:
+    app.state.agent_turn_provider = OtherPartyAgent()
+    created = create_claim(
+        client,
+        auth_headers,
+        key=f'{incident_type}-other-party',
+        incident_type=incident_type,
+    ).json()
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        created['claim']['claim_id'],
+        created['session']['session_id'],
+        key=f'{incident_type}-other-party-turn',
+        client_message_id=f'{incident_type}-other-party-message',
+        text='Another person was involved in this loss.',
+    )
+
+    assert turn.status_code == 200, turn.text
+    other_party = next(
+        item
+        for item in turn.json()['form_changes']
+        if item['field_code'] == 'parties.other_parties'
+    )
+    assert other_party['field']['value'] is True
+    assert other_party['field']['status'] == 'confirmed'
+
+
+def test_applied_message_evaluation_retains_message_branch_candidates(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-branch-candidates').json()
+    claim_id = created['claim']['claim_id']
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        created['session']['session_id'],
+        key='message-branch-candidates-turn',
+        client_message_id='message-branch-candidates-client',
+        text='Another car hit my house and Police attended.',
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    applied = evaluations[-1]
+    branch_results = {item.branch_id: item for item in applied.branch_results}
+    claimant_message_id = turn_body['claimant_message']['message_id']
+
+    assert applied.resulting_claim_revision == turn_body['claim_revision']
+    for branch_id in (
+        'incident.collision',
+        'participant.another_party',
+        'authority.police',
+    ):
+        assert branch_results[branch_id].status == 'candidate'
+        assert claimant_message_id in branch_results[branch_id].source_refs
 
 
 def test_create_claim_is_idempotent_and_conflicting_reuse_is_rejected(

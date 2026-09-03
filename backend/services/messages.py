@@ -1104,6 +1104,7 @@ def submit_message(
     )
     applied_evaluation = BranchRuleEvaluator().evaluate(
         updated_claim,
+        latest_message=(payload.content.text if payload.content is not None else None),
         trigger_source_refs=[claimant_message.message_id],
         current_action=updated_claim.claim_state.next_action,
         recomputation_reason='agent_turn_applied',

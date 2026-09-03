@@ -341,7 +341,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `revision` | integer | Yes | Starts at `1` and increases on every material state change |
 | `channel` | enum | Yes | Initial value `web_agent`; future channels require a contract change |
 | `locale` | string | Yes | BCP 47 language tag such as `en-NZ` |
-| `incident_type` | string | No | Registered claim type; may be unknown at creation |
+| `incident_type` | string | No | Registered claim-family projection; may be unknown at creation. Branch evaluation reconciles it with the source-aware `incident.type` form field and does not treat a matching proposed or disputed model-derived value as confirmed. |
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
