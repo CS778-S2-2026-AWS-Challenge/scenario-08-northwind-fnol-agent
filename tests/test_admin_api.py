@@ -14,12 +14,48 @@ def _client() -> TestClient:
     return TestClient(create_app(settings))
 
 
+def _model_client() -> TestClient:
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        model_protocol_adapter='openai_compatible',
+        model_base_url='https://approved-model.example/v1',
+        model_api_key_env='NORTHWIND_MODEL_API_KEY',
+    )
+    return TestClient(create_app(settings))
+
+
+def _model_values(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        'protocol': 'openai_compatible',
+        'provider': 'approved-provider',
+        'model_identifier': 'approved-model',
+        'base_url': 'https://approved-model.example/v1',
+        'credential_environment_variable': 'NORTHWIND_MODEL_API_KEY',
+        'profile_id': 'approved-profile',
+        'purpose': 'agent_turn',
+        'privacy_class': 'synthetic_fnol',
+        'prompt_version': 'northwind-fnol-motor-claimant-v3',
+        'evaluation_status': 'configured',
+        'timeout_seconds': 30,
+        'structured_output': True,
+        'tools': False,
+    }
+    values.update(overrides)
+    return values
+
+
 def _headers(token: str = 'synthetic-admin') -> dict[str, str]:
     return {'Authorization': f'Bearer {token}'}
 
 
-def _post_headers(key: str, revision: int | None = None) -> dict[str, str]:
-    headers = {**_headers(), 'Idempotency-Key': key}
+def _post_headers(
+    key: str,
+    revision: int | None = None,
+    *,
+    token: str = 'synthetic-admin',
+) -> dict[str, str]:
+    headers = {**_headers(token), 'Idempotency-Key': key}
     if revision is not None:
         headers['If-Match'] = f'"{revision}"'
     return headers
@@ -62,7 +98,7 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
 
         published = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/publish',
-            headers=_post_headers('publish-1', 2),
+            headers=_post_headers('publish-1', 2, token='synthetic-release-approver'),
             json={'reason': 'Approved after scenario validation.'},
         )
         assert published.status_code == 200
@@ -78,6 +114,49 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
             'validate',
             'publish',
         ]
+
+
+def test_high_impact_publish_rejects_the_sole_author_and_audits_attempt() -> None:
+    with _client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('author-conflict-create'),
+            json={
+                'domain': 'agent_rule',
+                'impact': 'high',
+                'values': {'rule_id': 'motor-intake'},
+                'reason': 'Create a high-impact rule.',
+            },
+        ).json()
+        configuration_id = created['configuration_id']
+        validated = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers=_post_headers('author-conflict-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'authority', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert validated.status_code == 200
+
+        rejected = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/publish',
+            headers=_post_headers('author-conflict-publish', 2),
+            json={'reason': 'The author must not approve this change.'},
+        )
+
+        assert rejected.status_code == 403
+        assert rejected.json()['error']['code'] == 'CONFIGURATION_APPROVER_CONFLICT'
+        record = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        ).json()
+        assert record['state'] == 'awaiting_approval'
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        assert audits[-1]['action'] == 'publish'
+        assert audits[-1]['outcome'] == 'rejected'
 
 
 def test_admin_boundary_and_revision_errors() -> None:
@@ -149,6 +228,80 @@ def test_plaintext_secret_is_rejected() -> None:
         )
         assert response.status_code == 422
         assert response.json()['error']['code'] == 'SECRET_VALUE_FORBIDDEN'
+
+
+@pytest.mark.parametrize('impact_fields', [{}, {'impact': 'normal'}], ids=['omitted', 'normal'])
+def test_model_configuration_cannot_downgrade_its_impact_classification(
+    impact_fields: dict[str, str],
+) -> None:
+    with _model_client() as client:
+        response = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'model-normal-impact-{impact_fields}'),
+            json={
+                'domain': 'model',
+                'values': _model_values(),
+                'reason': 'Attempt to bypass independent approval.',
+                **impact_fields,
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+        repository = cast(Any, client.app).state.configuration_repository
+        assert repository.list_configurations(domain='model') == []
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('protocol', 'unregistered_protocol'),
+        ('base_url', 'https://unapproved.example/v1'),
+        ('credential_environment_variable', 'UNAPPROVED_PROCESS_SECRET'),
+        ('evaluation_status', 'degraded'),
+        ('evaluation_status', 'unavailable'),
+        ('purpose', 'batch_evaluation'),
+        ('privacy_class', 'unrestricted'),
+        ('prompt_version', 'northwind-fnol-motor-claimant-v2'),
+        ('structured_output', False),
+    ],
+)
+def test_model_validation_rejects_unverified_runtime_authority(
+    field: str,
+    value: object,
+) -> None:
+    with _model_client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'model-authority-create-{field}-{value}'),
+            json={
+                'domain': 'model',
+                'impact': 'high',
+                'values': _model_values(**{field: value}),
+                'reason': 'Retain an unverified model profile as a draft.',
+            },
+        )
+        assert created.status_code == 201, created.text
+        configuration_id = created.json()['configuration_id']
+
+        validation = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers=_post_headers(f'model-authority-validate-{field}-{value}', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'model-authority', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+
+        assert validation.status_code == 422
+        assert validation.json()['error']['code'] == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+        stored = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        ).json()
+        assert stored['state'] == 'draft'
+        repository = cast(Any, client.app).state.configuration_repository
+        assert repository.active('model') is None
 
 
 def test_data_profile_configuration_is_closed_and_provider_neutral() -> None:
@@ -268,7 +421,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
         )
         client.post(
             f'/internal/v1/admin/configurations/{first_id}/publish',
-            headers=_post_headers('first-publish', 2),
+            headers=_post_headers('first-publish', 2, token='synthetic-release-approver'),
             json={'reason': 'Publish first rule.'},
         )
         second = client.post(
@@ -293,7 +446,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
         )
         published = client.post(
             f'/internal/v1/admin/configurations/{second_id}/publish',
-            headers=_post_headers('second-publish', 2),
+            headers=_post_headers('second-publish', 2, token='synthetic-release-approver'),
             json={'reason': 'Publish second rule.'},
         ).json()
         assert published['previous_version'] == first_id

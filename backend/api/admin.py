@@ -11,9 +11,12 @@ from backend.domain.configuration import (
     ConfigurationCreate,
     ConfigurationPatch,
     ConfigurationRecord,
+    ModelRuntimeBinding,
     TransitionRequest,
     ValidationRequest,
 )
+from backend.domain.model_gateway import CLAIMANT_AGENT_PRIVACY_CLASS, CLAIMANT_AGENT_PURPOSE
+from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import (
     ConfigurationIdempotencyRecord,
     ConfigurationRepository,
@@ -26,6 +29,19 @@ router = APIRouter(prefix='/internal/v1/admin', tags=['administration'])
 
 def repo(request: Request) -> ConfigurationRepository:
     return cast(ConfigurationRepository, request.app.state.configuration_repository)
+
+
+def _model_runtime_binding(request: Request) -> ModelRuntimeBinding:
+    settings = request.app.state.settings
+    return ModelRuntimeBinding(
+        protocol=settings.model_protocol_adapter,
+        base_url=settings.model_base_url,
+        credential_environment_variable=settings.model_api_key_env,
+        purpose=CLAIMANT_AGENT_PURPOSE,
+        privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
+        prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+        structured_output=True,
+    )
 
 
 def _idempotent(
@@ -142,7 +158,12 @@ def validate_configuration(
         f'POST /internal/v1/admin/configurations/{configuration_id}/validate',
         {'payload': payload.model_dump(mode='json'), 'revision': expected},
         lambda: service.validate(
-            repo(request), configuration_id, payload, principal.subject, expected
+            repo(request),
+            configuration_id,
+            payload,
+            principal.subject,
+            expected,
+            _model_runtime_binding(request),
         ),
     )
 
