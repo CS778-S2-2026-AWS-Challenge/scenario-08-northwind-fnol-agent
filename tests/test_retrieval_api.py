@@ -64,6 +64,8 @@ def test_policy_retrieval_returns_facts_with_their_source_and_drops_provider_con
     assert response.status_code == 200
     body = response.json()
     assert body['status'] == 'evidence_found'
+    assert body['connection_state'] == 'using_fixture'
+    assert body['errors'] == []
     assert body['source']['system'] == 'fixture_policy_administration'
     assert body['source']['reference'] == 'synthetic-policy-101'
     assert body['source']['retrieved_at']
@@ -131,7 +133,15 @@ def test_unavailable_provider_reports_the_limitation_and_stores_nothing(
 
     assert response.status_code == 200
     body = response.json()
-    assert body['status'] == 'unavailable'
+    assert body['status'] == 'timeout'
+    assert body['connection_state'] == 'degraded'
+    assert body['errors'] == [
+        {
+            'code': 'timeout',
+            'message': 'The policy provider did not respond within the request budget.',
+            'retryable': True,
+        }
+    ]
     assert body['limitations'] == ['The policy provider did not respond within the request budget.']
     assert body['facts'] is None
     assert body['source'] is None
@@ -156,6 +166,8 @@ def test_unknown_reference_is_no_evidence_rather_than_a_negative_finding(
     assert response.status_code == 200
     body = response.json()
     assert body['status'] == 'no_evidence'
+    assert body['connection_state'] == 'using_fixture'
+    assert body['errors'] == []
     assert body['facts'] is None
     assert body['limitations'] == ['The provider holds no record for the requested reference.']
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
@@ -189,6 +201,8 @@ def test_history_retrieval_is_purpose_limited_and_carries_no_fraud_finding(
     assert allowed.status_code == 200
     body = allowed.json()
     assert body['status'] == 'evidence_found'
+    assert body['connection_state'] == 'using_fixture'
+    assert body['errors'] == []
     assert body['facts']['history_reference'] == 'synthetic-history-204'
     assert body['facts']['outcome'] == 'settled'
     for banned in ('fraud_finding', 'internal_note', 'Provider-only commentary'):
@@ -237,7 +251,7 @@ def test_history_retrieval_reports_outage_and_missing_records_without_inventing_
         retrieval_adapter.set_outage(
             RetrievalUnavailable(
                 code='PROVIDER_UNAVAILABLE',
-                detail='The claim-history provider is not reachable.',
+                detail='Traceback: mongodb://user:secret@example.invalid',
             )
         )
         unavailable = client.post(
@@ -249,8 +263,45 @@ def test_history_retrieval_reports_outage_and_missing_records_without_inventing_
     assert absent.json()['status'] == 'no_evidence'
     assert absent.json()['facts'] is None
     assert unavailable.json()['status'] == 'unavailable'
+    assert unavailable.json()['connection_state'] == 'unavailable'
+    assert unavailable.json()['errors'] == [
+        {
+            'code': 'unavailable',
+            'message': 'The claim-history provider is temporarily unavailable.',
+            'retryable': True,
+        }
+    ]
     assert unavailable.json()['facts'] is None
-    assert unavailable.json()['limitations'] == ['The claim-history provider is not reachable.']
+    assert unavailable.json()['source'] is None
+    assert unavailable.json()['limitations'] == [
+        'The claim-history provider is temporarily unavailable.'
+    ]
+    assert 'secret' not in unavailable.text
+    assert 'mongodb://' not in unavailable.text
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+
+
+def test_connection_state_drift_fails_closed_before_persisting_retrieval(
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    retrieval_adapter: MockPolicyHistoryAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(retrieval_adapter, 'connection_status', lambda: 'pending_confirmation')
+
+    with retrieval_client as client:
+        claim_id = create_claim(client, 'policy-connection-drift')
+        response = client.post(
+            POLICY_SEARCH,
+            headers=INTEGRATION_AUTH,
+            json={'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'},
+        )
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['connection_state'] == 'unavailable'
+    assert response.json()['facts'] is None
+    assert response.json()['source'] is None
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
 
 

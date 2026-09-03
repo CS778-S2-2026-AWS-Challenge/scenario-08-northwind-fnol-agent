@@ -678,6 +678,17 @@
       "ClaimHistorySearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "connection_state": {
+            "$ref": "#/components/schemas/DataConnectionState"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DataQueryError"
+            },
+            "maxItems": 10,
+            "title": "Errors",
+            "type": "array"
+          },
           "facts": {
             "anyOf": [
               {
@@ -730,6 +741,7 @@
           }
         },
         "required": [
+          "connection_state",
           "result_id",
           "status",
           "retrieved_at"
@@ -2040,6 +2052,51 @@
         ],
         "title": "CustomerUpdateRecord",
         "type": "object"
+      },
+      "DataConnectionState": {
+        "description": "Connection classification exposed without leaking provider configuration.",
+        "enum": [
+          "using_fixture",
+          "verified",
+          "configured_service",
+          "degraded",
+          "unavailable"
+        ],
+        "title": "DataConnectionState",
+        "type": "string"
+      },
+      "DataQueryError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/DataQueryErrorCode"
+          },
+          "message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "title": "DataQueryError",
+        "type": "object"
+      },
+      "DataQueryErrorCode": {
+        "enum": [
+          "timeout",
+          "unavailable"
+        ],
+        "title": "DataQueryErrorCode",
+        "type": "string"
       },
       "DemoResetResponse": {
         "additionalProperties": false,
@@ -3833,6 +3890,17 @@
       "KnowledgeSearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "connection_state": {
+            "$ref": "#/components/schemas/DataConnectionState"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DataQueryError"
+            },
+            "maxItems": 10,
+            "title": "Errors",
+            "type": "array"
+          },
           "limitations": {
             "items": {
               "type": "string"
@@ -3851,6 +3919,7 @@
             "enum": [
               "evidence_found",
               "no_evidence",
+              "timeout",
               "unavailable"
             ],
             "title": "Status",
@@ -3858,6 +3927,7 @@
           }
         },
         "required": [
+          "connection_state",
           "status",
           "results",
           "limitations"
@@ -4337,6 +4407,17 @@
       "PolicySearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "connection_state": {
+            "$ref": "#/components/schemas/DataConnectionState"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DataQueryError"
+            },
+            "maxItems": 10,
+            "title": "Errors",
+            "type": "array"
+          },
           "facts": {
             "anyOf": [
               {
@@ -4389,6 +4470,7 @@
           }
         },
         "required": [
+          "connection_state",
           "result_id",
           "status",
           "retrieved_at"
@@ -4679,6 +4761,7 @@
           "evidence_found",
           "no_evidence",
           "ambiguous",
+          "timeout",
           "unavailable"
         ],
         "title": "RetrievalStatus",
