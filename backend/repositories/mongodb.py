@@ -9,13 +9,15 @@ document details below the repository boundary.
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -58,6 +60,7 @@ from backend.repositories.protocols import (
 )
 
 ModelT = TypeVar('ModelT', bound=BaseModel)
+_DATETIME_ADAPTER = TypeAdapter(datetime)
 
 
 class MongoDBConfigurationError(ValueError):
@@ -176,6 +179,15 @@ class MongoDBRepository:
         self._client = client
         self._collection: Collection[dict[str, Any]] = client[database_name][collection_name]
         self._collection.create_index([('record_type', 1), ('claim_id', 1), ('created_at', 1)])
+        self._collection.create_index(
+            [
+                ('record_type', 1),
+                ('subject.subject_type', 1),
+                ('subject.subject_id', 1),
+                ('subject.claim_id', 1),
+                ('created_at', 1),
+            ]
+        )
         self._collection.create_index([('record_type', 1), ('customer_id', 1), ('updated_at', -1)])
         self._collection.create_index(
             [('record_type', 1), ('actor_id', 1), ('route', 1), ('key', 1)],
@@ -303,6 +315,145 @@ class MongoDBRepository:
             return None
         payload = {key: value for key, value in document.items() if key in model_type.model_fields}
         return model_type.model_validate(payload)
+
+    @staticmethod
+    def _audit_timestamp(value: datetime) -> str:
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            value = value.astimezone(UTC)
+        return str(_DATETIME_ADAPTER.dump_python(value, mode='json'))
+
+    def _audit_document(self, event: AuditEventEnvelope) -> dict[str, Any]:
+        document = event.model_dump(mode='json')
+        document.update(
+            {
+                '_id': self._record_id('audit_event', event.event_id),
+                'record_type': 'audit_event',
+                'created_at': self._audit_timestamp(event.created_at),
+            }
+        )
+        return document
+
+    def _prepare_audit_events(
+        self,
+        claim: WorkingClaim,
+        audit_events: tuple[AuditEventEnvelope, ...],
+        *,
+        mongo_session: Any,
+    ) -> tuple[AuditEventEnvelope, ...]:
+        prepared: dict[str, AuditEventEnvelope] = {}
+        for event in audit_events:
+            if event.subject.claim_id != claim.claim_id:
+                raise KeyError(claim.claim_id)
+            if (
+                event.subject.subject_type.value == 'claim'
+                and event.claim_revision != claim.revision
+            ):
+                raise KeyError(claim.claim_id)
+            incoming = prepared.get(event.event_id)
+            if incoming is not None and incoming != event:
+                raise IdempotencyConflict(event.event_id)
+            existing = self._collection.find_one(
+                {
+                    '_id': self._record_id('audit_event', event.event_id),
+                    'record_type': 'audit_event',
+                },
+                session=mongo_session,
+            )
+            stored = self._model_from_document(existing, AuditEventEnvelope)
+            if stored is not None and stored != event:
+                raise IdempotencyConflict(event.event_id)
+            prepared[event.event_id] = event
+        return tuple(prepared.values())
+
+    def _insert_audit_event(self, event: AuditEventEnvelope, *, mongo_session: Any) -> None:
+        record_id = self._record_id('audit_event', event.event_id)
+        existing = self._collection.find_one(
+            {'_id': record_id, 'record_type': 'audit_event'},
+            session=mongo_session,
+        )
+        stored = self._model_from_document(existing, AuditEventEnvelope)
+        if stored is not None:
+            if stored != event:
+                raise IdempotencyConflict(event.event_id)
+            return
+        try:
+            self._collection.insert_one(
+                self._audit_document(event),
+                session=mongo_session,
+            )
+        except DuplicateKeyError as error:
+            existing = self._collection.find_one(
+                {'_id': record_id, 'record_type': 'audit_event'},
+                session=mongo_session,
+            )
+            stored = self._model_from_document(existing, AuditEventEnvelope)
+            if stored != event:
+                raise IdempotencyConflict(event.event_id) from error
+
+    def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        """Append one immutable audit event to MongoDB.
+
+        Args:
+            event: Audit event to persist.
+
+        Returns:
+            None.
+
+        Raises:
+            IdempotencyConflict: The event identity exists with different content.
+        """
+        self._insert_audit_event(event, mongo_session=None)
+
+    def list_audit_events_internal(
+        self,
+        subject: AuditSubject,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        """Return audit events for an already-authorised subject read.
+
+        Args:
+            subject: Exact logical subject to match.
+            start_at: Optional inclusive lower timestamp bound.
+            end_at: Optional inclusive upper timestamp bound.
+
+        Returns:
+            Matching events in stable time and identity order.
+
+        Raises:
+            ValueError: The requested time range is invalid or incomparable.
+        """
+        if start_at is not None and end_at is not None:
+            try:
+                invalid_range = start_at > end_at
+            except TypeError as error:
+                raise ValueError(
+                    'Audit event time bounds must use comparable timestamps.'
+                ) from error
+            if invalid_range:
+                raise ValueError('Audit event start_at must not be after end_at.')
+
+        query: dict[str, Any] = {
+            'record_type': 'audit_event',
+            'subject.subject_type': subject.subject_type.value,
+            'subject.subject_id': subject.subject_id,
+            'subject.claim_id': subject.claim_id,
+        }
+        time_range: dict[str, str] = {}
+        if start_at is not None:
+            time_range['$gte'] = self._audit_timestamp(start_at)
+        if end_at is not None:
+            time_range['$lte'] = self._audit_timestamp(end_at)
+        if time_range:
+            query['created_at'] = time_range
+
+        events: list[AuditEventEnvelope] = []
+        for document in self._collection.find(query).sort([('created_at', 1), ('_id', 1)]):
+            event = self._model_from_document(document, AuditEventEnvelope)
+            if event is not None:
+                events.append(event)
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         if (
@@ -469,6 +620,79 @@ class MongoDBRepository:
                 records=records,
             )
         )
+
+    def save_claim_mutation_with_audit(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
+        """Atomically persist a claim mutation and its audit events in MongoDB.
+
+        Args:
+            claim: Resulting authoritative Claim State.
+            expected_revision: Revision that must still be current.
+            idempotency: Retry metadata for the mutation.
+            audit_events: Claim-scoped immutable facts produced by the mutation.
+            branch_evaluation: Optional applied evaluation for the resulting Claim revision.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Retry or audit identity conflicts with stored data.
+            KeyError: Claim ownership, revision linkage, or audit scope is invalid.
+        """
+        if (
+            claim.revision != expected_revision + 1
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != (claim.active_session_id or '')
+        ):
+            raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        self._atomic(
+            lambda mongo_session: self._save_claim_mutation_with_audit(
+                claim,
+                expected_revision,
+                idempotency,
+                audit_events,
+                branch_evaluation,
+                mongo_session,
+            )
+        )
+
+    def _save_claim_mutation_with_audit(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None,
+        mongo_session: Any,
+    ) -> None:
+        prepared = self._prepare_audit_events(
+            claim,
+            audit_events,
+            mongo_session=mongo_session,
+        )
+        records: list[tuple[str, str, BaseModel]] = []
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
+        self._save_child_mutation(
+            claim,
+            expected_revision,
+            idempotency,
+            mongo_session,
+            records=records,
+        )
+        for event in prepared:
+            self._insert_audit_event(event, mongo_session=mongo_session)
 
     def get_session(
         self,
@@ -812,6 +1036,7 @@ class MongoDBRepository:
         operation: AssessorRoutingOperation,
         decision: AgentDecisionRecord,
         customer_id: str,
+        audit_events: tuple[AuditEventEnvelope, ...] = (),
     ) -> None:
         claim = self.get_claim(operation.claim_id, customer_id)
         session = self.get_session(operation.claim_id, decision.session_id, customer_id)
@@ -832,6 +1057,11 @@ class MongoDBRepository:
             raise KeyError(operation.claim_id)
 
         def persist(mongo_session: Any) -> None:
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                audit_events,
+                mongo_session=mongo_session,
+            )
             existing_operation = self._get(
                 'assessor_routing_operation',
                 operation.operation_id,
@@ -846,6 +1076,8 @@ class MongoDBRepository:
             )
             if existing_operation is not None or existing_decision is not None:
                 if existing_operation == operation and existing_decision == decision:
+                    for event in prepared_audit:
+                        self._insert_audit_event(event, mongo_session=mongo_session)
                     return
                 raise IdempotencyConflict(operation.operation_id)
             self._put(
@@ -863,6 +1095,8 @@ class MongoDBRepository:
                 claim_id=operation.claim_id,
                 session=mongo_session,
             )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
 
         self._atomic(persist)
 
