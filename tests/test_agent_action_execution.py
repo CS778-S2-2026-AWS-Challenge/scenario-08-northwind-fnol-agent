@@ -69,6 +69,20 @@ def _fact_patch_command(*, expected_revision: int = 1) -> ClaimContextCommand:
     )
 
 
+def _tool_free_command() -> ClaimContextCommand:
+    return build_claim_context_command(
+        'claim.recompute_form',
+        {
+            'claim_id': 'clm_execution',
+            'expected_revision': 1,
+        },
+        proposer_role=ActionActorRole.RUNTIME,
+        approved_authority=ExecutionAuthority.RUNTIME_VALIDATION,
+        authority_reference='runtime-validation:recompute-form',
+        workflow_state=WorkflowState.COLLECTING,
+    )
+
+
 def test_execution_gate_applies_only_after_current_state_checks() -> None:
     repository = FixtureRepository()
     _seed_claim(repository)
@@ -109,6 +123,30 @@ def test_execution_gate_applies_only_after_current_state_checks() -> None:
     assert result.claim_id == 'clm_execution'
     assert result.resulting_revision == 2
     assert result.failure_policy is None
+
+
+def test_tool_free_claim_proposal_can_execute_without_mutating_revision() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    command = _tool_free_command()
+
+    result = execute_claim_context_command(
+        repository,
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name=None,
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution',
+                    resulting_revision=1,
+                ),
+            )
+        },
+    )
+
+    assert command.permitted_tools == ()
+    assert result.status is ClaimContextExecutionStatus.APPLIED
+    assert result.resulting_revision == 1
 
 
 def test_stale_revision_is_rejected_before_handler_side_effect() -> None:
