@@ -49,11 +49,14 @@ def test_claimant_evidence_projection_excludes_internal_records_and_aggregate_co
     assert claimant_claim.json()['evidence_summary']['pending'] == 1
 
     assert staff.status_code == 200
-    staff_items = staff.json()['evidence']
+    staff_items = client.get(
+        f'/api/v1/workbench/claims/{scenario.claim.claim_id}/evidence',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items']
     assert {item['evidence_id'] for item in staff_items} == {
         'evd_fixture_at06_police',
         'evd_fixture_at06_agency',
         'evd_fixture_at06_internal',
     }
     assert {item['source'] for item in staff_items} == {'claimant', 'external_system', 'staff'}
-    assert staff.json()['evidence_summary']['pending'] == 3
+    assert staff.json()['section_summaries']['evidence']['needs_attention'] == 3

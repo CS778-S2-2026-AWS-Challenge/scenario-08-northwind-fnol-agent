@@ -162,7 +162,7 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'CREATE_CLAIM',
             'received',
             'ready_to_create',
-            'northwind',
+            'system',
             None,
         ),
         'pending': (
@@ -180,7 +180,7 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'URGENT_HANDOFF',
             'received',
             'urgent_support_queued',
-            'northwind',
+            'claims_professional',
             ('urgent_support', 'queued', 'urgent', 'urgent_support', 'urgent_safety_risk'),
         ),
         'professional_review': (
@@ -204,7 +204,7 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'HANDOFF',
             'received',
             'human_support_queued',
-            'northwind',
+            'claims_professional',
             (
                 'human_support',
                 'queued',

@@ -153,15 +153,18 @@ def test_pending_evidence_is_a_cross_workflow_staff_view_with_responsibility_con
 
     assert response.status_code == 200
     item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['queue'] == 'ready_to_progress'
+    assert item['work_summary']['queue_key'] == 'ready_to_progress'
     assert item['workflow_state'] == 'ready_for_next'
-    assert item['pending_evidence_count'] == 3
-    assert item['pending_wait_types'] == ['claimant', 'external_agency', 'internal']
-    assert item['pending_evidence'][0] == {
-        **item['pending_evidence'][0],
-        'wait_type': 'claimant',
-        'responsible_party': 'claimant',
-        'expected_timing': 'Expected next week',
+    missing = [
+        value
+        for value in item['work_summary']['missing_information']
+        if value['kind'] == 'evidence'
+    ]
+    assert len(missing) == 3
+    assert {value['responsible_party'] for value in missing} == {
+        'claimant',
+        'claims_professional',
+        'external_party',
     }
 
 
@@ -188,21 +191,24 @@ def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None
             f'/api/v1/workbench/claims/{claim_id}',
             headers={'Authorization': 'Bearer synthetic-staff'},
         )
+        sessions = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/sessions',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        messages = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/sessions/ses_fixture_at10/messages',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
 
     assert listing.status_code == 200
     item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
-    assert item['queue'] == 'created_routed'
-    assert item['route'] == 'motor_assessment'
-    assert item['evidence_state'] == 'received'
-    assert item['evidence_summary'] == {'received': 1, 'pending': 0, 'needs_attention': 0}
-    assert item['next_action_summary'].startswith('Assign the next available motor assessor')
-    assert item['responsible_party'] == 'external_party'
-    assert item['claim_creation_status'] == 'created'
-    assert item['assessor_routing_status'] == 'queued'
+    assert item['work_summary']['queue_key'] == 'created_routed'
+    assert item['integration_summary']['claim_creation_status'] == 'created'
+    assert item['integration_summary']['assessor_routing_status'] == 'queued'
 
     assert detail.status_code == 200
-    assert detail.json()['sessions'][0]['summary'].startswith('The motor claim was created')
-    assert detail.json()['messages']
+    assert sessions.json()['items'][0]['summary'].startswith('The motor claim was created')
+    assert messages.json()['items']
 
 
 def test_ten_day_resume_restores_bounded_context_without_internal_notes() -> None:
@@ -333,7 +339,7 @@ def test_claimant_and_staff_projections_share_state_without_leaking_internal_sig
         staff_next_step = CustomerNextStep(
             status='review_completed',
             summary='The professional review is complete and your claim can continue.',
-            responsible_party=ResponsibleParty.NORTHWIND,
+            responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
         )
         staff_state = workbench_state.model_copy(
             update={
@@ -394,10 +400,16 @@ def test_staff_action_lifecycle_fixture_records_audit_and_safe_claimant_update()
         messages = client.get(
             f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages', headers=claimant_auth
         )
+        work_items = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/work-items', headers=staff_auth
+        )
+        customer_updates = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/customer-updates', headers=staff_auth
+        )
 
     assert workbench.status_code == 200
-    assert len(workbench.json()['staff_actions']) == 4
-    assert len(workbench.json()['customer_updates']) == 1
+    assert len(work_items.json()['items']) == 4
+    assert len(customer_updates.json()['items']) == 1
     assert claimant.status_code == 200
     assert claimant.json()['customer_next_step']['status'] == 'review_completed'
     claimant_payload = f'{claimant.text}{messages.text}'

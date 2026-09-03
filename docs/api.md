@@ -71,6 +71,21 @@ provider or a production-readiness claim. The legacy fixed claimant token remain
 fixture compatibility credential while existing scenario clients migrate, and is likewise
 disabled outside development and test.
 
+Staff authentication is a separate account and session boundary. `POST
+/api/v1/staff/auth/sessions` verifies staff credentials and returns a short-lived opaque bearer
+token; only its hash, staff ID, creation time, expiry, and revocation state are stored. `GET
+/api/v1/staff/auth/session` and `GET /api/v1/staff/me` require that staff token. `DELETE
+/api/v1/staff/auth/session` revokes it immediately. A claimant session cannot cross into these
+routes, and a staff session cannot cross into claimant account routes.
+
+Normal-mode local runtimes use the separate SQLite staff identity adapter configured by
+`NORTHWIND_STAFF_IDENTITY_DB_PATH`. An initial account may be provisioned explicitly with
+`NORTHWIND_STAFF_BOOTSTRAP_EMAIL`, `NORTHWIND_STAFF_BOOTSTRAP_PASSWORD`, and
+`NORTHWIND_STAFF_BOOTSTRAP_DISPLAY_NAME`; the plaintext password is never persisted. This is a
+real persistent local login path, but it is not an enterprise IdP, SSO, MFA, recovery, or complete
+staff-entitlement implementation. Production deployment still requires an approved identity
+provider adapter.
+
 Current scopes:
 
 | Scope | Purpose |
@@ -259,6 +274,22 @@ derived from the authenticated principal and never accept a customer identifier 
 or payload. Profile updates accept `display_name` and `phone`; preference updates accept the
 boolean `email` and `sms` fields. These fixture records contain anonymous `.invalid` addresses
 only and must not be represented as real Northwind customer data.
+
+## Staff Identity API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/staff/auth/sessions` | Verify staff credentials and create an opaque session |
+| `GET` | `/staff/auth/session` | Read the current authenticated staff session |
+| `DELETE` | `/staff/auth/session` | Revoke the current staff session |
+| `GET` | `/staff/me` | Read the authenticated staff member's minimal Workbench profile |
+
+Only `POST /api/v1/staff/auth/sessions` is public. It accepts `email` and `password`, and returns
+`staff_id`, `access_token`, `token_type`, `expires_at`, and `development_identity`. It never accepts
+a role, scope, Claim assignment, or staff identifier from the client. The other routes require the
+issued staff bearer token and reject claimant credentials. `GET /staff/me` returns the staff ID,
+display name, email, roles, and development-identity marker; the server derives Workbench scopes
+from the authenticated staff boundary rather than trusting the returned profile in later requests.
 
 ## Shared Types
 
@@ -740,6 +771,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
+| `GET` | `/claims/{claim_id}/sessions/{session_id}/events` | Stream claimant-safe Claim and conversation change notifications |
 | `PATCH` | `/claims/{claim_id}/form` | Correct or update structured fields |
 | `POST` | `/claims/{claim_id}/form/confirmations` | Confirm selected material fields |
 | `POST` | `/claims/{claim_id}/creation` | Create an external claim after deterministic validation |
@@ -988,6 +1020,29 @@ stored value state. The projection is omitted when no current-revision evaluatio
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
 Returns claimant-visible messages ordered newest-last by default. Supported query: `before`, `after`, `limit`, and `cursor`. Staff-only notes and hidden system messages are excluded.
+
+### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/events`
+
+Opens a `text/event-stream` connection for the authenticated claimant or the browser's current
+anonymous claimant session. The Claim and session ownership checks are identical to the ordinary
+claimant read boundary. `after_revision` is the last Claim revision already applied by the client;
+the server rejects a cursor newer than the current Claim with `409 INVALID_EVENT_CURSOR` and the
+current revision.
+
+When shared Claim State advances, the stream emits `claim.updated`:
+
+```text
+id: 4
+event: claim.updated
+data: {"event_id":"4","claim_id":"clm_01J4Y7Q2AW","session_id":"ses_01J4Y7RPN8","claim_revision":4,"resources":["claim","messages"],"emitted_at":"2026-09-03T05:10:00Z"}
+```
+
+This event is a resource hint, not a second Claim projection. It contains no messages, handoff
+packet, internal signals, staff identity, model metadata, or hidden reasoning. After receiving it,
+the claimant client reloads `GET /claims/{claim_id}` and the active session's message list through
+their existing visibility-filtered endpoints. Reconnection sends the last applied Claim revision,
+so changes missed while disconnected are recovered. The server sends comment-only keep-alives;
+clients ignore them and reconnect with bounded backoff if the transport closes.
 
 ### `PATCH /api/v1/claims/{claim_id}/form`
 
@@ -1391,7 +1446,55 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `POST` | `/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve` | Resolve a handoff and write back state |
 | `POST` | `/workbench/claims/{claim_id}/updates` | Send a claimant-visible update |
 | `GET` | `/workbench/claims/{claim_id}/events` | Read the claim audit timeline |
+| `POST` | `/workbench/agent/sessions` | Create a private persistent Staff Agent session |
+| `GET` | `/workbench/agent/sessions` | List the authenticated staff member's Staff Agent sessions |
+| `GET` | `/workbench/agent/sessions/{session_id}/messages` | Read one owned Staff Agent session |
+| `POST` | `/workbench/agent/sessions/{session_id}/messages` | Ask the Staff Agent with an explicit Claim scope |
+| `GET` | `/workbench/conversations` | List accessible Claim conversations and owned Staff Agent sessions |
 | `GET` | `/operations/metrics` | Read aggregate operational metrics |
+
+### Staff Agent sessions
+
+Staff Agent sessions are private to the authenticated staff identity and remain stable across
+Workbench pages and browser refreshes. They are not Claim conversation sessions and are never
+exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
+`kind: "staff_agent"` so the staff member can resume them from Claim conversations.
+
+`POST /api/v1/workbench/agent/sessions` accepts an optional `title` and creates a `sas_` session.
+`GET /api/v1/workbench/agent/sessions` lists only sessions owned by the authenticated staff
+member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
+ordered `staff` and `assistant` messages; another staff identity receives `404` rather than an
+ownership disclosure.
+
+Every `POST /api/v1/workbench/agent/sessions/{session_id}/messages` request must include an
+explicit `claim_ids` array. An empty array is a valid general question. The array may contain up
+to five unique existing Claim IDs; the service never infers scope from the current page, an open
+Claim tab, prior session messages, or the question text.
+
+```json
+{
+  "client_message_id": "staff-question-01J4YB0J3S",
+  "content": "Compare the missing evidence for these two Claims.",
+  "claim_ids": ["clm_01J4Y7Q2AW", "clm_01J4Y8P1TZ"]
+}
+```
+
+The service assembles bounded conversation history, selected Claim projections, operational
+records (fields, evidence, policy/history retrievals, review signals, handoffs, staff actions,
+customer updates, and external-service tasks), and authorised knowledge retrieval context. It
+preserves source and availability limitations while building that context. It invokes the distinct
+`staff_assistant` model purpose under the
+`staff_internal_fnol` privacy class and prompt `northwind-fnol-staff-assistant-v1`. The response
+returns the saved session, the staff message and the assistant message. Assistant messages may
+include source references and editable drafts of `claimant_message`, `internal_note`, or
+`external_request` kind. A draft can name only a Claim in the request scope.
+
+The Staff Agent has no mutation authority. It cannot send a draft, change Claim State, decide a
+Signal, contact a third party, assign work, or perform another business action. A staff member must
+move an accepted draft into the applicable revision-checked business-action route, where Runtime
+performs permission, consent, idempotency and audit checks. Model unavailability, malformed output,
+or an out-of-scope draft fails the complete turn before either message is persisted. When no Staff
+Agent model profile is configured, message submission returns `503 DEPENDENCY_UNAVAILABLE`.
 
 ### `GET /api/v1/workbench/claims`
 
@@ -1399,12 +1502,14 @@ Supported filters:
 
 | Filter | Values |
 |---|---|
+| `limit` | Page size from 1 to 100; defaults to 25 |
+| `cursor` | Opaque cursor returned by the preceding page |
 | `view` | `urgent`, `human_requests`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
 | `next_action` | `AgentAction` |
-| `tag` | Registered internal tag code |
+| `tag` | One published staff tag code from the backend Staff Tag Registry |
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
 
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
@@ -1412,76 +1517,103 @@ next responsibility, evidence state and counts, open handoff summary, assignee, 
 service timing, and update time. It is a projection of shared claim state, not a separately
 editable board record.
 
-The response is shaped as `{ "items": [...], "page": { "next_cursor": null } }`. Each item
+The response is shaped as `{ "items": [...], "page": { "next_cursor": null } }`. A non-null
+`next_cursor` is passed back through `cursor` to read the next ordered page. Invalid cursors return
+`422 VALIDATION_ERROR`. Each item
 contains `claim_id`, `revision`, `customer_reference`, `incident_type`, `workflow_state`,
 `queue`, `priority`, `next_action`, `route`, `evidence_state`, `evidence_summary`,
 `next_action_summary`, `responsible_party`, `claim_creation_status`,
-`assessor_routing_status`, `open_handoff_count`, `assignee_id`, `created_at`, and `updated_at`.
+`assessor_routing_status`, `open_handoff_count`, `assignee_id`, `tags`, `created_at`, and
+`updated_at`.
 Queue assignment, priority, and assignee are derived from the shared claim state and active
 persisted handoffs. Creation and assessor-routing statuses are nullable until those integrations
 have produced a result.
 
+`tags` is a backend projection from authoritative Claim fields and branches, Evidence records,
+WorkItems, handoffs, external-operation results, and review Signals. The Workbench client MUST
+render this projection and MUST NOT infer tags from summaries, queue names, route names, or free
+text. Each tag has this shape:
+
+```json
+{
+  "tag_instance_id": "clm_01J4Y7Q2AW:impact.vehicle_not_drivable",
+  "code": "impact.vehicle_not_drivable",
+  "registry_version": "0.2",
+  "label": "Vehicle not drivable",
+  "description": "Summarises the reported practical impact: Vehicle not drivable.",
+  "category": "impact",
+  "status": "active",
+  "visibility": "safe_summary_only",
+  "basis": "reported",
+  "source_refs": ["msg_01J4Y7RPN8", "field:vehicle.drivable"],
+  "activated_at": "2026-08-10T03:45:00Z",
+  "display_weight": 30
+}
+```
+
+Stable codes are an API concern; staff interfaces display the natural-language `label` and make
+the basis and sources available through progressive disclosure. Tags classify a Claim for staff
+and do not independently determine queue priority. Staff cannot directly edit a tag: a correction,
+Signal decision, handoff, Evidence change, WorkItem transition, or authorised business action
+changes the source record and the backend recomputes the projection. Claimant routes MUST NOT
+include this staff-only projection.
+
+The `tag` filter uses the same backend Registry. Unknown, draft, deprecated, or retired codes
+return `400 INVALID_TAG_FILTER`; a published code returns only Claims whose computed `tags`
+contains that code. The current endpoint accepts one code. Future grouped OR/AND filtering requires
+an explicit contract extension.
+
 `urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
 contains claims with an open claimant-support handoff whose support need is `human_requested`.
-Queue results are ordered by priority (`immediate`, `urgent`, `high`, `standard`) and then by
-oldest claim creation time so staff can accept the highest-priority work first.
+Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
+`routine`) and then by due time/creation time. The client does not recalculate this order.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
-Returns the authorised internal projection assembled from the same repository records used by
-claimant routes:
+Returns the authorised internal Claim projection assembled from the same repository records used by
+claimant routes. The response deliberately contains summaries rather than a database-shaped dump;
+large resources are loaded from the dedicated sub-resources below:
 
 ```json
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
-  "customer_reference": "customer-1042",
-  "channel": "web_agent",
-  "locale": "en-NZ",
-  "incident_type": "motor",
+  "display_reference": "NW-1042",
+  "claimant": {"customer_id": "customer-1042"},
+  "incident": {"family": "motor", "summary": "Rear-end collision; vehicle remains drivable."},
+  "lifecycle_state": "staff_support",
+  "workflow_state": "professional_review",
+  "ownership": {"state": "assigned", "current_staff_access": "primary"},
+  "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
+  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "missing_information": [], "risk_signals": []},
+  "integration_summary": {"external_wait_count": 0},
+  "tags": [],
   "claim_state": {},
-  "form": {},
-  "route": "professional_review",
-  "active_session_id": "ses_01J4Y7RPN8",
-  "evidence_summary": {},
-  "evidence": [],
-  "sessions": [],
-  "messages": [],
-  "decisions": [],
-  "retrievals": [],
-  "signals": [],
-  "handoffs": [],
-  "staff_actions": [],
-  "customer_updates": [],
-  "external_claim": null,
-  "assessor_routing": null,
+  "allowed_actions": [],
+  "section_summaries": {"fields": {}, "conversation": {}, "evidence": {}, "reference_checks": {}, "external_services": {}, "activity": {}},
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
 
-The Workbench `evidence_summary` is the authoritative aggregate over the full persisted evidence set, including authorised internal evidence. It MUST NOT be recomputed from the narrower claimant-visible evidence projection.
+`section_summaries` reports availability, counts, and attention totals. Complete records are loaded
+only when staff opens a section:
 
-`sessions` includes compact summaries, unresolved questions, pending items, prior commitments,
-and context revisions. `messages` includes the complete persisted communication history,
-including internal-only staff or system records. `decisions` includes internal authority,
-tool, and proposed-signal context. `retrievals` contains the provider-neutral policy and relevant
-claim-history records, including provenance and recorded uncertainty. `signals` projects persisted
-proposed signals and connects retrieval-backed signals to their source evidence through
-`source_refs` and `source_evidence`; recorded staff decisions include their actor, reason codes,
-result summary, and evidence references. `handoffs` is a typed staff-only projection of the persisted handoff records and
-includes routing fields, the staff-visible `trigger`, and the complete transfer packet. An
-internal `professional_review_required` trigger does not set `support_need`: that field remains
-specific to claimant support intent. Claimant routes return only the
-separate `ClaimantHandoff` projection and never expose the queue, internal reasons, requested
-action, applied rule, assignment, source message, or packet. `external_claim` and
-`assessor_routing` use the shared typed creation and routing results, including their status,
-next step, and expected timing. Internal fields are never added to claimant projections unless
-their claimant-safe contract explicitly includes them.
+| Section | Endpoint |
+| --- | --- |
+| Fields | `GET /workbench/claims/{claim_id}/fields` |
+| Sessions/messages | `GET /workbench/claims/{claim_id}/sessions` and `.../sessions/{session_id}/messages` |
+| Evidence | `GET /workbench/claims/{claim_id}/evidence` |
+| Policy/history/RAG | `GET /workbench/claims/{claim_id}/retrievals` |
+| Signals | `GET /workbench/claims/{claim_id}/signals` |
+| Handoffs/work items/customer updates | The corresponding typed sub-resource endpoints |
+| External requests | `GET /workbench/claims/{claim_id}/external-requests` |
+| Audit activity | `GET /workbench/claims/{claim_id}/events` |
 
-The current repository has no separate persisted staff-action or customer-update records. Those
-arrays therefore remain empty rather than synthesising a second lifecycle or manual status.
+Each sub-resource returns its own availability and limitation metadata. A failed optional source
+does not invalidate the core Claim projection. `tags` follows the typed Staff Tag Registry contract;
+`allowed_actions` is a runtime projection and never grants the client authority to invent an action.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -2251,6 +2383,7 @@ All errors use one envelope:
 | `ACCESS_DENIED` | `403` | Principal lacks permission |
 | `RESOURCE_NOT_FOUND` | `404` | Resource absent or concealed |
 | `INVALID_STATE_TRANSITION` | `400` | Requested transition is not allowed |
+| `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown or is not published in the backend Registry |
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |

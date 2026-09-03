@@ -103,6 +103,48 @@ def build_model_gateway(
     )
 
 
+def build_scoped_model_gateway(
+    settings: Settings,
+    *,
+    purpose: str,
+    privacy_class: str,
+    prompt_version: str,
+    profile_suffix: str,
+    registry: ModelGatewayRegistry | None = None,
+) -> ModelGateway:
+    """Build an explicit purpose profile over the configured provider connection."""
+
+    resolved_registry = registry or default_model_gateway_registry()
+    capabilities = ModelCapabilities(
+        structured_output=settings.model_supports_structured_output,
+        tools=settings.model_supports_tools,
+    )
+    profile = ModelProfile(
+        profile_id=f'{settings.model_profile_id}-{profile_suffix}',
+        protocol=settings.model_protocol_adapter,
+        provider=settings.model_provider,
+        model_identifier=settings.model_identifier,
+        credential_reference=settings.model_api_key_env,
+        purpose=purpose,
+        privacy_class=privacy_class,
+        capabilities=capabilities,
+        timeout_seconds=settings.model_timeout_seconds,
+        prompt_version=prompt_version,
+        evaluation_status=ModelProfileStatus(settings.model_evaluation_status),
+    )
+    return resolved_registry.create(
+        settings.model_protocol_adapter,
+        ModelGatewayConfig(
+            base_url=settings.model_base_url,
+            model=settings.model_identifier,
+            credential_environment_variable=settings.model_api_key_env,
+            timeout_seconds=settings.model_timeout_seconds,
+            capabilities=capabilities,
+            profile=profile,
+        ),
+    )
+
+
 class ConfigurationBackedModelGateway:
     """Resolve the active published model configuration for every model turn.
 

@@ -14,6 +14,7 @@ from backend.domain.identity import (
     LoginRequest,
     PreferencesPatchRequest,
     ProfilePatchRequest,
+    RegistrationRequest,
 )
 from backend.repositories.identity import IdentityRepository
 
@@ -26,6 +27,8 @@ def login(
     repository: IdentityRepository,
     payload: LoginRequest,
     ttl_minutes: int,
+    *,
+    development_identity: bool = False,
 ) -> AuthenticatedSession:
     account = repository.authenticate(payload.email, payload.password)
     if account is None:
@@ -49,11 +52,42 @@ def login(
         customer_id=account.customer_id,
         access_token=token,
         expires_at=expires_at,
+        development_identity=development_identity,
+    )
+
+
+def register(
+    repository: IdentityRepository,
+    payload: RegistrationRequest,
+    ttl_minutes: int,
+    *,
+    development_identity: bool = False,
+) -> AuthenticatedSession:
+    account = repository.create_account(
+        payload.email,
+        payload.password,
+        payload.display_name,
+    )
+    if account is None:
+        raise ApiError(
+            status_code=409,
+            code='RESOURCE_CONFLICT',
+            message='An account with that email already exists.',
+        )
+    return login(
+        repository,
+        LoginRequest(email=account.email, password=payload.password),
+        ttl_minutes,
+        development_identity=development_identity,
     )
 
 
 def session_projection(repository: IdentityRepository, principal: Principal) -> CurrentAuthSession:
-    return CurrentAuthSession(customer_id=principal.subject, expires_at=principal.expires_at)
+    return CurrentAuthSession(
+        customer_id=principal.subject,
+        expires_at=principal.expires_at,
+        development_identity=principal.synthetic,
+    )
 
 
 def account_projection(repository: IdentityRepository, principal: Principal) -> AccountProjection:
@@ -72,6 +106,7 @@ def account_projection(repository: IdentityRepository, principal: Principal) -> 
             phone=account.phone,
         ),
         preferences=CommunicationPreferences(**account.communication_preferences),
+        development_identity=principal.synthetic,
     )
 
 

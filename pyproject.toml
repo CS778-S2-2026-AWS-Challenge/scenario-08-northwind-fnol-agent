@@ -10,6 +10,9 @@ source = ["backend"]
 fail_under = 90
 show_missing = true
 skip_covered = true
+exclude_also = [
+    "raise NotImplementedError",
+]
 
 [tool.ruff]
 line-length = 100

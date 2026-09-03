@@ -82,6 +82,10 @@ def test_review_reasons_are_visible_to_staff_but_not_claimants() -> None:
                 f'/api/v1/workbench/claims/{scenario.claim.claim_id}',
                 headers={'Authorization': 'Bearer synthetic-staff'},
             )
+            staff_messages = client.get(
+                f'/api/v1/workbench/claims/{scenario.claim.claim_id}/sessions/{session_id}/messages',
+                headers={'Authorization': 'Bearer synthetic-staff'},
+            )
 
         visibility = scenario.expected['visibility']
         review_reason = str(scenario.expected['review_reason'])
@@ -92,11 +96,23 @@ def test_review_reasons_are_visible_to_staff_but_not_claimants() -> None:
         assert claimant_messages.status_code == 200
         assert staff_detail.status_code == 200
         assert len(claimant_messages.json()['items']) == visibility['claimant_message_count']
-        assert len(staff_detail.json()['messages']) == visibility['staff_message_count']
+        assert staff_messages.status_code == 200
+        assert len(staff_messages.json()['items']) == visibility['staff_message_count']
         assert len(review_signals) == visibility['staff_review_signal_count']
         assert review_reason not in claimant_messages.text
-        assert review_reason in staff_detail.text or any(
-            review_reason in signal.reason_codes for signal in review_signals
+        staff_signals = client.get(
+            f'/api/v1/workbench/claims/{scenario.claim.claim_id}/signals',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        staff_handoffs = client.get(
+            f'/api/v1/workbench/claims/{scenario.claim.claim_id}/handoffs',
+            headers={'Authorization': 'Bearer synthetic-staff'},
+        )
+        assert (
+            review_reason in staff_messages.text
+            or review_reason in staff_signals.text
+            or review_reason in staff_handoffs.text
+            or any(review_reason in signal.reason_codes for signal in review_signals)
         )
         for retrieval in scenario.retrievals:
             assert retrieval.retrieval_id not in claimant_messages.text

@@ -83,10 +83,11 @@ journey check.
 Run the focused checks while developing; CircleCI supplies the authoritative exact-head result:
 
 ```text
-py -3.12 -m pytest tests/test_handoff_api.py tests/test_staff_actions_api.py tests/test_employee_workbench_static.py
+py -3.12 -m pytest tests/test_handoff_api.py tests/test_staff_actions_api.py tests/test_workbench_api.py
 npm test --prefix customer -- --run src/App.test.jsx src/EmployeeWorkbench.test.js
 ```
 
 Focused checks are `customer/src/App.test.jsx`, `customer/src/EmployeeWorkbench.test.js`,
 `tests/test_handoff_api.py`, `tests/test_staff_actions_api.py`, and
-`tests/test_employee_workbench_static.py`.
+`tests/test_workbench_api.py`. The componentised Workbench suite is run with
+`npm test --prefix workbench`.

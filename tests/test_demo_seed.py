@@ -51,23 +51,28 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
         assert pending.status_code == 200
         pending_items = pending.json()['items']
         assert [item['claim_id'] for item in pending_items] == ['clm_fixture_at06']
-        assert pending_items[0]['pending_wait_types'] == [
+        missing = pending_items[0]['work_summary']['missing_information']
+        assert {item['responsible_party'] for item in missing} == {
             'claimant',
-            'external_agency',
-            'internal',
-        ]
+            'external_party',
+            'claims_professional',
+        }
 
         listing = client.get('/api/v1/workbench/claims', headers=STAFF_AUTH)
         assert listing.status_code == 200
         items = {item['claim_id']: item for item in listing.json()['items']}
         assert set(body['claim_ids']) <= set(items)
-        priorities = {items[claim_id]['priority'] for claim_id in body['claim_ids']}
+        priorities = {
+            items[claim_id]['priority_projection']['level'] for claim_id in body['claim_ids']
+        }
         assert priorities == {'urgent', 'high', 'standard'}
 
         review_detail = client.get('/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH)
         assert review_detail.status_code == 200
         detail = review_detail.json()
-        evidence = detail['evidence']
+        evidence = client.get(
+            '/api/v1/workbench/claims/clm_fixture_at02/evidence', headers=STAFF_AUTH
+        ).json()['items']
         assert [item['original_filename'] for item in evidence] == [
             'synthetic-ground-floor-water-damage.jpg',
             'synthetic-plumber-site-note.pdf',
@@ -78,19 +83,31 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
             'received',
             'inconsistent',
         ]
-        retrievals = {item['retrieval_id']: item for item in detail['retrievals']}
+        retrievals = {
+            item['retrieval_id']: item
+            for item in client.get(
+                '/api/v1/workbench/claims/clm_fixture_at02/retrievals', headers=STAFF_AUTH
+            ).json()['items']
+        }
         assert set(retrievals) == {
             linked.policy_retrieval_id,
             linked.claim_history_retrieval_id,
         }
         assert retrievals[linked.policy_retrieval_id]['kind'] == 'policy'
         assert retrievals[linked.claim_history_retrieval_id]['kind'] == 'claim_history'
-        assert detail['customer_reference'] == linked.customer_id
+        assert detail['claimant']['customer_id'] == linked.customer_id
         assert detail['claim_id'] == linked.claim_id
         assert {item['evidence_id'] for item in evidence} == set(linked.evidence_ids)
-        assert {item['message_id'] for item in detail['messages']} == set(linked.message_ids)
-        assert [item['handoff_id'] for item in detail['handoffs']] == [linked.handoff_id]
-        packet = detail['handoffs'][0]['packet']
+        messages = client.get(
+            f'/api/v1/workbench/claims/{linked.claim_id}/sessions/{scenario.claim.active_session_id}/messages',
+            headers=STAFF_AUTH,
+        ).json()['items']
+        assert {item['message_id'] for item in messages} == set(linked.message_ids)
+        handoffs = client.get(
+            f'/api/v1/workbench/claims/{linked.claim_id}/handoffs', headers=STAFF_AUTH
+        ).json()['items']
+        assert [item['handoff_id'] for item in handoffs] == [linked.handoff_id]
+        packet = handoffs[0]['packet']
         assert linked.policy_retrieval_id in packet['source_refs']
         assert (
             retrievals[linked.policy_retrieval_id]['facts']['policy_reference']
@@ -115,7 +132,12 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
 
         # The policy fact keeps staff-side provenance without leaking the retrieval identifier
         # into the claimant projection.
-        staff_policy_field = detail['form']['policy.policy_number']
+        fields = client.get(
+            f'/api/v1/workbench/claims/{linked.claim_id}/fields', headers=STAFF_AUTH
+        ).json()['items']
+        staff_policy_field = next(
+            item['field'] for item in fields if item['code'] == 'policy.policy_number'
+        )
         assert staff_policy_field['source'] == 'policy'
         assert staff_policy_field['source_refs'] == [linked.policy_retrieval_id]
         claimant_policy_field = claimant_claim.json()['form']['policy.policy_number']
@@ -123,12 +145,14 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
         assert claimant_policy_field['value'] == staff_policy_field['value']
         assert claimant_policy_field['source_refs'] == []
 
-        signals = detail['signals']
+        signals = client.get(
+            f'/api/v1/workbench/claims/{linked.claim_id}/signals', headers=STAFF_AUTH
+        ).json()['items']
         assert [item['signal_id'] for item in signals] == [
             'sig_at02_policy_cause',
             'sig_at02_weather_date',
         ]
-        assert all(item['status'] == 'review_required' for item in signals)
+        assert all(item['status'] == 'open' for item in signals)
 
 
 def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None:
@@ -156,7 +180,10 @@ def test_seeded_mvp_paths_use_canonical_records_and_role_safe_evidence() -> None
             assert claimant_claim.json()['workflow_state'] == (
                 scenario.claim.claim_state.workflow_state.value
             )
-            assert {item['evidence_id'] for item in staff.json()['evidence']} == {
+            staff_evidence = client.get(
+                f'/api/v1/workbench/claims/{claim_id}/evidence', headers=STAFF_AUTH
+            ).json()['items']
+            assert {item['evidence_id'] for item in staff_evidence} == {
                 item.evidence_id for item in scenario.evidence
             }
             expected_claimant_ids = {

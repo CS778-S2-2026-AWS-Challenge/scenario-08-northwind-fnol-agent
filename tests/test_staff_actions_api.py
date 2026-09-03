@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +22,12 @@ def create_claim(client: TestClient, auth_headers: dict[str, str]) -> dict[str, 
         json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
     )
     assert response.status_code == 201
-    return response.json()['claim']  # type: ignore[no-any-return]
+    claim = response.json()['claim']
+    repository = cast(Any, client.app).state.claim_repository
+    stored = repository.get_claim_internal(claim['claim_id'])
+    assert stored is not None
+    repository._claims[claim['claim_id']] = stored.model_copy(update={'assignee_id': 'stf_demo'})
+    return claim  # type: ignore[no-any-return]
 
 
 def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
@@ -165,10 +171,10 @@ def test_signal_decision_is_internal_idempotent_and_never_declares_fraud(
     assert stored is not None
     assert stored.claim_state.fraud_signal.value == 'none'
     workbench = client.get(
-        f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers
+        f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
     ).json()
-    assert workbench['signals'][0]['code'] == 'sig_fixture'
-    assert workbench['signals'][0]['decisions'][0]['decision'] == 'dismissed'
+    assert workbench['items'][0]['code'] == 'sig_fixture'
+    assert workbench['items'][0]['decisions'][0]['decision'] == 'dismissed'
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
     assert 'signal_decision' not in claimant
     assert 'SOURCE_RECORD_NOT_COMPARABLE' not in str(claimant)

@@ -60,10 +60,13 @@ projections, fixtures, and transaction tests change together.
 | --- | --- | --- |
 | Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
 | Claimant auth session | hash of an opaque development/test token, authenticated customer reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `customer_id` |
+| Staff account | local/runtime staff identity, salted password hash, display name, roles, and active state | `staff_id` |
+| Staff auth session | hash of an opaque staff token, authenticated staff reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `staff_id` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
+| Staff Agent interaction | staff-owned persistent sessions, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
 | Agent turn | TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelopes, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -144,6 +147,13 @@ Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
     Claim.
 24. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
+25. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+    without accepting claimant credentials or browser-supplied roles.
+26. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+    another staff member's sessions.
+27. Append one Staff Agent question and answer atomically, resolve retries by
+    `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
+    used for that turn.
 
 ## Development/Test Identity Invariants
 
@@ -157,6 +167,10 @@ Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
   durable identity adapter exist.
 - Profile and communication preferences are Customer records, not browser-local authority.
 - Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
+- Staff password hashes and session hashes remain in the staff identity store; they are not Claim,
+  claimant session, or Workbench projection fields.
+- Staff logout revokes the server-side session immediately. The local adapter does not by itself
+  establish production IdP, MFA, recovery, or per-Claim entitlement readiness.
 
 ## Claim Revision and Idempotency
 
@@ -224,6 +238,25 @@ Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
   approved product contract explicitly changes this rule.
 - Resume preserves confirmed facts, evidence records, pending work, and prior
   commitments while using the latest authorised Claim State.
+
+## Staff Agent Session Invariants
+
+- A Staff Agent session is owned by one authenticated `staff_id`. It is separate from claimant and
+  Claim-bound staff conversation sessions and does not inherit the currently visible Claim tab.
+- Every staff question stores the explicitly supplied `claim_ids`; an empty list is a deliberate
+  general scope. Scope is never inferred from text, prior turns, navigation state, or open tabs.
+- One turn permits at most five unique Claim IDs. A generated draft that references a Claim outside
+  that scope rejects the complete turn before either message is saved.
+- The staff question and assistant answer are persisted atomically. Their common creation time is
+  ordered causally as staff question then assistant answer rather than by random record ID.
+- `client_message_id` is unique within the staff-owned session. An identical retry restores the
+  original pair; changed content or Claim scope under the same identity is an idempotency conflict.
+- Assistant records retain bounded provider model/request references and source references. They
+  do not retain credentials, hidden reasoning, unrestricted provider payloads, or data from an
+  unselected Claim.
+- Advice and drafts are not business-state authority. Sending, assignment, Claim mutation,
+  third-party contact, Signal decision, and other effects require a separate Runtime-authorised,
+  revision-checked and audited operation.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

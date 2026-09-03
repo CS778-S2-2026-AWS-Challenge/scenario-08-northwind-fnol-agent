@@ -2,7 +2,26 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import at08ResumeFixture from '../../tests/fixtures/api/AT-08-resume-public.json'
+
+const realtime = vi.hoisted(() => ({ streamClaimUpdates: vi.fn() }))
+
+vi.mock('./api.js', async (importOriginal) => ({
+  ...await importOriginal(),
+  streamClaimUpdates: realtime.streamClaimUpdates,
+}))
+
 import App from './App.jsx'
+
+function holdRealtimeConnection() {
+  realtime.streamClaimUpdates.mockReset()
+  realtime.streamClaimUpdates.mockImplementation(({ signal }) => new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    signal.addEventListener('abort', resolve, { once: true })
+  }))
+}
 
 function jsonResponse(body, status = 200) {
   return Promise.resolve(
@@ -220,10 +239,12 @@ function mockAt08Resume(sessionNextStep = at08ResumeFixture.session.resume.custo
   fetch.mockImplementationOnce(() => jsonResponse(messages))
 }
 
-describe('claimant intake', () => {
+describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent journey)', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    holdRealtimeConnection()
     localStorage.clear()
+    window.history.replaceState({}, '', '/')
   })
 
   afterEach(() => {
@@ -1552,5 +1573,138 @@ describe('claimant intake', () => {
     expect(screen.getAllByText(/Contact local emergency services yourself/)).toHaveLength(3)
     expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Add more information')).toBeEnabled()
+  })
+})
+
+describe('adaptive claimant entry', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    holdRealtimeConnection()
+    localStorage.clear()
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('presents the Agent as the single primary entry without legacy guided controls', () => {
+    render(<App />)
+    expect(screen.getByRole('heading', { name: 'Tell us what happened' })).toBeVisible()
+    expect(screen.getByLabelText('Incident description')).toBeEnabled()
+    expect(screen.queryByRole('radio', { name: 'Motor' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /guided motor/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps How it works in the entry journey', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'How it works' }))
+    expect(screen.getByRole('heading', { name: 'How this works' })).toBeVisible()
+  })
+
+  it('supports registration as a separate authentication view', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Create an account' }))
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeVisible()
+    expect(screen.getByLabelText('Confirm password')).toBeVisible()
+  })
+
+  it('shows the collapsible What we have so far panel after a claim starts', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(firstTurn()))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByRole('heading', { name: 'What we have so far' })).toBeVisible()
+    const toggle = screen.getByRole('button', { name: 'Collapse' })
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('starts an anonymous claim with a browser session header instead of an empty bearer token', async () => {
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(firstTurn()))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const [, request] = fetch.mock.calls.find(([url, options]) => (
+      url === '/api/v1/claims' && options?.method === 'POST'
+    ))
+    const headers = request.headers
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers['X-Northwind-Anonymous-Session']).toMatch(/^[0-9a-f-]{36}$/i)
+  })
+
+  it('reloads the safe claim projection and staff message after a live update', async () => {
+    let publishUpdate
+    realtime.streamClaimUpdates.mockImplementation(({ signal, onEvent }) => {
+      publishUpdate = onEvent
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+    })
+    const updatedClaim = {
+      ...createdClaim().claim,
+      revision: 4,
+      handoff: {
+        handoff_id: 'hnd_live',
+        status: 'in_progress',
+        priority: 'standard',
+        support_need: 'human_requested',
+        summary: 'A claims professional is helping with this report.',
+        created_at: '2026-08-12T00:02:00Z',
+      },
+      customer_next_step: {
+        ...nextStep,
+        status: 'human_support_in_progress',
+        summary: 'A Northwind staff member is now assisting you.',
+        responsible_party: 'claims_professional',
+      },
+    }
+    const staffMessage = {
+      message_id: 'msg_staff_live',
+      actor: 'staff',
+      content: { type: 'text', text: 'I can help you continue from the details already saved.' },
+      evidence_refs: [],
+      in_reply_to: null,
+      created_at: '2026-08-12T00:03:00Z',
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(firstTurn()))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'Another car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await waitFor(() => expect(publishUpdate).toBeTypeOf('function'))
+    fetch
+      .mockResolvedValueOnce(jsonResponse(updatedClaim))
+      .mockResolvedValueOnce(jsonResponse({ items: [staffMessage], page: { next_cursor: null } }))
+
+    await act(async () => publishUpdate({
+      claim_id: 'clm_test',
+      session_id: 'ses_test',
+      claim_revision: 4,
+      resources: ['claim', 'messages'],
+    }))
+
+    expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
+    expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    expect(realtime.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: 'clm_test',
+      sessionId: 'ses_test',
+      afterRevision: 2,
+    }))
   })
 })

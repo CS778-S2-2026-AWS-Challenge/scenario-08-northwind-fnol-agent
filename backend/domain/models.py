@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from backend.domain.tag_registry import StaffTag
+
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -152,9 +154,9 @@ class NeededFor(str, Enum):
 
 class ResponsibleParty(str, Enum):
     CLAIMANT = 'claimant'
-    NORTHWIND = 'northwind'
     CLAIMS_PROFESSIONAL = 'claims_professional'
     EXTERNAL_PARTY = 'external_party'
+    SYSTEM = 'system'
 
 
 class EvidenceWaitType(str, Enum):
@@ -663,6 +665,77 @@ class StaffActionRecord(ContractModel):
     completed_at: datetime | None = None
 
 
+class CollaborationRequestKind(str, Enum):
+    COWORK = 'cowork'
+    TRANSFER = 'transfer'
+    REQUEUE = 'requeue'
+
+
+class CollaborationRequestStatus(str, Enum):
+    PENDING = 'pending'
+    ACCEPTED = 'accepted'
+    REJECTED = 'rejected'
+    CANCELLED = 'cancelled'
+
+
+class ClaimCollaborationRequest(ContractModel):
+    request_id: str
+    claim_id: str
+    kind: CollaborationRequestKind
+    status: CollaborationRequestStatus
+    requested_by: str
+    primary_owner_id: str | None = None
+    target_staff_id: str | None = None
+    reason: str = Field(min_length=1, max_length=1000)
+    created_at: datetime
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+
+
+class ClaimCoworkerRecord(ContractModel):
+    coworker_id: str
+    claim_id: str
+    staff_id: str
+    granted_by: str
+    source_request_id: str
+    active: bool = True
+    granted_at: datetime
+    revoked_at: datetime | None = None
+
+
+class CreateCoworkRequest(ContractModel):
+    staff_id: str | None = Field(default=None, min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CreateTransferRequest(ContractModel):
+    target_staff_id: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class DecideCollaborationRequest(ContractModel):
+    decision: CollaborationRequestStatus
+
+    @model_validator(mode='after')
+    def require_final_decision(self) -> 'DecideCollaborationRequest':
+        if self.decision not in {
+            CollaborationRequestStatus.ACCEPTED,
+            CollaborationRequestStatus.REJECTED,
+        }:
+            raise ValueError('A collaboration request can only be accepted or rejected.')
+        return self
+
+
+class RequeueClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CollaborationMutationResponse(ContractModel):
+    request: ClaimCollaborationRequest
+    revision: int = Field(ge=1)
+    coworker: ClaimCoworkerRecord | None = None
+
+
 class CreateStaffActionRequest(ContractModel):
     action_type: str = Field(min_length=1, max_length=100)
     assigned_to: str | None = Field(default=None, min_length=1, max_length=100)
@@ -764,6 +837,7 @@ class WorkbenchClaimDetail(ContractModel):
     decisions: list[AgentDecisionRecord]
     retrievals: list[dict[str, Any]]
     signals: list[dict[str, Any]]
+    tags: list[StaffTag] = Field(default_factory=list)
     handoffs: list[WorkbenchHandoff]
     staff_actions: list[dict[str, Any]]
     customer_updates: list[dict[str, Any]]
@@ -802,6 +876,7 @@ class WorkbenchClaimListItem(ContractModel):
     assessor_routing_status: AssessorRoutingStatus | None = None
     open_handoff_count: int = Field(ge=0)
     assignee_id: str | None = None
+    tags: list[StaffTag] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -1056,6 +1131,17 @@ class ClaimantClaim(ContractModel):
     handoff: ClaimantHandoff | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ClaimantChangeEvent(ContractModel):
+    """Claimant-safe notification that authorised projections should be reloaded."""
+
+    event_id: str
+    claim_id: str
+    session_id: str
+    claim_revision: int = Field(ge=1)
+    resources: list[Literal['claim', 'messages']]
+    emitted_at: datetime
 
 
 class ClaimListItem(ContractModel):

@@ -29,6 +29,9 @@ def seed_policy_review_signal(
     assert created.status_code == 201
     claim_id = created.json()['claim']['claim_id']
     assert isinstance(claim_id, str)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository._claims[claim_id] = claim.model_copy(update={'assignee_id': 'stf_demo'})
 
     record = map_policy_provider_payload(
         retrieval_id=f'ret_{key_prefix}',
@@ -56,7 +59,7 @@ def seed_policy_review_signal(
 
 
 def signal_from_detail(body: dict[str, Any], signal_id: str) -> dict[str, Any]:
-    signals = cast(list[dict[str, Any]], body['signals'])
+    signals = cast(list[dict[str, Any]], body['items'])
     return next(signal for signal in signals if signal.get('signal_id') == signal_id)
 
 
@@ -85,12 +88,19 @@ def test_workbench_review_decision_preserves_actor_reason_revision_and_source_ev
         headers=staff_auth_headers,
     )
     assert detail.status_code == 200
-    projected = signal_from_detail(detail.json(), signal.signal_id)
-    assert projected['review_type'] == 'professional_review'
+    projected = signal_from_detail(
+        client.get(
+            f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+        ).json(),
+        signal.signal_id,
+    )
+    assert projected['category'] == 'review'
     assert projected['reason_codes'] == ['POLICY_WORDING_REVIEW_REQUIRED']
     assert projected['source_refs'] == [record.retrieval_id, record.source.reference]
     assert projected['source_evidence'] == [record.model_dump(mode='json')]
-    assert detail.json()['retrievals'] == [record.model_dump(mode='json')]
+    assert client.get(
+        f'/api/v1/workbench/claims/{claim_id}/retrievals', headers=staff_auth_headers
+    ).json()['items'] == [record.model_dump(mode='json')]
 
     payload = {
         'decision': 'confirmed',
@@ -142,7 +152,12 @@ def test_workbench_review_decision_preserves_actor_reason_revision_and_source_ev
         headers=staff_auth_headers,
     )
     assert refreshed.status_code == 200
-    refreshed_signal = signal_from_detail(refreshed.json(), signal.signal_id)
+    refreshed_signal = signal_from_detail(
+        client.get(
+            f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+        ).json(),
+        signal.signal_id,
+    )
     assert refreshed_signal['source_evidence'] == [record.model_dump(mode='json')]
     assert len(refreshed_signal['decisions']) == 1
     assert refreshed_signal['decisions'][0]['actor_id'] == 'stf_demo'
