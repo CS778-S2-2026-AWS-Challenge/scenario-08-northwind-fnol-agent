@@ -13,6 +13,9 @@ from backend.adapters.claims_service import (
 )
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.external_services import (
+    ExternalTaskOperationStatus,
+)
 from backend.domain.models import IntegrationSource, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
 from backend.services.external_service_entry import MismatchedServiceAdapterError
@@ -318,3 +321,94 @@ def test_the_fixture_runtime_assembles_with_the_adapter_it_declares() -> None:
 
     assert app.state.assessor_service_adapter.integration_source is IntegrationSource.FIXTURE
     assert app.state.assessor_service_entry.integration_source is IntegrationSource.FIXTURE
+
+
+@pytest.mark.parametrize(
+    ('failure', 'expected'),
+    [
+        (AssessorFixtureFailure.UNAVAILABLE, ExternalTaskOperationStatus.RETRYABLE_FAILURE),
+        (AssessorFixtureFailure.TIMEOUT, ExternalTaskOperationStatus.RETRYABLE_FAILURE),
+        (AssessorFixtureFailure.ACCESS_DENIED, ExternalTaskOperationStatus.TERMINAL_FAILURE),
+        (AssessorFixtureFailure.MALFORMED, ExternalTaskOperationStatus.TERMINAL_FAILURE),
+    ],
+)
+def test_a_failed_attempt_is_recorded_on_the_task_rather_than_left_prepared(
+    failure: AssessorFixtureFailure,
+    expected: ExternalTaskOperationStatus,
+) -> None:
+    """A failed task must not still claim the request had not been sent.
+
+    The routing operation already carried the failure. The task did not, so it
+    stayed `prepared` and nothing reading the task could tell a finished failure
+    from a request still in flight. The recovery matrix decides which failure this
+    is; the task records it.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(failure,))
+    key = f'recorded-{failure.value}'
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': f'{key}-route',
+                'If-Match': str(consent_revision),
+            },
+        )
+
+    tasks = repository.list_external_tasks_internal(claim_id)
+    assert len(tasks) == 1
+    assert tasks[0].status is expected
+    assert tasks[0].failure_code is not None
+    assert tasks[0].failure_code.value == failure.value
+    assert tasks[0].updated_at > tasks[0].created_at
+
+
+def test_a_retry_continues_the_failed_task_instead_of_opening_a_second_one() -> None:
+    """The retry advances the task it already has, and does not reset it.
+
+    Returning the record to `prepared` would assert the first attempt had never
+    been sent, which the transition guard refuses. One operation keeps one task
+    across the failure and the retry that succeeds.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(AssessorFixtureFailure.UNAVAILABLE,))
+    key = 'retry-continues'
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        headers = {
+            **AUTH,
+            'Idempotency-Key': f'{key}-route',
+            'If-Match': str(consent_revision),
+        }
+
+        failed = client.post(f'/api/v1/claims/{claim_id}/assessor-routing', headers=headers)
+        after_failure = repository.list_external_tasks_internal(claim_id)
+        retry = client.post(f'/api/v1/claims/{claim_id}/assessor-routing', headers=headers)
+
+    assert failed.status_code == 503
+    assert len(after_failure) == 1
+    assert after_failure[0].status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+    assert retry.status_code == 201
+    tasks = repository.list_external_tasks_internal(claim_id)
+    assert len(tasks) == 1
+    assert tasks[0].task_id == after_failure[0].task_id
+    assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
+    assert tasks[0].updated_at > after_failure[0].updated_at
