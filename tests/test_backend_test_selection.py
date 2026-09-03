@@ -1,4 +1,9 @@
-from scripts.select_backend_tests import select_tests
+from scripts.select_backend_tests import (
+    changed_python_files,
+    needs_audit_contract_check,
+    needs_openapi_check,
+    select_tests,
+)
 
 
 def test_docs_only_change_skips_backend_pytest() -> None:
@@ -42,3 +47,31 @@ def test_main_branch_forces_the_complete_suite() -> None:
 
     assert selection.mode == 'full'
     assert selection.tests == ('tests',)
+
+
+def test_shared_test_fixture_change_runs_the_complete_suite() -> None:
+    selection = select_tests(['tests/conftest.py'])
+
+    assert selection.mode == 'full'
+    assert selection.tests == ('tests',)
+
+
+def test_ci_selector_change_runs_the_complete_suite() -> None:
+    selection = select_tests(['scripts/select_backend_tests.py'])
+
+    assert selection.mode == 'full'
+    assert selection.tests == ('tests',)
+
+
+def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:
+    assert changed_python_files(['backend/api/claims.py', 'docs/README.md']) == (
+        'backend/api/claims.py',
+    )
+
+
+def test_contract_checks_follow_their_own_impact() -> None:
+    assert needs_openapi_check(['backend/api/claims.py'])
+    assert needs_openapi_check(['backend/domain/models.py'])
+    assert not needs_openapi_check(['backend/services/claims.py'])
+    assert needs_audit_contract_check(['backend/domain/audit.py'])
+    assert not needs_audit_contract_check(['backend/services/claims.py'])
