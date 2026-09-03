@@ -120,6 +120,14 @@ def _has_open_handoff(repository: PersistenceRepository, claim: WorkingClaim) ->
     )
 
 
+# The provider-neutral failure vocabulary is wider than the claimant one:
+# `ExternalTaskFailureCode` also carries `conflicting`, which the recovery matrix
+# settles as a terminal failure, and `partial`, which it settles as an unresolved
+# outcome. AT-10 approves claimant wording for these four only, so a task carrying
+# any other code keeps the ordinary safe action rather than being shown with
+# invented wording or crashing the projection on an enum it cannot express.
+_CLAIMANT_FAILURE_CODES = frozenset(code.value for code in AssessorRoutingFailureCode)
+
 _CLAIMANT_FAILURE_STATUS = {
     ExternalTaskOperationStatus.RETRYABLE_FAILURE: (
         ClaimantExternalServiceStatus.RETRYABLE_FAILURE
@@ -140,9 +148,10 @@ def _latest_failed_assessor_task(
     must leave the claim exactly as it was. Deriving the state here honours both,
     the claim is untouched and the claimant is still told what happened.
 
-    An `unknown_outcome` task is deliberately not mapped. AT-10 approves claimant
-    wording for the four failure codes only, and inventing a claimant meaning for
-    an unresolved outcome is the kind of claim this boundary exists to prevent.
+    An `unknown_outcome` task is deliberately not mapped, and neither is a failure
+    whose code has no approved claimant wording. AT-10 approves wording for four
+    codes only, and inventing a claimant meaning for the others is the kind of
+    claim this boundary exists to prevent.
 
     Args:
         repository: Persistence boundary for the claim.
@@ -156,6 +165,8 @@ def _latest_failed_assessor_task(
         for task in repository.list_external_tasks_internal(claim.claim_id)
         if task.service_identity == ASSESSOR_SERVICE_IDENTITY
         and task.status in _CLAIMANT_FAILURE_STATUS
+        and task.failure_code is not None
+        and task.failure_code.value in _CLAIMANT_FAILURE_CODES
     ]
     if not failed:
         return None

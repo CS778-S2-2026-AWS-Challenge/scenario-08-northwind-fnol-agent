@@ -14,7 +14,12 @@ from backend.adapters.claims_service import (
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.external_services import (
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskDelivery,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.models import IntegrationSource, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
@@ -476,3 +481,45 @@ def test_a_terminal_failure_is_shown_to_the_claimant_and_withdraws_the_request(
     after = repository.get_claim_internal(claim_id)
     assert before is not None and after is not None
     assert after.model_dump(mode='json') == before.model_dump(mode='json')
+
+
+def test_a_failure_code_without_claimant_wording_does_not_break_the_claimant_read() -> None:
+    """A provider-neutral code the claimant vocabulary cannot express is not projected.
+
+    `ExternalTaskFailureCode` is wider than `AssessorRoutingFailureCode`: the
+    recovery matrix settles `conflicting` as a terminal failure, and a task
+    carrying it is valid under the domain contract. AT-10 approves no claimant
+    wording for it, so the claimant keeps the ordinary safe action. Reading the
+    claim must not fail, and must not present the code with invented wording.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='unmapped-code')
+        _grant_consent(client, claim_id, revision, key='unmapped-code')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        recorded_at = datetime(2026, 9, 3, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='tsk_unmapped_code',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.TERMINAL_FAILURE,
+                delivery=ExternalTaskDelivery.NOT_SUBMITTED,
+                failure_code=ExternalTaskFailureCode.CONFLICTING,
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            ),
+            stored.customer_id,
+        )
+
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+
+    assert claimant.status_code == 200
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'ready_to_request'
+    assert action['failure_code'] is None
+    assert action['can_request'] is True
