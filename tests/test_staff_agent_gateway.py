@@ -99,7 +99,7 @@ class StubRetriever:
 
     def search(self, request: Any) -> list[KnowledgeChunk]:
         if self.unavailable:
-            raise KnowledgeRetrievalUnavailable()
+            raise KnowledgeRetrievalUnavailable('The knowledge provider is unavailable.')
         return self.chunks
 
 
