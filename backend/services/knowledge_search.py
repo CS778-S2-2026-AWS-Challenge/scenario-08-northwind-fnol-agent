@@ -46,6 +46,11 @@ def _unavailable_response() -> KnowledgeSearchResponse:
 def search_knowledge(
     retriever: KnowledgeRetriever, payload: KnowledgeSearchRequest
 ) -> KnowledgeSearchResponse:
+    # Check readiness before handing claimant data to any provider.  Unknown,
+    # pending, and unavailable states must fail closed without a retrieval call.
+    connection_state = _connection_state(retriever)
+    if connection_state is DataConnectionState.UNAVAILABLE:
+        return _unavailable_response()
     try:
         chunks = retriever.search(
             KnowledgeSearch(
@@ -85,9 +90,6 @@ def search_knowledge(
             results=[],
             limitations=[message],
         )
-    connection_state = _connection_state(retriever)
-    if connection_state is DataConnectionState.UNAVAILABLE:
-        return _unavailable_response()
     if not chunks:
         return KnowledgeSearchResponse(
             status='no_evidence',

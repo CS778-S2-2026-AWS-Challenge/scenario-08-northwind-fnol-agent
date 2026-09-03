@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -187,13 +188,16 @@ def test_knowledge_search_requires_integration_auth_and_complete_scope() -> None
     assert padded_product.status_code == 422
 
 
-def test_knowledge_connection_state_drift_does_not_return_unverified_citations() -> None:
-    retriever = ControlledRetriever([citation_chunk()])
+@pytest.mark.parametrize('connection_state', ['pending_confirmation', 'unavailable', 'mystery'])
+def test_knowledge_connection_state_drift_fails_closed_before_provider_call(
+    connection_state: str,
+) -> None:
+    retriever = ControlledRetriever([citation_chunk()], connection_state=connection_state)
     with client_for(retriever) as client:
-        retriever.connection_state = 'pending_confirmation'
         response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
 
     assert response.json()['status'] == 'unavailable'
     assert response.json()['connection_state'] == 'unavailable'
     assert response.json()['results'] == []
     assert response.json()['errors'][0]['code'] == 'unavailable'
+    assert retriever.last_request is None

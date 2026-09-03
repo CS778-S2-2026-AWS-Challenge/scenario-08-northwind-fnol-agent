@@ -133,16 +133,16 @@ def test_unavailable_provider_reports_the_limitation_and_stores_nothing(
 
     assert response.status_code == 200
     body = response.json()
-    assert body['status'] == 'timeout'
-    assert body['connection_state'] == 'degraded'
+    assert body['status'] == 'unavailable'
+    assert body['connection_state'] == 'unavailable'
     assert body['errors'] == [
         {
-            'code': 'timeout',
-            'message': 'The policy provider did not respond within the request budget.',
+            'code': 'unavailable',
+            'message': 'The policy provider is temporarily unavailable.',
             'retryable': True,
         }
     ]
-    assert body['limitations'] == ['The policy provider did not respond within the request budget.']
+    assert body['limitations'] == ['The policy provider is temporarily unavailable.']
     assert body['facts'] is None
     assert body['source'] is None
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
@@ -303,6 +303,27 @@ def test_connection_state_drift_fails_closed_before_persisting_retrieval(
     assert response.json()['facts'] is None
     assert response.json()['source'] is None
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert retrieval_adapter._lookups == 0
+
+    monkeypatch.setattr(retrieval_adapter, 'connection_status', lambda: 'pending_confirmation')
+    with retrieval_client as client:
+        history_claim_id = create_claim(client, 'history-connection-drift')
+        history_response = client.post(
+            HISTORY_SEARCH,
+            headers=INTEGRATION_AUTH,
+            json={
+                'claim_id': history_claim_id,
+                'history_reference': 'synthetic-history-204',
+            },
+        )
+
+    assert history_response.status_code == 200
+    assert history_response.json()['status'] == 'unavailable'
+    assert history_response.json()['connection_state'] == 'unavailable'
+    assert history_response.json()['facts'] is None
+    assert history_response.json()['source'] is None
+    assert retrieval_repository.list_retrieval_records(history_claim_id, 'cus_demo') == []
+    assert retrieval_adapter._lookups == 0
 
 
 def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
