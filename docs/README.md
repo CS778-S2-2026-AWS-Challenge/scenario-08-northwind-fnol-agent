@@ -64,6 +64,11 @@ them:
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
+Generated contract snapshots are mechanical drift sentinels. The current AuditEvent
+envelope snapshot is [audit-event.schema.json](contracts/audit-event.schema.json) and is
+regenerated with `py -3.12 scripts/export_audit_contract.py`; the semantic authority
+remains [Persistence Contract](persistence-schema.md).
+
 These documents are normative only for the boundaries they explicitly own. An implemented
 contract change must update the implementation, consumers, fixtures, and tests in the same pull
 request.

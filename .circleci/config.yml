@@ -32,6 +32,9 @@ jobs:
       - run:
           name: Check OpenAPI snapshot drift
           command: python scripts/export_openapi.py --check
+      - run:
+          name: Check AuditEvent contract snapshot drift
+          command: python scripts/export_audit_contract.py --check
 
   customer-quality:
     docker:
@@ -144,6 +147,10 @@ jobs:
             modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
             if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
               echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
+              exit 1
+            fi
+            if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
+              echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
               exit 1
             fi
             echo "Path coupling satisfied."
