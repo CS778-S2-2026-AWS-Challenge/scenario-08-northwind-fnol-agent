@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
+from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -125,6 +127,42 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
+
+    def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        """Append one immutable audit fact.
+
+        Args:
+            event: Audit event to persist.
+
+        Returns:
+            None.
+
+        Raises:
+            IdempotencyConflict: The event identity already exists with different content.
+        """
+        raise NotImplementedError
+
+    def list_audit_events_internal(
+        self,
+        subject: AuditSubject,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        """List audit events after the caller authorises the subject read.
+
+        Args:
+            subject: Logical subject whose audit events are requested.
+            start_at: Optional inclusive lower timestamp bound.
+            end_at: Optional inclusive upper timestamp bound.
+
+        Returns:
+            Matching events in stable ``(created_at, event_id)`` order.
+
+        Raises:
+            ValueError: The requested time range is invalid.
+        """
+        raise NotImplementedError
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
