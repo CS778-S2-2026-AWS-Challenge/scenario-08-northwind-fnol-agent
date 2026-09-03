@@ -192,8 +192,9 @@ def test_knowledge_search_requires_integration_auth_and_complete_scope() -> None
 def test_knowledge_connection_state_drift_fails_closed_before_provider_call(
     connection_state: str,
 ) -> None:
-    retriever = ControlledRetriever([citation_chunk()], connection_state=connection_state)
+    retriever = ControlledRetriever([citation_chunk()])
     with client_for(retriever) as client:
+        retriever.connection_state = connection_state
         response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
 
     assert response.json()['status'] == 'unavailable'
