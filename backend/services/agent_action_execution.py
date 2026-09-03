@@ -31,9 +31,9 @@ ClaimContextCommandHandler = Callable[[ClaimContextCommand], ClaimContextHandler
 
 @dataclass(frozen=True, slots=True)
 class ClaimContextHandlerBinding:
-    """Bind one approved action to the exact internal tool used to execute it."""
+    """Bind one approved action to its internal handler and optional registered tool."""
 
-    tool_name: str
+    tool_name: str | None
     handler: ClaimContextCommandHandler
 
 
@@ -106,7 +106,14 @@ def execute_claim_context_command(
         )
     if not isinstance(binding, ClaimContextHandlerBinding):
         raise TypeError('handler bindings must be ClaimContextHandlerBinding values.')
-    if binding.tool_name not in command.permitted_tools:
+    if command.permitted_tools:
+        if binding.tool_name not in command.permitted_tools:
+            return _result(
+                command,
+                status=ClaimContextExecutionStatus.REJECTED,
+                reason_code='TOOL_NOT_ALLOWED',
+            )
+    elif binding.tool_name is not None:
         return _result(
             command,
             status=ClaimContextExecutionStatus.REJECTED,
