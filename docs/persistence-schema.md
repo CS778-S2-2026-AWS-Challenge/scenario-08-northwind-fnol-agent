@@ -80,6 +80,32 @@ Original evidence bytes, policy documents, and other large objects are stored th
 the active profile's object or document store. Domain records retain protected references
 and checksums rather than embedding those bytes.
 
+## Audit Event Contract
+
+The provider-neutral structural envelope is defined by `AuditEventEnvelope` in
+`backend/domain/audit.py`. Its generated JSON Schema is committed at
+`docs/contracts/audit-event.schema.json`; run `py -3.12 scripts/export_audit_contract.py`
+to regenerate it, or add `--check` to detect drift. The snapshot is a mechanical shape
+check and does not replace this semantic contract.
+
+Each event is an immutable fact, not a second Claim State record. The envelope records a
+controlled event type and outcome, the logical subject, actor and authentication source,
+bounded reason and source references, applicable permission and consent references,
+visibility, correlation or idempotency identity, the resulting Claim revision when the
+subject is a claim, and the server-created timestamp. Raw provider payloads, secrets,
+tokens, and unrestricted model context are excluded.
+
+The initial event vocabulary is intentionally bounded to consent, permission, action,
+and access outcomes. New event types or changes to field meaning require an explicit
+contract update; additive optional fields are structural changes detected by CI. Claim,
+integration, and configuration mutations must add their events within the applicable
+transaction boundary once their repository adapters consume this envelope.
+
+The existing configuration-only `backend.domain.configuration.AuditEvent` projection is
+kept compatible with the Admin API. It is not yet the cross-domain repository
+implementation of this envelope; migration of that projection and the generic
+Fixture/MongoDB audit store belongs to the implementation work tracked by #415.
+
 ## Required Access Patterns
 
 1. Read one claim after verifying customer ownership or authorised staff access.

@@ -24,6 +24,14 @@ one:
   3. `docs/api.md` remains the human-readable authority; the snapshot is only
      a mechanical sentinel and does not replace contract tests.
   4. Optional: lint the exported spec with spectral.
+- **AuditEvent envelope drift check**: the provider-neutral audit envelope is
+  defined by the Pydantic model in `backend/domain/audit.py`. The committed
+  `docs/contracts/audit-event.schema.json` snapshot is regenerated with
+  `python scripts/export_audit_contract.py`; the backend quality profile runs
+  the script with `--check`, and a snapshot change must update
+  `docs/persistence-schema.md` in the same PR. The snapshot checks structure
+  only; event meaning, visibility, authorisation, retention, and transaction
+  boundaries remain governed by the persistence contract and tests.
 - Broken-link check for documentation: `lycheeverse/lychee-action` over
   `./docs/**/*.md`.
 - Path coupling (fail when API code changes but the contract document does

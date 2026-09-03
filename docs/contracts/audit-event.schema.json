@@ -1,0 +1,292 @@
+{
+  "$defs": {
+    "ActorType": {
+      "enum": [
+        "claimant",
+        "agent",
+        "staff",
+        "system"
+      ],
+      "title": "ActorType",
+      "type": "string"
+    },
+    "AuditActor": {
+      "additionalProperties": false,
+      "description": "Actor identity plus the authentication source used for the action.",
+      "properties": {
+        "actor_id": {
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "actor_type": {
+          "$ref": "#/$defs/ActorType"
+        },
+        "auth_source": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Auth Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor_type",
+        "actor_id",
+        "auth_source"
+      ],
+      "title": "AuditActor",
+      "type": "object"
+    },
+    "AuditEventType": {
+      "description": "Initial bounded event vocabulary for the Week 5 audit contract.",
+      "enum": [
+        "consent.granted",
+        "consent.withdrawn",
+        "permission.authorised",
+        "permission.rejected",
+        "action.prepared",
+        "action.completed",
+        "action.failed",
+        "action.unknown_outcome",
+        "access.denied"
+      ],
+      "title": "AuditEventType",
+      "type": "string"
+    },
+    "AuditOutcome": {
+      "description": "Observed outcome of the action represented by an audit event.",
+      "enum": [
+        "succeeded",
+        "rejected",
+        "failed",
+        "unknown"
+      ],
+      "title": "AuditOutcome",
+      "type": "string"
+    },
+    "AuditPermission": {
+      "additionalProperties": false,
+      "description": "Permission requirement and decision associated with an event.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/AuditPermissionOutcome"
+        },
+        "required_permission": {
+          "maxLength": 150,
+          "minLength": 1,
+          "title": "Required Permission",
+          "type": "string"
+        }
+      },
+      "required": [
+        "required_permission",
+        "outcome"
+      ],
+      "title": "AuditPermission",
+      "type": "object"
+    },
+    "AuditPermissionOutcome": {
+      "description": "Decision recorded for the permission relevant to an event.",
+      "enum": [
+        "authorised",
+        "rejected",
+        "review_required"
+      ],
+      "title": "AuditPermissionOutcome",
+      "type": "string"
+    },
+    "AuditSubject": {
+      "additionalProperties": false,
+      "description": "The logical object to which an audit event belongs.",
+      "properties": {
+        "claim_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Id"
+        },
+        "subject_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "subject_type": {
+          "$ref": "#/$defs/AuditSubjectType"
+        }
+      },
+      "required": [
+        "subject_type",
+        "subject_id"
+      ],
+      "title": "AuditSubject",
+      "type": "object"
+    },
+    "AuditSubjectType": {
+      "description": "Logical subject categories that can be audited.",
+      "enum": [
+        "claim",
+        "customer",
+        "external_request",
+        "configuration",
+        "access"
+      ],
+      "title": "AuditSubjectType",
+      "type": "string"
+    },
+    "AuditVisibility": {
+      "description": "Projection boundary for an audit event.",
+      "enum": [
+        "claimant_visible",
+        "shared",
+        "internal_only",
+        "administration_only",
+        "audit_only"
+      ],
+      "title": "AuditVisibility",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Immutable, append-only audit fact.\n\nArgs:\n    event_id: Stable identifier for idempotent append and replay checks.\n    event_type: Controlled event vocabulary entry.\n    outcome: The observed result, including rejected and unknown outcomes.\n    subject: Audited logical object and optional claim scope.\n    actor: Account or service identity that caused the event.\n    reason: Human-readable bounded reason for the action.\n    source_refs: References to messages, decisions, requests, or evidence.\n    permission: Permission decision when the event is authority-related.\n    consent_ref: Related consent identity when applicable.\n    consent_state: Recorded consent state when applicable.\n    visibility: Projection boundary for authorised readers.\n    correlation_id: Request or operation correlation identity.\n    idempotency_key: Client operation key when one exists.\n    claim_revision: Resulting Claim revision for material claim mutations.\n    created_at: Server-recorded event time.",
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/AuditActor"
+    },
+    "claim_revision": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Claim Revision"
+    },
+    "consent_ref": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consent Ref"
+    },
+    "consent_state": {
+      "anyOf": [
+        {
+          "maxLength": 50,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consent State"
+    },
+    "correlation_id": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correlation Id"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "event_id": {
+      "pattern": "^aud_[A-Za-z0-9_-]{1,96}$",
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/AuditEventType"
+    },
+    "idempotency_key": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Idempotency Key"
+    },
+    "outcome": {
+      "$ref": "#/$defs/AuditOutcome"
+    },
+    "permission": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AuditPermission"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "source_refs": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Source Refs",
+      "type": "array"
+    },
+    "subject": {
+      "$ref": "#/$defs/AuditSubject"
+    },
+    "visibility": {
+      "$ref": "#/$defs/AuditVisibility"
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "outcome",
+    "subject",
+    "actor",
+    "reason",
+    "visibility",
+    "created_at"
+  ],
+  "title": "AuditEventEnvelope",
+  "type": "object"
+}
