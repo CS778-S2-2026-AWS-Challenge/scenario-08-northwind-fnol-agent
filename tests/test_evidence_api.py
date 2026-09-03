@@ -146,13 +146,20 @@ def test_unresolved_evidence_remains_in_staff_pending_evidence_view(
 
     assert response.status_code == 200
     item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['evidence_summary']['needs_attention'] == 1
-    assert item['pending_evidence_count'] == 1
-    assert item['pending_wait_types'] == ['claimant']
-    assert item['pending_evidence'][0]['status'] == status
-    assert item['pending_evidence'][0]['file_status'] == file_status.value
-    assert item['pending_evidence'][0]['responsible_party'] == 'claimant'
-    assert item['pending_evidence'][0]['context_summary'] == 'Needed for: later_action'
+    missing = next(
+        value
+        for value in item['work_summary']['missing_information']
+        if value['kind'] == 'evidence'
+    )
+    assert missing['code'] == 'repair_quote'
+    assert missing['attention'] == 'needed_next'
+    assert missing['responsible_party'] == 'claimant'
+    evidence_page = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/evidence',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()
+    assert evidence_page['items'][0]['status'] == status
+    assert evidence_page['items'][0]['file_status'] == file_status.value
 
 
 @pytest.mark.parametrize(
@@ -271,17 +278,23 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     workbench_item = next(
         item for item in workbench.json()['items'] if item['claim_id'] == claim_id
     )
-    assert workbench_item['pending_wait_types'] == ['internal']
-    assert workbench_item['pending_evidence_count'] == 1
-    assert workbench_item['pending_evidence'][0]['status'] == 'received'
-    assert workbench_item['pending_evidence'][0]['file_status'] == 'processing'
-    assert workbench_item['pending_evidence'][0]['wait_type'] == 'internal'
-    assert workbench_item['pending_evidence'][0]['responsible_party'] == 'northwind'
-    assert workbench_item['pending_evidence'][0]['context_summary'] == (
+    pending = next(
+        value
+        for value in workbench_item['work_summary']['missing_information']
+        if value['kind'] == 'evidence'
+    )
+    assert pending['responsible_party'] == 'system'
+    workbench_evidence = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/evidence',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items'][0]
+    assert workbench_evidence['status'] == 'received'
+    assert workbench_evidence['file_status'] == 'processing'
+    assert workbench_evidence['wait_type'] == 'internal'
+    assert workbench_evidence['responsible_party'] == 'system'
+    assert workbench_evidence['context_summary'] == (
         'Northwind is processing the completed evidence upload.'
     )
-    assert 'claimant' not in workbench_item['pending_wait_types']
-    assert 'Waiting for the claimant' not in str(workbench_item['pending_evidence'])
     public_payload = listed.text
     assert 'storage_key' not in public_payload
     assert 'upload_checksum' not in public_payload

@@ -119,7 +119,7 @@ def test_notification_outage_keeps_the_request_its_state_and_the_staff_queue(
     assert claim is not None
     assert claim.revision == 2
     assert entry is not None
-    assert entry['priority'] == stored.priority.value
+    assert entry['priority_projection']['level'] == stored.priority.value
     assert readiness.json()['checks']['handoff_dispatch'] == 'unavailable'
 
 

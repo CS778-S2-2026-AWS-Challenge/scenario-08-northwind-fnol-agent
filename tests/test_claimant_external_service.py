@@ -150,7 +150,7 @@ def _start_created_motor_claim(
             'customer_next_step': CustomerNextStep(
                 status='claim_created',
                 summary='Claims intake review',
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.SYSTEM,
             ),
             'revision': claim.revision + 1,
             'updated_at': timestamp,

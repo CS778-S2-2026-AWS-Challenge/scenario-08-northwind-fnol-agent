@@ -21,6 +21,8 @@ from backend.domain.models import (
 
 CLAIMANT_AGENT_PURPOSE = 'agent_turn'
 CLAIMANT_AGENT_PRIVACY_CLASS = 'synthetic_fnol'
+STAFF_AGENT_PURPOSE = 'staff_assistant'
+STAFF_AGENT_PRIVACY_CLASS = 'staff_internal_fnol'
 
 
 class ModelContract(BaseModel):

@@ -47,7 +47,9 @@ authorisation.
 | --- | --- |
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
 | `customer/` | React and Vite claimant experience |
-| `employee/` | Static employee workbench backed by the shared Workbench API |
+| `workbench/` | React and Vite Claims Workbench with independent staff authentication |
+| `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
+| `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
 | `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
@@ -75,6 +77,7 @@ Use Python 3.12 and Node.js 22. On Windows, install dependencies from the reposi
 ```powershell
 py -3.12 -m pip install -r backend/requirements-dev.txt
 npm ci --prefix customer
+npm ci --prefix workbench
 ```
 
 Start the backend:
@@ -115,9 +118,17 @@ In another terminal, start the claimant client:
 npm run dev --prefix customer
 ```
 
-The Vite development server proxies `/api` requests to the local backend. To run the employee
-workbench, serve `employee/` on port 8002 as documented in `employee/README.md`; it reads and
-updates the same backend claim state.
+The Vite development server proxies `/api` requests to the local backend. Start the componentised
+Claims Workbench separately:
+
+```powershell
+npm run dev --prefix workbench
+```
+
+Configure the initial normal-mode staff account as documented in
+[workbench/README.md](workbench/README.md). The legacy files under `employee/` remain only until
+their still-valid capabilities have been migrated and verified; do not add new product behaviour
+to that client.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
@@ -130,8 +141,8 @@ must not be used as a production approval mechanism.
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests, PR policy, GitHub automation, documentation, and the claimant client for
-every pull request. Backend pull requests use impact-scoped tests selected by
+linting, types, tests, PR policy, GitHub automation, documentation, and both claimant and Workbench
+clients for every pull request. Backend pull requests use impact-scoped tests selected by
 `scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
 suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
 only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.

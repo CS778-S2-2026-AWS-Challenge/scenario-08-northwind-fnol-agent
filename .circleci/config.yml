@@ -122,6 +122,36 @@ jobs:
           command: npm run build
           working_directory: customer
 
+  workbench-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-workbench-node-{{ arch }}-{{ checksum "workbench/package-lock.json" }}
+      - run:
+          name: Install Workbench dependencies
+          command: npm ci
+          working_directory: workbench
+      - save_cache:
+          key: v1-workbench-node-{{ arch }}-{{ checksum "workbench/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint Workbench
+          command: npm run lint
+          working_directory: workbench
+      - run:
+          name: Test Workbench
+          command: npm test
+          working_directory: workbench
+      - run:
+          name: Build Workbench
+          command: npm run build
+          working_directory: workbench
+
   github-automation-quality:
     docker:
       - image: cimg/node:22.14
@@ -216,6 +246,7 @@ workflows:
     jobs:
       - backend-quality
       - customer-quality
+      - workbench-quality
       - github-automation-quality
       - pr-policy
       - docs-quality

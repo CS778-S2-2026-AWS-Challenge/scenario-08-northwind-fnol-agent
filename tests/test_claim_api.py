@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -38,7 +39,7 @@ class HighImpactAgent:
             customer_next_step=CustomerNextStep(
                 status='claim_creation_proposed',
                 summary='The claim is being created.',
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.SYSTEM,
             ),
             form_changes=[
                 ProposedFormChange(
@@ -413,6 +414,22 @@ def test_claim_routes_require_the_synthetic_claimant_token(client: TestClient) -
 
     assert response.status_code == 401
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
+def test_claimant_can_start_an_anonymous_browser_session(client: TestClient) -> None:
+    anonymous_session = str(uuid4())
+    response = client.post(
+        '/api/v1/claims',
+        headers={
+            'X-Northwind-Anonymous-Session': anonymous_session,
+            'Idempotency-Key': f'anonymous-{anonymous_session}',
+        },
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    )
+
+    assert response.status_code == 201
+    assert response.json()['claim']['claim_id']
+    assert response.json()['session']['claim_id'] == response.json()['claim']['claim_id']
 
 
 def test_claim_creation_rejects_missing_and_overlong_idempotency_keys(

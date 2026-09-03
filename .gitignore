@@ -60,6 +60,12 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+.northwind-identity.sqlite3
+.northwind-identity.sqlite3-shm
+.northwind-identity.sqlite3-wal
+.northwind-staff-identity.sqlite3
+.northwind-staff-identity.sqlite3-shm
+.northwind-staff-identity.sqlite3-wal
 
 # Flask stuff:
 instance/

@@ -554,7 +554,7 @@ def complete_upload(
             'status': EvidenceStatus.RECEIVED,
             'file_status': EvidenceFileStatus.PROCESSING,
             'wait_type': EvidenceWaitType.INTERNAL,
-            'responsible_party': ResponsibleParty.NORTHWIND,
+            'responsible_party': ResponsibleParty.SYSTEM,
             'expected_by': None,
             'expected_timing': None,
             'context_summary': 'Northwind is processing the completed evidence upload.',

@@ -13,6 +13,12 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.retrieval_review import persist_retrieval_record
 
 
+def _assign_fixture_staff(repository: FixtureRepository, claim_id: str) -> None:
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository._claims[claim_id] = claim.model_copy(update={'assignee_id': 'stf_demo'})
+
+
 def test_staff_review_writeback_uses_current_revision_and_stays_internal(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -26,6 +32,7 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
     )
     assert created.status_code == 201
     claim_id = created.json()['claim']['claim_id']
+    _assign_fixture_staff(repository, claim_id)
     assert isinstance(claim_id, str)
     assert created.json()['claim']['revision'] == 1
 
@@ -68,7 +75,12 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
         headers=staff_auth_headers,
     )
     assert staff_before.status_code == 200
-    projected_signals = cast(list[dict[str, Any]], staff_before.json()['signals'])
+    projected_signals = cast(
+        list[dict[str, Any]],
+        client.get(
+            f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff_auth_headers
+        ).json()['items'],
+    )
     projected_signal = next(
         item for item in projected_signals if item.get('signal_id') == signal.signal_id
     )

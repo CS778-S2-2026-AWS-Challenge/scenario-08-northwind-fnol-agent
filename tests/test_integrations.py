@@ -158,7 +158,7 @@ def save_authorisation(
             customer_next_step=CustomerNextStep(
                 status='authorised',
                 summary='The authorised integration action can continue.',
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.SYSTEM,
             ),
             authority=AgentAuthority(
                 proposed_by='fixture_rule',

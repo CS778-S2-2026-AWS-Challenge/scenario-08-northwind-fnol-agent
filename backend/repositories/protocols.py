@@ -12,6 +12,8 @@ from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
     BranchEvaluationRecord,
+    ClaimCollaborationRequest,
+    ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -22,6 +24,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
+from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
 
 
 class RepositoryConflict(Exception):
@@ -69,6 +72,15 @@ class ClaimRepository(Protocol):
 
     def list_claims_internal(self) -> list[WorkingClaim]:
         """Return claims for an authorised staff projection."""
+        raise NotImplementedError
+
+    def promote_claim_owner(
+        self,
+        claim_id: str,
+        anonymous_customer_id: str,
+        customer_id: str,
+    ) -> WorkingClaim | None:
+        """Atomically attach an anonymous claim and its records to an account."""
         raise NotImplementedError
 
     def save_claim(
@@ -200,6 +212,32 @@ class PersistenceRepository(ClaimRepository, Protocol):
         raise NotImplementedError
 
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
+        raise NotImplementedError
+
+    def save_staff_agent_session(self, session: StaffAgentSession) -> None:
+        raise NotImplementedError
+
+    def get_staff_agent_session(self, session_id: str, staff_id: str) -> StaffAgentSession | None:
+        raise NotImplementedError
+
+    def list_staff_agent_sessions(self, staff_id: str) -> list[StaffAgentSession]:
+        raise NotImplementedError
+
+    def list_staff_agent_messages(self, session_id: str, staff_id: str) -> list[StaffAgentMessage]:
+        raise NotImplementedError
+
+    def find_staff_agent_message_by_client_id(
+        self, session_id: str, staff_id: str, client_message_id: str
+    ) -> StaffAgentMessage | None:
+        raise NotImplementedError
+
+    def save_staff_agent_turn(
+        self,
+        session: StaffAgentSession,
+        staff_message: StaffAgentMessage,
+        assistant_message: StaffAgentMessage,
+    ) -> None:
+        """Atomically append one Staff Agent exchange and advance its session timestamp."""
         raise NotImplementedError
 
     def save_message_mutation(
@@ -503,6 +541,24 @@ class PersistenceRepository(ClaimRepository, Protocol):
         raise NotImplementedError
 
     def list_signal_decisions(self, claim_id: str) -> list[SignalDecisionRecord]:
+        raise NotImplementedError
+
+    def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
+        raise NotImplementedError
+
+    def list_claim_coworkers(self, claim_id: str) -> list[ClaimCoworkerRecord]:
+        raise NotImplementedError
+
+    def save_ownership_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        collaboration_request: ClaimCollaborationRequest,
+        coworkers: list[ClaimCoworkerRecord] | None = None,
+        handoff: HandoffRecord | None = None,
+    ) -> None:
+        """Atomically persist an ownership transition and its collaboration record."""
         raise NotImplementedError
 
     def save_staff_mutation(

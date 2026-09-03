@@ -33,6 +33,8 @@ from backend.domain.models import (
     AuthorityOutcome,
     BranchEvaluationRecord,
     BranchEvaluationStatus,
+    ClaimCollaborationRequest,
+    ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -50,6 +52,7 @@ from backend.domain.retrieval import (
     RetrievalRecord,
     ReviewSignalRecord,
 )
+from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -500,6 +503,26 @@ class MongoDBRepository:
 
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
+
+    def promote_claim_owner(
+        self,
+        claim_id: str,
+        anonymous_customer_id: str,
+        customer_id: str,
+    ) -> WorkingClaim | None:
+        """Move an anonymous claim projection to an authenticated customer."""
+        claim = self.get_claim(claim_id, anonymous_customer_id)
+        if claim is None:
+            return None
+        self._collection.update_many(
+            {'claim_id': claim_id, 'customer_id': anonymous_customer_id},
+            {'$set': {'customer_id': customer_id}},
+        )
+        self._collection.update_one(
+            {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
+            {'$set': {'customer_id': customer_id}},
+        )
+        return self.get_claim(claim_id, customer_id)
 
     def save_claim(
         self,
@@ -1597,6 +1620,57 @@ class MongoDBRepository:
             'signal_decision', SignalDecisionRecord, {'claim_id': claim_id}, 'created_at'
         )
 
+    def list_collaboration_requests(self, claim_id: str) -> list[ClaimCollaborationRequest]:
+        return self._list(
+            'collaboration_request',
+            ClaimCollaborationRequest,
+            {'claim_id': claim_id},
+            'created_at',
+        )
+
+    def list_claim_coworkers(self, claim_id: str) -> list[ClaimCoworkerRecord]:
+        return self._list(
+            'claim_coworker',
+            ClaimCoworkerRecord,
+            {'claim_id': claim_id, 'active': True},
+            'granted_at',
+        )
+
+    def save_ownership_mutation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        collaboration_request: ClaimCollaborationRequest,
+        coworkers: list[ClaimCoworkerRecord] | None = None,
+        handoff: HandoffRecord | None = None,
+    ) -> None:
+        coworker_records = coworkers or []
+        if (
+            claim.revision != expected_revision + 1
+            or collaboration_request.claim_id != claim.claim_id
+            or any(item.claim_id != claim.claim_id for item in coworker_records)
+            or (handoff is not None and handoff.claim_id != claim.claim_id)
+            or idempotency.claim_id != claim.claim_id
+        ):
+            raise KeyError(claim.claim_id)
+        records: list[tuple[str, str, BaseModel]] = [
+            ('collaboration_request', collaboration_request.request_id, collaboration_request)
+        ]
+        for coworker in coworker_records:
+            records.append(('claim_coworker', coworker.coworker_id, coworker))
+        if handoff is not None:
+            records.append(('handoff', handoff.handoff_id, handoff))
+        self._atomic(
+            lambda mongo_session: self._save_child_mutation(
+                claim,
+                expected_revision,
+                idempotency,
+                mongo_session,
+                records=records,
+            )
+        )
+
     def save_staff_mutation(
         self,
         claim: WorkingClaim,
@@ -2207,6 +2281,113 @@ class MongoDBRepository:
             self._collection.insert_one(document, session=session)
         except DuplicateKeyError as error:
             raise IdempotencyConflict(record.key) from error
+
+    def save_staff_agent_session(self, staff_agent_session: StaffAgentSession) -> None:
+        existing = self.get_staff_agent_session(
+            staff_agent_session.session_id, staff_agent_session.staff_id
+        )
+        if existing is not None and existing != staff_agent_session:
+            raise IdempotencyConflict(staff_agent_session.session_id)
+        self._put(
+            'staff_agent_session',
+            staff_agent_session.session_id,
+            staff_agent_session,
+            customer_id=staff_agent_session.staff_id,
+        )
+
+    def get_staff_agent_session(self, session_id: str, staff_id: str) -> StaffAgentSession | None:
+        return self._get(
+            'staff_agent_session',
+            session_id,
+            StaffAgentSession,
+            customer_id=staff_id,
+        )
+
+    def list_staff_agent_sessions(self, staff_id: str) -> list[StaffAgentSession]:
+        return self._list(
+            'staff_agent_session',
+            StaffAgentSession,
+            {'customer_id': staff_id},
+            '-updated_at',
+        )
+
+    def list_staff_agent_messages(self, session_id: str, staff_id: str) -> list[StaffAgentMessage]:
+        if self.get_staff_agent_session(session_id, staff_id) is None:
+            return []
+        return self._list(
+            'staff_agent_message',
+            StaffAgentMessage,
+            {'customer_id': staff_id, 'session_id': session_id},
+            'created_at',
+        )
+
+    def find_staff_agent_message_by_client_id(
+        self, session_id: str, staff_id: str, client_message_id: str
+    ) -> StaffAgentMessage | None:
+        document = self._collection.find_one(
+            {
+                'record_type': 'staff_agent_message',
+                'customer_id': staff_id,
+                'session_id': session_id,
+                'client_message_id': client_message_id,
+            }
+        )
+        return self._model_from_document(document, StaffAgentMessage)
+
+    def save_staff_agent_turn(
+        self,
+        staff_agent_session: StaffAgentSession,
+        staff_message: StaffAgentMessage,
+        assistant_message: StaffAgentMessage,
+    ) -> None:
+        stored = self.get_staff_agent_session(
+            staff_agent_session.session_id, staff_agent_session.staff_id
+        )
+        if stored is None:
+            raise KeyError(staff_agent_session.session_id)
+        if (
+            staff_message.session_id != staff_agent_session.session_id
+            or assistant_message.session_id != staff_agent_session.session_id
+            or staff_message.staff_id != staff_agent_session.staff_id
+            or assistant_message.staff_id != staff_agent_session.staff_id
+            or assistant_message.in_reply_to != staff_message.message_id
+        ):
+            raise KeyError(staff_agent_session.session_id)
+        duplicate = self.find_staff_agent_message_by_client_id(
+            staff_agent_session.session_id,
+            staff_agent_session.staff_id,
+            staff_message.client_message_id or '',
+        )
+        if duplicate is not None and duplicate.message_id != staff_message.message_id:
+            raise IdempotencyConflict(staff_message.client_message_id or '')
+        for message in (staff_message, assistant_message):
+            existing = self._get(
+                'staff_agent_message',
+                message.message_id,
+                StaffAgentMessage,
+                customer_id=staff_agent_session.staff_id,
+            )
+            if existing is not None and existing != message:
+                raise IdempotencyConflict(message.message_id)
+
+        def save_turn(mongo_session: Any) -> None:
+            self._put(
+                'staff_agent_session',
+                staff_agent_session.session_id,
+                staff_agent_session,
+                customer_id=staff_agent_session.staff_id,
+                session=mongo_session,
+            )
+            for message in (staff_message, assistant_message):
+                self._put(
+                    'staff_agent_message',
+                    message.message_id,
+                    message,
+                    customer_id=staff_agent_session.staff_id,
+                    session=mongo_session,
+                )
+
+        self._atomic(save_turn)
 
     def _list(
         self,

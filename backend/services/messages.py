@@ -243,7 +243,7 @@ def _effective_next_step(
     return CustomerNextStep(
         status='action_not_applied',
         summary='The proposed action was not applied. Your current report remains available.',
-        responsible_party=ResponsibleParty.NORTHWIND,
+        responsible_party=ResponsibleParty.SYSTEM,
     )
 
 

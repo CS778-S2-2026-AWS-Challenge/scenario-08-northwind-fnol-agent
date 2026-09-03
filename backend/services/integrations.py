@@ -417,7 +417,7 @@ def create_external_claim(
             'customer_next_step': CustomerNextStep(
                 status='claim_created' if created else 'claim_creation_pending',
                 summary=outcome.result.next_step,
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.SYSTEM,
                 expected_by=outcome.result.expected_by,
             ),
             'revision': claim.revision + 1,

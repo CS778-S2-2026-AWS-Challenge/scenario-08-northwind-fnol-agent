@@ -149,9 +149,17 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
     assert detail_response.status_code == 200, detail_response.text
     detail = detail_response.json()
     assert detail['claim_id'] == claim_id
-    assert len(detail['messages']) == 6
-    assert len(detail['handoffs']) == 1
-    handoff = detail['handoffs'][0]
+    messages = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items']
+    assert len(messages) == 6
+    handoffs = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items']
+    assert len(handoffs) == 1
+    handoff = handoffs[0]
     expected_handoff = journey['expected_handoff']
     assert handoff['priority'] == expected_handoff['priority']
     assert handoff['support_need'] == expected_handoff['support_need']
@@ -243,19 +251,26 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
         f'/api/v1/workbench/claims/{claim_id}',
         headers={'Authorization': 'Bearer synthetic-staff'},
     ).json()
-    assert latest_detail['handoffs'][0]['status'] == 'in_progress'
+    latest_handoffs = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items']
+    latest_messages = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions/{session_id}/messages',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    ).json()['items']
+    assert latest_handoffs[0]['status'] == 'in_progress'
     assert latest_detail['customer_next_step']['status'] == 'human_support_in_progress'
     claimant_request_index = next(
         index
-        for index, item in enumerate(latest_detail['messages'])
+        for index, item in enumerate(latest_messages)
         if item['content'].get('text') == handoff_spec['input']
     )
     handoff_reply_index = next(
         index
-        for index, item in enumerate(latest_detail['messages'])
+        for index, item in enumerate(latest_messages)
         if item['actor'] == 'agent'
-        and item.get('in_reply_to')
-        == latest_detail['messages'][claimant_request_index]['message_id']
+        and item.get('in_reply_to') == latest_messages[claimant_request_index]['message_id']
     )
     assert claimant_request_index < handoff_reply_index
 
@@ -278,7 +293,7 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
                 'summary': (
                     'A Northwind staff member has reviewed your report and will contact you.'
                 ),
-                'responsible_party': 'northwind',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff['handoff_id']],
             },
         },
