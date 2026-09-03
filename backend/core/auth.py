@@ -66,6 +66,16 @@ def _synthetic_profiles(settings: Settings) -> tuple[_SyntheticProfile, ...]:
             ),
         ),
         _SyntheticProfile(
+            token=settings.synthetic_release_approver_token,
+            principal=Principal(
+                subject='apr_demo',
+                actor_type='administrator',
+                scopes=ADMIN_SCOPES,
+                auth_source='developer:synthetic_release_approver',
+                synthetic=True,
+            ),
+        ),
+        _SyntheticProfile(
             token=settings.synthetic_integration_token,
             principal=Principal(
                 subject='integration_fixture',

@@ -39,6 +39,44 @@ class DataProfileConfiguration(BaseModel):
     object_storage_adapter: ObjectStorageAdapterValue
 
 
+class ModelRuntimeConfiguration(BaseModel):
+    """Provider-neutral model settings stored in a published Control Plane record."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    protocol: str = Field(min_length=1, max_length=50, pattern=r'^[a-z][a-z0-9_]*$')
+    provider: str = Field(min_length=1, max_length=100)
+    model_identifier: str = Field(min_length=1, max_length=300)
+    base_url: str = Field(min_length=1, max_length=500)
+    credential_environment_variable: str | None = Field(
+        default=None,
+        max_length=200,
+        pattern=r'^[A-Za-z_][A-Za-z0-9_]*$',
+    )
+    profile_id: str = Field(min_length=1, max_length=100)
+    purpose: str = Field(min_length=1, max_length=100)
+    privacy_class: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    evaluation_status: Literal['configured', 'degraded', 'unavailable']
+    timeout_seconds: float = Field(gt=0)
+    structured_output: bool = False
+    tools: bool = False
+
+
+class ModelRuntimeBinding(BaseModel):
+    """Runtime-owned authority for model connection and claimant-turn capabilities."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    protocol: str = Field(min_length=1, max_length=50)
+    base_url: str = Field(max_length=500)
+    credential_environment_variable: str | None = Field(default=None, max_length=200)
+    purpose: str = Field(min_length=1, max_length=100)
+    privacy_class: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    structured_output: bool
+
+
 class ConfigurationRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
