@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import mongomock
 import pytest
@@ -46,7 +47,7 @@ def _audit_event(
 
 
 def _mongodb_repository() -> MongoDBRepository:
-    client = mongomock.MongoClient()
+    client: Any = mongomock.MongoClient()
     return MongoDBRepository(client, 'northwind_audit_test')
 
 
