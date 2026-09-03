@@ -178,6 +178,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         idempotency: IdempotencyRecord,
         audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a claim mutation, retry metadata, and audit facts.
 
@@ -186,6 +187,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
             expected_revision: Revision that must still be current.
             idempotency: Retry metadata for the accepted mutation.
             audit_events: Immutable audit facts produced by the same mutation.
+            branch_evaluation: Optional applied Dynamic Form evaluation for the resulting revision.
 
         Returns:
             None.
@@ -272,8 +274,23 @@ class PersistenceRepository(ClaimRepository, Protocol):
         operation: AssessorRoutingOperation,
         decision: AgentDecisionRecord,
         customer_id: str,
+        audit_events: tuple[AuditEventEnvelope, ...] = (),
     ) -> None:
-        """Atomically persist routing authority and its immutable operation identity."""
+        """Atomically persist routing authority, operation identity, and audit facts.
+
+        Args:
+            operation: Prepared assessor-routing operation.
+            decision: Current deterministic Northwind authority decision.
+            customer_id: Customer who owns the parent claim.
+            audit_events: Immutable audit facts produced by the preparation.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: Claim, session, authority, or audit scope is invalid.
+            IdempotencyConflict: Existing operation, decision, or audit identity conflicts.
+        """
         raise NotImplementedError
 
     def get_agent_decision(

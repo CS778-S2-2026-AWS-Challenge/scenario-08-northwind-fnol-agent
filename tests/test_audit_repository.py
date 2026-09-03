@@ -13,9 +13,18 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.models import (
+    Channel,
+    CustomerNextStep,
+    ResponsibleParty,
+    SessionRecord,
+    SessionStatus,
+    WorkingClaim,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
-from backend.repositories.protocols import IdempotencyConflict
+from backend.repositories.protocols import IdempotencyConflict, IdempotencyRecord
+from backend.services.branching import build_applied_branch_evaluation
 
 
 def _audit_event(
@@ -48,7 +57,9 @@ def _audit_event(
 
 def _mongodb_repository() -> MongoDBRepository:
     client: Any = mongomock.MongoClient()
-    return MongoDBRepository(client, 'northwind_audit_test')
+    repository = MongoDBRepository(client, 'northwind_audit_test')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    return repository
 
 
 def test_fixture_audit_event_is_append_only_and_idempotent() -> None:
@@ -153,3 +164,169 @@ def test_mongodb_audit_query_filters_subject_time_and_orders_stably() -> None:
             start_at=started + timedelta(minutes=5),
             end_at=started,
         )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_claim_mutation_persists_audit_and_branch_evaluation_together(
+    repository_kind: str,
+) -> None:
+    repository = FixtureRepository() if repository_kind == 'fixture' else _mongodb_repository()
+    timestamp = datetime(2026, 9, 3, 5, 0, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id=f'clm_audit_atomic_{repository_kind}',
+        customer_id=f'cus_audit_atomic_{repository_kind}',
+        revision=1,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        incident_type='motor',
+        active_session_id=f'ses_audit_atomic_{repository_kind}',
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Describe the incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session = SessionRecord(
+        session_id=claim.active_session_id or '',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        context_revision=claim.revision,
+        started_at=timestamp,
+        last_active_at=timestamp,
+        status=SessionStatus.ACTIVE,
+    )
+    repository.create_claim(claim, session)
+
+    updated = claim.model_copy(
+        update={
+            'revision': 2,
+            'updated_at': timestamp + timedelta(seconds=1),
+        }
+    )
+    event = _audit_event(
+        f'aud_atomic_{repository_kind}',
+        timestamp + timedelta(seconds=1),
+        claim_id=claim.claim_id,
+    ).model_copy(update={'claim_revision': updated.revision})
+    evaluation = build_applied_branch_evaluation(
+        updated,
+        repository=repository,
+        recomputation_reason='audit_atomic_test',
+        created_at=timestamp + timedelta(seconds=1),
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/audit-atomic-test',
+        key=f'audit-atomic-{repository_kind}',
+        request_fingerprint=f'fingerprint-{repository_kind}',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    repository.save_claim_mutation_with_audit(
+        updated,
+        expected_revision=1,
+        idempotency=idempotency,
+        audit_events=(event,),
+        branch_evaluation=evaluation,
+    )
+
+    assert repository.get_claim_internal(claim.claim_id) == updated
+    assert repository.list_audit_events_internal(event.subject) == [event]
+    evaluations = repository.list_branch_evaluations(claim.claim_id, claim.customer_id)
+    assert evaluations == [evaluation]
+    assert (
+        repository.find_idempotency(
+            claim.customer_id,
+            '/audit-atomic-test',
+            f'audit-atomic-{repository_kind}',
+        )
+        == idempotency
+    )
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+def test_audit_conflict_rejects_claim_bundle_before_any_state_change(
+    repository_kind: str,
+) -> None:
+    repository = FixtureRepository() if repository_kind == 'fixture' else _mongodb_repository()
+    timestamp = datetime(2026, 9, 3, 6, 0, tzinfo=UTC)
+    claim = WorkingClaim(
+        claim_id=f'clm_audit_conflict_{repository_kind}',
+        customer_id=f'cus_audit_conflict_{repository_kind}',
+        revision=1,
+        channel=Channel.WEB_AGENT,
+        locale='en-NZ',
+        incident_type='motor',
+        active_session_id=f'ses_audit_conflict_{repository_kind}',
+        customer_next_step=CustomerNextStep(
+            status='describe_incident',
+            summary='Describe the incident.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        ),
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session = SessionRecord(
+        session_id=claim.active_session_id or '',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        context_revision=claim.revision,
+        started_at=timestamp,
+        last_active_at=timestamp,
+        status=SessionStatus.ACTIVE,
+    )
+    repository.create_claim(claim, session)
+
+    updated = claim.model_copy(
+        update={
+            'revision': 2,
+            'updated_at': timestamp + timedelta(seconds=1),
+        }
+    )
+    stored_event = _audit_event(
+        f'aud_conflict_{repository_kind}',
+        timestamp,
+        claim_id=claim.claim_id,
+    ).model_copy(update={'claim_revision': updated.revision})
+    repository.append_audit_event(stored_event)
+    conflicting_event = stored_event.model_copy(
+        update={'reason': 'Conflicting rewrite must reject the whole claim bundle.'}
+    )
+    evaluation = build_applied_branch_evaluation(
+        updated,
+        repository=repository,
+        recomputation_reason='audit_conflict_test',
+        created_at=timestamp + timedelta(seconds=1),
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/audit-conflict-test',
+        key=f'audit-conflict-{repository_kind}',
+        request_fingerprint=f'fingerprint-conflict-{repository_kind}',
+        claim_id=claim.claim_id,
+        session_id=claim.active_session_id or '',
+    )
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_claim_mutation_with_audit(
+            updated,
+            expected_revision=1,
+            idempotency=idempotency,
+            audit_events=(conflicting_event,),
+            branch_evaluation=evaluation,
+        )
+
+    assert repository.get_claim_internal(claim.claim_id) == claim
+    assert repository.list_audit_events_internal(stored_event.subject) == [stored_event]
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == []
+    assert (
+        repository.find_idempotency(
+            claim.customer_id,
+            '/audit-conflict-test',
+            f'audit-conflict-{repository_kind}',
+        )
+        is None
+    )

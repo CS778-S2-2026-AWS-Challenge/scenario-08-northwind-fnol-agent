@@ -604,6 +604,7 @@ class MongoDBRepository:
         expected_revision: int,
         idempotency: IdempotencyRecord,
         audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a claim mutation and its audit events in MongoDB.
 
@@ -612,6 +613,7 @@ class MongoDBRepository:
             expected_revision: Revision that must still be current.
             idempotency: Retry metadata for the mutation.
             audit_events: Claim-scoped immutable facts produced by the mutation.
+            branch_evaluation: Optional applied evaluation for the resulting Claim revision.
 
         Returns:
             None.
@@ -628,12 +630,14 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         self._atomic(
             lambda mongo_session: self._save_claim_mutation_with_audit(
                 claim,
                 expected_revision,
                 idempotency,
                 audit_events,
+                branch_evaluation,
                 mongo_session,
             )
         )
@@ -644,6 +648,7 @@ class MongoDBRepository:
         expected_revision: int,
         idempotency: IdempotencyRecord,
         audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None,
         mongo_session: Any,
     ) -> None:
         prepared = self._prepare_audit_events(
@@ -651,12 +656,17 @@ class MongoDBRepository:
             audit_events,
             mongo_session=mongo_session,
         )
+        records: list[tuple[str, str, BaseModel]] = []
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._save_child_mutation(
             claim,
             expected_revision,
             idempotency,
             mongo_session,
-            records=[],
+            records=records,
         )
         for event in prepared:
             self._insert_audit_event(event, mongo_session=mongo_session)
@@ -995,6 +1005,7 @@ class MongoDBRepository:
         operation: AssessorRoutingOperation,
         decision: AgentDecisionRecord,
         customer_id: str,
+        audit_events: tuple[AuditEventEnvelope, ...] = (),
     ) -> None:
         claim = self.get_claim(operation.claim_id, customer_id)
         session = self.get_session(operation.claim_id, decision.session_id, customer_id)
@@ -1015,6 +1026,11 @@ class MongoDBRepository:
             raise KeyError(operation.claim_id)
 
         def persist(mongo_session: Any) -> None:
+            prepared_audit = self._prepare_audit_events(
+                claim,
+                audit_events,
+                mongo_session=mongo_session,
+            )
             existing_operation = self._get(
                 'assessor_routing_operation',
                 operation.operation_id,
@@ -1029,6 +1045,8 @@ class MongoDBRepository:
             )
             if existing_operation is not None or existing_decision is not None:
                 if existing_operation == operation and existing_decision == decision:
+                    for event in prepared_audit:
+                        self._insert_audit_event(event, mongo_session=mongo_session)
                     return
                 raise IdempotencyConflict(operation.operation_id)
             self._put(
@@ -1046,6 +1064,8 @@ class MongoDBRepository:
                 claim_id=operation.claim_id,
                 session=mongo_session,
             )
+            for event in prepared_audit:
+                self._insert_audit_event(event, mongo_session=mongo_session)
 
         self._atomic(persist)
 

@@ -258,6 +258,7 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         idempotency: IdempotencyRecord,
         audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Persist one claim mutation and its prevalidated audit facts atomically.
 
@@ -266,6 +267,7 @@ class FixtureRepository(PersistenceRepository):
             expected_revision: Revision that must still be current.
             idempotency: Retry metadata for the mutation.
             audit_events: Claim-scoped immutable facts produced by the mutation.
+            branch_evaluation: Optional applied evaluation for the resulting Claim revision.
 
         Returns:
             None.
@@ -275,8 +277,14 @@ class FixtureRepository(PersistenceRepository):
             IdempotencyConflict: Retry or audit identity conflicts with stored data.
             KeyError: Claim ownership, revision linkage, or audit scope is invalid.
         """
+        self._validate_branch_evaluation(claim, branch_evaluation)
         prepared = self._prepare_audit_events(claim, audit_events)
-        self.save_claim_mutation(claim, expected_revision, idempotency)
+        self.save_claim_mutation(
+            claim,
+            expected_revision,
+            idempotency,
+            branch_evaluation=branch_evaluation,
+        )
         for event in prepared:
             self._audit_events[event.event_id] = deepcopy(event)
 
@@ -625,6 +633,7 @@ class FixtureRepository(PersistenceRepository):
         operation: AssessorRoutingOperation,
         decision: AgentDecisionRecord,
         customer_id: str,
+        audit_events: tuple[AuditEventEnvelope, ...] = (),
     ) -> None:
         claim = self._claims.get(operation.claim_id)
         session = self._sessions.get(decision.session_id)
@@ -647,15 +656,20 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(operation.claim_id)
 
+        prepared_audit = self._prepare_audit_events(claim, audit_events)
         existing_operation = self._assessor_routing_operations.get(operation.operation_id)
         existing_decision = self._decisions.get(decision.decision_id)
         if existing_operation is not None or existing_decision is not None:
             if existing_operation == operation and existing_decision == decision:
+                for event in prepared_audit:
+                    self._audit_events[event.event_id] = deepcopy(event)
                 return
             raise IdempotencyConflict(operation.operation_id)
 
         self._decisions[decision.decision_id] = deepcopy(decision)
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
 
     def get_agent_decision(
         self,
