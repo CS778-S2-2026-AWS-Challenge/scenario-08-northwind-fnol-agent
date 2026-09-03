@@ -4,6 +4,15 @@ from typing import Any, NoReturn
 from backend.adapters.claims_service import AssessorServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_REQUESTED_ACTION,
@@ -56,6 +65,11 @@ _ACTION_PURPOSE = (
     'This does not decide coverage or approve repairs.'
 )
 _ELIGIBLE_NEXT_STEPS = {'claim_created', 'assessor_request_ready'}
+
+
+def _audit_event_id(kind: str, identity: str) -> str:
+    seed = f'{kind}:{identity}'.encode()
+    return f'aud_{sha256(seed).hexdigest()[:24]}'
 
 
 def _not_found() -> ApiError:
@@ -291,17 +305,42 @@ def grant_assessor_consent(
         session_id=updated.active_session_id or '',
         response_payload=response.model_dump(mode='json'),
     )
+    audit_event = AuditEventEnvelope(
+        event_id=_audit_event_id('consent-granted', consent.consent_ref),
+        event_type=AuditEventType.CONSENT_GRANTED,
+        outcome=AuditOutcome.SUCCEEDED,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=updated.claim_id,
+            claim_id=updated.claim_id,
+        ),
+        actor=AuditActor(
+            actor_type=ActorType.CLAIMANT,
+            actor_id=principal.subject,
+            auth_source=principal.auth_source,
+        ),
+        reason='Claimant granted task-specific consent for vehicle damage assessment routing.',
+        source_refs=[consent.consent_ref],
+        consent_ref=consent.consent_ref,
+        consent_state=consent.status.value,
+        visibility=AuditVisibility.AUDIT_ONLY,
+        idempotency_key=key,
+        claim_revision=updated.revision,
+        created_at=consent.granted_at,
+    )
+    branch_evaluation = build_applied_branch_evaluation(
+        updated,
+        repository=repository,
+        recomputation_reason='external_consent_granted',
+        trigger_source_refs=[consent.consent_ref],
+    )
     try:
-        repository.save_claim_mutation(
+        repository.save_claim_mutation_with_audit(
             updated,
             expected_revision=claim.revision,
             idempotency=idempotency,
-            branch_evaluation=build_applied_branch_evaluation(
-                updated,
-                repository=repository,
-                recomputation_reason='external_consent_granted',
-                trigger_source_refs=[consent.consent_ref],
-            ),
+            audit_events=(audit_event,),
+            branch_evaluation=branch_evaluation,
         )
     except RevisionConflict as conflict:
         raise ApiError(

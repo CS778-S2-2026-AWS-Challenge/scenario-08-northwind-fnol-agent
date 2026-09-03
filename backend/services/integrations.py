@@ -8,16 +8,30 @@ from backend.adapters.claims_service import (
     ClaimsServiceAdapter,
 )
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditPermission,
+    AuditPermissionOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskRequest,
     assert_disclosure_within_consent,
     assert_request_matches_task,
+    assert_task_transition_is_permitted,
+    classify_external_task_failure,
 )
 from backend.domain.models import (
     ActorType,
@@ -143,6 +157,19 @@ def _prepare_external_request(
         created_at=operation.created_at,
         updated_at=operation.created_at,
     )
+    stored_task = next(
+        (
+            held
+            for held in repository.list_external_tasks_internal(operation.claim_id)
+            if held.task_id == task.task_id
+        ),
+        None,
+    )
+    if stored_task is not None:
+        # A retry continues the task it already has. Rebuilding it as `prepared`
+        # would assert that the earlier attempt had not been sent, which erases the
+        # recorded failure and is what the transition guard refuses outright.
+        task = stored_task
     request = ExternalTaskRequest(
         request_id=_external_request_id(operation.operation_id),
         task_id=task.task_id,
@@ -230,8 +257,63 @@ def _record_external_acceptance(
             'updated_at': updated_at,
         }
     )
+    assert_task_transition_is_permitted(task, accepted)
     try:
         repository.save_external_task(accepted, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+
+
+def _record_external_failure(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    customer_id: str,
+    failure_code: ExternalTaskFailureCode,
+) -> None:
+    """Record on the task what the attempt actually came to.
+
+    Until this ran, a failed attempt left the task at `prepared`, which asserts
+    that the request had not been sent. The failure was recorded on the routing
+    operation and not on the task, so nothing reading the task could tell a
+    finished failure from a request still in flight, and the delivery, failure,
+    and recovery vocabulary the task carries was never populated at runtime.
+
+    The recovery matrix decides what the failure means; this records it. Delivery
+    is read from the task rather than assumed, because whether the request reached
+    the provider is what separates a retryable failure from an unknown outcome.
+
+    Args:
+        repository: Persistence boundary for the claim.
+        task: External task state as it stands before the failure.
+        customer_id: Customer who owns the parent claim.
+        failure_code: Provider-neutral reason the attempt failed.
+
+    Returns:
+        None.
+
+    Raises:
+        ApiError: The write conflicts with a concurrent change to the task.
+    """
+    classification = classify_external_task_failure(
+        failure_code=failure_code,
+        delivery=task.delivery,
+    )
+    updated_at = now_utc()
+    # The same coarse-clock case the acceptance write handles: preparation and
+    # failure can land in one tick, and a changed task state must advance time.
+    if updated_at <= task.updated_at:
+        updated_at = task.updated_at + timedelta(microseconds=1)
+    failed = task.model_copy(
+        update={
+            'status': classification.operation_status,
+            'failure_code': failure_code,
+            'updated_at': updated_at,
+        }
+    )
+    assert_task_transition_is_permitted(task, failed)
+    try:
+        repository.save_external_task(failed, customer_id)
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
 
@@ -542,6 +624,49 @@ def route_assessor(
             created_at=timestamp,
             updated_at=timestamp,
         )
+        permission_audit_events: tuple[AuditEventEnvelope, ...] = ()
+        if authorisation_decision is not None:
+            permission_audit_events = (
+                AuditEventEnvelope(
+                    event_id=(
+                        'aud_'
+                        + request_fingerprint(
+                            {
+                                'event_type': AuditEventType.PERMISSION_AUTHORISED.value,
+                                'decision_id': decision.decision_id,
+                            }
+                        )[:24]
+                    ),
+                    event_type=AuditEventType.PERMISSION_AUTHORISED,
+                    outcome=AuditOutcome.SUCCEEDED,
+                    subject=AuditSubject(
+                        subject_type=AuditSubjectType.CLAIM,
+                        subject_id=claim.claim_id,
+                        claim_id=claim.claim_id,
+                    ),
+                    actor=AuditActor(
+                        actor_type=ActorType.SYSTEM,
+                        actor_id=decision.authority.proposed_by,
+                        auth_source=decision.authority.validated_by,
+                    ),
+                    reason=decision.customer_reason,
+                    source_refs=[
+                        decision.decision_id,
+                        decision.trigger_message_id,
+                        consent.consent_ref,
+                    ],
+                    permission=AuditPermission(
+                        required_permission=payload.requested_action,
+                        outcome=AuditPermissionOutcome.AUTHORISED,
+                    ),
+                    consent_ref=consent.consent_ref,
+                    consent_state=consent.status.value,
+                    visibility=AuditVisibility.AUDIT_ONLY,
+                    correlation_id=operation.operation_id,
+                    claim_revision=claim.revision,
+                    created_at=timestamp,
+                ),
+            )
         try:
             if authorisation_decision is None:
                 repository.save_assessor_routing_operation(operation)
@@ -550,6 +675,7 @@ def route_assessor(
                     operation,
                     authorisation_decision,
                     claim.customer_id,
+                    audit_events=permission_audit_events,
                 )
         except IdempotencyConflict as conflict:
             raise _idempotency_error() from conflict
@@ -572,6 +698,12 @@ def route_assessor(
             request=external_request,
             customer_id=claim.customer_id,
             operation_id=operation.operation_id,
+        )
+        _record_external_failure(
+            repository,
+            task=task,
+            customer_id=claim.customer_id,
+            failure_code=ExternalTaskFailureCode(failure.code.value),
         )
         unavailable = failure.code in {
             AssessorFixtureFailure.TIMEOUT,

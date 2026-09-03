@@ -1,7 +1,9 @@
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
+from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -45,6 +47,7 @@ class FixtureRepository(PersistenceRepository):
 
     def __init__(self) -> None:
         self._claims: dict[str, WorkingClaim] = {}
+        self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
@@ -74,6 +77,7 @@ class FixtureRepository(PersistenceRepository):
         """Clear only records owned by this in-memory prototype repository."""
         cleared = {
             'claims': len(self._claims),
+            'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
             'messages': len(self._messages),
             'staff_agent_sessions': len(self._staff_agent_sessions),
@@ -96,6 +100,7 @@ class FixtureRepository(PersistenceRepository):
             'idempotency_records': len(self._idempotency),
         }
         self._claims.clear()
+        self._audit_events.clear()
         self._sessions.clear()
         self._messages.clear()
         self._staff_agent_sessions.clear()
@@ -117,6 +122,80 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs.clear()
         self._idempotency.clear()
         return cleared
+
+    def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        """Append one immutable audit event to the fixture store.
+
+        Args:
+            event: Audit event to persist.
+
+        Returns:
+            None.
+
+        Raises:
+            IdempotencyConflict: The event identity exists with different content.
+        """
+        existing = self._audit_events.get(event.event_id)
+        if existing is not None:
+            if existing != event:
+                raise IdempotencyConflict(event.event_id)
+            return
+        self._audit_events[event.event_id] = deepcopy(event)
+
+    def list_audit_events_internal(
+        self,
+        subject: AuditSubject,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        """Return audit events for an already-authorised subject read.
+
+        Args:
+            subject: Exact logical subject to match.
+            start_at: Optional inclusive lower timestamp bound.
+            end_at: Optional inclusive upper timestamp bound.
+
+        Returns:
+            Deep-copied matching events in stable time and identity order.
+
+        Raises:
+            ValueError: The requested time range is invalid.
+        """
+        if start_at is not None and end_at is not None and start_at > end_at:
+            raise ValueError('Audit event start_at must not be after end_at.')
+
+        events = [
+            deepcopy(event)
+            for event in self._audit_events.values()
+            if event.subject == subject
+            and (start_at is None or event.created_at >= start_at)
+            and (end_at is None or event.created_at <= end_at)
+        ]
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
+
+    def _prepare_audit_events(
+        self,
+        claim: WorkingClaim,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> tuple[AuditEventEnvelope, ...]:
+        prepared: dict[str, AuditEventEnvelope] = {}
+        for event in audit_events:
+            if event.subject.claim_id != claim.claim_id:
+                raise KeyError(claim.claim_id)
+            if (
+                event.subject.subject_type.value == 'claim'
+                and event.claim_revision != claim.revision
+            ):
+                raise KeyError(claim.claim_id)
+            incoming = prepared.get(event.event_id)
+            if incoming is not None and incoming != event:
+                raise IdempotencyConflict(event.event_id)
+            existing = self._audit_events.get(event.event_id)
+            if existing is not None and existing != event:
+                raise IdempotencyConflict(event.event_id)
+            prepared[event.event_id] = event
+        return tuple(prepared.values())
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
@@ -229,6 +308,42 @@ class FixtureRepository(PersistenceRepository):
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = deepcopy(idempotency)
+
+    def save_claim_mutation_with_audit(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
+        """Persist one claim mutation and its prevalidated audit facts atomically.
+
+        Args:
+            claim: Resulting authoritative Claim State.
+            expected_revision: Revision that must still be current.
+            idempotency: Retry metadata for the mutation.
+            audit_events: Claim-scoped immutable facts produced by the mutation.
+            branch_evaluation: Optional applied evaluation for the resulting Claim revision.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The stored Claim revision changed first.
+            IdempotencyConflict: Retry or audit identity conflicts with stored data.
+            KeyError: Claim ownership, revision linkage, or audit scope is invalid.
+        """
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        prepared = self._prepare_audit_events(claim, audit_events)
+        self.save_claim_mutation(
+            claim,
+            expected_revision,
+            idempotency,
+            branch_evaluation=branch_evaluation,
+        )
+        for event in prepared:
+            self._audit_events[event.event_id] = deepcopy(event)
 
     def get_session(
         self,
@@ -651,6 +766,7 @@ class FixtureRepository(PersistenceRepository):
         operation: AssessorRoutingOperation,
         decision: AgentDecisionRecord,
         customer_id: str,
+        audit_events: tuple[AuditEventEnvelope, ...] = (),
     ) -> None:
         claim = self._claims.get(operation.claim_id)
         session = self._sessions.get(decision.session_id)
@@ -673,15 +789,20 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(operation.claim_id)
 
+        prepared_audit = self._prepare_audit_events(claim, audit_events)
         existing_operation = self._assessor_routing_operations.get(operation.operation_id)
         existing_decision = self._decisions.get(decision.decision_id)
         if existing_operation is not None or existing_decision is not None:
             if existing_operation == operation and existing_decision == decision:
+                for event in prepared_audit:
+                    self._audit_events[event.event_id] = deepcopy(event)
                 return
             raise IdempotencyConflict(operation.operation_id)
 
         self._decisions[decision.decision_id] = deepcopy(decision)
         self._assessor_routing_operations[operation.operation_id] = deepcopy(operation)
+        for event in prepared_audit:
+            self._audit_events[event.event_id] = deepcopy(event)
 
     def get_agent_decision(
         self,
