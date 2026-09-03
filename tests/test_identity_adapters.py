@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from backend.adapters.identity import (
     FixtureIdentityRepository,
@@ -28,7 +29,9 @@ def test_fixture_claimant_identity_covers_account_and_session_lifecycle() -> Non
     assert repository.create_account('NEW@example.invalid', 'secret', 'Duplicate') is None
     created.phone = '021 123 456'
     repository.save_account(created)
-    assert repository.get_account(created.customer_id).phone == '021 123 456'
+    saved_created = repository.get_account(created.customer_id)
+    assert saved_created is not None
+    assert saved_created.phone == '021 123 456'
 
     now = datetime.now(UTC)
     session = ClaimantAuthSessionRecord(
@@ -44,7 +47,7 @@ def test_fixture_claimant_identity_covers_account_and_session_lifecycle() -> Non
     assert repository.revoke_session('fixture-token') is False
 
 
-def test_sqlite_claimant_identity_persists_accounts_and_sessions(tmp_path) -> None:
+def test_sqlite_claimant_identity_persists_accounts_and_sessions(tmp_path: Path) -> None:
     repository = SQLiteIdentityRepository(str(tmp_path / 'claimant.sqlite'))
     assert repository.authenticate('missing@example.invalid', 'secret') is None
     account = repository.create_account(' User@Example.com ', 'secret', ' User ')
@@ -111,7 +114,7 @@ def test_fixture_staff_identity_covers_provision_and_session_lifecycle() -> None
     assert repository.revoke_session('staff-fixture-token') is False
 
 
-def test_sqlite_staff_identity_persists_accounts_and_sessions(tmp_path) -> None:
+def test_sqlite_staff_identity_persists_accounts_and_sessions(tmp_path: Path) -> None:
     repository = SQLiteStaffIdentityRepository(str(tmp_path / 'staff.sqlite'))
     assert repository.authenticate('missing@example.invalid', 'secret') is None
     account = repository.provision_account(
