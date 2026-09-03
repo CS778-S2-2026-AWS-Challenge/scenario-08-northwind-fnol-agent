@@ -11,12 +11,14 @@ from backend.domain.identity import (
     LoginRequest,
     PreferencesPatchRequest,
     ProfilePatchRequest,
+    RegistrationRequest,
 )
 from backend.repositories.identity import IdentityRepository
 from backend.services.identity import (
     account_projection,
     hash_access_token,
     login,
+    register,
     session_projection,
     update_preferences,
     update_profile,
@@ -33,16 +35,23 @@ def identity_repository_for(request: Request) -> IdentityRepository:
     '/auth/sessions', response_model=AuthenticatedSession, status_code=status.HTTP_201_CREATED
 )
 def create_auth_session(request: Request, payload: LoginRequest) -> AuthenticatedSession:
-    if not request.app.state.settings.developer_mode:
-        raise ApiError(
-            status_code=503,
-            code='DEPENDENCY_UNAVAILABLE',
-            message='The development claimant identity provider is not enabled.',
-        )
     return login(
         identity_repository_for(request),
         payload,
         request.app.state.settings.claimant_session_ttl_minutes,
+        development_identity=request.app.state.settings.developer_mode,
+    )
+
+
+@router.post(
+    '/auth/accounts', response_model=AuthenticatedSession, status_code=status.HTTP_201_CREATED
+)
+def create_auth_account(request: Request, payload: RegistrationRequest) -> AuthenticatedSession:
+    return register(
+        identity_repository_for(request),
+        payload,
+        request.app.state.settings.claimant_session_ttl_minutes,
+        development_identity=request.app.state.settings.developer_mode,
     )
 
 

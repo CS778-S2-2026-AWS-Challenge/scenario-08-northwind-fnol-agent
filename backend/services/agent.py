@@ -475,7 +475,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
                     'services yourself if immediate help is needed. Northwind urgent support '
                     'has been requested with the details already provided.'
                 ),
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             ),
             form_changes=[],
             state_changes=[StateChange(path='claim_state.next_action', to='URGENT_HANDOFF')],
@@ -538,7 +538,7 @@ def deterministic_interrupt_proposal(context: AgentTurnContext) -> AgentProposal
             customer_next_step=CustomerNextStep(
                 status='human_support_queued',
                 summary=next_step_summary,
-                responsible_party=ResponsibleParty.NORTHWIND,
+                responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
             ),
             form_changes=[],
             state_changes=[StateChange(path='claim_state.next_action', to='HANDOFF')],

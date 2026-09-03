@@ -193,15 +193,24 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert detail_response.status_code == 200, detail_response.text
     detail = detail_response.json()
     assert detail['claim_id'] == claim_id
-    assert detail['incident_type'] is None
-    assert detail['form']['claim.product_family']['value'] == 'motor'
-    assert detail['form']['claim.product_family']['status'] == 'proposed'
-    assert detail['form']['incident.type']['value'] == 'collision'
-    assert detail['form']['incident.type']['status'] == 'proposed'
+    assert detail['incident']['family'] is None
+    staff_fields = {
+        item['code']: item['field']
+        for item in client.get(f'/api/v1/workbench/claims/{claim_id}/fields', headers=staff).json()[
+            'items'
+        ]
+    }
+    assert staff_fields['claim.product_family']['value'] == 'motor'
+    assert staff_fields['claim.product_family']['status'] == 'proposed'
+    assert staff_fields['incident.type']['value'] == 'collision'
+    assert staff_fields['incident.type']['status'] == 'proposed'
     assert detail['claim_state']['coverage'] == 'review_required'
     assert detail['claim_state']['workflow_state'] == 'professional_review'
-    assert len(detail['handoffs']) == 1
-    handoff = detail['handoffs'][0]
+    handoffs = client.get(f'/api/v1/workbench/claims/{claim_id}/handoffs', headers=staff).json()[
+        'items'
+    ]
+    assert len(handoffs) == 1
+    handoff = handoffs[0]
     assert handoff['type'] == 'professional_review'
     assert handoff['support_need'] is None
     assert handoff['trigger'] == 'professional_review_required'
@@ -223,7 +232,9 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert any(
         signal['reason_codes'] == [journey['policy']['review_reason']]
         and signal['source_evidence'][0]['retrieval_id'] == retrieval.retrieval_id
-        for signal in detail['signals']
+        for signal in client.get(
+            f'/api/v1/workbench/claims/{claim_id}/signals', headers=staff
+        ).json()['items']
     )
 
     continued = _message(
@@ -275,7 +286,7 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
             ],
             'customer_update': {
                 'summary': resolution['customer_update'],
-                'responsible_party': 'northwind',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff['handoff_id']],
             },
         },

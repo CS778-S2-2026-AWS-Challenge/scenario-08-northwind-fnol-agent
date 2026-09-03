@@ -269,7 +269,7 @@ def build_handoff(
             else 'human_support_queued'
         ),
         summary=promised_next_step,
-        responsible_party=ResponsibleParty.NORTHWIND,
+        responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
     )
     return handoff, next_step
 

@@ -10,7 +10,7 @@
         "next_action": "CREATE_CLAIM",
         "evidence_state": "received",
         "customer_next_step_status": "ready_to_create",
-        "responsible_party": "northwind",
+        "responsible_party": "system",
         "handoff": null
       },
       "evidence": [
@@ -64,7 +64,7 @@
         "next_action": "URGENT_HANDOFF",
         "evidence_state": "received",
         "customer_next_step_status": "urgent_support_queued",
-        "responsible_party": "northwind",
+        "responsible_party": "claims_professional",
         "handoff": {
           "type": "urgent_support",
           "status": "queued",
@@ -89,7 +89,7 @@
         "next_action": "HANDOFF",
         "evidence_state": "received",
         "customer_next_step_status": "human_support_queued",
-        "responsible_party": "northwind",
+        "responsible_party": "claims_professional",
         "handoff": {
           "type": "human_support",
           "status": "queued",

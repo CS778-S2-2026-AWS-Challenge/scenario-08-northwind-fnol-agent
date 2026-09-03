@@ -92,9 +92,15 @@ def test_evidence_handoff_and_next_action_share_one_claim_context(
     assert detail['claim_state']['next_action'] == 'HANDOFF'
     assert detail['customer_next_step']['status'] == next_step['status']
     assert detail['customer_next_step']['summary'] == next_step['summary']
-    assert [item['evidence_id'] for item in detail['evidence']] == [evidence_id]
-    assert [item['handoff_id'] for item in detail['handoffs']] == [handoff_id]
-    packet = detail['handoffs'][0]['packet']
+    evidence_items = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/evidence', headers=staff_auth_headers
+    ).json()['items']
+    assert [item['evidence_id'] for item in evidence_items] == [evidence_id]
+    handoff_items = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs', headers=staff_auth_headers
+    ).json()['items']
+    assert [item['handoff_id'] for item in handoff_items] == [handoff_id]
+    packet = handoff_items[0]['packet']
     assert packet['evidence_refs'] == [evidence_id]
     assert [item['evidence_id'] for item in packet['evidence']] == [evidence_id]
     assert evidence_id in packet['pending_items']

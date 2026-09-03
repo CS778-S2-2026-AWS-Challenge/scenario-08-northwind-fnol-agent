@@ -62,6 +62,7 @@ them:
 - [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
+- [Staff Tag Registry](staff-tag-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
 Generated contract snapshots are mechanical drift sentinels. The current AuditEvent

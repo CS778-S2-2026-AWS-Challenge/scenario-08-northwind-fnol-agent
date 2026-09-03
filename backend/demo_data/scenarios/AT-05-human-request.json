@@ -58,7 +58,7 @@
     "customer_next_step": {
       "status": "human_support_queued",
       "summary": "A Northwind support request has been queued with the details already provided. You do not need to restart your report.",
-      "responsible_party": "northwind",
+      "responsible_party": "claims_professional",
       "can_resume": true,
       "required_items": []
     },

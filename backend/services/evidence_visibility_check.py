@@ -81,11 +81,14 @@ def _projections(scenario: ScenarioFixture) -> tuple[list[dict[str, Any]], list[
     settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
     with TestClient(create_app(settings, repository)) as client:
         claimant = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=CLAIMANT_AUTH)
-        staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=STAFF_AUTH)
+        staff = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence',
+            headers=STAFF_AUTH,
+        )
     claimant.raise_for_status()
     staff.raise_for_status()
     claimant_items: list[dict[str, Any]] = claimant.json()['items']
-    staff_items: list[dict[str, Any]] = staff.json()['evidence']
+    staff_items: list[dict[str, Any]] = staff.json()['items']
     return claimant_items, staff_items
 
 
