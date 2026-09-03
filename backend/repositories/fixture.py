@@ -1,5 +1,7 @@
 from copy import deepcopy
+from datetime import datetime
 
+from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
@@ -38,6 +40,7 @@ class FixtureRepository(PersistenceRepository):
 
     def __init__(self) -> None:
         self._claims: dict[str, WorkingClaim] = {}
+        self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
@@ -62,6 +65,7 @@ class FixtureRepository(PersistenceRepository):
         """Clear only records owned by this in-memory prototype repository."""
         cleared = {
             'claims': len(self._claims),
+            'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
             'messages': len(self._messages),
             'agent_decisions': len(self._decisions),
@@ -79,6 +83,7 @@ class FixtureRepository(PersistenceRepository):
             'idempotency_records': len(self._idempotency),
         }
         self._claims.clear()
+        self._audit_events.clear()
         self._sessions.clear()
         self._messages.clear()
         self._decisions.clear()
@@ -95,6 +100,33 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs.clear()
         self._idempotency.clear()
         return cleared
+
+    def append_audit_event(self, event: AuditEventEnvelope) -> None:
+        existing = self._audit_events.get(event.event_id)
+        if existing is not None:
+            if existing != event:
+                raise IdempotencyConflict(event.event_id)
+            return
+        self._audit_events[event.event_id] = deepcopy(event)
+
+    def list_audit_events_internal(
+        self,
+        subject: AuditSubject,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        if start_at is not None and end_at is not None and start_at > end_at:
+            raise ValueError('Audit event start_at must not be after end_at.')
+
+        events = [
+            deepcopy(event)
+            for event in self._audit_events.values()
+            if event.subject == subject
+            and (start_at is None or event.created_at >= start_at)
+            and (end_at is None or event.created_at <= end_at)
+        ]
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
 
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
