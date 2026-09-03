@@ -133,7 +133,9 @@ CircleCI is the authoritative repository quality provider. Its workflow checks b
 linting, types, tests, PR policy, GitHub automation, documentation, and the claimant client for
 every pull request. Backend pull requests use impact-scoped tests selected by
 `scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
-suite. The `main` branch retains the complete backend suite with coverage enforcement.
+suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
+only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.
+The `main` branch retains the complete backend suite with coverage enforcement.
 
 For focused local backend verification while developing, run the checks affected by the change:
 

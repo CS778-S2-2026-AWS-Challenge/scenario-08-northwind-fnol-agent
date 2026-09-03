@@ -15,6 +15,13 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 FULL_TESTS = ('tests',)
+TOOLING_FULL_PATHS = {
+    '.circleci/config.yml',
+    '.github/workflows/ci.yml',
+    'pyproject.toml',
+    'backend/requirements-dev.txt',
+    'scripts/select_backend_tests.py',
+}
 
 
 @dataclass(frozen=True)
@@ -37,12 +44,15 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
         A deterministic selection with ``full``, ``scoped``, or ``skip`` mode.
     """
 
-    paths = tuple(sorted(set(changed_paths)))
+    paths = tuple(sorted(set(_normalise_path(path) for path in changed_paths)))
     if full:
         return TestSelection('full', FULL_TESTS, 'main branch or explicitly forced full suite')
 
     if not paths:
         return TestSelection('skip', (), 'no changed paths')
+
+    if set(paths) & TOOLING_FULL_PATHS:
+        return TestSelection('full', FULL_TESTS, 'CI, selector, dependency, or test-tooling change')
 
     selected: set[str] = set()
     backend_changed = False
@@ -67,6 +77,10 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
             backend_changed = True
         if path_text.startswith('tests/') and path_text.endswith('.py'):
             selected.add(path_text)
+        if path_text == 'tests/conftest.py' or path_text.startswith(
+            ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
+        ):
+            shared_change = True
 
         if path_text.startswith(('backend/api/claims.py', 'backend/services/claims.py')):
             selected.update(
@@ -161,11 +175,55 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
     return TestSelection('skip', (), 'no backend behavior changed')
 
 
+def _normalise_path(path: str) -> str:
+    return PurePosixPath(path.replace('\\', '/')).as_posix()
+
+
+def changed_python_files(changed: Sequence[str]) -> tuple[str, ...]:
+    """Return changed Python files for scoped static checks."""
+
+    return tuple(
+        sorted(
+            {
+                normalised
+                for path in changed
+                if (normalised := _normalise_path(path)).endswith('.py')
+            }
+        )
+    )
+
+
+def needs_openapi_check(changed: Sequence[str]) -> bool:
+    """Return whether the changed paths can alter the generated OpenAPI schema."""
+
+    paths = {_normalise_path(path) for path in changed}
+    return bool(
+        paths & {'backend/app.py', 'backend/main.py', 'scripts/export_openapi.py'}
+        or any(path.startswith('backend/api/') for path in paths)
+        or any(path.startswith('backend/domain/') for path in paths)
+        or 'docs/openapi.snapshot.json' in paths
+    )
+
+
+def needs_audit_contract_check(changed: Sequence[str]) -> bool:
+    """Return whether the AuditEvent contract or its snapshot changed."""
+
+    paths = {_normalise_path(path) for path in changed}
+    return bool(
+        paths
+        & {
+            'backend/domain/audit.py',
+            'scripts/export_audit_contract.py',
+            'docs/contracts/audit-event.schema.json',
+        }
+    )
+
+
 def changed_paths() -> tuple[str, ...]:
     """Read changed paths against the target branch from the local checkout."""
 
     completed = subprocess.run(
-        ['git', 'diff', '--name-only', 'origin/main...HEAD'],
+        ['git', 'diff', '--name-only', '--diff-filter=ACMR', 'origin/main...HEAD'],
         check=True,
         capture_output=True,
         text=True,
@@ -188,13 +246,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', action='store_true', help='print only the selection mode')
     parser.add_argument('--tests', action='store_true', help='print selected pytest paths')
+    parser.add_argument('--python-files', action='store_true', help='print changed Python files')
+    parser.add_argument('--needs-openapi', action='store_true', help='print OpenAPI check need')
+    parser.add_argument(
+        '--needs-audit-contract', action='store_true', help='print AuditEvent check need'
+    )
     parser.add_argument('--full', action='store_true', help='force the complete suite')
     args = parser.parse_args()
-    selection = select_tests(changed_paths(), full=args.full or running_on_main())
+    paths = changed_paths()
+    on_main = args.full or running_on_main()
+    selection = select_tests(paths, full=on_main)
     if args.mode:
         print(selection.mode)
     elif args.tests:
         print('\n'.join(selection.tests))
+    elif args.python_files:
+        print('\n'.join(changed_python_files(paths)))
+    elif args.needs_openapi:
+        print(str(on_main or needs_openapi_check(paths)).lower())
+    elif args.needs_audit_contract:
+        print(str(on_main or needs_audit_contract_check(paths)).lower())
     else:
         print(f'{selection.mode}: {selection.reason}')
         print('\n'.join(selection.tests))

@@ -57,9 +57,11 @@ one:
   domain models, repository protocols, runtime composition, dependency
   manifests, and unmapped backend changes select the complete suite. The
   `main` branch always runs the complete suite with coverage enforcement.
-  Scoped PR runs intentionally omit the global coverage threshold; the full
-  coverage gate remains on `main`. The selector is itself covered by tests and
-  must never return an empty selection for a backend behavior change.
+  Scoped PRs also scope Ruff and Mypy to changed Python files, while OpenAPI
+  and AuditEvent snapshot checks run only when their contract can be affected.
+  Scoped pytest runs intentionally omit the global coverage threshold; the
+  full coverage gate remains on `main`. The selector is itself covered by
+  tests and must never return an empty selection for a backend behavior change.
 
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing
