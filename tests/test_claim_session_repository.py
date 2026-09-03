@@ -282,6 +282,10 @@ def test_start_session_reads_saved_claim_in_new_session(
     assert repository.claim_count == 1
     assert stored_claim.revision == paused_claim.revision + 1
     assert stored_claim.active_session_id == resumed_session_id
+    evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
+    assert evaluation.recomputation_reason == 'session_resumed'
+    assert evaluation.resulting_claim_revision == stored_claim.revision
+    assert evaluation.session_id == resumed_session_id
 
     read_session = client.get(
         f'/api/v1/claims/{claim_id}/sessions/{resumed_session_id}',
@@ -320,8 +324,9 @@ def test_start_session_surfaces_repository_revision_conflict(
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: object | None = None,
     ) -> None:
-        del claim, session, idempotency
+        del claim, session, idempotency, branch_evaluation
         raise RevisionConflict(expected_revision + 7)
 
     monkeypatch.setattr(repository, 'save_session_mutation', reject_session_mutation)
@@ -368,8 +373,9 @@ def test_start_session_surfaces_repository_idempotency_conflict_without_partial_
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: object | None = None,
     ) -> None:
-        del claim, expected_revision, session
+        del claim, expected_revision, session, branch_evaluation
         raise IdempotencyConflict(idempotency.key)
 
     monkeypatch.setattr(repository, 'save_session_mutation', reject_session_mutation)

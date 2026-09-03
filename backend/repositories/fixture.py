@@ -13,6 +13,8 @@ from backend.domain.models import (
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
     AuthorityOutcome,
+    BranchEvaluationRecord,
+    BranchEvaluationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -41,6 +43,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
+        self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
         self._evidence: dict[str, EvidenceRecord] = {}
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
@@ -65,6 +68,7 @@ class FixtureRepository(PersistenceRepository):
             'sessions': len(self._sessions),
             'messages': len(self._messages),
             'agent_decisions': len(self._decisions),
+            'branch_evaluations': len(self._branch_evaluations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
             'evidence': len(self._evidence),
             'external_tasks': len(self._external_tasks),
@@ -82,6 +86,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions.clear()
         self._messages.clear()
         self._decisions.clear()
+        self._branch_evaluations.clear()
         self._assessor_routing_operations.clear()
         self._evidence.clear()
         self._external_tasks.clear()
@@ -110,9 +115,17 @@ class FixtureRepository(PersistenceRepository):
         claim = self._claims.get(claim_id)
         return deepcopy(claim) if claim is not None else None
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         self._claims[claim.claim_id] = deepcopy(claim)
+        if branch_evaluation is not None:
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
 
     def _validate_claim_mutation(
         self,
@@ -141,8 +154,10 @@ class FixtureRepository(PersistenceRepository):
         claim: WorkingClaim,
         expected_revision: int,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         if (
             idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
@@ -154,6 +169,8 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(idempotency.key)
 
         self._claims[claim.claim_id] = deepcopy(claim)
+        if branch_evaluation is not None:
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def get_session(
@@ -179,6 +196,7 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(
             claim,
@@ -208,10 +226,29 @@ class FixtureRepository(PersistenceRepository):
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         if self._idempotency.get(lookup) is not None:
             raise IdempotencyConflict(idempotency.key)
+        self._validate_branch_evaluation(claim, branch_evaluation)
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
+        if branch_evaluation is not None:
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = deepcopy(idempotency)
+
+    def _validate_branch_evaluation(
+        self,
+        claim: WorkingClaim,
+        branch_evaluation: BranchEvaluationRecord | None,
+    ) -> None:
+        if branch_evaluation is None:
+            return
+        if (
+            branch_evaluation.claim_id != claim.claim_id
+            or branch_evaluation.evaluated_against_claim_revision != claim.revision
+            or branch_evaluation.resulting_claim_revision != claim.revision
+        ):
+            raise KeyError(claim.claim_id)
+        if branch_evaluation.evaluation_id in self._branch_evaluations:
+            raise IdempotencyConflict(branch_evaluation.evaluation_id)
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
         claim = self.get_claim(claim_id, customer_id)
@@ -376,6 +413,43 @@ class FixtureRepository(PersistenceRepository):
         ):
             raise KeyError(decision.claim_id)
         self._decisions[decision.decision_id] = deepcopy(decision)
+
+    def save_branch_evaluation(
+        self,
+        evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self.get_claim(evaluation.claim_id, customer_id)
+        if claim is None:
+            raise KeyError(evaluation.claim_id)
+        if evaluation.status is BranchEvaluationStatus.APPLIED:
+            raise ValueError(
+                'Applied branch evaluations must be persisted with their Claim mutation.'
+            )
+        if evaluation.evaluated_against_claim_revision != claim.revision:
+            raise RevisionConflict(claim.revision)
+        existing = self._branch_evaluations.get(evaluation.evaluation_id)
+        if existing is not None:
+            if existing == evaluation:
+                return
+            raise IdempotencyConflict(evaluation.evaluation_id)
+        self._branch_evaluations[evaluation.evaluation_id] = deepcopy(evaluation)
+
+    def list_branch_evaluations(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[BranchEvaluationRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        return sorted(
+            (
+                deepcopy(record)
+                for record in self._branch_evaluations.values()
+                if record.claim_id == claim_id
+            ),
+            key=lambda record: (record.created_at, record.evaluation_id),
+        )
 
     def get_assessor_routing_operation(
         self,
@@ -544,6 +618,7 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
@@ -600,9 +675,22 @@ class FixtureRepository(PersistenceRepository):
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
             and (evidence is None or evidence.claim_id == claim.claim_id)
+            and (
+                branch_evaluation is None
+                or (
+                    branch_evaluation.claim_id == claim.claim_id
+                    and branch_evaluation.evaluated_against_claim_revision == claim.revision
+                    and branch_evaluation.resulting_claim_revision == claim.revision
+                )
+            )
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        existing_branch_evaluation = (
+            self._branch_evaluations.get(branch_evaluation.evaluation_id)
+            if branch_evaluation is not None
+            else None
+        )
         immutable_collision = next(
             (
                 identity
@@ -610,6 +698,10 @@ class FixtureRepository(PersistenceRepository):
                     (claimant_message.message_id, existing_claimant_message),
                     (agent_message.message_id, existing_agent_message),
                     (decision.decision_id, existing_decision),
+                    (
+                        branch_evaluation.evaluation_id if branch_evaluation is not None else '',
+                        existing_branch_evaluation,
+                    ),
                 )
                 if existing is not None
             ),
@@ -645,6 +737,10 @@ class FixtureRepository(PersistenceRepository):
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if evidence is not None:
             self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        if branch_evaluation is not None:
+            if branch_evaluation.evaluation_id in self._branch_evaluations:
+                raise IdempotencyConflict(branch_evaluation.evaluation_id)
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
@@ -681,8 +777,10 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         existing_evidence = self._evidence.get(evidence.evidence_id)
         if (
             evidence.claim_id != claim.claim_id
@@ -702,6 +800,8 @@ class FixtureRepository(PersistenceRepository):
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._evidence[evidence.evidence_id] = deepcopy(evidence)
+        if branch_evaluation is not None:
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
 
     def save_external_task(self, task: ExternalTaskRecord, customer_id: str) -> None:
@@ -1133,8 +1233,10 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_claim_mutation(claim, expected_revision)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         existing_handoff = self._handoffs.get(handoff.handoff_id)
         if (
             handoff.claim_id != claim.claim_id
@@ -1155,4 +1257,6 @@ class FixtureRepository(PersistenceRepository):
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        if branch_evaluation is not None:
+            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency

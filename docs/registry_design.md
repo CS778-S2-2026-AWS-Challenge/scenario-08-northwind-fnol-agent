@@ -299,7 +299,8 @@ the system should:
 
 1. save the natural account and its source;
 2. evaluate injury, danger, human-support, and accessibility signals;
-3. propose `incident.type = motor` from supported wording;
+3. propose `claim.product_family = motor` from supported wording and, when the event
+   meaning is also supported, propose `incident.type = collision` independently;
 4. activate the approved motor branch and its registered fields;
 5. activate `another_party`, Police, evidence, towing, or property sub-branches only when
    supported by the claim context;
@@ -421,6 +422,322 @@ claim creation, urgent handling, or another high-impact action is a controlled b
 rule and requires Northwind authority.
 
 ## Progressive Implementation
+
+## VP Branch Evaluation Contract
+
+The VP contract is implemented in `backend/domain/branch_registry.py` as a checked-in,
+provider-neutral Field Registry snapshot (`4`), branch-rule snapshot
+(`vp-dynamic-form-branch-rules-v1`), and pure `BranchRuleEvaluator`. The evaluator does not call a
+model, provider SDK, or repository and does not mutate Claim State. It returns an evaluation for
+the supplied Claim revision. The message service supplies a pre-effect result to the Agent turn
+context, validates proposals against its allowed fields, then recomputes the applied result from
+the resulting Claim snapshot. Persistence adapters atomically store that immutable result with
+the Claim mutation.
+
+This section records the agreed contract for the Sprint 3 Validation Prototype branch
+engine. It is the implementation baseline for the complete three-path design; it is not a
+claim that every component below already exists in the repository.
+
+### Family selection and shared fields
+
+The three claim-family branches are mutually exclusive for one working claim:
+
+```text
+family.motor XOR family.home XOR family.contents
+```
+
+One draft claim may select only one family at a time and one formal claim may be submitted
+for only that selected family. A claimant may correct an unsubmitted family classification.
+The correction suspends or exits the previous family candidates, preserves the original
+message and source history, and recalculates the form. After formal claim creation, a family
+change is not a silent route switch; it requires the approved correction or professional-
+review path.
+
+Family exclusivity does **not** make all fields family-specific. Shared fields retain one
+canonical representation and remain available under whichever family is selected. Examples
+include `incident.description`, `incident.occurred_at`, `incident.location`,
+`incident.cause`, `loss.description`, claimant context, policy reference, and bounded
+safety/support signals. Conditional branches such as collision, another party, Police,
+pending evidence, human support, and professional review may be active alongside exactly one
+family branch.
+
+For example:
+
+```text
+family.motor
++ incident.collision
++ participant.another_party
++ authority.police
++ evidence.pending
+```
+
+This is additive branch state, not one flattened route label. Shared fields are never copied
+into `motor.*`, `home.*`, or `contents.*` variants merely because a family was selected.
+
+The evaluator reconciles the existing top-level `WorkingClaim.incident_type` compatibility
+projection with the source-aware `claim.product_family` form field. A request-supplied top-level
+value selects the current family. A confirmed form value can also select it, and matching
+authoritative values coalesce. Conflicting authoritative values produce an unresolved family
+conflict instead of silently choosing one. A `proposed` or `disputed` form value remains only a
+family candidate until it crosses the applicable confirmation boundary. `incident.type` is
+independent: it records an event subtype such as `collision`, `fire`, `water`, `theft`, or
+`weather`, and it can activate an additive conditional branch but never selects a product family.
+
+### Two independent field-state dimensions
+
+The evaluator must keep field selection state separate from stored value state.
+
+**Selection state** answers where a field sits in the current claim and current action:
+
+| Selection state | Meaning |
+| --- | --- |
+| `required_now` | The field is missing and a published rule says the current safe action cannot proceed without it. |
+| `candidate_now` | The field is relevant to the active branches, but missing it does not block the current safe action. |
+| `pending_later` | The field or material belongs to a later action, or its evidence is not yet available. |
+| `inactive` | The field is not supported by the current family or conditional branches. |
+| `system_owned` | The authoritative source is identity, provider lookup, workflow, integration, staff, or audit; it must not be collected as an ordinary claimant question. |
+
+**Value state** answers whether the information itself is present and authoritative:
+
+| Value state | Meaning |
+| --- | --- |
+| `missing` | No usable value has been accepted. |
+| `proposed` | A model, evidence extractor, claimant message, or other source proposed a value that still needs the applicable confirmation or authority. |
+| `confirmed` | The value passed the applicable confirmation or authoritative-source boundary. |
+| `disputed` | The value conflicts with another source or has been explicitly challenged. |
+| `pending_generation` | The value depends on material that is expected but has not yet been generated. |
+
+`system_owned` does not mean “already collected”. It describes the authority of the field's
+source. A claimant-supplied field remains claimant-sourced with `proposed` or `confirmed`
+value state; it must not be relabelled `system_owned` merely because the Agent structured it.
+For example:
+
+```text
+vehicle.drivable:
+  selection_state: required_now
+  value_state: missing
+
+vehicle.drivable:
+  selection_state: required_now
+  value_state: proposed
+
+vehicle.drivable:
+  selection_state: required_now
+  value_state: confirmed
+
+claim.created_at:
+  selection_state: system_owned
+  value_state: confirmed
+  source: system
+```
+
+### BranchRuleEvaluator contract
+
+`BranchRuleEvaluator` is a provider-neutral, deterministic application component. It does
+not call a model, provider SDK, database, or external service, and it does not directly
+mutate Claim State.
+
+It receives:
+
+- the latest authoritative `WorkingClaim` snapshot and Claim revision;
+- accepted facts and their source references;
+- current proposed, disputed, missing, and pending values;
+- the latest claimant message or other trigger context;
+- the registered Field and Content Branch catalogue;
+- the current action and open WorkItems;
+- Evidence, Handoff, Consent, Review, and Integration records relevant to the purpose;
+- the active policy and Registry versions; and
+- the set of fields and branches that are actually registered and executable.
+
+It returns a deterministic `BranchEvaluationResult` containing:
+
+- exactly one selected family, or an unresolved family conflict;
+- active, candidate, suspended, and exited branches with rule IDs and source references;
+- the registered fields each branch adds to the active projection;
+- selection state for every relevant field;
+- the current `required_now`, `candidate_now`, `pending_later`, `inactive`, and `system_owned`
+  sets;
+- proposed creation or update intents for WorkItem, Handoff, Evidence, Review, Consent, or
+  Integration records;
+- the primary runtime interruption/control signal when safety or support takes precedence;
+- the rule-set and registry versions used for evaluation;
+- the Claim revision against which the result was calculated; and
+- a bounded recomputation reason.
+
+The result is an evaluation proposal and evidence record. Runtime decides whether it can be
+applied under the current revision, authority, visibility, confirmation, idempotency, and
+side-effect rules.
+
+### Evaluation order
+
+The evaluator applies the following precedence while retaining additive branch state:
+
+1. Explicit injury, continuing danger, or emergency safety signals.
+2. Repeated human requests, distress, accessibility needs, and the configured first-request
+   human-support rule.
+3. Family classification for `motor`, `home`, or `contents`; unresolved conflict remains a
+   candidate/clarification state and cannot activate two families.
+4. Incident and participant dimensions such as collision, theft/burglary, another party,
+   witness, and Police.
+5. Evidence and mitigation dimensions such as pending materials, towing, emergency repair,
+   or temporary accommodation.
+6. Professional-review conditions such as material conflict or coverage ambiguity.
+7. Field-selection promotion for the current action.
+
+The first two steps determine the primary Runtime control directive. Later steps may still
+produce useful fact, evidence, or WorkItem proposals without overriding that directive.
+
+### BranchEvaluationRecord
+
+The VP uses an immutable `BranchEvaluationRecord` for every material branch/form
+recalculation. It records why a particular Dynamic Form projection existed at a particular
+point in the claim's history without becoming a second Claim State.
+
+The record contains at least:
+
+```text
+evaluation_id
+claim_id
+session_id or turn_id
+evaluated_against_claim_revision
+resulting_claim_revision (when applied)
+field_registry_version
+branch_rules_version
+selected_family or unresolved_family_conflict
+branch_results[]
+field_selection_results[]
+work_item_intents[]
+handoff/review/evidence/consent/integration intents[]
+interruption_result
+recomputation_reason
+status (evaluated | applied | stale | superseded)
+created_at
+```
+
+`branch_results[]` retains active, candidate, suspended, and exited branch states. Each
+state carries its rule ID and supporting source references. `field_selection_results[]`
+retains the selection state independently from the stored field's value state. A record may
+also retain bounded rule diagnostics, but never secrets, raw provider payloads, hidden model
+reasoning, or unrestricted Claim State.
+
+Each material recalculation compares the new Claim snapshot with the latest valid applied
+evaluation. A conditional branch that was active or candidate and then loses support is retained
+in the new evaluation as `suspended` or `exited` according to its registered correction rule. The
+transition retains the original rule and source references and adds the source coordinate for the
+correction. Branches that have never been supported are not manufactured as conditional exits.
+
+The bounded current claimant message is also evaluated for explicit human-support,
+accessibility, and distress signals before ordinary field selection. A shared deterministic
+classifier supplies the same signal to the controlled Agent and branch evaluator. Negated requests
+and ordinary references to another person do not create a support branch. A qualifying signal
+produces a source-linked handoff intent and takes precedence over ordinary questioning; after the
+handoff mutation, authoritative Claim State activates the same branch in the applied evaluation.
+
+The authority relationship is:
+
+```text
+Claim State
+  = current business facts, values, sources, lifecycle, and WorkItems
+
+BranchEvaluationRecord
+  = immutable evidence of one rule evaluation against one Claim revision
+
+Dynamic Form
+  = projection of Claim State + latest valid branch evaluation
+```
+
+The evaluation record never becomes a competing source of current facts. If the Claim revision
+changes from 12 to 13 before an evaluation calculated against revision 12 is applied, the result
+cannot be attached to revision 13 and must be recomputed. The old record remains immutable audit
+evidence but no longer qualifies as the current Dynamic Form projection. A future status event
+may describe it as stale or superseded, but must not rewrite the calculation payload.
+
+### Runtime and Agent integration
+
+The Agent does not read this Markdown directly. The intended runtime path is:
+
+```text
+published Field / Content Branch Registry snapshot
+        ↓
+BranchRuleEvaluator
+        ↓
+BranchEvaluationRecord
+        ↓
+Dynamic Form controller
+        ↓
+bounded AgentTurnContext
+        ↓
+Model Gateway / Agent proposal
+        ↓
+proposal validation against active branches and field selection
+        ↓
+ExecutionPlan and revision-checked Runtime effects
+        ↓
+Claim State mutation
+        ↓
+new BranchEvaluationRecord and updated Dynamic Form projection
+```
+
+The Agent receives only the bounded result needed for the current turn, including active
+branches, allowed registered fields, selection states, required-now fields, pending work,
+permitted actions/tools, and safe interruption information. It may propose a branch
+candidate, field patch, question, lookup, or handoff action, but it cannot activate a branch,
+make an unregistered field valid, write Claim State, or perform a side effect by itself.
+
+The Dynamic Form controller consumes the evaluator result to:
+
+- expose only active and permitted fields;
+- exclude inactive and system-owned fields from claimant questions;
+- avoid asking for confirmed or clearly claimant-supplied facts again;
+- choose the smallest useful question when a `required_now` answer is needed;
+- preserve pending evidence and unrelated safe progress;
+- accept multiple facts from one natural-language message;
+- recalculate after material facts, corrections, evidence updates, resume, and handoff; and
+- reject model proposals for unknown, inactive, or unauthorised fields.
+
+The complete three-path catalogue in `docs/fnol-field-model.md` is design authority, not a generic
+write allowlist. The executable registry contains only field codes that already have compatible
+domain, API, persistence, and visibility contracts. Candidate fields and separate Evidence,
+Participant, Contents Item, WorkItem, Handoff, Consent, and Integration records remain outside
+`WorkingClaim.form` until their owning typed contracts and consumers land together.
+
+### VP implementation boundary and ownership
+
+The agreed VP build includes the registry, deterministic evaluator, immutable evaluation
+record, field-selection logic, Dynamic Form control integration, Agent context injection,
+branch-aware proposal validation, and focused tests for the three paths and their important
+conditional branches. It is not limited to a presentation-only mock.
+
+The implementation may initially load a checked-in, versioned registry/rule snapshot through
+a local adapter, provided that the application-facing port remains replaceable. A later
+Control Plane publication can supply the active snapshot without changing Agent code.
+
+`Ysoseri1224` owns the construction of these capabilities, including domain, API,
+persistence, Dynamic Form, Agent integration, fixtures, and tests. `liyang6620` is not an
+implementation dependency for this work; he is expected to be informed of the field and data
+impact, validate the API/domain/repository/database mapping, and review the resulting PR.
+
+Any new field code, branch, selection state, `BranchEvaluationRecord` persistence, API
+projection, visibility rule, or revision behavior is a shared contract change. The same PR
+or coordinated implementation set must update affected API documentation, persistence
+contracts, domain validation, repositories/adapters, claimant/staff projections, fixtures,
+and tests. No independent second concurrency counter or competing Claim State may be
+introduced.
+
+### Explicit non-goals
+
+- Do not make `motor`, `home`, and `contents` simultaneously active for one formal claim.
+- Do not duplicate shared fields under each family namespace.
+- Do not use `system_owned` as a synonym for “value collected”.
+- Do not let the Agent or model activate branches or write Claim State directly.
+- Do not turn the complete field catalogue into a fixed questionnaire or mark every field
+  `required_now`.
+- Do not flatten Evidence, Handoff, WorkItem, Review, Consent, or Integration records into
+  ordinary form strings.
+- Do not add a separate branch database or concurrency authority without evidence that the
+  immutable evaluation-record contract cannot satisfy the VP audit and resume requirements.
+- Do not represent candidate fields as current runtime capability until their shared contract,
+  consumers, and tests exist.
 
 ### Stage 1: Static controlled catalogue
 

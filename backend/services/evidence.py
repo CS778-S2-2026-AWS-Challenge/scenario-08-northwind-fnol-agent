@@ -7,6 +7,7 @@ from backend.adapters.evidence_storage import (
 )
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -45,6 +46,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.support import (
     now_utc,
@@ -173,6 +175,12 @@ def _persist(
             expected_revision,
             evidence,
             idempotency,
+            branch_evaluation=build_applied_branch_evaluation(
+                claim,
+                repository=repository,
+                recomputation_reason='evidence_changed',
+                trigger_source_refs=[evidence.evidence_id],
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(
@@ -642,6 +650,19 @@ def complete_evidence_processing(
             code='VALIDATION_ERROR',
             message='The processing result contains invalid extracted facts.',
             details=details,
+        )
+    invalid_values: list[ErrorDetail] = []
+    for fact in payload.facts:
+        try:
+            validate_registered_field_value(fact.field_code, fact.value)
+        except ValueError as error:
+            invalid_values.append(ErrorDetail(field=fact.field_code, reason=str(error)))
+    if invalid_values:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The processing result contains invalid extracted fact values.',
+            details=invalid_values,
         )
     # Extraction may only fill a field that the shared form does not hold yet.
     # Writing into an occupied field would replace its value, source, and

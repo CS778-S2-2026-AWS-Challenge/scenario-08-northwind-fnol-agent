@@ -46,6 +46,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
+from backend.services.branching import build_applied_branch_evaluation
 from backend.services.external_service_entry import (
     ExternalServiceEntryDecision,
     assert_task_matches_entry,
@@ -273,7 +274,15 @@ def _save_claim(
     expected_revision: int,
 ) -> None:
     try:
-        repository.save_claim(claim, expected_revision)
+        repository.save_claim(
+            claim,
+            expected_revision,
+            branch_evaluation=build_applied_branch_evaluation(
+                claim,
+                repository=repository,
+                recomputation_reason='integration_result_changed',
+            ),
+        )
     except RevisionConflict as conflict:
         raise ApiError(
             status_code=409,

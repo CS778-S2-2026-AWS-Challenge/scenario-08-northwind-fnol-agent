@@ -11,6 +11,7 @@
       "expected_action": "CONFIRM",
       "expected_form_fields": [
         "incident.description",
+        "incident.type",
         "incident.location",
         "loss.description"
       ],

@@ -4,6 +4,7 @@ REGISTERED_FIELD_CODES = frozenset(
         'claimant.client_number',
         'claimant.role',
         'claimant.contact_preference',
+        'claim.product_family',
         'incident.type',
         'incident.occurred_at',
         'incident.location',
@@ -22,4 +23,4 @@ REGISTERED_FIELD_CODES = frozenset(
     }
 )
 
-FIELD_REGISTRY_VERSION = '3'
+FIELD_REGISTRY_VERSION = '4'

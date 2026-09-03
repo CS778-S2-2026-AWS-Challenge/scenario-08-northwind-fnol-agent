@@ -4,6 +4,7 @@
   "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
   "expected_proposed_fields": [
     "incident.description",
+    "incident.type",
     "incident.location",
     "loss.description"
   ],
@@ -20,6 +21,12 @@
           "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
           "status": "proposed",
           "source": "claimant"
+        },
+        {
+          "field_code": "incident.type",
+          "value": "collision",
+          "status": "proposed",
+          "source": "inference"
         },
         {
           "field_code": "incident.location",
@@ -50,6 +57,12 @@
           "source": "claimant"
         },
         {
+          "field_code": "incident.type",
+          "value": "collision",
+          "status": "confirmed",
+          "source": "inference"
+        },
+        {
           "field_code": "incident.location",
           "value": "Queen Street",
           "status": "confirmed",
@@ -76,6 +89,12 @@
           "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
           "status": "confirmed",
           "source": "claimant"
+        },
+        {
+          "field_code": "incident.type",
+          "value": "collision",
+          "status": "confirmed",
+          "source": "inference"
         },
         {
           "field_code": "incident.location",
@@ -109,6 +128,12 @@
           "value": "Another car hit the rear of mine while I was stopped at Queen Street and damaged the rear bumper.",
           "status": "confirmed",
           "source": "claimant"
+        },
+        {
+          "field_code": "incident.type",
+          "value": "collision",
+          "status": "confirmed",
+          "source": "inference"
         },
         {
           "field_code": "incident.location",

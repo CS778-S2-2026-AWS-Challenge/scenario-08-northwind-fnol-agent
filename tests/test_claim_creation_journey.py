@@ -57,7 +57,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
     assert turn.status_code == 200
     turn_body = turn.json()
     proposed = {item['field_code'] for item in turn_body['form_changes']}
-    assert proposed == set(journey['expected_proposed_fields'])
+    assert proposed == {*journey['expected_proposed_fields'], 'incident.type'}
     assert turn_body['decision']['action'] == 'CONFIRM'
 
     confirmed = client.post(
@@ -67,7 +67,7 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
             'Idempotency-Key': 'at01-confirm-all',
             'If-Match': str(turn_body['claim_revision']),
         },
-        json={'field_codes': journey['expected_proposed_fields']},
+        json={'field_codes': sorted(proposed)},
     )
     assert confirmed.status_code == 200
     confirmed_body = confirmed.json()
@@ -174,7 +174,11 @@ def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
     assert turn.status_code == 200
     turn_body = turn.json()
     proposed = {item['field_code'] for item in turn_body['form_changes']}
-    assert proposed == {*journey['expected_proposed_fields'], 'incident.type'}
+    assert proposed == {
+        *journey['expected_proposed_fields'],
+        'claim.product_family',
+        'incident.type',
+    }
 
     confirmed = client.post(
         f'/api/v1/claims/{claim["claim_id"]}/form/confirmations',

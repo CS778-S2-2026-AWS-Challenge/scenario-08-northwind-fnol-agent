@@ -3,6 +3,11 @@ from datetime import datetime
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.branch_registry import (
+    BranchRuleEvaluator,
+    claimant_projection_fields,
+    validate_registered_field_value,
+)
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -12,11 +17,15 @@ from backend.domain.models import (
     AgentDecisionRecord,
     AgentProposalSource,
     AuthorityOutcome,
+    BranchEvaluationRecord,
+    BranchEvaluationResult,
+    BranchEvaluationStatus,
     ClaimantDecision,
     ClaimantMessage,
     Coverage,
     CreateMessageRequest,
     CustomerNextStep,
+    DynamicFormProjection,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
@@ -44,6 +53,7 @@ from backend.domain.retrieval import (
     PolicySearchRequest,
     RetrievalStatus,
 )
+from backend.domain.support_intent import detect_support_intent, support_need_for_intent
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -57,6 +67,7 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
+from backend.services.branching import latest_applied_branch_evaluation
 from backend.services.handoffs import (
     build_handoff,
     claimant_handoff,
@@ -150,6 +161,35 @@ def _message_turn_response(
         if decision.handoff_id is not None
         else None
     )
+    dynamic_form = None
+    claim = repository.get_claim(claim_id, principal.subject)
+    evaluations = repository.list_branch_evaluations(claim_id, principal.subject)
+    valid_evaluation = next(
+        (
+            item
+            for item in reversed(evaluations)
+            if claim is not None
+            and item.status is BranchEvaluationStatus.APPLIED
+            and item.evaluated_against_claim_revision == claim.revision
+            and item.resulting_claim_revision == claim.revision
+        ),
+        None,
+    )
+    if valid_evaluation is not None:
+        dynamic_form = DynamicFormProjection(
+            claim_id=claim_id,
+            claim_revision=valid_evaluation.resulting_claim_revision
+            or valid_evaluation.evaluated_against_claim_revision,
+            field_registry_version=valid_evaluation.field_registry_version,
+            branch_rules_version=valid_evaluation.branch_rules_version,
+            selected_family=valid_evaluation.selected_family,
+            active_branches=[
+                result.branch_id
+                for result in valid_evaluation.branch_results
+                if result.status == 'active'
+            ],
+            fields=claimant_projection_fields(valid_evaluation),
+        )
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -168,6 +208,7 @@ def _message_turn_response(
             and handoff.support_need is not None
             else None
         ),
+        dynamic_form=dynamic_form,
     )
 
 
@@ -346,6 +387,7 @@ def _build_form_changes(
     timestamp: datetime,
     authority_outcome: AuthorityOutcome,
     proposal_source: AgentProposalSource,
+    branch_evaluation: BranchEvaluationResult | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     normalised_proposals = list(proposals)
@@ -374,6 +416,37 @@ def _build_form_changes(
                 code='INTERNAL_ERROR',
                 message='The Agent proposed an unregistered field.',
             )
+        try:
+            validate_registered_field_value(
+                proposal.field_code,
+                proposal.value,
+                status=proposal.status,
+            )
+        except ValueError as error:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The Agent proposed an invalid registered-field value.',
+                details=[ErrorDetail(field=proposal.field_code, reason=str(error))],
+            ) from error
+        if branch_evaluation is not None:
+            selection = next(
+                (
+                    item
+                    for item in branch_evaluation.field_selection
+                    if item.field_code == proposal.field_code
+                ),
+                None,
+            )
+            if selection is None or selection.selection_state.value in {
+                'inactive',
+                'system_owned',
+            }:
+                raise ApiError(
+                    status_code=409,
+                    code='INVALID_FIELD_BRANCH',
+                    message='The Agent proposed a field outside the active form branches.',
+                )
         existing_field = existing_form.get(proposal.field_code)
         if existing_field is not None and existing_field.status is FormStatus.CONFIRMED:
             continue
@@ -787,6 +860,15 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    previous_evaluation = latest_applied_branch_evaluation(repository, claim)
+    branch_evaluation = BranchRuleEvaluator().evaluate(
+        claim,
+        latest_message=(payload.content.text if payload.content is not None else None),
+        trigger_source_refs=[claimant_message.message_id],
+        current_action=claim.claim_state.next_action,
+        recomputation_reason='claimant_message',
+        previous_evaluation=previous_evaluation,
+    )
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
     proposal = agent.propose_turn(
         AgentTurnContext(
@@ -805,6 +887,7 @@ def submit_message(
             professional_review_required=any(
                 signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
             ),
+            branch_evaluation=branch_evaluation,
         )
     )
     authority = validate_proposal(proposal)
@@ -830,6 +913,7 @@ def submit_message(
         timestamp,
         authority.outcome,
         proposal.proposal_source,
+        branch_evaluation,
     )
     pending_evidence = _pending_evidence_for_proposal(
         claim_id,
@@ -866,16 +950,6 @@ def submit_message(
         proposal,
     )
     inferred_incident_type = claim.incident_type
-    incident_type_change = form_changes.get('incident.type')
-    if (
-        inferred_incident_type is None
-        and incident_type_change is not None
-        and incident_type_change.source is FormSource.INFERENCE
-        and incident_type_change.confidence is not None
-        and incident_type_change.confidence >= 0.9
-        and isinstance(incident_type_change.value, str)
-    ):
-        inferred_incident_type = incident_type_change.value.strip().lower()
 
     next_action = claim.claim_state.next_action
     for state_change in executed_state_changes:
@@ -891,10 +965,11 @@ def submit_message(
         AgentAction.HANDOFF,
         AgentAction.URGENT_HANDOFF,
     }:
+        detected_support_need = support_need_for_intent(detect_support_intent(message_text))
         support_need = (
             SupportNeed.URGENT
             if proposal.action is AgentAction.URGENT_HANDOFF
-            else SupportNeed.HUMAN_REQUESTED
+            else detected_support_need or SupportNeed.HUMAN_REQUESTED
         )
         handoff, effective_next_step = build_handoff(
             repository,
@@ -1039,6 +1114,39 @@ def submit_message(
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
     )
+    applied_evaluation = BranchRuleEvaluator().evaluate(
+        updated_claim,
+        latest_message=(payload.content.text if payload.content is not None else None),
+        trigger_source_refs=[claimant_message.message_id],
+        current_action=updated_claim.claim_state.next_action,
+        recomputation_reason='agent_turn_applied',
+        previous_evaluation=previous_evaluation,
+    )
+    evaluation_record = BranchEvaluationRecord(
+        evaluation_id=new_id('brn'),
+        claim_id=claim_id,
+        session_id=session_id,
+        turn_id=claimant_message.message_id,
+        evaluated_against_claim_revision=applied_evaluation.evaluated_against_claim_revision,
+        resulting_claim_revision=resulting_revision,
+        field_registry_version=applied_evaluation.field_registry_version,
+        branch_rules_version=applied_evaluation.branch_rules_version,
+        selected_family=applied_evaluation.selected_family,
+        unresolved_family_conflict=applied_evaluation.unresolved_family_conflict,
+        branch_results=applied_evaluation.branch_results,
+        field_selection_results=applied_evaluation.field_selection,
+        work_item_intents=applied_evaluation.work_item_intents,
+        handoff_intents=applied_evaluation.handoff_intents,
+        evidence_intents=applied_evaluation.evidence_intents,
+        consent_intents=applied_evaluation.consent_intents,
+        integration_intents=applied_evaluation.integration_intents,
+        interruption_result=applied_evaluation.interruption_result,
+        permitted_actions=applied_evaluation.permitted_actions,
+        permitted_tools=applied_evaluation.permitted_tools,
+        recomputation_reason=applied_evaluation.recomputation_reason,
+        status=BranchEvaluationStatus.APPLIED,
+        created_at=timestamp,
+    )
     try:
         repository.save_agent_turn(
             updated_claim,
@@ -1050,6 +1158,7 @@ def submit_message(
             idempotency,
             handoff,
             pending_evidence,
+            evaluation_record,
         )
     except RevisionConflict as conflict:
         raise ApiError(

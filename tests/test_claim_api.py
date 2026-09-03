@@ -8,8 +8,12 @@ from httpx import Response
 from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLookupEnvelope
 from backend.domain.models import (
     AgentAction,
+    ClaimCreationStatus,
     CustomerNextStep,
+    ExternalClaimResult,
+    FormSource,
     FormStatus,
+    IntegrationSource,
     MessageRecord,
     MessageVisibility,
     ProposedFormChange,
@@ -17,6 +21,7 @@ from backend.domain.models import (
     SessionRecord,
     SessionStatus,
     StateChange,
+    WorkflowState,
 )
 from backend.domain.retrieval import ClaimHistoryRetrievalRecord, ClaimHistorySearchRequest
 from backend.repositories.fixture import FixtureRepository
@@ -45,6 +50,29 @@ class HighImpactAgent:
             state_changes=[StateChange(path='claim_state.next_action', to='CREATE_CLAIM')],
             proposed_signals=[],
             required_tools=[{'tool': 'claim_creation', 'status': 'requested'}],
+            next_action_requirements=[],
+        )
+
+
+class OtherPartyAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['OTHER_PARTY_RECORDED'],
+            customer_reason='The claimant reported another party.',
+            customer_response='I have recorded that another party was involved.',
+            customer_next_step=context.claim.customer_next_step,
+            form_changes=[
+                ProposedFormChange(
+                    field_code='parties.other_parties',
+                    value=True,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                )
+            ],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
             next_action_requirements=[],
         )
 
@@ -88,12 +116,14 @@ def create_claim(
     client: TestClient,
     auth_headers: dict[str, str],
     key: str = 'claim-1',
+    *,
+    incident_type: str = 'motor',
 ) -> Response:
     headers = {**auth_headers, 'Idempotency-Key': key}
     return client.post(
         '/api/v1/claims',
         headers=headers,
-        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': incident_type},
     )
 
 
@@ -143,6 +173,100 @@ def test_create_claim_returns_claim_and_first_session(
     assert session['status'] == 'active'
     assert 'customer_id' not in claim
     assert 'fraud_signal' not in claim
+
+
+@pytest.mark.parametrize('incident_type', ['home', 'contents'])
+def test_cross_path_other_party_proposal_passes_branch_validation(
+    client: TestClient,
+    app: FastAPI,
+    auth_headers: dict[str, str],
+    incident_type: str,
+) -> None:
+    app.state.agent_turn_provider = OtherPartyAgent()
+    created = create_claim(
+        client,
+        auth_headers,
+        key=f'{incident_type}-other-party',
+        incident_type=incident_type,
+    ).json()
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        created['claim']['claim_id'],
+        created['session']['session_id'],
+        key=f'{incident_type}-other-party-turn',
+        client_message_id=f'{incident_type}-other-party-message',
+        text='Another person was involved in this loss.',
+    )
+
+    assert turn.status_code == 200, turn.text
+    other_party = next(
+        item
+        for item in turn.json()['form_changes']
+        if item['field_code'] == 'parties.other_parties'
+    )
+    assert other_party['field']['value'] is True
+    assert other_party['field']['status'] == 'confirmed'
+
+
+def test_form_patch_rejects_an_incompatible_registered_field_shape(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='invalid-other-party-shape').json()
+
+    response = client.patch(
+        f'/api/v1/claims/{created["claim"]["claim_id"]}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'parties.other_parties',
+                    'value': ['unbounded participant data'],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.json()['error']['details'][0]['field'] == 'parties.other_parties'
+
+
+def test_applied_message_evaluation_retains_message_branch_candidates(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='message-branch-candidates').json()
+    claim_id = created['claim']['claim_id']
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        created['session']['session_id'],
+        key='message-branch-candidates-turn',
+        client_message_id='message-branch-candidates-client',
+        text='Another car hit my house and Police attended.',
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    applied = evaluations[-1]
+    branch_results = {item.branch_id: item for item in applied.branch_results}
+    claimant_message_id = turn_body['claimant_message']['message_id']
+
+    assert applied.resulting_claim_revision == turn_body['claim_revision']
+    for branch_id in (
+        'incident.collision',
+        'participant.another_party',
+        'authority.police',
+    ):
+        assert branch_results[branch_id].status == 'candidate'
+        assert claimant_message_id in branch_results[branch_id].source_refs
 
 
 def test_create_claim_is_idempotent_and_conflicting_reuse_is_rejected(
@@ -213,6 +337,7 @@ def test_start_session_requires_idempotency_and_reuses_active_session(
 def test_form_update_records_registered_field_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
 ) -> None:
     created = create_claim(client, auth_headers)
     claim = created.json()['claim']
@@ -238,6 +363,10 @@ def test_form_update_records_registered_field_and_revision(
         response.json()['updated_fields']['incident.description']['updated_by']['actor_id']
         == 'cus_demo'
     )
+    evaluations = repository.list_branch_evaluations(claim['claim_id'], 'cus_demo')
+    assert evaluations[-1].evaluated_against_claim_revision == 2
+    assert evaluations[-1].resulting_claim_revision == 2
+    assert evaluations[-1].recomputation_reason == 'form_updated'
 
 
 def test_form_update_rejects_stale_revision_unknown_field_and_silent_overwrite(
@@ -552,6 +681,7 @@ def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
 def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     client: TestClient,
     auth_headers: dict[str, str],
+    repository: FixtureRepository,
 ) -> None:
     created = create_claim(client, auth_headers, key='confirm-field').json()
     claim_id = created['claim']['claim_id']
@@ -608,6 +738,225 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
     assert corrected['source'] == 'claimant'
     assert corrected['updated_by']['actor_id'] == 'cus_demo'
     assert replay.json() == confirmed.json()
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert [item.recomputation_reason for item in evaluations[-2:]] == [
+        'form_confirmed',
+        'form_updated',
+    ]
+    assert evaluations[-1].resulting_claim_revision == 4
+
+
+def test_confirmed_family_patch_atomically_updates_claim_and_branch_projection(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='family-patch').json()
+    claim_id = created['claim']['claim_id']
+
+    response = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={'updates': [{'field_code': 'claim.product_family', 'value': 'home'}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()['updated_fields']['claim.product_family']['value'] == 'home'
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert stored is not None
+    assert stored.incident_type == 'home'
+    assert stored.form['claim.product_family'].value == 'home'
+    assert stored.form['claim.product_family'].status is FormStatus.CONFIRMED
+    assert evaluations[-1].resulting_claim_revision == stored.revision
+    assert evaluations[-1].selected_family == 'home'
+    assert evaluations[-1].unresolved_family_conflict == []
+
+
+def test_family_confirmation_uses_same_atomic_projection_as_patch(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='family-confirm').json()
+    claim_id = created['claim']['claim_id']
+    proposed = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'claim.product_family',
+                    'value': 'home',
+                    'status': 'proposed',
+                }
+            ]
+        },
+    )
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-home-family',
+            'If-Match': str(proposed.json()['revision']),
+        },
+        json={'field_codes': ['claim.product_family']},
+    )
+    replay = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-home-family',
+            'If-Match': str(proposed.json()['revision']),
+        },
+        json={'field_codes': ['claim.product_family']},
+    )
+
+    assert proposed.status_code == 200
+    assert response.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert stored is not None
+    assert response.json()['confirmed_fields']['claim.product_family']['value'] == 'home'
+    assert stored.incident_type == 'home'
+    assert evaluations[-1].selected_family == 'home'
+    assert evaluations[-1].resulting_claim_revision == stored.revision
+
+    history_before_stale_write = list(evaluations)
+    stale = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(proposed.json()['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': 'claim.product_family',
+                    'value': 'contents',
+                    'correction_reason': 'Synthetic stale correction.',
+                }
+            ]
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert repository.get_claim(claim_id, 'cus_demo') == stored
+    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == history_before_stale_write
+
+
+def test_created_claim_rejects_family_change_without_partial_state(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='locked-family').json()
+    claim_id = created['claim']['claim_id']
+    proposed = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'claim.product_family',
+                    'value': 'home',
+                    'status': 'proposed',
+                }
+            ]
+        },
+    )
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    assert claim is not None
+    locked = claim.model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_locked_motor',
+                claim_number='NW-LOCKED-MOTOR',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor_claims',
+                next_step='Northwind owns the created claim.',
+                source=IntegrationSource.FIXTURE,
+                created_at=claim.updated_at,
+            ),
+            'claim_state': claim.claim_state.model_copy(
+                update={'workflow_state': WorkflowState.CREATED}
+            ),
+            'revision': claim.revision + 1,
+        }
+    )
+    repository.save_claim(locked, expected_revision=claim.revision)
+    before = repository.get_claim(claim_id, 'cus_demo')
+    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_demo')
+
+    patch_response = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(locked.revision)},
+        json={'updates': [{'field_code': 'claim.product_family', 'value': 'home'}]},
+    )
+    confirmation_response = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'locked-family-confirmation',
+            'If-Match': str(locked.revision),
+        },
+        json={'field_codes': ['claim.product_family']},
+    )
+
+    assert proposed.status_code == 200
+    assert patch_response.status_code == 409
+    assert patch_response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert confirmation_response.status_code == 409
+    assert confirmation_response.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    assert repository.get_claim(claim_id, 'cus_demo') == before
+    assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations_before
+
+
+def test_form_correction_persists_current_transition_and_immutable_previous_evaluation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='branch-correction').json()
+    claim_id = created['claim']['claim_id']
+    collision = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={'updates': [{'field_code': 'incident.type', 'value': 'collision'}]},
+    )
+    corrected = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(collision.json()['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.type',
+                    'value': 'other',
+                    'correction_reason': 'The incident did not involve an impact.',
+                }
+            ]
+        },
+    )
+
+    assert collision.status_code == 200
+    assert corrected.status_code == 200
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert len(evaluations) == 2
+    previous_collision = next(
+        item for item in evaluations[0].branch_results if item.branch_id == 'incident.collision'
+    )
+    current_collision = next(
+        item for item in evaluations[1].branch_results if item.branch_id == 'incident.collision'
+    )
+    assert previous_collision.status == 'active'
+    assert previous_collision.source_refs == [f'claim:{claim_id}:revision:2:field:incident.type']
+    assert current_collision.status == 'suspended'
+    assert current_collision.source_refs == [
+        f'claim:{claim_id}:revision:2:field:incident.type',
+        f'claim:{claim_id}:revision:3:field:incident.type',
+    ]
+    assert evaluations[0].resulting_claim_revision == 2
+    assert evaluations[1].resulting_claim_revision == 3
 
 
 def test_confirmed_intake_field_is_not_asked_again(

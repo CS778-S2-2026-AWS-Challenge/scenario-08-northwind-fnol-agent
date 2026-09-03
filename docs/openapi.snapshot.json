@@ -2095,6 +2095,69 @@
         "title": "DemoSeedResponse",
         "type": "object"
       },
+      "DynamicFormProjection": {
+        "additionalProperties": false,
+        "description": "Claimant-safe projection of the latest valid branch evaluation.",
+        "properties": {
+          "active_branches": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Branches",
+            "type": "array"
+          },
+          "branch_rules_version": {
+            "minLength": 1,
+            "title": "Branch Rules Version",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "claim_revision": {
+            "minimum": 1.0,
+            "title": "Claim Revision",
+            "type": "integer"
+          },
+          "field_registry_version": {
+            "minLength": 1,
+            "title": "Field Registry Version",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldSelectionResult"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "selected_family": {
+            "anyOf": [
+              {
+                "enum": [
+                  "motor",
+                  "home",
+                  "contents"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Family"
+          }
+        },
+        "required": [
+          "claim_id",
+          "claim_revision",
+          "field_registry_version",
+          "branch_rules_version"
+        ],
+        "title": "DynamicFormProjection",
+        "type": "object"
+      },
       "EvidenceCompleteResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3036,6 +3099,56 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "FieldSelectionResult": {
+        "additionalProperties": false,
+        "description": "Selection state kept separate from a field's stored value state.",
+        "properties": {
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "selection_state": {
+            "$ref": "#/components/schemas/FieldSelectionState"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FormSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_state": {
+            "$ref": "#/components/schemas/FormStatus"
+          }
+        },
+        "required": [
+          "field_code",
+          "selection_state",
+          "value_state",
+          "reason"
+        ],
+        "title": "FieldSelectionResult",
+        "type": "object"
+      },
+      "FieldSelectionState": {
+        "description": "Runtime relevance of a registered field for the current safe action.",
+        "enum": [
+          "required_now",
+          "candidate_now",
+          "pending_later",
+          "inactive",
+          "system_owned"
+        ],
+        "title": "FieldSelectionState",
+        "type": "string"
+      },
       "FormChange": {
         "additionalProperties": false,
         "properties": {
@@ -3911,6 +4024,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
               },
               {
                 "type": "null"
