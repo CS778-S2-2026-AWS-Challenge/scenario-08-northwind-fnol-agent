@@ -26,6 +26,29 @@ The three incomplete candidate containers exited with code 1 while importing the
 Their bounded errors named only missing or unverified capabilities. They did not listen on a port,
 construct fixture persistence as fallback, or access an unselected provider.
 
+## Week 5 Day 4 cloud boundary revalidation
+
+Issue #432 revalidated this boundary on 3 September 2026 against `main@8d4d4e5`. The local
+environment exposed no AWS or Cloudflare credential variable names, and the AWS CLI was not
+installed. No live cloud request was attempted: there was no approved service binding or local
+identity with which to make one. AWS and Cloudflare therefore remain `unavailable`, not verified
+or partially complete.
+
+`py -3.12 scripts/validate_runtime_profiles.py` returned `isolation=verified_fail_closed`.
+The fixture profile was ready; the incomplete MongoDB, Cloudflare, and AWS profiles all refused
+startup with the complete missing-capability list. Local MinIO was unavailable during this run and
+`local_mvp` was deliberately not checked, so the run does not supersede their separately recorded
+provider-backed results above.
+
+The focused regression also supplies valid Model Gateway settings and conflicting MongoDB,
+object-storage, AWS SDK, and Cloudflare SDK settings while selecting `DATA_RUNTIME_PROFILE=aws`.
+The process still refuses the AWS data profile before constructing any data adapter, does not
+expose a provider endpoint or credential in its result, and restores the caller's environment.
+A configured model endpoint is independent evidence and cannot promote an unverified data profile.
+Because application construction stops at the data composition root, no repository, API route, or
+Claim Context mutation is available before refusal; existing claimant and staff visibility
+contracts are therefore unchanged.
+
 ## Repeatable Classification
 
 With the repository Python environment active, run:

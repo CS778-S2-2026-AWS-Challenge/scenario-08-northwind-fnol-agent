@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -219,6 +220,67 @@ def test_environment_inspection_does_not_inherit_or_leak_managed_host_settings(
     assert exit_code == 0
     assert result['profile'] == 'fixture'
     assert 'host-secret' not in str(result)
+
+
+def test_environment_inspection_isolates_cloud_sdk_settings_and_restores_all_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('AWS_ACCESS_KEY_ID', 'host-aws-sentinel')
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN', 'host-cloudflare-sentinel')
+    monkeypatch.setenv('ISSUE_432_TEMP_SETTING', 'host-original')
+
+    with isolated_environment(
+        {
+            'DATA_RUNTIME_PROFILE': 'fixture',
+            'ISSUE_432_TEMP_SETTING': 'example-value',
+        }
+    ):
+        assert 'AWS_ACCESS_KEY_ID' not in os.environ
+        assert 'CLOUDFLARE_API_TOKEN' not in os.environ
+        assert os.environ['ISSUE_432_TEMP_SETTING'] == 'example-value'
+
+    assert os.environ['AWS_ACCESS_KEY_ID'] == 'host-aws-sentinel'
+    assert os.environ['CLOUDFLARE_API_TOKEN'] == 'host-cloudflare-sentinel'
+    assert os.environ['ISSUE_432_TEMP_SETTING'] == 'host-original'
+
+
+def test_aws_profile_refuses_cross_provider_and_model_settings_without_leaking_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = load_environment_example(EXAMPLES / 'aws.env.example')
+    sentinels = {
+        'AWS_ACCESS_KEY_ID': 'issue-432-aws-access',
+        'AWS_SECRET_ACCESS_KEY': 'issue-432-aws-secret',
+        'CLOUDFLARE_API_TOKEN': 'issue-432-cloudflare-secret',
+        'NORTHWIND_MONGODB_URI': 'mongodb://issue-432-mongodb-secret.invalid',
+        'NORTHWIND_OBJECT_STORAGE_ENDPOINT': 'https://issue-432-storage.invalid',
+        'MODEL_BASE_URL': 'https://issue-432-model.invalid/v1',
+        'MODEL_IDENTIFIER': 'issue-432-model',
+        'MODEL_API_KEY_ENV': 'ISSUE_432_MODEL_API_KEY',
+        'ISSUE_432_MODEL_API_KEY': 'issue-432-model-secret',
+    }
+    values.update(sentinels)
+    values['AGENT_RUNTIME_PROFILE'] = 'model_gateway'
+    original_environment = {name: os.environ.get(name) for name in sentinels}
+
+    def forbidden_adapter(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('AWS profile touched an unselected data adapter')
+
+    monkeypatch.setattr('backend.core.runtime_profiles.FixtureRepository', forbidden_adapter)
+    monkeypatch.setattr(
+        'backend.core.runtime_profiles.connect_mongodb_repository', forbidden_adapter
+    )
+    monkeypatch.setattr('backend.core.runtime_profiles.MinioEvidenceStorage', forbidden_adapter)
+
+    result, exit_code = inspect_environment(values)
+
+    assert exit_code == 2
+    assert result['profile'] == 'aws'
+    assert result['status'] == 'startup_refused'
+    assert 'second-provider fallback' in str(result['reason'])
+    for secret_or_endpoint in sentinels.values():
+        assert secret_or_endpoint not in str(result)
+    assert {name: os.environ.get(name) for name in sentinels} == original_environment
 
 
 def test_switching_profiles_keeps_each_preflight_isolated() -> None:

@@ -17,7 +17,7 @@ from backend.core.runtime_profiles import (
 )
 
 _SETTING_NAME = re.compile(r'[A-Z][A-Z0-9_]*\Z')
-_MANAGED_PREFIXES = ('NORTHWIND_', 'MODEL_')
+_MANAGED_PREFIXES = ('NORTHWIND_', 'MODEL_', 'AWS_', 'CLOUDFLARE_')
 _MANAGED_NAMES = {'DATA_RUNTIME_PROFILE', 'AGENT_RUNTIME_PROFILE'}
 _READY_CAPABILITY_STATES = {'using_fixture', 'configured_service', 'verified'}
 
@@ -49,16 +49,18 @@ def _is_managed(name: str) -> bool:
 
 @contextmanager
 def isolated_environment(values: dict[str, str]) -> Iterator[None]:
-    original = {name: value for name, value in os.environ.items() if _is_managed(name)}
+    original = {
+        name: value for name, value in os.environ.items() if _is_managed(name) or name in values
+    }
     for name in tuple(os.environ):
-        if _is_managed(name):
+        if _is_managed(name) or name in values:
             del os.environ[name]
     os.environ.update(values)
     try:
         yield
     finally:
         for name in tuple(os.environ):
-            if _is_managed(name):
+            if _is_managed(name) or name in values:
                 del os.environ[name]
         os.environ.update(original)
 
