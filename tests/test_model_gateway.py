@@ -1030,7 +1030,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
             gateway_config(
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v3',
+                prompt_version='northwind-fnol-motor-claimant-v4',
             ),
             transport=transport,
         )
@@ -1054,7 +1054,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v3',
+                prompt_version='northwind-fnol-motor-claimant-v4',
             ),
             transport=transport,
         )
@@ -1327,7 +1327,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v3'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v4'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
@@ -1362,10 +1362,11 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
     timestamp = datetime.now(UTC)
     claim = _working_claim().model_copy(
         update={
+            'incident_type': 'motor',
             'form': {
-                'incident.type': _form_field('motor', timestamp),
+                'incident.type': _form_field('collision', timestamp),
                 'incident.description': _form_field('A rear-end collision.', timestamp),
-            }
+            },
         }
     )
     branch = BranchRuleEvaluator().evaluate(claim, recomputation_reason='model_context')
@@ -1863,7 +1864,8 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
                     'required_items': ['loss.description'],
                 },
                 'form_changes': [
-                    {'field_code': 'incident.type', 'value': 'motor'},
+                    {'field_code': 'claim.product_family', 'value': 'motor'},
+                    {'field_code': 'incident.type', 'value': 'collision'},
                     {
                         'field_code': 'incident.description',
                         'value': 'Another car hit the rear of mine on Queen Street.',
@@ -2150,7 +2152,7 @@ def test_published_model_cannot_override_runtime_authority(
         'profile_id': 'untrusted-profile',
         'purpose': 'agent_turn',
         'privacy_class': 'synthetic_fnol',
-        'prompt_version': 'northwind-fnol-motor-claimant-v3',
+        'prompt_version': 'northwind-fnol-motor-claimant-v4',
         'evaluation_status': 'configured',
         'timeout_seconds': 30,
         'structured_output': True,
@@ -2199,8 +2201,8 @@ def test_published_model_cannot_override_runtime_authority(
 def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
     prompt = load_motor_claimant_prompt()
 
-    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-motor-claimant-v3'
-    assert 'Prompt ID: `northwind-fnol-motor-claimant-v3`' in prompt
+    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-motor-claimant-v4'
+    assert 'Prompt ID: `northwind-fnol-motor-claimant-v4`' in prompt
     assert '`knowledge_citations` from approved retrieval' in prompt
     assert 'untrusted reference material' in prompt
     assert 'do not invent a policy or knowledge answer' in prompt

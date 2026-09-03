@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
@@ -35,6 +35,7 @@ COMMON_FIELDS = frozenset(
         'claimant.client_number',
         'claimant.role',
         'claimant.contact_preference',
+        'claim.product_family',
         'incident.type',
         'incident.occurred_at',
         'incident.location',
@@ -68,10 +69,41 @@ FAMILY_PATTERNS = {
     'contents': re.compile(r'\b(contents|belongings|item|laptop|phone|stolen|theft|lost)\b', re.I),
 }
 
+FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
+    'policy.policy_number': ('text', frozenset()),
+    'claimant.client_number': ('text', frozenset()),
+    'claimant.role': ('text', frozenset()),
+    'claimant.contact_preference': (
+        'enum',
+        frozenset({'in_app', 'email', 'phone', 'sms'}),
+    ),
+    'claim.product_family': ('enum', frozenset(FAMILY_NAMES)),
+    'incident.type': (
+        'enum',
+        frozenset({'collision', 'fire', 'water', 'theft', 'weather', 'other'}),
+    ),
+    'incident.occurred_at': ('text', frozenset()),
+    'incident.location': ('location', frozenset()),
+    'incident.description': ('text', frozenset()),
+    'incident.injury_or_danger': ('boolean', frozenset()),
+    'incident.cause': ('text', frozenset()),
+    'loss.description': ('text', frozenset()),
+    'parties.other_parties': ('boolean', frozenset()),
+    'authorities.police_report_reference': ('text', frozenset()),
+    'authorities.emergency_services_notified': ('boolean', frozenset()),
+    'vehicle.registration': ('text', frozenset()),
+    'vehicle.damage_description': ('text', frozenset()),
+    'vehicle.drivable': ('boolean', frozenset()),
+    'property.address': ('location', frozenset()),
+    'property.affected_areas': ('text_list', frozenset()),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class FieldDefinition:
     code: str
+    value_type: str
+    allowed_values: frozenset[str] = frozenset()
     families: frozenset[str] = frozenset()
     system_owned: bool = False
     claimant_visible: bool = True
@@ -109,9 +141,17 @@ def build_default_registry() -> BranchRegistrySnapshot:
     """Return the checked-in executable VP registry snapshot."""
 
     executable_codes = set(REGISTERED_FIELD_CODES)
+    if executable_codes != FIELD_VALUE_CONTRACTS.keys():
+        missing = sorted(executable_codes - FIELD_VALUE_CONTRACTS.keys())
+        extra = sorted(FIELD_VALUE_CONTRACTS.keys() - executable_codes)
+        raise RuntimeError(
+            f'Field value contracts do not match the registry: {missing=}, {extra=}.'
+        )
     fields = tuple(
         FieldDefinition(
             code=code,
+            value_type=FIELD_VALUE_CONTRACTS[code][0],
+            allowed_values=FIELD_VALUE_CONTRACTS[code][1],
             families=frozenset(
                 family for family, family_fields in FAMILY_FIELDS.items() if code in family_fields
             ),
@@ -134,7 +174,7 @@ def build_default_registry() -> BranchRegistrySnapshot:
             ContentBranch(
                 'incident.collision',
                 'BR-COLLISION-001',
-                'motor',
+                None,
                 frozenset({'parties.other_parties'} & executable_codes),
             ),
             ContentBranch(
@@ -163,7 +203,16 @@ def build_default_registry() -> BranchRegistrySnapshot:
                 frozenset({'authorities.police_report_reference'} & executable_codes),
             ),
             ContentBranch('accommodation.temporary', 'BR-ACCOMMODATION-001', 'home', frozenset()),
-            ContentBranch('contents.theft', 'BR-THEFT-001', 'contents', frozenset()),
+            ContentBranch('contents.theft', 'BR-THEFT-001', None, frozenset()),
+            ContentBranch(
+                'safety.injury_or_danger',
+                'BR-SAFETY-001',
+                None,
+                frozenset({'incident.injury_or_danger'} & executable_codes),
+            ),
+            ContentBranch('mitigation.emergency', 'BR-MITIGATION-001', None, frozenset()),
+            ContentBranch('professional_review', 'BR-REVIEW-001', None, frozenset()),
+            ContentBranch('human_support', 'BR-HUMAN-SUPPORT-001', None, frozenset()),
         ]
     )
     return BranchRegistrySnapshot(
@@ -276,16 +325,16 @@ class BranchRuleEvaluator:
         authoritative: set[str] = set()
         candidates: set[str] = set()
         sources: dict[str, list[str]] = {family: [] for family in FAMILY_NAMES}
-        incident_type_field = claim.form.get('incident.type')
+        product_family_field = claim.form.get('claim.product_family')
         form_family: str | None = None
-        if incident_type_field is not None and isinstance(incident_type_field.value, str):
-            normalised = incident_type_field.value.strip().lower()
+        if product_family_field is not None and isinstance(product_family_field.value, str):
+            normalised = product_family_field.value.strip().lower()
             if normalised in FAMILY_NAMES:
                 form_family = normalised
-                sources[form_family].extend(incident_type_field.source_refs)
-                if incident_type_field.status is FormStatus.CONFIRMED:
+                sources[form_family].extend(product_family_field.source_refs)
+                if product_family_field.status is FormStatus.CONFIRMED:
                     authoritative.add(form_family)
-                elif incident_type_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}:
+                elif product_family_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}:
                     candidates.add(form_family)
 
         canonical_family = (
@@ -295,16 +344,8 @@ class BranchRuleEvaluator:
             else None
         )
         if canonical_family is not None:
-            matching_unconfirmed_form = (
-                form_family == canonical_family
-                and incident_type_field is not None
-                and incident_type_field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
-            )
-            if matching_unconfirmed_form:
-                candidates.add(canonical_family)
-            else:
-                authoritative.add(canonical_family)
-                sources[canonical_family].append(f'claim:{claim.claim_id}:incident_type')
+            authoritative.add(canonical_family)
+            sources[canonical_family].append(f'claim:{claim.claim_id}:incident_type')
 
         for family, pattern in FAMILY_PATTERNS.items():
             if pattern.search(text):
@@ -343,6 +384,21 @@ class BranchRuleEvaluator:
                 refs.update(self._source_refs(claim, codes))
             results.append(self._branch_result(branch, status, reason, refs))
 
+        subtype_field = claim.form.get('incident.type')
+        subtype = (
+            subtype_field.value.strip().lower()
+            if subtype_field is not None and isinstance(subtype_field.value, str)
+            else None
+        )
+        subtype_confirmed = (
+            subtype_field is not None and subtype_field.status is FormStatus.CONFIRMED
+        )
+        subtype_candidate = subtype_field is not None and subtype_field.status in {
+            FormStatus.PROPOSED,
+            FormStatus.DISPUTED,
+        }
+        subtype_refs = subtype_field.source_refs if subtype_field is not None else []
+
         another_party = self._confirmed_truthy(claim, 'parties.other_parties')
         collision_text = bool(
             re.search(
@@ -351,21 +407,33 @@ class BranchRuleEvaluator:
                 re.I,
             )
         )
-        if selected_family == 'motor' and another_party:
+        if subtype == 'collision' and subtype_confirmed:
             add(
                 'incident.collision',
                 'active',
-                'A confirmed motor fact records another party or collision.',
-                ('parties.other_parties',),
+                'A confirmed incident subtype records a collision.',
+                ('incident.type',),
             )
+        elif (subtype == 'collision' and subtype_candidate) or collision_text:
+            add(
+                'incident.collision',
+                'candidate',
+                'The incident subtype or claimant message describes a collision.',
+                source_refs=subtype_refs,
+            )
+
+        if another_party:
             add(
                 'participant.another_party',
                 'active',
                 'A confirmed fact records another participant.',
                 ('parties.other_parties',),
             )
-        elif collision_text:
-            add('incident.collision', 'candidate', 'The claimant message describes a collision.')
+        elif re.search(
+            r'\b(another person|another party|other party|other driver|another car)\b',
+            text,
+            re.I,
+        ):
             add(
                 'participant.another_party',
                 'candidate',
@@ -432,10 +500,97 @@ class BranchRuleEvaluator:
                 'candidate',
                 'The claimant message describes a possible accommodation need.',
             )
-        if selected_family == 'contents' and re.search(
-            r'\b(stolen|theft|burglary|break[- ]?in)\b', text, re.I
-        ):
-            add('contents.theft', 'candidate', 'The claimant message describes possible theft.')
+        theft_text = bool(re.search(r'\b(stolen|theft|burglary|break[- ]?in)\b', text, re.I))
+        if subtype == 'theft' and subtype_confirmed:
+            add(
+                'contents.theft',
+                'active',
+                'A confirmed incident subtype records theft or burglary.',
+                ('incident.type',),
+            )
+        elif (subtype == 'theft' and subtype_candidate) or theft_text:
+            add(
+                'contents.theft',
+                'candidate',
+                'The incident subtype or claimant message describes possible theft.',
+                source_refs=subtype_refs,
+            )
+
+        mitigation_text = bool(
+            re.search(
+                r'\b(active leak|fire|flood|water damage|unsafe property|'
+                r'emergency repair|tow(?:ing)?)\b',
+                text,
+                re.I,
+            )
+        )
+        if subtype in {'fire', 'water'} and subtype_confirmed:
+            add(
+                'mitigation.emergency',
+                'active',
+                'A confirmed fire or water subtype requires mitigation evaluation.',
+                ('incident.type',),
+            )
+        elif (subtype in {'fire', 'water'} and subtype_candidate) or mitigation_text:
+            add(
+                'mitigation.emergency',
+                'candidate',
+                'The incident subtype or claimant message may require mitigation.',
+                source_refs=subtype_refs,
+            )
+
+        safety_state = claim.claim_state.urgency.value in {'urgent', 'immediate_safety_risk'}
+        safety_fact = self._confirmed_truthy(claim, 'incident.injury_or_danger')
+        safety_text = bool(
+            re.search(r'\b(injur(?:y|ed)|hurt|danger|unsafe|emergency)\b', text, re.I)
+        )
+        safety_negated = bool(
+            re.search(
+                r'\b(no one|nobody|not)\s+(?:was\s+)?(?:injured|hurt|in danger)\b', text, re.I
+            )
+        )
+        if safety_state or safety_fact:
+            refs = list(self._source_refs(claim, ('incident.injury_or_danger',)))
+            if safety_state:
+                refs.append(f'claim:{claim.claim_id}:claim_state.urgency')
+            add(
+                'safety.injury_or_danger',
+                'active',
+                'Authoritative Claim State records an urgent safety condition.',
+                source_refs=refs,
+            )
+        elif safety_text and not safety_negated:
+            add(
+                'safety.injury_or_danger',
+                'candidate',
+                'The claimant message may describe an injury or continuing danger.',
+            )
+
+        if claim.claim_state.customer_support.value in {
+            'human_requested',
+            'accessibility_required',
+        }:
+            add(
+                'human_support',
+                'active',
+                'Authoritative Claim State requires human support.',
+                source_refs=[f'claim:{claim.claim_id}:claim_state.customer_support'],
+            )
+
+        review_sources: list[str] = []
+        if claim.claim_state.workflow_state.value == 'professional_review':
+            review_sources.append(f'claim:{claim.claim_id}:claim_state.workflow_state')
+        if claim.claim_state.coverage.value in {'ambiguous', 'review_required'}:
+            review_sources.append(f'claim:{claim.claim_id}:claim_state.coverage')
+        if claim.claim_state.fraud_signal.value == 'review_required':
+            review_sources.append(f'claim:{claim.claim_id}:claim_state.fraud_signal')
+        if review_sources:
+            add(
+                'professional_review',
+                'active',
+                'Authoritative Claim State requires professional review.',
+                source_refs=review_sources,
+            )
         return results
 
     @staticmethod
@@ -551,9 +706,17 @@ class BranchRuleEvaluator:
 
     @staticmethod
     def _handoff_intents(claim: WorkingClaim) -> list[dict[str, object]]:
+        intents: list[dict[str, object]] = []
+        if claim.claim_state.urgency.value in {'urgent', 'immediate_safety_risk'}:
+            intents.append({'type': 'urgent_support', 'required': True})
+        if claim.claim_state.customer_support.value in {
+            'human_requested',
+            'accessibility_required',
+        }:
+            intents.append({'type': 'human_support', 'required': True})
         if claim.claim_state.workflow_state.value == 'professional_review':
-            return [{'type': 'professional_review', 'required': True}]
-        return []
+            intents.append({'type': 'professional_review', 'required': True})
+        return intents
 
     @staticmethod
     def _evidence_intents(claim: WorkingClaim) -> list[dict[str, object]]:
@@ -591,6 +754,47 @@ def claimant_projection_fields(
     ]
 
 
+def validate_registered_field_value(
+    field_code: str,
+    value: object,
+    *,
+    status: FormStatus = FormStatus.PROPOSED,
+    registry: BranchRegistrySnapshot | None = None,
+) -> None:
+    """Validate a generic form value against its executable field contract."""
+
+    active_registry = registry or build_default_registry()
+    definition = active_registry.field_by_code.get(field_code)
+    if definition is None:
+        raise ValueError(f'Unknown registered field: {field_code}.')
+    if value is None and status in {FormStatus.MISSING, FormStatus.PENDING_GENERATION}:
+        return
+    valid = False
+    if definition.value_type == 'text':
+        valid = isinstance(value, str) and bool(value.strip())
+    elif definition.value_type == 'boolean':
+        valid = isinstance(value, bool)
+    elif definition.value_type == 'enum':
+        valid = isinstance(value, str) and value.strip().lower() in definition.allowed_values
+    elif definition.value_type == 'location':
+        valid = (isinstance(value, str) and bool(value.strip())) or (
+            isinstance(value, Mapping) and bool(value)
+        )
+    elif definition.value_type == 'text_list':
+        valid = (
+            isinstance(value, list)
+            and bool(value)
+            and all(isinstance(item, str) and bool(item.strip()) for item in value)
+        )
+    if not valid:
+        allowed = (
+            f' Allowed values: {", ".join(sorted(definition.allowed_values))}.'
+            if definition.allowed_values
+            else ''
+        )
+        raise ValueError(f'{field_code} requires a {definition.value_type} value.{allowed}')
+
+
 __all__ = [
     'BRANCH_RULES_VERSION',
     'BranchRegistrySnapshot',
@@ -599,4 +803,5 @@ __all__ = [
     'FieldDefinition',
     'build_default_registry',
     'claimant_projection_fields',
+    'validate_registered_field_value',
 ]

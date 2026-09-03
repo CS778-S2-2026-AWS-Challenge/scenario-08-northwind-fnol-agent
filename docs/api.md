@@ -220,7 +220,7 @@ PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation
 publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
 environment-variable name match the deployment-owned startup settings; and purpose, privacy
 class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v3`. A
+contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v4`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -503,17 +503,18 @@ Initial common field codes:
 | Field code | Type | Purpose |
 |---|---|---|
 | `policy.policy_number` | string | Locate the relevant policy |
-| `claimant.client_number` | string | Claimant-facing Northwind client reference |
+| `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
-| `incident.type` | string | Motor, home, contents, or configured subtype |
+| `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
+| `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
 | `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
-| `parties.other_parties` | array | Other involved parties when known |
+| `parties.other_parties` | boolean | Whether another person or organisation is involved; participant details use separate records |
 | `authorities.police_report_reference` | string | Reference if already issued |
 | `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |

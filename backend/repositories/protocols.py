@@ -181,7 +181,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         evaluation: BranchEvaluationRecord,
         customer_id: str,
     ) -> None:
-        """Persist one claim-scoped branch evaluation without changing Claim State."""
+        """Persist non-applied evaluation evidence without changing Claim State."""
         raise NotImplementedError
 
     def list_branch_evaluations(

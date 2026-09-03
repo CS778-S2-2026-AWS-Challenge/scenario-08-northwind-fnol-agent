@@ -3,7 +3,11 @@ from datetime import datetime
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import BranchRuleEvaluator, claimant_projection_fields
+from backend.domain.branch_registry import (
+    BranchRuleEvaluator,
+    claimant_projection_fields,
+    validate_registered_field_value,
+)
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
 from backend.domain.models import (
@@ -410,6 +414,19 @@ def _build_form_changes(
                 code='INTERNAL_ERROR',
                 message='The Agent proposed an unregistered field.',
             )
+        try:
+            validate_registered_field_value(
+                proposal.field_code,
+                proposal.value,
+                status=proposal.status,
+            )
+        except ValueError as error:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The Agent proposed an invalid registered-field value.',
+                details=[ErrorDetail(field=proposal.field_code, reason=str(error))],
+            ) from error
         if branch_evaluation is not None:
             selection = next(
                 (
@@ -929,16 +946,6 @@ def submit_message(
         proposal,
     )
     inferred_incident_type = claim.incident_type
-    incident_type_change = form_changes.get('incident.type')
-    if (
-        inferred_incident_type is None
-        and incident_type_change is not None
-        and incident_type_change.source is FormSource.INFERENCE
-        and incident_type_change.confidence is not None
-        and incident_type_change.confidence >= 0.9
-        and isinstance(incident_type_change.value, str)
-    ):
-        inferred_incident_type = incident_type_change.value.strip().lower()
 
     next_action = claim.claim_state.next_action
     for state_change in executed_state_changes:

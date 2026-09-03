@@ -168,6 +168,9 @@ and checksums rather than embedding those bytes.
   form updates and confirmations, session resume, evidence updates, handoff creation, claimant
   consent changes, and integration results. An evaluation based on another revision cannot be
   attached to the mutation.
+- The standalone Branch Evaluation write accepts only non-applied evaluation evidence calculated
+  against the stored current Claim revision. It cannot publish an `applied` record; that status is
+  valid only inside the atomic Claim-mutation boundary.
 - Evaluation identities and payloads are immutable in both fixture and MongoDB repositories. An
   older record remains audit evidence but is ineligible for a current Dynamic Form projection;
   later status reporting must not rewrite the original calculation.

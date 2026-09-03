@@ -206,6 +206,30 @@ def test_cross_path_other_party_proposal_passes_branch_validation(
     assert other_party['field']['status'] == 'confirmed'
 
 
+def test_form_patch_rejects_an_incompatible_registered_field_shape(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    created = create_claim(client, auth_headers, key='invalid-other-party-shape').json()
+
+    response = client.patch(
+        f'/api/v1/claims/{created["claim"]["claim_id"]}/form',
+        headers={**auth_headers, 'If-Match': '1'},
+        json={
+            'updates': [
+                {
+                    'field_code': 'parties.other_parties',
+                    'value': ['unbounded participant data'],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.json()['error']['details'][0]['field'] == 'parties.other_parties'
+
+
 def test_applied_message_evaluation_retains_message_branch_candidates(
     client: TestClient,
     auth_headers: dict[str, str],

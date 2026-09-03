@@ -156,10 +156,10 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-motor-claimant-v3`, stored under
+The executable claimant prompt is `northwind-fnol-motor-claimant-v4`, stored under
 `backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
 current minimum Claim projection, bounded knowledge citations, retrieval status, and response
-schema; the adapter does not own FNOL behaviour. Prompt v1 and v2 remain immutable historical
+schema; the adapter does not own FNOL behaviour. Prompt v1 through v3 remain immutable historical
 artifacts. Changing executable prompt content requires another prompt identifier and regression
 evidence.
 

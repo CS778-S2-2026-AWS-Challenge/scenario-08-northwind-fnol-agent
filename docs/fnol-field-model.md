@@ -102,7 +102,7 @@ make their boundary explicit.
 | `claimant.client_number` | Authenticated customer reference | common/scalar/no | Y/n/n/n | n/n/registered | Registry; identity supplies value | S; privacy |
 | `claimant.contact_preference` | Preferred safe contact channel | common/enum/no | C/y/y/y | support/c/registered | Registry/profile | C/S; privacy |
 | `policy.policy_number` | Policy reference | common/scalar/no | C,P/y/y/y | lookup/c/registered | Registry; bounded lookup | C/S; privacy |
-| `claim.product_family` | Motor, home, or contents family | common/enum/no | C,Y/y/y/y | routing/y/candidate | Route exists; no complete field entry | C/S; authority |
+| `claim.product_family` | Motor, home, or contents family | common/enum/no | C,Y/y/y/y | routing/y/registered | Registry + form; top-level `incident_type` remains the compatibility projection | C/S; authority |
 | `incident.type` | Collision, fire, water, theft, weather, etc. | common/enum/no | C/y/y/y | safety/y/registered | Registry + form | C/S; review if disputed |
 | `incident.description` | Natural account of what happened | common/scalar/no | C/y/n/y | y/c/registered | Registry + form | C/S; privacy |
 | `incident.occurred_at` | Loss occurrence date/time | common/date-time/no | C/y/y/y | safety/c/registered | Registry + form | C/S; privacy |
@@ -110,8 +110,8 @@ make their boundary explicit.
 | `incident.location` | Incident place or useful region | common/location/no | C/y/y/y | safety/y/registered | Registry + form | C/S; privacy |
 | `incident.cause` | Initial cause, not coverage conclusion | common/scalar/no | C,E/y/y/y | safety/c/registered | Registry; evidence proposal gap | C/S; review if conflict |
 | `loss.description` | Damaged, lost, or stolen subject | common/scalar/no | C,E/y/y/y | y/c/registered | Registry + form | C/S; privacy |
-| `incident.injury_or_danger` | Bounded injury/continuing danger signal | common/enum/no | C/y/y/y | urgent/y/registered | Registry + interruption rules | C/S; safety |
-| `parties.other_parties` | Another person/organisation involved | conditional/enum/no | C/y/y/y | handoff/c/registered | Bounded field only | C/S; consent/privacy |
+| `incident.injury_or_danger` | Bounded injury/continuing danger signal | common/boolean/no | C/y/y/y | urgent/y/registered | Registry + interruption rules | C/S; safety |
+| `parties.other_parties` | Whether another person or organisation is involved | conditional/boolean/no | C/y/y/y | handoff/c/registered | Participant details remain a separate record | C/S; consent/privacy |
 | `evidence.availability` | Available, missing, incomplete, pending | common/enum/no | C,E,W/y/y/y | next action/y/candidate | Evidence projection, not form | C/S; privacy |
 | `declaration.factual_accuracy` | Claimant factual declaration | common/enum/no | C/y/y/y | authority/y/candidate | No declaration contract | C/S; authority |
 | `consent.sharing_scope` | Purpose and fields allowed to share | conditional/structured/no | C/y/y/y | external/y/record | Consent record exists | C/S; consent/privacy |
@@ -130,7 +130,7 @@ make their boundary explicit.
 | `vehicle.year` | Model year | scalar/no | C,E/y/y/y | n/c/candidate | New registry/domain/API/fixtures | C/S; privacy |
 | `vehicle.use` | Personal/business/commuting use | enum/no | C/y/y/y | routing/c/candidate | New bounded enum | C/S; policy/privacy |
 | `vehicle.damage_description` | Visible damage account | scalar/no | C,E/y/y/y | safety/y/registered | Registered; evidence link separate | C/S; privacy |
-| `vehicle.drivable` | Safe, unsafe, or unknown | enum/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
+| `vehicle.drivable` | Whether the vehicle is safe and able to be driven | boolean/no | C/y/y/y | safety/y/registered | Registered; towing rule gap | C/S; safety |
 | `vehicle.towing_required` | Need for towing | enum/no | C,S/y/y/y | safety/y/candidate | Registry + WorkItem rule | C/S; consent |
 | `vehicle.towing_location` | Safe tow destination/current location | location/no | C/y/y/y | safety/c/candidate | Registry/API; provider task separate | C/S; privacy/consent |
 | `driver.identity` | Driver identity/reference | object/no | C,S/y/y/y | authority/c/candidate | Restricted object + visibility | S; privacy/authority |

@@ -99,6 +99,10 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     fields = {item['field_code']: item['field'] for item in first['form_changes']}
     assert fields['incident.description']['status'] == 'confirmed'
     assert fields['incident.description']['source'] == 'claimant'
+    assert fields['claim.product_family']['value'] == 'motor'
+    assert fields['claim.product_family']['source'] == 'inference'
+    assert fields['claim.product_family']['status'] == 'proposed'
+    assert fields['incident.type']['value'] == 'collision'
     assert fields['incident.type']['source'] == 'inference'
     assert fields['incident.type']['status'] == 'proposed'
     _assert_customer_text_excludes_internal_terms(first)
@@ -189,7 +193,11 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert detail_response.status_code == 200, detail_response.text
     detail = detail_response.json()
     assert detail['claim_id'] == claim_id
-    assert detail['incident_type'] == 'motor'
+    assert detail['incident_type'] is None
+    assert detail['form']['claim.product_family']['value'] == 'motor'
+    assert detail['form']['claim.product_family']['status'] == 'proposed'
+    assert detail['form']['incident.type']['value'] == 'collision'
+    assert detail['form']['incident.type']['status'] == 'proposed'
     assert detail['claim_state']['coverage'] == 'review_required'
     assert detail['claim_state']['workflow_state'] == 'professional_review'
     assert len(detail['handoffs']) == 1

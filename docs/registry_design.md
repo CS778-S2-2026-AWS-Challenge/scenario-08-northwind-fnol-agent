@@ -299,7 +299,8 @@ the system should:
 
 1. save the natural account and its source;
 2. evaluate injury, danger, human-support, and accessibility signals;
-3. propose `incident.type = motor` from supported wording;
+3. propose `claim.product_family = motor` from supported wording and, when the event
+   meaning is also supported, propose `incident.type = collision` independently;
 4. activate the approved motor branch and its registered fields;
 5. activate `another_party`, Police, evidence, towing, or property sub-branches only when
    supported by the claim context;
@@ -425,7 +426,7 @@ rule and requires Northwind authority.
 ## VP Branch Evaluation Contract
 
 The VP contract is implemented in `backend/domain/branch_registry.py` as a checked-in,
-provider-neutral Field Registry snapshot (`3`), branch-rule snapshot
+provider-neutral Field Registry snapshot (`4`), branch-rule snapshot
 (`vp-dynamic-form-branch-rules-v1`), and pure `BranchRuleEvaluator`. The evaluator does not call a
 model, provider SDK, or repository and does not mutate Claim State. It returns an evaluation for
 the supplied Claim revision. The message service supplies a pre-effect result to the Agent turn
@@ -473,15 +474,14 @@ family.motor
 This is additive branch state, not one flattened route label. Shared fields are never copied
 into `motor.*`, `home.*`, or `contents.*` variants merely because a family was selected.
 
-The evaluator reconciles the existing top-level `WorkingClaim.incident_type` projection with
-the source-aware `incident.type` form field. A request-supplied top-level value can select the
-current family when no form value exists. A confirmed form value can also select it, and matching
+The evaluator reconciles the existing top-level `WorkingClaim.incident_type` compatibility
+projection with the source-aware `claim.product_family` form field. A request-supplied top-level
+value selects the current family. A confirmed form value can also select it, and matching
 authoritative values coalesce. Conflicting authoritative values produce an unresolved family
-conflict instead of silently choosing one. When the top-level compatibility projection matches a
-`proposed` or `disputed` form value, it remains only a family candidate until that form value
-crosses the applicable confirmation boundary. The top-level value therefore remains compatible
-with existing claimant and staff projections without allowing model inference to bypass field
-authority.
+conflict instead of silently choosing one. A `proposed` or `disputed` form value remains only a
+family candidate until it crosses the applicable confirmation boundary. `incident.type` is
+independent: it records an event subtype such as `collision`, `fire`, `water`, `theft`, or
+`weather`, and it can activate an additive conditional branch but never selects a product family.
 
 ### Two independent field-state dimensions
 

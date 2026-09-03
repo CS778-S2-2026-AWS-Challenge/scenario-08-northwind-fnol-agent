@@ -4,8 +4,8 @@ from typing import Protocol
 
 from backend.domain.intake import (
     CONTROLLED_INTAKE_FIELDS,
-    INCIDENT_TYPE_INTAKE_FIELD,
-    infer_controlled_incident_type,
+    PRODUCT_FAMILY_INTAKE_FIELD,
+    infer_controlled_product_family,
     next_controlled_intake_field,
 )
 from backend.domain.knowledge import KnowledgeChunk
@@ -202,14 +202,25 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
             confidence=1.0,
         )
     ]
-    inferred_incident_type = (
-        infer_controlled_incident_type(message_text) if incident_type is None else None
+    inferred_product_family = (
+        infer_controlled_product_family(message_text) if incident_type is None else None
     )
-    if inferred_incident_type is not None:
+    if inferred_product_family is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='claim.product_family',
+                value=inferred_product_family,
+                source=FormSource.INFERENCE,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.95,
+            )
+        )
+    if any(pattern.search(message_text) for pattern in REAR_END_COLLISION_PATTERNS):
         changes.append(
             ProposedFormChange(
                 field_code='incident.type',
-                value=inferred_incident_type,
+                value='collision',
                 source=FormSource.INFERENCE,
                 status=FormStatus.PROPOSED,
                 needed_for=NeededFor.CURRENT_ACTION,
@@ -246,16 +257,16 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
 def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
     description = claim.form.get('incident.description')
     candidate = str(description.value) if description is not None else message_text
-    inferred_type = claim.form.get('incident.type')
+    inferred_family = claim.form.get('claim.product_family')
     if description is None:
         is_motor = (
-            claim.incident_type is None and infer_controlled_incident_type(candidate) == 'motor'
+            claim.incident_type is None and infer_controlled_product_family(candidate) == 'motor'
         )
     else:
         is_motor = (
-            inferred_type is not None
-            and inferred_type.value == 'motor'
-            and inferred_type.source is FormSource.INFERENCE
+            inferred_family is not None
+            and inferred_family.value == 'motor'
+            and inferred_family.source is FormSource.INFERENCE
         )
     return is_motor and any(pattern.search(candidate) for pattern in REAR_END_COLLISION_PATTERNS)
 
@@ -416,7 +427,8 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
 def _confirmation_response(changes: list[ProposedFormChange]) -> str:
     labels = {
         'incident.description': 'what happened',
-        'incident.type': 'the incident type',
+        'claim.product_family': 'the claim type',
+        'incident.type': 'the incident subtype',
         'incident.location': 'where it happened',
         'loss.description': 'what was damaged or lost',
     }
@@ -620,7 +632,7 @@ class ControlledAgent:
                 intake_field = next(
                     (
                         item
-                        for item in (*CONTROLLED_INTAKE_FIELDS, INCIDENT_TYPE_INTAKE_FIELD)
+                        for item in (*CONTROLLED_INTAKE_FIELDS, PRODUCT_FAMILY_INTAKE_FIELD)
                         if item.field_code in allowed_codes
                         and (
                             item.field_code not in context.claim.form

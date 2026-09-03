@@ -30,6 +30,7 @@ from backend.domain.models import (
     AssessorRoutingOperationStatus,
     AuthorityOutcome,
     BranchEvaluationRecord,
+    BranchEvaluationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -613,8 +614,15 @@ class MongoDBRepository:
         evaluation: BranchEvaluationRecord,
         customer_id: str,
     ) -> None:
-        if not self._claim_owned(evaluation.claim_id, customer_id):
+        claim = self.get_claim(evaluation.claim_id, customer_id)
+        if claim is None:
             raise KeyError(evaluation.claim_id)
+        if evaluation.status is BranchEvaluationStatus.APPLIED:
+            raise ValueError(
+                'Applied branch evaluations must be persisted with their Claim mutation.'
+            )
+        if evaluation.evaluated_against_claim_revision != claim.revision:
+            raise RevisionConflict(claim.revision)
         existing = self._get(
             'branch_evaluation',
             evaluation.evaluation_id,

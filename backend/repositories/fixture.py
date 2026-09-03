@@ -14,6 +14,7 @@ from backend.domain.models import (
     AssessorRoutingOperationStatus,
     AuthorityOutcome,
     BranchEvaluationRecord,
+    BranchEvaluationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -418,8 +419,15 @@ class FixtureRepository(PersistenceRepository):
         evaluation: BranchEvaluationRecord,
         customer_id: str,
     ) -> None:
-        if self.get_claim(evaluation.claim_id, customer_id) is None:
+        claim = self.get_claim(evaluation.claim_id, customer_id)
+        if claim is None:
             raise KeyError(evaluation.claim_id)
+        if evaluation.status is BranchEvaluationStatus.APPLIED:
+            raise ValueError(
+                'Applied branch evaluations must be persisted with their Claim mutation.'
+            )
+        if evaluation.evaluated_against_claim_revision != claim.revision:
+            raise RevisionConflict(claim.revision)
         existing = self._branch_evaluations.get(evaluation.evaluation_id)
         if existing is not None:
             if existing == evaluation:

@@ -7,6 +7,7 @@ from backend.domain.branch_registry import (
     BranchRuleEvaluator,
     build_default_registry,
     claimant_projection_fields,
+    validate_registered_field_value,
 )
 from backend.domain.field_registry import FIELD_REGISTRY_VERSION, REGISTERED_FIELD_CODES
 from backend.domain.models import (
@@ -18,7 +19,9 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationStatus,
     Channel,
+    Coverage,
     CustomerNextStep,
+    CustomerSupport,
     FieldSelectionState,
     FormSource,
     FormStatus,
@@ -27,6 +30,8 @@ from backend.domain.models import (
     ResponsibleParty,
     SessionRecord,
     StructuredFormField,
+    Urgency,
+    WorkflowState,
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -75,6 +80,7 @@ def evaluation_record(
     claim: WorkingClaim,
     *,
     evaluation_id: str = 'brn_eval_1',
+    status: BranchEvaluationStatus = BranchEvaluationStatus.APPLIED,
 ) -> BranchEvaluationRecord:
     result = BranchRuleEvaluator().evaluate(claim, recomputation_reason='test')
     return BranchEvaluationRecord(
@@ -82,7 +88,9 @@ def evaluation_record(
         claim_id=claim.claim_id,
         session_id=claim.active_session_id,
         evaluated_against_claim_revision=claim.revision,
-        resulting_claim_revision=claim.revision,
+        resulting_claim_revision=(
+            claim.revision if status is BranchEvaluationStatus.APPLIED else None
+        ),
         field_registry_version=result.field_registry_version,
         branch_rules_version=result.branch_rules_version,
         selected_family=result.selected_family,
@@ -96,14 +104,14 @@ def evaluation_record(
         permitted_actions=result.permitted_actions,
         permitted_tools=result.permitted_tools,
         recomputation_reason=result.recomputation_reason,
-        status=BranchEvaluationStatus.APPLIED,
+        status=status,
         created_at=FIXED_TIME,
     )
 
 
 @pytest.mark.parametrize('family', ['motor', 'home', 'contents'])
 def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
-    claim = make_claim().model_copy(update={'form': {'incident.type': field(family)}})
+    claim = make_claim().model_copy(update={'form': {'claim.product_family': field(family)}})
 
     result = BranchRuleEvaluator().evaluate(claim)
 
@@ -120,7 +128,7 @@ def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
 
 def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
     claim = make_claim().model_copy(
-        update={'form': {'incident.type': field('contents', FormStatus.PROPOSED)}}
+        update={'form': {'claim.product_family': field('contents', FormStatus.PROPOSED)}}
     )
 
     result = BranchRuleEvaluator().evaluate(claim)
@@ -141,21 +149,59 @@ def test_canonical_claim_type_selects_family_when_form_is_empty(family: str) -> 
     assert selected.source_refs == [f'claim:{claim.claim_id}:incident_type']
 
 
-def test_matching_proposed_form_keeps_inferred_claim_type_as_candidate() -> None:
-    claim = make_claim(incident_type='contents').model_copy(
-        update={'form': {'incident.type': field('contents', FormStatus.PROPOSED)}}
+@pytest.mark.parametrize(
+    ('family', 'subtype', 'branch_id', 'rule_id'),
+    [
+        ('motor', 'collision', 'incident.collision', 'BR-COLLISION-001'),
+        ('home', 'fire', 'mitigation.emergency', 'BR-MITIGATION-001'),
+        ('home', 'water', 'mitigation.emergency', 'BR-MITIGATION-001'),
+        ('contents', 'theft', 'contents.theft', 'BR-THEFT-001'),
+    ],
+)
+def test_confirmed_incident_subtype_activates_its_additive_branch(
+    family: str,
+    subtype: str,
+    branch_id: str,
+    rule_id: str,
+) -> None:
+    claim = make_claim(incident_type=family).model_copy(
+        update={'form': {'incident.type': field(subtype)}}
     )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+    branch = next(item for item in result.branch_results if item.branch_id == branch_id)
+
+    assert result.selected_family == family
+    assert branch.status == 'active'
+    assert branch.rule_id == rule_id
+    assert branch.source_refs == ['msg_source']
+
+
+def test_incident_subtype_cannot_select_a_product_family() -> None:
+    claim = make_claim().model_copy(update={'form': {'incident.type': field('collision')}})
 
     result = BranchRuleEvaluator().evaluate(claim)
 
     assert result.selected_family is None
+    assert 'family.motor' not in result.active_branches
+    assert 'incident.collision' in result.active_branches
+
+
+def test_canonical_family_remains_authoritative_with_matching_proposal() -> None:
+    claim = make_claim(incident_type='contents').model_copy(
+        update={'form': {'claim.product_family': field('contents', FormStatus.PROPOSED)}}
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+
+    assert result.selected_family == 'contents'
     assert result.unresolved_family_conflict == []
-    assert 'family.contents' in result.candidate_branches
+    assert 'family.contents' not in result.candidate_branches
 
 
 def test_conflicting_authoritative_family_sources_require_resolution() -> None:
     claim = make_claim(incident_type='motor').model_copy(
-        update={'form': {'incident.type': field('home')}}
+        update={'form': {'claim.product_family': field('home')}}
     )
 
     result = BranchRuleEvaluator().evaluate(claim)
@@ -184,7 +230,7 @@ def test_false_other_party_value_does_not_activate_collision_branches() -> None:
     claim = make_claim().model_copy(
         update={
             'form': {
-                'incident.type': field('motor'),
+                'claim.product_family': field('motor'),
                 'parties.other_parties': field(False),
             }
         }
@@ -197,7 +243,7 @@ def test_false_other_party_value_does_not_activate_collision_branches() -> None:
 
 
 def test_confirm_action_uses_the_agent_action_enum_contract() -> None:
-    claim = make_claim().model_copy(update={'form': {'incident.type': field('home')}})
+    claim = make_claim().model_copy(update={'form': {'claim.product_family': field('home')}})
 
     result = BranchRuleEvaluator().evaluate(claim, current_action=AgentAction.CONFIRM)
 
@@ -220,7 +266,7 @@ def test_runtime_registry_excludes_design_only_and_separate_record_codes() -> No
 
 
 def test_branch_results_retain_rule_and_source_coordinates() -> None:
-    claim = make_claim().model_copy(update={'form': {'incident.type': field('motor')}})
+    claim = make_claim().model_copy(update={'form': {'claim.product_family': field('motor')}})
 
     result = BranchRuleEvaluator().evaluate(claim)
     motor = next(item for item in result.branch_results if item.branch_id == 'family.motor')
@@ -232,7 +278,7 @@ def test_branch_results_retain_rule_and_source_coordinates() -> None:
 
 
 def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None:
-    claim = make_claim().model_copy(update={'form': {'incident.type': field('motor')}})
+    claim = make_claim().model_copy(update={'form': {'claim.product_family': field('motor')}})
     evaluation = evaluation_record(claim)
 
     projected = claimant_projection_fields(evaluation)
@@ -256,7 +302,8 @@ def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> 
     claim = make_claim().model_copy(
         update={
             'form': {
-                'incident.type': field('motor'),
+                'incident.type': field('collision'),
+                'claim.product_family': field('motor'),
                 'incident.description': field('A rear-end collision.'),
                 'authorities.police_report_reference': field(None, FormStatus.PENDING_GENERATION),
             }
@@ -282,6 +329,57 @@ def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> 
     assert description.selection_state.value == 'candidate_now'
 
 
+def test_registered_field_value_contracts_reject_incompatible_shapes() -> None:
+    validate_registered_field_value('parties.other_parties', True)
+    validate_registered_field_value('incident.type', 'collision')
+    validate_registered_field_value('claim.product_family', 'motor')
+
+    with pytest.raises(ValueError, match='boolean'):
+        validate_registered_field_value('parties.other_parties', ['driver'])
+    with pytest.raises(ValueError, match='Allowed values'):
+        validate_registered_field_value('incident.type', 'motor')
+    with pytest.raises(ValueError, match='Allowed values'):
+        validate_registered_field_value('claim.product_family', 'collision')
+
+
+def test_safety_human_and_review_state_emit_registered_branch_results() -> None:
+    claim = make_claim(incident_type='motor').model_copy(
+        update={
+            'claim_state': make_claim().claim_state.model_copy(
+                update={
+                    'urgency': Urgency.IMMEDIATE_SAFETY_RISK,
+                    'customer_support': CustomerSupport.HUMAN_REQUESTED,
+                    'coverage': Coverage.REVIEW_REQUIRED,
+                    'workflow_state': WorkflowState.PROFESSIONAL_REVIEW,
+                }
+            )
+        }
+    )
+
+    result = BranchRuleEvaluator().evaluate(claim)
+    branches = {item.branch_id: item for item in result.branch_results}
+
+    assert branches['safety.injury_or_danger'].rule_id == 'BR-SAFETY-001'
+    assert branches['safety.injury_or_danger'].status == 'active'
+    assert branches['human_support'].rule_id == 'BR-HUMAN-SUPPORT-001'
+    assert branches['human_support'].status == 'active'
+    assert branches['professional_review'].rule_id == 'BR-REVIEW-001'
+    assert branches['professional_review'].status == 'active'
+    assert all(
+        branches[branch_id].source_refs
+        for branch_id in (
+            'safety.injury_or_danger',
+            'human_support',
+            'professional_review',
+        )
+    )
+    assert {intent['type'] for intent in result.handoff_intents} == {
+        'urgent_support',
+        'human_support',
+        'professional_review',
+    }
+
+
 @pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
 def test_evaluation_payload_is_immutable_in_both_repositories(repository_kind: str) -> None:
     repository: PersistenceRepository
@@ -300,7 +398,7 @@ def test_evaluation_payload_is_immutable_in_both_repositories(repository_kind: s
         last_active_at=FIXED_TIME,
     )
     repository.create_claim(claim, session)
-    record = evaluation_record(claim)
+    record = evaluation_record(claim, status=BranchEvaluationStatus.EVALUATED)
     repository.save_branch_evaluation(record, claim.customer_id)
 
     rewritten = record.model_copy(
@@ -314,6 +412,39 @@ def test_evaluation_payload_is_immutable_in_both_repositories(repository_kind: s
         repository.save_branch_evaluation(rewritten, claim.customer_id)
 
     assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == [record]
+
+
+@pytest.mark.parametrize('repository_kind', ['fixture', 'mongodb'])
+@pytest.mark.parametrize('evaluation_revision', [1, 99])
+def test_standalone_repository_rejects_applied_evaluation(
+    repository_kind: str,
+    evaluation_revision: int,
+) -> None:
+    repository: PersistenceRepository
+    if repository_kind == 'fixture':
+        repository = FixtureRepository()
+    else:
+        mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'branch_unattached')
+        mongo_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+        repository = mongo_repository
+    claim = make_claim()
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    repository.create_claim(claim, session)
+    record = evaluation_record(claim.model_copy(update={'revision': evaluation_revision}))
+
+    with pytest.raises(
+        ValueError,
+        match='must be persisted with their Claim mutation',
+    ):
+        repository.save_branch_evaluation(record, claim.customer_id)
+
+    assert repository.list_branch_evaluations(claim.claim_id, claim.customer_id) == []
 
 
 def test_mongodb_agent_turn_persists_evaluation_with_resulting_claim_atomically() -> None:
@@ -412,7 +543,11 @@ def test_evaluation_identity_conflict_cannot_partially_advance_claim(
         last_active_at=FIXED_TIME,
     )
     repository.create_claim(claim, session)
-    original_evaluation = evaluation_record(claim, evaluation_id='brn_collision')
+    original_evaluation = evaluation_record(
+        claim,
+        evaluation_id='brn_collision',
+        status=BranchEvaluationStatus.EVALUATED,
+    )
     repository.save_branch_evaluation(original_evaluation, claim.customer_id)
     updated_claim = claim.model_copy(update={'revision': 2})
     colliding_evaluation = evaluation_record(updated_claim, evaluation_id='brn_collision')

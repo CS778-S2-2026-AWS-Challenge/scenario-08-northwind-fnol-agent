@@ -45,6 +45,7 @@ _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
+        'claim.product_family',
         'incident.type',
         'incident.occurred_at',
         'incident.description',

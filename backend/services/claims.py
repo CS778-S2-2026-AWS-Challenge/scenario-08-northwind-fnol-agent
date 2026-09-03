@@ -2,6 +2,7 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -459,6 +460,19 @@ def update_form(
                     ErrorDetail(field='field_code', reason=f'Unknown field: {update.field_code}.')
                 ],
             )
+        try:
+            validate_registered_field_value(
+                update.field_code,
+                update.value,
+                status=update.status,
+            )
+        except ValueError as error:
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='The form update contains an invalid registered-field value.',
+                details=[ErrorDetail(field=update.field_code, reason=str(error))],
+            ) from error
         existing = claim.form.get(update.field_code)
         if (
             existing is not None
@@ -597,9 +611,9 @@ def confirm_form_fields(
         for field_code in payload.field_codes
     }
     incident_type = claim.incident_type
-    confirmed_incident_type = confirmed_fields.get('incident.type')
-    if confirmed_incident_type is not None and isinstance(confirmed_incident_type.value, str):
-        incident_type = confirmed_incident_type.value.strip().lower()
+    confirmed_product_family = confirmed_fields.get('claim.product_family')
+    if confirmed_product_family is not None and isinstance(confirmed_product_family.value, str):
+        incident_type = confirmed_product_family.value.strip().lower()
     projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
