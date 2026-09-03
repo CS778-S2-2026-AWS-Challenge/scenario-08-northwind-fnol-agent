@@ -164,6 +164,31 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """
         raise NotImplementedError
 
+    def save_claim_mutation_with_audit(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        idempotency: IdempotencyRecord,
+        audit_events: tuple[AuditEventEnvelope, ...],
+    ) -> None:
+        """Atomically persist a claim mutation, retry metadata, and audit facts.
+
+        Args:
+            claim: Resulting authoritative Claim State.
+            expected_revision: Revision that must still be current.
+            idempotency: Retry metadata for the accepted mutation.
+            audit_events: Immutable audit facts produced by the same mutation.
+
+        Returns:
+            None.
+
+        Raises:
+            RevisionConflict: The authoritative Claim revision changed first.
+            IdempotencyConflict: Retry or audit identity conflicts with stored data.
+            KeyError: Claim ownership or mutation links are invalid.
+        """
+        raise NotImplementedError
+
     def save_message(self, message: MessageRecord, customer_id: str) -> None:
         raise NotImplementedError
 
