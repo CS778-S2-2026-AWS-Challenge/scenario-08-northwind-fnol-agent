@@ -1972,9 +1972,10 @@ Request:
 
 An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
 version, checksum, and source text for every result. `no_evidence` returns no results and an honest
-scope limitation. `unavailable` returns no results and a claimant-safe dependency limitation.
-Provider errors and object-store identifiers are not exposed. Missing applicability fields fail
-request validation rather than broadening the search.
+scope limitation. `timeout` and `unavailable` return no results, include the shared connection and
+structured-error projection described below, and remain retryable. Provider errors, traceback
+content, credentials, endpoints, and object-store identifiers are not exposed. Missing
+applicability fields fail request validation rather than broadening the search.
 When a structured Policy Schedule supplies a wording document identifier, the caller includes
 `document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
 The approved document catalogue comes from the controlled publication manifest. Applicability is
@@ -2003,6 +2004,8 @@ Response:
 {
   "result_id": "pol_01J4Y93M22",
   "status": "evidence_found",
+  "connection_state": "using_fixture",
+  "errors": [],
   "source": {
     "system": "fixture_policy_administration",
     "reference": "synthetic-policy-101",
@@ -2022,7 +2025,7 @@ Response:
 }
 ```
 
-Status is `evidence_found`, `no_evidence`, `ambiguous`, or `unavailable`.
+Status is `evidence_found`, `no_evidence`, `ambiguous`, `timeout`, or `unavailable`.
 
 - `evidence_found` returns allow-listed facts with the `source` that supplied
   them, and persists a retrieval record against the claim.
@@ -2030,9 +2033,12 @@ Status is `evidence_found`, `no_evidence`, `ambiguous`, or `unavailable`.
   uncertainty becomes a staff-only professional-review signal. Ambiguity is
   reported as evidence for a person; it is never resolved here.
 - `no_evidence` means the provider answered and holds no matching record.
-- `unavailable` means the provider could not answer. It carries `limitations`
-  and never carries `facts` or a `source`, and nothing is persisted, because an
-  absent answer must not become a finding.
+- `timeout` means the provider exceeded the request budget. It reports
+  `connection_state=degraded` and one retryable `errors[].code=timeout` item.
+- `unavailable` means the provider could not answer. It reports
+  `connection_state=unavailable` and one retryable `errors[].code=unavailable` item.
+  Both failure states carry claimant-safe `limitations`, never carry `facts` or a
+  `source`, and persist nothing, because an absent answer must not become a finding.
 
 Retrieval provides evidence and limitations, not authority to decide coverage.
 Provider-only scoring, fraud labels, and coverage verdicts are discarded at the
@@ -2059,6 +2065,8 @@ Response:
 {
   "result_id": "his_01J4Y95E0P",
   "status": "evidence_found",
+  "connection_state": "using_fixture",
+  "errors": [],
   "source": {
     "system": "fixture_claims_history",
     "reference": "synthetic-history-204",
@@ -2084,6 +2092,25 @@ rules match the policy endpoint.
 
 Results provide evidence only and MUST NOT return an automated fraud
 conclusion.
+
+### Shared data-query outcome projection
+
+The knowledge, policy, and claim-history search responses expose the same operational fields so a
+consumer does not infer provider state from an empty result:
+
+- `connection_state` is `using_fixture`, `verified`, or `configured_service` for a usable selected
+  adapter, `degraded` for a timed-out request, and `unavailable` when the selected adapter could not
+  answer. Fixture state remains explicit and is never relabelled as a verified provider.
+- `errors` is empty for `evidence_found`, `ambiguous`, and `no_evidence`. A timeout or unavailable
+  response contains exactly one item with the bounded `code`, a safe `message`, and
+  `retryable=true`.
+- `no_evidence` means the selected adapter answered successfully but supplied no applicable
+  evidence. It is not an error and does not imply a negative policy, coverage, or history finding.
+- Evidence results must carry their exact retrieval `source` or knowledge citations. Timeout,
+  unavailable, and no-evidence results cannot carry facts, citations, uncertainty, or a source.
+
+The API never returns raw provider exceptions, tracebacks, connection strings, credentials,
+endpoints, or provider-only payloads through `errors` or `limitations`.
 
 ### Retrieval provider availability
 

@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from backend.domain.data_query import DataQueryProjection
 from backend.domain.models import ContractModel
 
 
@@ -88,6 +89,7 @@ class RetrievalStatus(str, Enum):
     EVIDENCE_FOUND = 'evidence_found'
     NO_EVIDENCE = 'no_evidence'
     AMBIGUOUS = 'ambiguous'
+    TIMEOUT = 'timeout'
     UNAVAILABLE = 'unavailable'
 
 
@@ -111,7 +113,7 @@ class ClaimHistorySearchRequest(ContractModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
-class PolicySearchResponse(ContractModel):
+class PolicySearchResponse(DataQueryProjection):
     result_id: str = Field(min_length=1, max_length=100)
     status: RetrievalStatus
     source: RetrievalSource | None = None
@@ -121,7 +123,7 @@ class PolicySearchResponse(ContractModel):
     retrieved_at: datetime
 
 
-class ClaimHistorySearchResponse(ContractModel):
+class ClaimHistorySearchResponse(DataQueryProjection):
     result_id: str = Field(min_length=1, max_length=100)
     status: RetrievalStatus
     source: RetrievalSource | None = None

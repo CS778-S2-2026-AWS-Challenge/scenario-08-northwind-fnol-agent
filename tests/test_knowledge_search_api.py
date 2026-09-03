@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
@@ -19,19 +20,27 @@ class ControlledRetriever:
     def __init__(
         self,
         chunks: list[KnowledgeChunk] | None = None,
-        unavailable: bool = False,
+        failure_code: str | None = None,
+        connection_state: str = 'configured_service',
+        connection_state_after_search: str | None = None,
     ) -> None:
         self.chunks = chunks or []
-        self.unavailable = unavailable
+        self.failure_code = failure_code
+        self.connection_state = connection_state
+        self.connection_state_after_search = connection_state_after_search
         self.last_request: KnowledgeSearch | None = None
 
     def connection_status(self) -> str:
-        return 'configured_service'
+        return self.connection_state
 
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         self.last_request = request
-        if self.unavailable:
-            raise KnowledgeRetrievalUnavailable('provider detail')
+        if self.failure_code is not None:
+            raise KnowledgeRetrievalUnavailable(
+                'Traceback: access_key=secret-provider-detail', code=self.failure_code
+            )
+        if self.connection_state_after_search is not None:
+            self.connection_state = self.connection_state_after_search
         return self.chunks
 
 
@@ -97,6 +106,8 @@ def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None
     assert response.status_code == 200
     body = response.json()
     assert body['status'] == 'evidence_found'
+    assert body['connection_state'] == 'configured_service'
+    assert body['errors'] == []
     assert body['limitations'] == []
     assert body['results'][0]['chunk_id'].endswith('#MTR-EXC-01')
     assert body['results'][0]['section_path'] == 'MTR-EXC-01 - Excesses'
@@ -110,17 +121,44 @@ def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None
 def test_knowledge_search_reports_empty_and_unavailable_without_inventing_results() -> None:
     with client_for(ControlledRetriever()) as client:
         empty = client.post(ENDPOINT, headers=AUTH, json=request_payload())
-    with client_for(ControlledRetriever(unavailable=True)) as client:
+    with client_for(ControlledRetriever(failure_code='PROVIDER_UNAVAILABLE')) as client:
         unavailable = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+    with client_for(ControlledRetriever(failure_code='PROVIDER_TIMEOUT')) as client:
+        timed_out = client.post(ENDPOINT, headers=AUTH, json=request_payload())
 
     assert empty.json()['status'] == 'no_evidence'
+    assert empty.json()['connection_state'] == 'configured_service'
+    assert empty.json()['errors'] == []
     assert empty.json()['results'] == []
     assert empty.json()['limitations']
     assert unavailable.json() == {
         'status': 'unavailable',
+        'connection_state': 'unavailable',
+        'errors': [
+            {
+                'code': 'unavailable',
+                'message': 'The knowledge service is temporarily unavailable.',
+                'retryable': True,
+            }
+        ],
         'results': [],
         'limitations': ['The knowledge service is temporarily unavailable.'],
     }
+    assert timed_out.json() == {
+        'status': 'timeout',
+        'connection_state': 'degraded',
+        'errors': [
+            {
+                'code': 'timeout',
+                'message': 'The knowledge service did not respond within the request budget.',
+                'retryable': True,
+            }
+        ],
+        'results': [],
+        'limitations': ['The knowledge service did not respond within the request budget.'],
+    }
+    assert 'secret-provider-detail' not in unavailable.text
+    assert 'secret-provider-detail' not in timed_out.text
 
 
 def test_knowledge_search_requires_integration_auth_and_complete_scope() -> None:
@@ -152,3 +190,32 @@ def test_knowledge_search_requires_integration_auth_and_complete_scope() -> None
     assert missing_version.status_code == 422
     assert missing_timezone.status_code == 422
     assert padded_product.status_code == 422
+
+
+@pytest.mark.parametrize('connection_state', ['pending_confirmation', 'unavailable', 'mystery'])
+def test_knowledge_connection_state_drift_fails_closed_before_provider_call(
+    connection_state: str,
+) -> None:
+    retriever = ControlledRetriever([citation_chunk()])
+    with client_for(retriever) as client:
+        retriever.connection_state = connection_state
+        response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['connection_state'] == 'unavailable'
+    assert response.json()['results'] == []
+    assert response.json()['errors'][0]['code'] == 'unavailable'
+    assert retriever.last_request is None
+
+
+def test_knowledge_connection_drift_during_search_discards_provider_evidence() -> None:
+    retriever = ControlledRetriever(
+        [citation_chunk()], connection_state_after_search='pending_confirmation'
+    )
+    with client_for(retriever) as client:
+        response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+
+    assert response.json()['status'] == 'unavailable'
+    assert response.json()['connection_state'] == 'unavailable'
+    assert response.json()['results'] == []
+    assert retriever.last_request is not None

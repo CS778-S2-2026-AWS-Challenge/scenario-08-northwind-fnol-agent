@@ -5,6 +5,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field, field_validator
 
+from backend.domain.data_query import DataQueryProjection
 from backend.domain.models import ContractModel
 
 
@@ -86,7 +87,9 @@ class KnowledgeRetriever(Protocol):
 
 
 class KnowledgeRetrievalUnavailable(RuntimeError):
-    pass
+    def __init__(self, detail: str, *, code: str = 'PROVIDER_UNAVAILABLE') -> None:
+        super().__init__(detail)
+        self.code = code
 
 
 class KnowledgeSearchRequest(ContractModel):
@@ -136,7 +139,7 @@ class KnowledgeCitation(ContractModel):
     text: str
 
 
-class KnowledgeSearchResponse(ContractModel):
-    status: Literal['evidence_found', 'no_evidence', 'unavailable']
+class KnowledgeSearchResponse(DataQueryProjection):
+    status: Literal['evidence_found', 'no_evidence', 'timeout', 'unavailable']
     results: list[KnowledgeCitation]
     limitations: list[str]
