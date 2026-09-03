@@ -137,6 +137,16 @@
         "title": "AssessorLocation",
         "type": "object"
       },
+      "AssessorRoutingFailureCode": {
+        "enum": [
+          "timeout",
+          "unavailable",
+          "access_denied",
+          "malformed"
+        ],
+        "title": "AssessorRoutingFailureCode",
+        "type": "string"
+      },
       "AssessorRoutingResult": {
         "additionalProperties": false,
         "properties": {
@@ -1212,6 +1222,16 @@
               }
             ]
           },
+          "failure_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssessorRoutingFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -1290,11 +1310,14 @@
         "type": "object"
       },
       "ClaimantExternalServiceStatus": {
+        "description": "Claimant-facing lifecycle of one external-service action.\n\nThe values are the claimant-visible states named by the AT-10 controlled\nassessor scenario in `tests/fixtures/journeys/`. A failed attempt is one of\nthem: that scenario requires the claimant to receive an honest state and next\nstep, and a failure that showed nothing would read as an offer to request a\nservice whose last attempt had just failed.",
         "enum": [
           "consent_required",
           "ready_to_request",
           "queued",
-          "assigned"
+          "assigned",
+          "retryable_failure",
+          "terminal_failure"
         ],
         "title": "ClaimantExternalServiceStatus",
         "type": "string"

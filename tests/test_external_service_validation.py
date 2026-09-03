@@ -274,7 +274,13 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
     assert after_failure.assessor_routing is None
     assert after_failure.customer_next_step.status == 'assessor_request_ready'
     assert claimant_after_failure.status_code == 200
-    assert claimant_after_failure.json()['external_service_action']['status'] == 'ready_to_request'
+    # AT-10 requires the claimant to receive an honest state and next step. This
+    # projection previously returned to `ready_to_request`, offering the service
+    # again without saying that the last attempt had failed.
+    action_after_failure = claimant_after_failure.json()['external_service_action']
+    assert action_after_failure['status'] == 'retryable_failure'
+    assert action_after_failure['failure_code'] == failure.value
+    assert action_after_failure['can_request'] is True
     assert retry.status_code == 201
     assert retry.json()['action']['status'] == 'assigned'
     assert replay.status_code == 200
@@ -412,3 +418,61 @@ def test_a_retry_continues_the_failed_task_instead_of_opening_a_second_one() -> 
     assert tasks[0].task_id == after_failure[0].task_id
     assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
     assert tasks[0].updated_at > after_failure[0].updated_at
+
+
+@pytest.mark.parametrize(
+    'failure',
+    [AssessorFixtureFailure.ACCESS_DENIED, AssessorFixtureFailure.MALFORMED],
+)
+def test_a_terminal_failure_is_shown_to_the_claimant_and_withdraws_the_request(
+    failure: AssessorFixtureFailure,
+) -> None:
+    """A terminal failure is honest about itself and stops offering another attempt.
+
+    AT-10 gives these two codes the `terminal_failure` lifecycle status and says
+    Northwind must review the request before trying again, so the claimant keeps
+    the state but loses the affordance. The claim itself is untouched, which is
+    what that scenario's empty `failure_may_change` requires.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(failure,))
+    key = f'terminal-{failure.value}'
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        before = repository.get_claim_internal(claim_id)
+        headers = {
+            **AUTH,
+            'Idempotency-Key': f'{key}-route',
+            'If-Match': str(consent_revision),
+        }
+
+        failed = client.post(f'/api/v1/claims/{claim_id}/assessor-routing', headers=headers)
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+        another = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': f'{key}-again',
+                'If-Match': str(consent_revision),
+            },
+        )
+
+    assert failed.status_code == 502
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'terminal_failure'
+    assert action['failure_code'] == failure.value
+    assert action['can_request'] is False
+    assert action['routing'] is None
+    assert another.status_code == 409
+    assert another.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    after = repository.get_claim_internal(claim_id)
+    assert before is not None and after is not None
+    assert after.model_dump(mode='json') == before.model_dump(mode='json')

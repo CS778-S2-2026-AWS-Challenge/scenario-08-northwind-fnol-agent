@@ -18,6 +18,8 @@ from backend.domain.external_services import (
     ASSESSOR_REQUESTED_ACTION,
     ASSESSOR_SERVICE_IDENTITY,
     ASSESSOR_SHARED_DATA_SUMMARY,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.models import (
     ActorReference,
@@ -25,6 +27,7 @@ from backend.domain.models import (
     AgentAction,
     AgentAuthority,
     AgentDecisionRecord,
+    AssessorRoutingFailureCode,
     AssessorRoutingOperationStatus,
     AssessorRoutingStatus,
     AuthorityOutcome,
@@ -117,12 +120,56 @@ def _has_open_handoff(repository: PersistenceRepository, claim: WorkingClaim) ->
     )
 
 
+_CLAIMANT_FAILURE_STATUS = {
+    ExternalTaskOperationStatus.RETRYABLE_FAILURE: (
+        ClaimantExternalServiceStatus.RETRYABLE_FAILURE
+    ),
+    ExternalTaskOperationStatus.TERMINAL_FAILURE: (ClaimantExternalServiceStatus.TERMINAL_FAILURE),
+}
+
+
+def _latest_failed_assessor_task(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ExternalTaskRecord | None:
+    """Find the most recent assessor task that ended in a failure the claimant may see.
+
+    AT-10 requires the claimant to receive an honest state and next step. The
+    failure is read from the task rather than stored on the claim, because that
+    scenario's `claim_state_effects.failure_may_change` is empty: a failed attempt
+    must leave the claim exactly as it was. Deriving the state here honours both,
+    the claim is untouched and the claimant is still told what happened.
+
+    An `unknown_outcome` task is deliberately not mapped. AT-10 approves claimant
+    wording for the four failure codes only, and inventing a claimant meaning for
+    an unresolved outcome is the kind of claim this boundary exists to prevent.
+
+    Args:
+        repository: Persistence boundary for the claim.
+        claim: Working Claim whose assessor action is being projected.
+
+    Returns:
+        The latest failed assessor task, or None when no attempt has failed.
+    """
+    failed = [
+        task
+        for task in repository.list_external_tasks_internal(claim.claim_id)
+        if task.service_identity == ASSESSOR_SERVICE_IDENTITY
+        and task.status in _CLAIMANT_FAILURE_STATUS
+    ]
+    if not failed:
+        return None
+    return max(failed, key=lambda task: (task.updated_at, task.task_id))
+
+
 def claimant_assessor_action(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> ClaimantExternalServiceAction | None:
     routing = claim.assessor_routing
+    failed_task = None
     if routing is None:
+        failed_task = _latest_failed_assessor_task(repository, claim)
         created_claim = claim.external_claim
         eligible = (
             claim.incident_type == 'motor'
@@ -145,6 +192,8 @@ def claimant_assessor_action(
             status = ClaimantExternalServiceStatus.QUEUED
         else:
             return None
+    elif failed_task is not None:
+        status = _CLAIMANT_FAILURE_STATUS[failed_task.status]
     elif consent is not None:
         status = ClaimantExternalServiceStatus.READY_TO_REQUEST
     else:
@@ -159,10 +208,19 @@ def claimant_assessor_action(
         status=status,
         consent_status=consent.status if consent is not None else None,
         routing=routing,
+        failure_code=(
+            AssessorRoutingFailureCode(failed_task.failure_code.value)
+            if failed_task is not None and failed_task.failure_code is not None
+            else None
+        ),
+        # A retryable failure keeps the affordance, because AT-10 says the same
+        # unchanged operation may be retried explicitly. A terminal failure loses
+        # it, because that scenario requires Northwind to review the request first.
         can_request=status
         in {
             ClaimantExternalServiceStatus.CONSENT_REQUIRED,
             ClaimantExternalServiceStatus.READY_TO_REQUEST,
+            ClaimantExternalServiceStatus.RETRYABLE_FAILURE,
         },
     )
 
@@ -470,11 +528,11 @@ def request_assessor_routing(
         return response, True
     action = claimant_assessor_action(repository, claim)
     consent = _active_assessor_consent(claim)
-    if (
-        action is None
-        or action.status is not ClaimantExternalServiceStatus.READY_TO_REQUEST
-        or consent is None
-    ):
+    # `can_request` is the single answer to whether this claimant may send the
+    # request now. It admits a retryable failure, which AT-10 permits to be retried
+    # with the same unchanged operation, and refuses a terminal one, which that
+    # scenario requires Northwind to review first.
+    if action is None or not action.can_request or consent is None:
         raise _invalid_state('Record claimant permission before requesting an assessor.')
     if claim.active_session_id is None:
         raise _invalid_state('An active claim session is required for assessor routing.')
