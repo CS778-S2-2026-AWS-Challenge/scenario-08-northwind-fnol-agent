@@ -100,6 +100,15 @@ remains unchanged.
 An explicitly configured fixture adapter may be used for controlled development. It is
 not a silent production fallback and its result remains labelled `fixture`.
 
+The vehicle-damage assessor simulation is a separate, explicitly non-live adapter for the
+provider-neutral lifecycle. It consumes the bounded assessor request confirmed by Issue #416 and
+returns delivery, operation status, failure code, recovery, retryability, and routing output as one
+typed result. Its assigned and queued outcomes include a simulation acknowledgement and limitation;
+its unavailable, pre-submission timeout, rejected, malformed, and partial-result scenarios remain
+distinct. A partial simulated response is `unknown_outcome` and requires reconciliation before any
+retry. The adapter never reports `configured_service` and is not wired into the claimant runtime by
+this boundary; Issue #441 owns that end-to-end consumption.
+
 ## Routing and External Participants
 
 Routing, assessor tasks, repair tasks, or another participant action require their own
