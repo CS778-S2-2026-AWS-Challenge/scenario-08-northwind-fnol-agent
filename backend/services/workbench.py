@@ -1086,7 +1086,10 @@ def list_workbench_messages(
             status_code=404, code='RESOURCE_NOT_FOUND', message='The session was not found.'
         )
     messages = repository.list_messages(claim_id, session_id, claim.customer_id)
-    messages.sort(key=lambda item: (item.created_at, item.message_id))
+    actor_order = {'claimant': 0, 'agent': 1, 'staff': 2, 'system': 3}
+    messages.sort(
+        key=lambda item: (item.created_at, actor_order[item.actor.value], item.message_id)
+    )
     return _page(messages, limit, cursor)
 
 
