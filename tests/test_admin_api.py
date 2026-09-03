@@ -35,7 +35,7 @@ def _model_values(**overrides: object) -> dict[str, object]:
         'profile_id': 'approved-profile',
         'purpose': 'agent_turn',
         'privacy_class': 'synthetic_fnol',
-        'prompt_version': 'northwind-fnol-motor-claimant-v3',
+        'prompt_version': 'northwind-fnol-motor-claimant-v4',
         'evaluation_status': 'configured',
         'timeout_seconds': 30,
         'structured_output': True,

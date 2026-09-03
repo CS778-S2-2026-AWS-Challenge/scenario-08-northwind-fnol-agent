@@ -35,11 +35,11 @@ CONTROLLED_INTAKE_FIELDS = (
     ),
 )
 
-INCIDENT_TYPE_INTAKE_FIELD = ControlledIntakeField(
-    field_code='incident.type',
-    prompt='What type of incident is this: motor, home, or contents?',
-    confirmation_prompt='Please check the incident type before I continue.',
-    status='identify_incident_type',
+PRODUCT_FAMILY_INTAKE_FIELD = ControlledIntakeField(
+    field_code='claim.product_family',
+    prompt='Is this a motor, home, or contents claim?',
+    confirmation_prompt='Please check the claim type before I continue.',
+    status='identify_product_family',
 )
 
 MOTOR_INCIDENT_PATTERN = re.compile(
@@ -48,7 +48,7 @@ MOTOR_INCIDENT_PATTERN = re.compile(
 )
 
 
-def infer_controlled_incident_type(message_text: str) -> str | None:
+def infer_controlled_product_family(message_text: str) -> str | None:
     """Classify only the explicit motor vocabulary supported by the prototype."""
     if MOTOR_INCIDENT_PATTERN.search(message_text) is not None:
         return 'motor'
@@ -60,11 +60,11 @@ def next_controlled_intake_field(claim: WorkingClaim) -> ControlledIntakeField |
         field = claim.form.get(intake_field.field_code)
         if field is None or field.status is not FormStatus.CONFIRMED:
             return intake_field
-    incident_type_field = claim.form.get(INCIDENT_TYPE_INTAKE_FIELD.field_code)
+    product_family_field = claim.form.get(PRODUCT_FAMILY_INTAKE_FIELD.field_code)
     if claim.incident_type is None and (
-        incident_type_field is None or incident_type_field.status is not FormStatus.CONFIRMED
+        product_family_field is None or product_family_field.status is not FormStatus.CONFIRMED
     ):
-        return INCIDENT_TYPE_INTAKE_FIELD
+        return PRODUCT_FAMILY_INTAKE_FIELD
     return None
 
 

@@ -31,6 +31,8 @@ from backend.domain.models import (
     AssessorRoutingOperation,
     AssessorRoutingOperationStatus,
     AuthorityOutcome,
+    BranchEvaluationRecord,
+    BranchEvaluationStatus,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -152,7 +154,7 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
             client.close()
 
 
-IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision'})
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision', 'branch_evaluation'})
 """Child records whose identity may never be rebound or rewritten once persisted."""
 
 
@@ -196,6 +198,10 @@ class MongoDBRepository:
                 'record_type': 'message',
                 'client_message_id': {'$type': 'string'},
             },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
+            name='branch_evaluation_claim_created',
         )
 
     def connection_status(self) -> str:
@@ -495,7 +501,23 @@ class MongoDBRepository:
     def list_claims_internal(self) -> list[WorkingClaim]:
         return self._list('claim', WorkingClaim, {}, '-updated_at')
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
+        if branch_evaluation is not None:
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._atomic(
+                lambda mongo_session: self._save_claim_with_evaluation(
+                    claim,
+                    expected_revision,
+                    branch_evaluation,
+                    mongo_session,
+                )
+            )
+            return
         self._ensure_claim_revision(claim, expected_revision, mongo_session=None)
         if claim.revision != expected_revision + 1:
             raise KeyError(claim.claim_id)
@@ -521,11 +543,37 @@ class MongoDBRepository:
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
 
+    def _save_claim_with_evaluation(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord,
+        mongo_session: Any,
+    ) -> None:
+        self._reject_branch_evaluation_identity_conflict(
+            branch_evaluation,
+            mongo_session=mongo_session,
+        )
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        if claim.revision != expected_revision + 1:
+            raise KeyError(claim.claim_id)
+        if self._replace_claim_revision(claim, expected_revision, mongo_session=mongo_session) == 0:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+        self._put(
+            'branch_evaluation',
+            branch_evaluation.evaluation_id,
+            branch_evaluation,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+            session=mongo_session,
+        )
+
     def save_claim_mutation(
         self,
         claim: WorkingClaim,
         expected_revision: int,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -534,13 +582,19 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = []
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[],
+                records=records,
             )
         )
 
@@ -767,6 +821,52 @@ class MongoDBRepository:
             decision,
             customer_id=customer_id,
             claim_id=decision.claim_id,
+        )
+
+    def save_branch_evaluation(
+        self,
+        evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        claim = self.get_claim(evaluation.claim_id, customer_id)
+        if claim is None:
+            raise KeyError(evaluation.claim_id)
+        if evaluation.status is BranchEvaluationStatus.APPLIED:
+            raise ValueError(
+                'Applied branch evaluations must be persisted with their Claim mutation.'
+            )
+        if evaluation.evaluated_against_claim_revision != claim.revision:
+            raise RevisionConflict(claim.revision)
+        existing = self._get(
+            'branch_evaluation',
+            evaluation.evaluation_id,
+            BranchEvaluationRecord,
+            customer_id=customer_id,
+        )
+        if existing is not None:
+            if existing == evaluation:
+                return
+            raise IdempotencyConflict(evaluation.evaluation_id)
+        self._put(
+            'branch_evaluation',
+            evaluation.evaluation_id,
+            evaluation,
+            customer_id=customer_id,
+            claim_id=evaluation.claim_id,
+        )
+
+    def list_branch_evaluations(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[BranchEvaluationRecord]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+        return self._list(
+            'branch_evaluation',
+            BranchEvaluationRecord,
+            {'claim_id': claim_id, 'customer_id': customer_id},
+            'created_at',
         )
 
     def get_agent_decision(
@@ -1572,6 +1672,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -1599,6 +1700,14 @@ class MongoDBRepository:
             and (handoff is None or idempotency.handoff_id == handoff.handoff_id)
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
             and (evidence is None or evidence.claim_id == claim.claim_id)
+            and (
+                branch_evaluation is None
+                or (
+                    branch_evaluation.claim_id == claim.claim_id
+                    and branch_evaluation.evaluated_against_claim_revision == claim.revision
+                    and branch_evaluation.resulting_claim_revision == claim.revision
+                )
+            )
         )
         if not records_match:
             raise KeyError(claim.claim_id)
@@ -1613,6 +1722,7 @@ class MongoDBRepository:
                 idempotency,
                 handoff,
                 evidence,
+                branch_evaluation,
                 mongo_session,
             )
         )
@@ -1628,6 +1738,7 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None,
         evidence: EvidenceRecord | None,
+        branch_evaluation: BranchEvaluationRecord | None,
         mongo_session: Any,
     ) -> None:
         if claimant_message.client_message_id is not None:
@@ -1650,6 +1761,10 @@ class MongoDBRepository:
             records.append(('handoff', handoff.handoff_id, handoff))
         if evidence is not None:
             records.append(('evidence', evidence.evidence_id, evidence))
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._save_child_mutation(
             claim,
             expected_revision,
@@ -1665,6 +1780,7 @@ class MongoDBRepository:
         expected_revision: int,
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -1674,13 +1790,19 @@ class MongoDBRepository:
             or idempotency.session_id != (claim.active_session_id or '')
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = [('evidence', evidence.evidence_id, evidence)]
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[('evidence', evidence.evidence_id, evidence)],
+                records=records,
             )
         )
 
@@ -1690,6 +1812,7 @@ class MongoDBRepository:
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -1700,13 +1823,19 @@ class MongoDBRepository:
             or idempotency.handoff_id != handoff.handoff_id
         ):
             raise KeyError(claim.claim_id)
+        self._validate_branch_evaluation(claim, branch_evaluation)
+        records: list[tuple[str, str, BaseModel]] = [('handoff', handoff.handoff_id, handoff)]
+        if branch_evaluation is not None:
+            records.append(
+                ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
                 expected_revision,
                 idempotency,
                 mongo_session,
-                records=[('handoff', handoff.handoff_id, handoff)],
+                records=records,
             )
         )
 
@@ -1914,11 +2043,18 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         self._validate_session_mutation(claim, expected_revision, session, idempotency)
+        self._validate_branch_evaluation(claim, branch_evaluation)
         self._atomic(
             lambda mongo_session: self._save_session_mutation(
-                claim, expected_revision, session, idempotency, mongo_session
+                claim,
+                expected_revision,
+                session,
+                idempotency,
+                branch_evaluation,
+                mongo_session,
             )
         )
 
@@ -1948,6 +2084,7 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None,
         mongo_session: Any,
     ) -> None:
         if (
@@ -1956,6 +2093,11 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(session.session_id)
         self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        if branch_evaluation is not None:
+            self._reject_branch_evaluation_identity_conflict(
+                branch_evaluation,
+                mongo_session=mongo_session,
+            )
         result = self._collection.replace_one(
             {
                 '_id': self._record_id('claim', claim.claim_id),
@@ -1987,7 +2129,47 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        if branch_evaluation is not None:
+            self._put(
+                'branch_evaluation',
+                branch_evaluation.evaluation_id,
+                branch_evaluation,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         self._save_idempotency(record=idempotency, session=mongo_session)
+
+    @staticmethod
+    def _validate_branch_evaluation(
+        claim: WorkingClaim,
+        branch_evaluation: BranchEvaluationRecord | None,
+    ) -> None:
+        if branch_evaluation is None:
+            return
+        if (
+            branch_evaluation.claim_id != claim.claim_id
+            or branch_evaluation.evaluated_against_claim_revision != claim.revision
+            or branch_evaluation.resulting_claim_revision != claim.revision
+        ):
+            raise KeyError(claim.claim_id)
+
+    def _reject_branch_evaluation_identity_conflict(
+        self,
+        branch_evaluation: BranchEvaluationRecord,
+        *,
+        mongo_session: Any,
+    ) -> None:
+        existing = self._collection.find_one(
+            {
+                '_id': self._record_id('branch_evaluation', branch_evaluation.evaluation_id),
+                'record_type': 'branch_evaluation',
+            },
+            projection={'_id': 1},
+            session=mongo_session,
+        )
+        if existing is not None:
+            raise IdempotencyConflict(branch_evaluation.evaluation_id)
 
     def _save_idempotency(self, record: IdempotencyRecord, session: Any) -> None:
         query = {

@@ -220,7 +220,7 @@ PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation
 publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
 environment-variable name match the deployment-owned startup settings; and purpose, privacy
 class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v3`. A
+contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v4`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -365,7 +365,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `revision` | integer | Yes | Starts at `1` and increases on every material state change |
 | `channel` | enum | Yes | Initial value `web_agent`; future channels require a contract change |
 | `locale` | string | Yes | BCP 47 language tag such as `en-NZ` |
-| `incident_type` | string | No | Registered claim type; may be unknown at creation |
+| `incident_type` | string | No | Compatibility projection of the registered product family; may be unknown at creation. Branch evaluation reconciles it with the source-aware `claim.product_family` form field. The independent `incident.type` field records the event subtype. |
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
@@ -503,17 +503,18 @@ Initial common field codes:
 | Field code | Type | Purpose |
 |---|---|---|
 | `policy.policy_number` | string | Locate the relevant policy |
-| `claimant.client_number` | string | Claimant-facing Northwind client reference |
+| `claimant.client_number` | string | Staff-only Northwind client reference supplied by identity |
 | `claimant.role` | enum | Policyholder, authorised representative, or other reporter |
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
-| `incident.type` | string | Motor, home, contents, or configured subtype |
+| `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
+| `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
 | `incident.occurred_at` | timestamp | When the incident occurred |
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
 | `incident.cause` | string | Cause classification used for coverage assessment (e.g. sudden vs gradual) |
 | `loss.description` | string | Damage, loss, or affected property |
-| `parties.other_parties` | array | Other involved parties when known |
+| `parties.other_parties` | boolean | Whether another person or organisation is involved; participant details use separate records |
 | `authorities.police_report_reference` | string | Reference if already issued |
 | `authorities.emergency_services_notified` | boolean | Whether emergency services were contacted |
 | `vehicle.registration` | string | Motor-specific vehicle reference |
@@ -955,11 +956,34 @@ Response `200`:
     "customer_reason": "Please check the incident details before I continue.",
     "customer_next_step": {}
   },
-  "handoff": null
+  "handoff": null,
+  "dynamic_form": {
+    "claim_id": "clm_01J4Y7Q2AW",
+    "claim_revision": 3,
+    "field_registry_version": "3",
+    "branch_rules_version": "vp-dynamic-form-branch-rules-v1",
+    "selected_family": "motor",
+    "active_branches": ["family.motor", "incident.collision"],
+    "fields": [
+      {
+        "field_code": "incident.occurred_at",
+        "selection_state": "required_now",
+        "value_state": "missing",
+        "source": null,
+        "reason": "Missing and required for the current safe action."
+      }
+    ]
+  }
 }
 ```
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
+
+`dynamic_form` is a claimant-safe projection of the latest applied branch evaluation whose
+evaluated and resulting revision both equal the current Claim revision. It exposes only active,
+claimant-visible fields; inactive and system-owned fields remain outside this response. Selection
+state (`required_now`, `candidate_now`, or `pending_later` in this projection) is separate from the
+stored value state. The projection is omitted when no current-revision evaluation exists.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 

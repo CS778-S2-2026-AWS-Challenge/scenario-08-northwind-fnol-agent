@@ -170,7 +170,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
                     'profile_id': 'integration-model-profile',
                     'purpose': 'agent_turn',
                     'privacy_class': 'synthetic_fnol',
-                    'prompt_version': 'northwind-fnol-motor-claimant-v3',
+                    'prompt_version': 'northwind-fnol-motor-claimant-v4',
                     'evaluation_status': 'configured',
                     'timeout_seconds': 30,
                     'structured_output': True,
@@ -293,7 +293,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         assert request_body['model'] == 'control-plane-model'
         provider_messages = cast(list[dict[str, object]], request_body['messages'])
         system_prompt = cast(str, provider_messages[0]['content'])
-        assert 'Prompt ID: `northwind-fnol-motor-claimant-v3`' in system_prompt
+        assert 'Prompt ID: `northwind-fnol-motor-claimant-v4`' in system_prompt
         assert 'untrusted reference material' in system_prompt
         model_context_content = cast(str, provider_messages[1]['content'])
         model_context = json.loads(model_context_content)

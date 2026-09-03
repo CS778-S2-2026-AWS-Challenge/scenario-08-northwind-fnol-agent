@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -155,7 +156,9 @@ def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> N
     assert after.assessor_routing is None
 
 
-def test_success_is_claimant_safe_and_replays_without_a_second_assignment() -> None:
+def test_success_is_claimant_safe_and_replays_without_a_second_assignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repository = FixtureRepository()
     with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
         claim_id, revision = _create_assessor_ready_claim(client, key='validation-success')
@@ -170,6 +173,11 @@ def test_success_is_claimant_safe_and_replays_without_a_second_assignment() -> N
             'Idempotency-Key': 'validation-success-route',
             'If-Match': str(consent_revision),
         }
+        same_instant = datetime(2026, 9, 3, tzinfo=UTC)
+        monkeypatch.setattr(
+            'backend.services.integrations.now_utc',
+            lambda: same_instant,
+        )
 
         routed = client.post(
             f'/api/v1/claims/{claim_id}/assessor-routing',
@@ -192,6 +200,9 @@ def test_success_is_claimant_safe_and_replays_without_a_second_assignment() -> N
     assert stored is not None
     assert stored.revision == consent_revision + 1
     assert stored.assessor_routing is not None
+    tasks = repository.list_external_tasks_internal(claim_id)
+    assert len(tasks) == 1
+    assert tasks[0].updated_at == same_instant + timedelta(microseconds=1)
     decisions = [
         decision
         for decision in repository.list_agent_decisions(claim_id, 'cus_demo')

@@ -96,8 +96,13 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
                             'confidence': 0.98,
                         },
                         {
-                            'field_code': 'incident.type',
+                            'field_code': 'claim.product_family',
                             'value': 'motor',
+                            'confidence': 0.99,
+                        },
+                        {
+                            'field_code': 'incident.type',
+                            'value': 'collision',
                             'confidence': 0.99,
                         },
                         {
@@ -194,6 +199,7 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
         assert 'Is the vehicle safe to drive?' in first_body['agent_message']['content']['text']
         assert {change['field_code'] for change in first_body['form_changes']} == {
             'incident.description',
+            'claim.product_family',
             'incident.type',
             'incident.location',
             'incident.injury_or_danger',
@@ -231,6 +237,7 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
             json={
                 'field_codes': [
                     'incident.description',
+                    'claim.product_family',
                     'incident.type',
                     'incident.location',
                     'incident.injury_or_danger',

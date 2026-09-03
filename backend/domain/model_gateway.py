@@ -10,6 +10,7 @@ from backend.domain.models import (
     CustomerSupport,
     EvidenceState,
     EvidenceSummary,
+    FieldSelectionState,
     FormSource,
     FormStatus,
     NeededFor,
@@ -146,11 +147,33 @@ class ModelClaimContext(ModelContract):
     customer_next_step: CustomerNextStep
 
 
+class ModelFieldSelectionContext(ModelContract):
+    field_code: str
+    selection_state: FieldSelectionState
+    value_state: FormStatus
+
+
+class ModelBranchContext(ModelContract):
+    field_registry_version: str
+    branch_rules_version: str
+    selected_family: str | None = None
+    unresolved_family_conflict: list[str] = Field(default_factory=list)
+    active_branches: list[str] = Field(default_factory=list)
+    candidate_branches: list[str] = Field(default_factory=list)
+    allowed_field_codes: list[str] = Field(default_factory=list)
+    field_selection: list[ModelFieldSelectionContext] = Field(default_factory=list)
+    work_item_intents: list[dict[str, Any]] = Field(default_factory=list)
+    interruption_result: dict[str, Any] = Field(default_factory=dict)
+    permitted_actions: list[AgentAction] = Field(default_factory=list)
+    permitted_tools: list[str] = Field(default_factory=list)
+
+
 class ModelTurnContext(ModelContract):
     claim: ModelClaimContext
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
+    branch: ModelBranchContext | None = None
     knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
         'not_requested'
     )

@@ -11,6 +11,7 @@ from backend.domain.external_services import (
 from backend.domain.models import (
     AgentDecisionRecord,
     AssessorRoutingOperation,
+    BranchEvaluationRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
     HandoffRecord,
@@ -70,7 +71,12 @@ class ClaimRepository(Protocol):
         """Return claims for an authorised staff projection."""
         raise NotImplementedError
 
-    def save_claim(self, claim: WorkingClaim, expected_revision: int) -> None:
+    def save_claim(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        branch_evaluation: BranchEvaluationRecord | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def save_claim_mutation(
@@ -78,6 +84,7 @@ class ClaimRepository(Protocol):
         claim: WorkingClaim,
         expected_revision: int,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a claim revision and its retry metadata."""
         raise NotImplementedError
@@ -99,6 +106,7 @@ class ClaimRepository(Protocol):
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a resumed session, claim revision, and retry metadata."""
         raise NotImplementedError
@@ -231,6 +239,21 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def save_agent_decision(self, decision: AgentDecisionRecord, customer_id: str) -> None:
         raise NotImplementedError
 
+    def save_branch_evaluation(
+        self,
+        evaluation: BranchEvaluationRecord,
+        customer_id: str,
+    ) -> None:
+        """Persist non-applied evaluation evidence without changing Claim State."""
+        raise NotImplementedError
+
+    def list_branch_evaluations(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[BranchEvaluationRecord]:
+        raise NotImplementedError
+
     def get_assessor_routing_operation(
         self,
         operation_id: str,
@@ -295,6 +318,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         idempotency: IdempotencyRecord,
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
         raise NotImplementedError
@@ -319,6 +343,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         evidence: EvidenceRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist evidence, shared claim state, and retry metadata."""
         raise NotImplementedError
@@ -498,6 +523,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a handoff, shared claim state, and retry metadata."""
         raise NotImplementedError

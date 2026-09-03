@@ -287,7 +287,9 @@ def test_claimant_consent_failure_leaves_claim_and_retry_state_unchanged() -> No
             claim: Any,
             expected_revision: int,
             idempotency: IdempotencyRecord,
+            branch_evaluation: Any = None,
         ) -> None:
+            del claim, expected_revision, idempotency, branch_evaluation
             raise RuntimeError('injected consent transaction failure')
 
     repository = FailingConsentRepository()
@@ -337,7 +339,9 @@ def test_claimant_consent_maps_atomic_repository_conflicts(
             claim: Any,
             expected_revision: int,
             idempotency: IdempotencyRecord,
+            branch_evaluation: Any = None,
         ) -> None:
+            del claim, expected_revision, idempotency, branch_evaluation
             raise failure
 
     repository = ConflictingConsentRepository()
@@ -692,7 +696,7 @@ def test_claimant_retry_restores_authoritative_success_when_response_save_fails(
             headers=headers,
         )
 
-    assert failed_response.status_code == 500
+    assert failed_response.status_code == 500, failed_response.text
     assert after_failure is not None
     assert after_failure.revision == consent['revision'] + 1
     assert after_failure.assessor_routing is not None
@@ -706,7 +710,12 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
     class AcceptedResultCASConflictRepository(FixtureRepository):
         fail_assessor_claim_write = True
 
-        def save_claim(self, claim: Any, expected_revision: int) -> None:
+        def save_claim(
+            self,
+            claim: Any,
+            expected_revision: int,
+            branch_evaluation: Any = None,
+        ) -> None:
             if self.fail_assessor_claim_write and claim.assessor_routing is not None:
                 self.fail_assessor_claim_write = False
                 current = self.get_claim_internal(claim.claim_id)
@@ -722,7 +731,7 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
                 )
                 super().save_claim(concurrent, expected_revision)
                 raise RevisionConflict(concurrent.revision)
-            super().save_claim(claim, expected_revision)
+            super().save_claim(claim, expected_revision, branch_evaluation)
 
     class CountingAssessorAdapter(MockAssessorServiceAdapter):
         invocations = 0
@@ -771,7 +780,7 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
         )
 
     assert conflicted.status_code == 409
-    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert conflicted.json()['error']['code'] == 'REVISION_CONFLICT', conflicted.text
     assert after_conflict is not None
     assert after_conflict.revision == consent['revision'] + 1
     assert after_conflict.assessor_routing is None

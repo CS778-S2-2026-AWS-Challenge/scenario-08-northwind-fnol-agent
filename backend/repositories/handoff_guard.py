@@ -1,6 +1,11 @@
 from typing import Any, Protocol, cast, runtime_checkable
 
-from backend.domain.models import HandoffRecord, HandoffStatus, WorkingClaim
+from backend.domain.models import (
+    BranchEvaluationRecord,
+    HandoffRecord,
+    HandoffStatus,
+    WorkingClaim,
+)
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -184,6 +189,7 @@ class HandoffPersistenceGuard:
         expected_revision: int,
         handoff: HandoffRecord,
         idempotency: IdempotencyRecord,
+        branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         _validate_creation(self._repository, claim, expected_revision, handoff, idempotency)
         self._repository.save_handoff_mutation(
@@ -191,6 +197,7 @@ class HandoffPersistenceGuard:
             expected_revision,
             handoff,
             idempotency,
+            branch_evaluation,
         )
 
     def save_staff_mutation(
