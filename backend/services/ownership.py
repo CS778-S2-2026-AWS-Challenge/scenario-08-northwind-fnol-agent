@@ -145,6 +145,34 @@ def _idempotency(
     )
 
 
+def _validate_projected_inputs(
+    action: WorkbenchAllowedAction,
+    submitted: dict[str, object],
+) -> None:
+    definitions = {item.field_code: item for item in action.inputs}
+    unprojected = sorted(set(submitted) - set(definitions))
+    if unprojected:
+        raise _error(
+            422,
+            'VALIDATION_ERROR',
+            f'The action does not accept the submitted field: {unprojected[0]}.',
+        )
+    for field_code, definition in definitions.items():
+        value = submitted.get(field_code)
+        if definition.required and (value is None or not str(value).strip()):
+            raise _error(
+                422,
+                'VALIDATION_ERROR',
+                f'The projected action requires {field_code}.',
+            )
+        if definition.choices and value not in {choice.value for choice in definition.choices}:
+            raise _error(
+                422,
+                'VALIDATION_ERROR',
+                f'The submitted value for {field_code} is not registered for this action.',
+            )
+
+
 def create_cowork_request(
     repository: PersistenceRepository,
     principal: Principal,
@@ -167,6 +195,10 @@ def create_cowork_request(
     )
     projected_action = require_workbench_action(
         repository, principal, claim, expected, action_code, claim.claim_id
+    )
+    _validate_projected_inputs(
+        projected_action,
+        payload.model_dump(mode='json', exclude_none=True),
     )
     if owner is None:
         raise _error(
@@ -231,6 +263,10 @@ def create_transfer_request(
     projected_action = require_workbench_action(
         repository, principal, claim, expected, 'ownership.request_transfer', claim.claim_id
     )
+    _validate_projected_inputs(
+        projected_action,
+        payload.model_dump(mode='json', exclude_none=True),
+    )
     owner = _primary_owner(repository, claim)
     if owner != principal.subject:
         raise _error(403, 'ACCESS_DENIED', 'Only the primary owner can request a normal transfer.')
@@ -294,6 +330,10 @@ def decide_collaboration_request(
         expected,
         f'ownership.decide_{request.kind.value}',
         request_id,
+    )
+    _validate_projected_inputs(
+        projected_action,
+        payload.model_dump(mode='json', exclude_none=True),
     )
     if request.status is not CollaborationRequestStatus.PENDING:
         raise _error(
@@ -385,6 +425,10 @@ def requeue_claim(
     expected = parse_if_match(if_match)
     projected_action = require_workbench_action(
         repository, principal, claim, expected, 'ownership.requeue', claim.claim_id
+    )
+    _validate_projected_inputs(
+        projected_action,
+        payload.model_dump(mode='json', exclude_none=True),
     )
     if _primary_owner(repository, claim) != principal.subject:
         raise _error(

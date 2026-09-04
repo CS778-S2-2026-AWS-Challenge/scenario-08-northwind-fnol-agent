@@ -19,7 +19,7 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-04.1'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-04.2'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
         'conversation.send_claimant_message',
         'human.accept_handoff',
@@ -44,6 +44,29 @@ def test_action_registry_owns_every_projected_action_contract_dimension() -> Non
         assert {'action_code', 'target_ref', 'actor_id', 'resulting_revision'} <= set(
             definition.audit_requirements
         )
+
+
+def test_registry_owns_ownership_inputs_and_conditional_completion_requirements() -> None:
+    expected_ownership_fields = {
+        'ownership.request_cowork': ['reason'],
+        'ownership.invite_cowork': ['staff_id', 'reason'],
+        'ownership.request_transfer': ['target_staff_id', 'reason'],
+        'ownership.requeue': ['reason'],
+        'ownership.decide_cowork': ['decision'],
+        'ownership.decide_transfer': ['decision'],
+    }
+    for action_code, field_codes in expected_ownership_fields.items():
+        inputs = WORKBENCH_ACTION_REGISTRY[action_code].inputs
+        assert [item.field_code for item in inputs] == field_codes
+        assert all(item.required for item in inputs)
+
+    result_summary = next(
+        item
+        for item in WORKBENCH_ACTION_REGISTRY['work_item.update'].inputs
+        if item.field_code == 'result.summary'
+    )
+    assert result_summary.required is False
+    assert result_summary.required_when == ('status', 'completed')
 
 
 def test_registered_target_variants_own_fixed_completion_effects() -> None:

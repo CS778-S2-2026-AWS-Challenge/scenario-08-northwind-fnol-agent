@@ -47,6 +47,7 @@ from backend.domain.workbench import (
     WorkbenchActionConfirmation,
     WorkbenchActionInput,
     WorkbenchActionInputChoice,
+    WorkbenchActionInputCondition,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -601,6 +602,14 @@ def _registered_action(
             label=item.label,
             control=item.control,
             required=item.required,
+            required_when=(
+                WorkbenchActionInputCondition(
+                    field_code=item.required_when[0],
+                    equals=item.required_when[1],
+                )
+                if item.required_when is not None
+                else None
+            ),
             choices=[
                 WorkbenchActionInputChoice(value=value, label=label)
                 for value, label in item.choices
@@ -742,6 +751,10 @@ def _allowed_actions(
                     label='Claimant update',
                     control='textarea',
                     required=False,
+                    required_when=WorkbenchActionInputCondition(
+                        field_code='status',
+                        equals='completed',
+                    ),
                 )
             )
         actions.append(

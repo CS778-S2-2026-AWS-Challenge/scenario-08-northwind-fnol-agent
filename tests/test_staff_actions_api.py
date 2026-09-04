@@ -47,6 +47,19 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     action = created.json()['action']
     assert action['assigned_to'] == 'stf_demo'
     assert created.json()['revision'] == 2
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    update_action = next(
+        item
+        for item in detail.json()['allowed_actions']
+        if item['action_code'] == 'work_item.update' and item['target_ref'] == action['action_id']
+    )
+    claimant_summary = next(
+        item for item in update_action['inputs'] if item['field_code'] == 'customer_update.summary'
+    )
+    assert claimant_summary['required_when'] == {
+        'field_code': 'status',
+        'equals': 'completed',
+    }
 
     completed = client.patch(
         f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
@@ -86,7 +99,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
         'complete-review',
     )
     assert audit_record is not None
-    assert audit_record.action_registry_version == '2026-09-04.1'
+    assert audit_record.action_registry_version == '2026-09-04.2'
     assert audit_record.action_code == 'work_item.update'
     assert audit_record.target_ref == action['action_id']
 
@@ -197,6 +210,113 @@ def test_staff_write_back_requires_staff_current_revision_and_allowed_paths(
         },
     )
     assert forbidden.status_code == 422
+
+
+def test_work_item_transition_summary_contract_matches_projected_requirements(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim = create_claim(client, auth_headers)
+    claim_id = str(claim['claim_id'])
+    endpoint = f'/api/v1/workbench/claims/{claim_id}/staff-actions'
+    first = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-first-action',
+            'If-Match': '1',
+        },
+        json={'action_type': 'claimant_support'},
+    )
+    assert first.status_code == 201
+    first_id = first.json()['action']['action_id']
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    projected_update = next(
+        action
+        for action in detail.json()['allowed_actions']
+        if action['action_code'] == 'work_item.update' and action['target_ref'] == first_id
+    )
+    result_summary = next(
+        item for item in projected_update['inputs'] if item['field_code'] == 'result.summary'
+    )
+    assert result_summary['required'] is False
+    assert result_summary['required_when'] == {'field_code': 'status', 'equals': 'completed'}
+
+    in_progress = client.patch(
+        f'{endpoint}/{first_id}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-in-progress',
+            'If-Match': '2',
+        },
+        json={'status': 'in_progress'},
+    )
+    assert in_progress.status_code == 200
+    cancelled = client.patch(
+        f'{endpoint}/{first_id}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-cancelled',
+            'If-Match': '3',
+        },
+        json={'status': 'cancelled'},
+    )
+    assert cancelled.status_code == 200
+
+    second = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-second-action',
+            'If-Match': '4',
+        },
+        json={'action_type': 'claimant_support'},
+    )
+    assert second.status_code == 201
+    second_id = second.json()['action']['action_id']
+    completion_payload: dict[str, Any] = {
+        'status': 'completed',
+        'result': {
+            'outcome': 'staff_work_completed',
+            'summary': '',
+            'reason_codes': ['SUPPORT_NEED_MET'],
+            'source_refs': [],
+        },
+        'state_changes': [],
+        'customer_update': None,
+    }
+    empty_summary = client.patch(
+        f'{endpoint}/{second_id}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-empty-completion',
+            'If-Match': '5',
+        },
+        json=completion_payload,
+    )
+    assert empty_summary.status_code == 422
+    assert empty_summary.json()['error']['code'] == 'VALIDATION_ERROR'
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.revision == 5
+
+    completion_payload['result']['summary'] = 'The claimant support work is complete.'
+    completed = client.patch(
+        f'{endpoint}/{second_id}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'transition-valid-completion',
+            'If-Match': '5',
+        },
+        json=completion_payload,
+    )
+    assert completed.status_code == 200
+    assert completed.json()['action']['result']['summary'] == (
+        'The claimant support work is complete.'
+    )
 
 
 def test_signal_decision_is_internal_idempotent_and_never_declares_fraud(

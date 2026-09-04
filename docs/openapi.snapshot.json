@@ -6486,6 +6486,16 @@
             "default": true,
             "title": "Required",
             "type": "boolean"
+          },
+          "required_when": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActionInputCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6513,6 +6523,25 @@
           "label"
         ],
         "title": "WorkbenchActionInputChoice",
+        "type": "object"
+      },
+      "WorkbenchActionInputCondition": {
+        "additionalProperties": false,
+        "properties": {
+          "equals": {
+            "title": "Equals",
+            "type": "string"
+          },
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_code",
+          "equals"
+        ],
+        "title": "WorkbenchActionInputCondition",
         "type": "object"
       },
       "WorkbenchActionInputControl": {

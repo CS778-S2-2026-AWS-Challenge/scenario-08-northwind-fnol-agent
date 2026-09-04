@@ -1450,6 +1450,10 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
+| `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
+| `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
+| `PATCH` | `/workbench/claims/{claim_id}/collaboration-requests/{request_id}` | Accept or reject a projected cowork or transfer request |
+| `POST` | `/workbench/claims/{claim_id}/requeue` | Release primary ownership when the projected action is executable |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
@@ -1640,6 +1644,15 @@ explicit confirmation recorded by the current endpoints. The runtime returns `40
 with structured `action_code` and `target_ref` details when the exact action is absent or blocked;
 it returns `409 REVISION_CONFLICT` before action resolution when the projection revision is stale.
 The client may collect only the projected inputs and must submit the projected fixed fields unchanged.
+An input with `required: true` is always required. An input with `required: false` and a
+`required_when` object becomes required when the named projected field equals the registered value;
+for example, `result.summary` and any projected `customer_update.summary` are required when
+`status` is `completed`, but remain optional for `in_progress` and `cancelled` WorkItem
+transitions. Ownership actions project their complete mutation inputs: cowork access requests and
+requeue require `reason`; cowork invitations require `staff_id` and `reason`; transfer requests
+require `target_staff_id` and `reason`; and cowork or transfer decisions require a registered
+`decision` choice. Ownership mutation routes reject fields that are not present in the exact
+projected action input set.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised.

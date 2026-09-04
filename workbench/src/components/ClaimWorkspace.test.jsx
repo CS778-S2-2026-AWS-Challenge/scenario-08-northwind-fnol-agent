@@ -107,7 +107,7 @@ describe('ClaimWorkspace navigation', () => {
           primary_action_target_ref: 'clm_1',
         },
         allowed_actions: [
-          { action_code: 'ownership.request_cowork', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' } },
+          { action_code: 'ownership.request_cowork', target_type: 'claim', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }] },
           { action_code: 'human.accept_handoff', target_ref: 'hnd_1', label: 'Accept Claim', purpose: 'Assigned to another staff member.', availability: 'blocked', blocked_reason: 'This work is assigned to another staff member.' },
         ],
       }}

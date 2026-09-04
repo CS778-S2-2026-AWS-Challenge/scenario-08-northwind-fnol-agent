@@ -180,7 +180,7 @@ export const workbenchApi = {
   requestTransfer(token, claimId, revision, payload) {
     return ownershipRequest(token, claimId, 'transfer-requests', revision, payload)
   },
-  decideCollaboration(token, claimId, requestId, revision, decision) {
+  decideCollaboration(token, claimId, requestId, revision, payload) {
     return request(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/collaboration-requests/${encodeURIComponent(requestId)}`,
       {
@@ -190,12 +190,12 @@ export const workbenchApi = {
           'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify(payload),
       },
     )
   },
-  requeue(token, claimId, revision, reason) {
-    return ownershipRequest(token, claimId, 'requeue', revision, { reason })
+  requeue(token, claimId, revision, payload) {
+    return ownershipRequest(token, claimId, 'requeue', revision, payload)
   },
   resolveHandoff(token, claimId, handoffId, revision, payload) {
     return request(

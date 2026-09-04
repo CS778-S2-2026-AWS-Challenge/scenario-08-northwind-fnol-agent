@@ -44,10 +44,7 @@ export default function ClaimWorkspace({
   onUpdateAction,
   onLoadEvidence,
   onSend,
-  onCoworkRequest,
-  onTransferRequest,
-  onRequeue,
-  onCollaborationDecision,
+  onOwnershipAction,
 }) {
   if (loading) return <main className="claim-state"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error) return <main className="claim-state claim-state--error"><AlertTriangle /><h2>This Claim could not be opened</h2><p>{error}</p></main>
@@ -79,7 +76,7 @@ export default function ClaimWorkspace({
       </nav>
 
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
-        {section === 'summary' && <Summary detail={detail} resources={resources} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onCoworkRequest={onCoworkRequest} onTransferRequest={onTransferRequest} onRequeue={onRequeue} onCollaborationDecision={onCollaborationDecision} />}
+        {section === 'summary' && <Summary detail={detail} resources={resources} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} />}
         {section === 'conversation' && <Conversation detail={detail} resource={resources.messages} draft={draft} onDraft={onDraft} onSend={onSend} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
@@ -115,7 +112,7 @@ function EmptyWorkspace() {
   )
 }
 
-function Summary({ detail, resources, handoffs, collaborationRequests, profile, onAccept, onResolve, onCoworkRequest, onTransferRequest, onRequeue, onCollaborationDecision }) {
+function Summary({ detail, resources, handoffs, collaborationRequests, profile, onAccept, onResolve, onOwnershipAction }) {
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
   const missing = detail.work_summary?.missing_information || []
   const attention = detail.work_summary?.risk_signals || []
@@ -172,10 +169,7 @@ function Summary({ detail, resources, handoffs, collaborationRequests, profile, 
       <OwnershipActions
         actions={detail.allowed_actions || []}
         requests={collaborationRequests}
-        onCoworkRequest={onCoworkRequest}
-        onTransferRequest={onTransferRequest}
-        onRequeue={onRequeue}
-        onDecision={onCollaborationDecision}
+        onAction={onOwnershipAction}
       />
 
       <div className="detail-columns">

@@ -116,6 +116,9 @@ export function StaffActions({ actions, allowedActions = [], onUpdate }) {
 function StaffActionRecord({ action, allowedAction, onUpdate }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [selectedStatus, setSelectedStatus] = useState(() => (
+    allowedAction?.inputs.find((input) => input.field_code === 'status')?.choices?.[0]?.value || ''
+  ))
   const final = ['completed', 'cancelled'].includes(action.status)
 
   async function update(event) {
@@ -149,21 +152,28 @@ function StaffActionRecord({ action, allowedAction, onUpdate }) {
       <summary><span><strong>{words(action.action_type)}</strong><small>{action.requested_outcome}</small></span><span className={`record-status record-status--${action.status}`}>{words(action.status)}</span></summary>
       <div className="record-body">
         <dl><dt>Assigned to</dt><dd>{action.assigned_to}</dd><dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>Outcome</dt><dd>{words(action.result.outcome)}</dd><dt>Result</dt><dd>{action.result.summary}</dd></>}</dl>
-        {!final && allowedAction && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && allowedAction && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} required={isInputRequired(input, { status: selectedStatus })} onChange={input.field_code === 'status' ? (event) => setSelectedStatus(event.target.value) : undefined} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
         {!final && !allowedAction && <p className="record-note">This action is read-only because no matching target action is projected for you.</p>}
       </div>
     </details>
   )
 }
 
-function ActionInput({ input }) {
+function ActionInput({ input, required = input.required, onChange }) {
   if (input.control === 'select') {
-    return <label>{input.label}<select name={input.field_code} required={input.required}>{input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label>
+    return <label>{input.label}<select name={input.field_code} required={required} onChange={onChange}>{input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label>
   }
   if (input.control === 'textarea') {
-    return <label>{input.label}<textarea name={input.field_code} rows="3" required={input.required} /></label>
+    return <label>{input.label}<textarea name={input.field_code} rows="3" required={required} /></label>
   }
-  return <label>{input.label}<input name={input.field_code} required={input.required} /></label>
+  return <label>{input.label}<input name={input.field_code} required={required} /></label>
+}
+
+function isInputRequired(input, values) {
+  return input.required || (
+    input.required_when
+    && values[input.required_when.field_code] === input.required_when.equals
+  )
 }
 
 function HandoffContext({ handoff }) {

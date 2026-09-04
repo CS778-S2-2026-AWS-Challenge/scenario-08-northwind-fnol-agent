@@ -820,6 +820,45 @@ def test_non_owner_cowork_request_owner_approval_and_coworker_message(
     )
     assert accepted.status_code == 200
 
+    owner_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers
+    ).json()
+    owner_actions = {action['action_code']: action for action in owner_detail['allowed_actions']}
+    assert [item['field_code'] for item in owner_actions['ownership.invite_cowork']['inputs']] == [
+        'staff_id',
+        'reason',
+    ]
+    assert [
+        item['field_code'] for item in owner_actions['ownership.request_transfer']['inputs']
+    ] == ['target_staff_id', 'reason']
+    assert [item['field_code'] for item in owner_actions['ownership.requeue']['inputs']] == [
+        'reason'
+    ]
+
+    coworker_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers
+    ).json()
+    cowork_request_action = next(
+        action
+        for action in coworker_detail['allowed_actions']
+        if action['action_code'] == 'ownership.request_cowork'
+    )
+    assert [item['field_code'] for item in cowork_request_action['inputs']] == ['reason']
+    unprojected_target = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'cowork-unprojected-target',
+            'If-Match': str(accepted.json()['revision']),
+        },
+        json={
+            'staff_id': coworker_id,
+            'reason': 'I can help with the claimant conversation.',
+        },
+    )
+    assert unprojected_target.status_code == 422
+    assert unprojected_target.json()['error']['code'] == 'VALIDATION_ERROR'
+
     requested = client.post(
         f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
         headers={

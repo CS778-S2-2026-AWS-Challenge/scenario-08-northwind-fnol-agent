@@ -105,11 +105,17 @@ class WorkbenchActionInputChoice(ContractModel):
     label: str
 
 
+class WorkbenchActionInputCondition(ContractModel):
+    field_code: str
+    equals: str
+
+
 class WorkbenchActionInput(ContractModel):
     field_code: str
     label: str
     control: WorkbenchActionInputControl
     required: bool = True
+    required_when: WorkbenchActionInputCondition | None = None
     choices: list[WorkbenchActionInputChoice] = Field(default_factory=list)
 
 

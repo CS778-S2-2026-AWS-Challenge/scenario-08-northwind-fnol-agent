@@ -97,7 +97,7 @@ describe('review actions', () => {
       confirmation: { message: 'The completion result is audited.' },
       inputs: [
         { field_code: 'status', label: 'Status', control: 'select', required: true, choices: [{ value: 'completed', label: 'Completed' }] },
-        { field_code: 'result.summary', label: 'Result summary', control: 'textarea', required: false, choices: [] },
+        { field_code: 'result.summary', label: 'Result summary', control: 'textarea', required: false, required_when: { field_code: 'status', equals: 'completed' }, choices: [] },
       ],
       payload_defaults: {
         result: { outcome: 'professional_review_completed', reason_codes: ['POLICY_SECTION_CONFIRMED'], source_refs: ['pol_1'] },
@@ -114,6 +114,46 @@ describe('review actions', () => {
       status: 'completed',
       result: { outcome: 'professional_review_completed', reason_codes: ['POLICY_SECTION_CONFIRMED'], source_refs: ['pol_1'], summary: 'The policy review is complete.' },
       state_changes: [{ path: 'claim_state.coverage', to: 'clear' }],
+      customer_update: null,
+    })
+  })
+
+  it('prevents completed WorkItems from submitting an empty projected summary', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<StaffActions
+      actions={[workItemRecord()]}
+      allowedActions={[workItemUpdateAction()]}
+      onUpdate={onUpdate}
+    />)
+
+    await user.click(screen.getByText('Claimant Support'))
+    await user.selectOptions(screen.getByLabelText('Status'), 'completed')
+    expect(screen.getByLabelText('Result summary')).toBeRequired()
+    expect(screen.getByLabelText('Claimant update')).toBeRequired()
+    await user.click(screen.getByRole('button', { name: 'Update action' }))
+
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it.each(['in_progress', 'cancelled'])('allows %s without a completion summary', async (status) => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<StaffActions
+      actions={[workItemRecord()]}
+      allowedActions={[workItemUpdateAction()]}
+      onUpdate={onUpdate}
+    />)
+
+    await user.click(screen.getByText('Claimant Support'))
+    await user.selectOptions(screen.getByLabelText('Status'), status)
+    expect(screen.getByLabelText('Result summary')).not.toBeRequired()
+    await user.click(screen.getByRole('button', { name: 'Update action' }))
+
+    expect(onUpdate).toHaveBeenCalledWith('act_transition', {
+      status,
+      result: null,
+      state_changes: [],
       customer_update: null,
     })
   })
@@ -149,3 +189,65 @@ describe('review actions', () => {
     expect(screen.queryByRole('button', { name: 'Record resolution' })).not.toBeInTheDocument()
   })
 })
+
+function workItemRecord() {
+  return {
+    action_id: 'act_transition',
+    action_type: 'claimant_support',
+    requested_outcome: 'Continue claimant support.',
+    status: 'open',
+    assigned_to: 'stf_1',
+    source_refs: [],
+    created_at: '2026-09-03T01:00:00Z',
+  }
+}
+
+function workItemUpdateAction() {
+  return {
+    action_code: 'work_item.update',
+    target_ref: 'act_transition',
+    availability: 'confirmation_required',
+    confirmation: { message: 'The selected status is audited.' },
+    inputs: [
+      {
+        field_code: 'status',
+        label: 'Status',
+        control: 'select',
+        required: true,
+        choices: [
+          { value: 'in_progress', label: 'In progress' },
+          { value: 'completed', label: 'Completed' },
+          { value: 'cancelled', label: 'Cancelled' },
+        ],
+      },
+      {
+        field_code: 'result.summary',
+        label: 'Result summary',
+        control: 'textarea',
+        required: false,
+        required_when: { field_code: 'status', equals: 'completed' },
+        choices: [],
+      },
+      {
+        field_code: 'customer_update.summary',
+        label: 'Claimant update',
+        control: 'textarea',
+        required: false,
+        required_when: { field_code: 'status', equals: 'completed' },
+        choices: [],
+      },
+    ],
+    payload_defaults: {
+      result: {
+        outcome: 'staff_work_completed',
+        reason_codes: ['SUPPORT_NEED_MET'],
+        source_refs: [],
+      },
+      state_changes: [],
+      customer_update: {
+        responsible_party: 'claimant',
+        related_refs: ['act_transition'],
+      },
+    },
+  }
+}

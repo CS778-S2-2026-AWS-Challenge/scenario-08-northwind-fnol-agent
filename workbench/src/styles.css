@@ -195,7 +195,7 @@ p { line-height: 1.55; }
 .ownership-action__toggle small { margin-top: 3px; color: var(--color-text-muted); font-size: var(--workbench-font-meta); font-weight: var(--font-weight-regular); }
 .ownership-action__form { display: grid; gap: 12px; padding: 14px; border-top: 1px solid var(--color-divider); background: var(--color-surface); }
 .ownership-action__form label { display: grid; gap: 6px; font-size: var(--workbench-font-meta); font-weight: var(--font-weight-semibold); }
-.ownership-action__form input, .ownership-action__form textarea { width: 100%; min-height: 40px; padding: 8px 10px; }
+.ownership-action__form input, .ownership-action__form select, .ownership-action__form textarea { width: 100%; min-height: 40px; padding: 8px 10px; }
 .ownership-action__form > p { margin: 0; color: var(--color-text-muted); font-size: var(--workbench-font-meta); }
 .ownership-action__controls { display: flex; justify-content: flex-end; gap: 8px; }
 .ownership-decision { display: grid; align-items: center; gap: 12px; padding: 13px 14px; grid-template-columns: minmax(0, 1fr) auto; }

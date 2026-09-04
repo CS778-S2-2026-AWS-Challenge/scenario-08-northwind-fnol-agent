@@ -9,7 +9,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-04.1'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-04.2'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -35,6 +35,7 @@ class RegisteredActionInput:
     label: str
     control: WorkbenchActionInputControl
     required: bool = True
+    required_when: tuple[str, str] | None = None
     choices: tuple[tuple[str, str], ...] = ()
 
 
@@ -138,9 +139,10 @@ def _input(
     control: WorkbenchActionInputControl,
     *,
     required: bool = True,
+    required_when: tuple[str, str] | None = None,
     choices: tuple[tuple[str, str], ...] = (),
 ) -> RegisteredActionInput:
-    return RegisteredActionInput(field_code, label, control, required, choices)
+    return RegisteredActionInput(field_code, label, control, required, required_when, choices)
 
 
 WORKBENCH_ACTION_REGISTRY = {
@@ -271,6 +273,7 @@ WORKBENCH_ACTION_REGISTRY = {
                     'Result summary',
                     WorkbenchActionInputControl.TEXTAREA,
                     required=False,
+                    required_when=('status', 'completed'),
                 ),
             ),
             ('customer_next_step.update', 'customer_update.append'),
@@ -284,6 +287,7 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'The current primary owner will receive this request.',
             ('collaboration_request.create',),
+            (_input('reason', 'Why do you need access?', WorkbenchActionInputControl.TEXTAREA),),
         ),
         RegisteredWorkbenchAction(
             'ownership.invite_cowork',
@@ -294,6 +298,14 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'The invited staff member must accept before access changes.',
             ('collaboration_request.create',),
+            (
+                _input('staff_id', 'Staff ID to invite', WorkbenchActionInputControl.TEXT),
+                _input(
+                    'reason',
+                    'Why is this collaboration needed?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
         ),
         RegisteredWorkbenchAction(
             'ownership.request_transfer',
@@ -304,6 +316,14 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'Ownership changes only after the target staff member accepts.',
             ('collaboration_request.create',),
+            (
+                _input('target_staff_id', 'Target staff ID', WorkbenchActionInputControl.TEXT),
+                _input(
+                    'reason',
+                    'Why should ownership transfer?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
         ),
         RegisteredWorkbenchAction(
             'ownership.requeue',
@@ -314,6 +334,13 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'This Claim will become available for another staff member.',
             ('ownership.release', 'queue.recompute'),
+            (
+                _input(
+                    'reason',
+                    'Why are you releasing this Claim?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
         ),
         RegisteredWorkbenchAction(
             'ownership.decide_cowork',
@@ -324,6 +351,14 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'Accepting this request changes Claim access and is audited.',
             ('ownership.cowork_grant',),
+            (
+                _input(
+                    'decision',
+                    'Decision',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(('accepted', 'Accept'), ('rejected', 'Decline')),
+                ),
+            ),
         ),
         RegisteredWorkbenchAction(
             'ownership.decide_transfer',
@@ -334,6 +369,14 @@ WORKBENCH_ACTION_REGISTRY = {
             ConfirmationLevel.EXPLICIT,
             'Accepting this request changes Claim access and is audited.',
             ('ownership.transfer',),
+            (
+                _input(
+                    'decision',
+                    'Decision',
+                    WorkbenchActionInputControl.SELECT,
+                    choices=(('accepted', 'Accept'), ('rejected', 'Decline')),
+                ),
+            ),
         ),
     )
 }
