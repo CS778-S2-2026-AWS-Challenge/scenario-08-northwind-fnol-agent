@@ -47,7 +47,7 @@ class ControlledRetriever:
 class RaisingRetriever(ControlledRetriever):
     def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
         self.last_request = request
-        raise ValueError('provider payload could not be decoded')
+        raise RuntimeError('provider payload could not be decoded')
 
 
 class MalformedChunkRetriever(ControlledRetriever):
