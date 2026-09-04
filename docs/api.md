@@ -2048,6 +2048,9 @@ Status is `evidence_found`, `no_evidence`, `ambiguous`, `timeout`, or `unavailab
   `connection_state=degraded` and one retryable `errors[].code=timeout` item.
 - `unavailable` means the provider could not answer. It reports
   `connection_state=unavailable` and one retryable `errors[].code=unavailable` item.
+- If a structured policy or claim-history provider returns a malformed response, the API
+  returns `502 DEPENDENCY_FAILED` with a bounded message and `retryable=false`; no retrieval
+  evidence or provider payload is persisted or returned.
   Both failure states carry claimant-safe `limitations`, never carry `facts` or a
   `source`, and persist nothing, because an absent answer must not become a finding.
 

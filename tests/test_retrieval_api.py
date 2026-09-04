@@ -5,11 +5,13 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.policy_history import (
     MockPolicyHistoryAdapter,
+    ProviderLookupEnvelope,
     RetrievalUnavailable,
 )
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.repositories.fixture import FixtureRepository
+from backend.services.support import now_utc
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
 POLICY_SEARCH = '/internal/v1/policy/search'
@@ -400,6 +402,48 @@ def test_ready_provider_timeout_is_projected_without_persisting_evidence(
     assert response.json()['source'] is None
     assert 'secret provider timeout' not in response.text
     assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+
+
+@pytest.mark.parametrize('operation', ['policy', 'history'])
+def test_malformed_provider_payload_returns_bounded_failure_without_persisting_evidence(
+    operation: str,
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    retrieval_adapter: MockPolicyHistoryAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method_name = f'search_{operation}' if operation == 'policy' else 'search_claim_history'
+
+    def malformed(_: object) -> ProviderLookupEnvelope:
+        return ProviderLookupEnvelope(
+            provider='fixture-malformed-provider',
+            provider_reference='malformed-reference',
+            retrieved_at=now_utc(),
+            payload={},
+        )
+
+    monkeypatch.setattr(retrieval_adapter, method_name, malformed)
+    with retrieval_client as client:
+        claim_id = create_claim(client, f'{operation}-malformed')
+        if operation == 'policy':
+            endpoint = POLICY_SEARCH
+            payload = {'claim_id': claim_id, 'policy_reference': 'synthetic-policy-101'}
+            expected_message = 'The policy provider returned an unusable response.'
+        else:
+            endpoint = HISTORY_SEARCH
+            payload = {'claim_id': claim_id, 'history_reference': 'synthetic-history-204'}
+            expected_message = 'The claim-history provider returned an unusable response.'
+        response = client.post(endpoint, headers=INTEGRATION_AUTH, json=payload)
+
+    assert response.status_code == 502
+    assert response.json()['error'] == {
+        'code': 'DEPENDENCY_FAILED',
+        'message': expected_message,
+        'request_id': response.headers['x-request-id'],
+        'retryable': False,
+    }
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+    assert 'malformed-reference' not in response.text
 
 
 def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
