@@ -26,6 +26,13 @@ For product-direction or user-behaviour work, read [Northwind FNOL Product Soul]
 before the relevant files in `SPEC/`. It is the concise product-direction index; `SPEC/` remains
 the normative requirement and acceptance source.
 
+For any frontend or frontend-runtime design, implementation, review, or refactoring task, you
+MUST read [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-quality-standard.md)
+before acting. This document defines the required product big picture, Agent-first claimant
+journey, Workbench task model, component and token system, route and state boundaries, frontend
+and Runtime responsibilities, real-API expectations, and acceptance evidence. Do not treat the
+legacy `employee/index.html` or other historical prototypes as the design baseline.
+
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical
 reference only. Where an archived document disagrees with the skill, the skill prevails
