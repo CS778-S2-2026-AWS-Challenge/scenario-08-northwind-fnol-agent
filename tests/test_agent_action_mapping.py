@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from backend.domain.agent_action_commands import build_claim_context_command
+from backend.domain.agent_action_commands import ClaimContextCommand, build_claim_context_command
 from backend.domain.agent_action_registry import ActionActorRole, ExecutionAuthority
 from backend.domain.audit import AuditActor, AuditEventType, AuditOutcome, AuditVisibility
 from backend.domain.models import ActorType, WorkflowState
@@ -16,7 +16,7 @@ from backend.services.agent_action_mapping import (
 )
 
 
-def _command():
+def _command() -> ClaimContextCommand:
     return build_claim_context_command(
         'claim.apply_fact_patch',
         {'claim_id': 'clm_123', 'fact_patches': [], 'expected_revision': 4},
