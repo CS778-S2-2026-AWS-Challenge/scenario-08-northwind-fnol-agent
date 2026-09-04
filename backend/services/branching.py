@@ -3,12 +3,13 @@
 from collections.abc import Sequence
 from datetime import datetime
 
-from backend.domain.branch_registry import BranchRuleEvaluator
+from backend.domain.branch_registry import BranchRuleEvaluator, claimant_projection_fields
 from backend.domain.ids import new_id
 from backend.domain.models import (
     AgentAction,
     BranchEvaluationRecord,
     BranchEvaluationStatus,
+    DynamicFormProjection,
     WorkingClaim,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -45,6 +46,37 @@ def latest_applied_branch_evaluation(
             record.created_at,
             record.evaluation_id,
         ),
+    )
+
+
+def claimant_dynamic_form_projection(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> DynamicFormProjection | None:
+    """Project the newest applicable branch evaluation for a claimant Claim snapshot.
+
+    Args:
+        repository: The selected provider-neutral persistence boundary.
+        claim: The current authoritative Claim snapshot.
+
+    Returns:
+        A claimant-safe projection carried to the current Claim revision, or ``None``
+        when the Claim has no applied branch evaluation.
+    """
+
+    evaluation = latest_applied_branch_evaluation(repository, claim)
+    if evaluation is None:
+        return None
+    return DynamicFormProjection(
+        claim_id=claim.claim_id,
+        claim_revision=claim.revision,
+        field_registry_version=evaluation.field_registry_version,
+        branch_rules_version=evaluation.branch_rules_version,
+        selected_family=evaluation.selected_family,
+        active_branches=[
+            result.branch_id for result in evaluation.branch_results if result.status == 'active'
+        ],
+        fields=claimant_projection_fields(evaluation),
     )
 
 
@@ -98,4 +130,8 @@ def build_applied_branch_evaluation(
     )
 
 
-__all__ = ['build_applied_branch_evaluation', 'latest_applied_branch_evaluation']
+__all__ = [
+    'build_applied_branch_evaluation',
+    'claimant_dynamic_form_projection',
+    'latest_applied_branch_evaluation',
+]

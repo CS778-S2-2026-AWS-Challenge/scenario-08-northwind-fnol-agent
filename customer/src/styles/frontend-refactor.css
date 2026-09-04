@@ -182,6 +182,20 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .customer-app::-webkit-scrollb
 .details-panel-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
 .details-toggle { padding: var(--space-2) var(--space-3); border: var(--border-component); border-radius: var(--radius-md); color: var(--color-text-secondary); background: var(--color-surface); font: inherit; cursor: pointer; }
 #claim-details-body { padding: var(--space-5); }
+.dynamic-form-summary { margin-bottom: var(--space-5); padding-bottom: var(--space-5); border-bottom: 1px solid var(--color-divider); }
+.dynamic-form-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.dynamic-form-heading h2 { margin: var(--space-1) 0 0; color: var(--color-text-primary); font-size: var(--font-size-section); }
+.dynamic-form-revision { color: var(--color-text-muted); font-size: var(--font-size-caption); white-space: nowrap; }
+.dynamic-form-fields { display: grid; gap: var(--space-3); margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+.dynamic-form-field { padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-surface); }
+.dynamic-form-field-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
+.dynamic-selection { padding: 2px var(--space-2); border-radius: var(--radius-sm); font-size: var(--font-size-caption); white-space: nowrap; }
+.dynamic-selection-required_now { color: var(--color-danger); background: var(--color-danger-soft); }
+.dynamic-selection-candidate_now { color: var(--color-accent-strong); background: var(--color-accent-soft); }
+.dynamic-selection-pending_later { color: var(--color-text-muted); background: var(--color-page); }
+.dynamic-form-value { margin: var(--space-2) 0 var(--space-1); color: var(--color-text-primary); font-size: var(--font-size-body); line-height: 1.45; }
+.dynamic-form-meta, .dynamic-form-reason, .dynamic-form-empty { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-caption); line-height: 1.45; }
+.dynamic-form-reason { margin-top: var(--space-1); }
 .field-list { display: grid; gap: var(--space-3); }
 .claim-field { padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-surface); }
 .field-heading { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
