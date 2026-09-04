@@ -89,7 +89,12 @@ def map_claim_context_execution_to_api(result: ClaimContextExecutionResult) -> A
     if not isinstance(result, ClaimContextExecutionResult):
         raise TypeError('result must be a ClaimContextExecutionResult.')
     if result.status is ClaimContextExecutionStatus.APPLIED:
-        if result.claim_id is not None and result.resulting_revision is not None:
+        if (
+            result.claim_id is not None
+            and result.claim_id.strip()
+            and result.resulting_revision is not None
+            and result.resulting_revision >= 1
+        ):
             return None
         return ApiError(
             status_code=500,
@@ -154,11 +159,17 @@ def build_claim_context_execution_audit_event(
         raise TypeError('created_at must be a datetime.')
     if command.action_code != result.action_code:
         raise ValueError('Execution result action does not match the approved command.')
+    if result.claim_id is not None and not result.claim_id.strip():
+        return None
+    if result.resulting_revision is None or result.resulting_revision < 1:
+        return None
+    if result.status is ClaimContextExecutionStatus.APPLIED and result.claim_id is None:
+        return None
     if command.claim_id is not None and result.claim_id not in {None, command.claim_id}:
         raise ValueError('Execution result Claim scope does not match the approved command.')
 
-    claim_id = result.claim_id or command.claim_id
-    if claim_id is None or result.resulting_revision is None:
+    claim_id = result.claim_id if result.claim_id is not None else command.claim_id
+    if claim_id is None or not claim_id.strip():
         return None
     event_type = (
         AuditEventType.ACTION_COMPLETED

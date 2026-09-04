@@ -33,13 +33,14 @@ def _result(
     status: ClaimContextExecutionStatus,
     reason: str,
     *,
+    claim_id: str | None = 'clm_123',
     revision: int | None = 5,
     retryable: bool = False,
 ) -> ClaimContextExecutionResult:
     return ClaimContextExecutionResult(
         action_code='claim.apply_fact_patch',
         status=status,
-        claim_id='clm_123',
+        claim_id=claim_id,
         resulting_revision=revision,
         reason_code=reason,
         retryable=retryable,
@@ -78,6 +79,44 @@ def test_applied_execution_reuses_revision_and_existing_audit_vocabulary() -> No
     assert event.idempotency_key == 'patch-4'
     assert event.source_refs == ['published-rule:fact-patch-v1']
     assert event.visibility is AuditVisibility.AUDIT_ONLY
+
+
+@pytest.mark.parametrize(
+    ('claim_id', 'revision'),
+    [
+        ('', 5),
+        ('   ', 5),
+        (None, 5),
+        ('clm_123', 0),
+        ('clm_123', -1),
+    ],
+)
+def test_applied_mapping_fails_closed_for_invalid_persisted_identity(
+    claim_id: str | None,
+    revision: int,
+) -> None:
+    command = _command()
+    result = _result(
+        ClaimContextExecutionStatus.APPLIED,
+        'APPLIED',
+        claim_id=claim_id,
+        revision=revision,
+    )
+
+    error = map_claim_context_execution_to_api(result)
+    assert error is not None
+    assert (error.status_code, error.code) == (500, 'INTERNAL_ERROR')
+
+    assert (
+        build_claim_context_execution_audit_event(
+            command,
+            result,
+            event_id='aud_invalid_execution_identity',
+            actor=_actor(),
+            created_at=datetime(2026, 9, 4, 1, 4, tzinfo=UTC),
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
