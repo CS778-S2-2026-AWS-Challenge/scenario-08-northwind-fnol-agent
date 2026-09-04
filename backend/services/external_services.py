@@ -18,8 +18,10 @@ from backend.domain.external_services import (
     ASSESSOR_REQUESTED_ACTION,
     ASSESSOR_SERVICE_IDENTITY,
     ASSESSOR_SHARED_DATA_SUMMARY,
-    ExternalTaskOperationStatus,
+    ExternalTaskContinuation,
+    ExternalTaskContinuationOutcome,
     ExternalTaskRecord,
+    continuation_for_failed_task,
 )
 from backend.domain.models import (
     ActorReference,
@@ -128,11 +130,17 @@ def _has_open_handoff(repository: PersistenceRepository, claim: WorkingClaim) ->
 # invented wording or crashing the projection on an enum it cannot express.
 _CLAIMANT_FAILURE_CODES = frozenset(code.value for code in AssessorRoutingFailureCode)
 
-_CLAIMANT_FAILURE_STATUS = {
-    ExternalTaskOperationStatus.RETRYABLE_FAILURE: (
+# What a failed task means for whoever is waiting on it is decided once, by
+# `continuation_for_failed_task`, from the recovery the matrix settled. This maps
+# that answer onto the claimant vocabulary rather than deriving it a second time
+# from the operation status, which would be the same rule written twice and free
+# to drift. `AWAITING_RECONCILIATION` has no entry: an unresolved outcome has no
+# approved claimant wording and is deliberately not projected.
+_CLAIMANT_CONTINUATION_STATUS = {
+    ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE: (
         ClaimantExternalServiceStatus.RETRYABLE_FAILURE
     ),
-    ExternalTaskOperationStatus.TERMINAL_FAILURE: (ClaimantExternalServiceStatus.TERMINAL_FAILURE),
+    ExternalTaskContinuation.AWAITING_REVIEW: (ClaimantExternalServiceStatus.TERMINAL_FAILURE),
 }
 
 
@@ -164,9 +172,9 @@ def _latest_failed_assessor_task(
         task
         for task in repository.list_external_tasks_internal(claim.claim_id)
         if task.service_identity == ASSESSOR_SERVICE_IDENTITY
-        and task.status in _CLAIMANT_FAILURE_STATUS
         and task.failure_code is not None
         and task.failure_code.value in _CLAIMANT_FAILURE_CODES
+        and continuation_for_failed_task(task).continuation in _CLAIMANT_CONTINUATION_STATUS
     ]
     if not failed:
         return None
@@ -179,6 +187,7 @@ def claimant_assessor_action(
 ) -> ClaimantExternalServiceAction | None:
     routing = claim.assessor_routing
     failed_task = None
+    continuation: ExternalTaskContinuationOutcome | None = None
     if routing is None:
         failed_task = _latest_failed_assessor_task(repository, claim)
         created_claim = claim.external_claim
@@ -204,7 +213,8 @@ def claimant_assessor_action(
         else:
             return None
     elif failed_task is not None:
-        status = _CLAIMANT_FAILURE_STATUS[failed_task.status]
+        continuation = continuation_for_failed_task(failed_task)
+        status = _CLAIMANT_CONTINUATION_STATUS[continuation.continuation]
     elif consent is not None:
         status = ClaimantExternalServiceStatus.READY_TO_REQUEST
     else:
@@ -224,15 +234,20 @@ def claimant_assessor_action(
             if failed_task is not None and failed_task.failure_code is not None
             else None
         ),
-        # A retryable failure keeps the affordance, because AT-10 says the same
-        # unchanged operation may be retried explicitly. A terminal failure loses
-        # it, because that scenario requires Northwind to review the request first.
-        can_request=status
-        in {
-            ClaimantExternalServiceStatus.CONSENT_REQUIRED,
-            ClaimantExternalServiceStatus.READY_TO_REQUEST,
-            ClaimantExternalServiceStatus.RETRYABLE_FAILURE,
-        },
+        # After a failure the domain has already answered whether the failure
+        # itself permits another attempt, so this reads that answer instead of
+        # inferring it from the status a moment after deriving that status from the
+        # same place. It is not permission to send: the routing endpoint still
+        # checks the claim, consent, and revision.
+        can_request=(
+            continuation.failure_permits_another_attempt
+            if continuation is not None
+            else status
+            in {
+                ClaimantExternalServiceStatus.CONSENT_REQUIRED,
+                ClaimantExternalServiceStatus.READY_TO_REQUEST,
+            }
+        ),
     )
 
 
