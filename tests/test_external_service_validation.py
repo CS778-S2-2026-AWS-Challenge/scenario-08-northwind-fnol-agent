@@ -523,3 +523,44 @@ def test_a_failure_code_without_claimant_wording_does_not_break_the_claimant_rea
     assert action['status'] == 'ready_to_request'
     assert action['failure_code'] is None
     assert action['can_request'] is True
+
+
+def test_a_task_awaiting_reconciliation_is_not_shown_as_a_failure() -> None:
+    """The claimant projection follows the continuation, not the operation status.
+
+    A timeout that reached the provider is an unresolved outcome, not a failure the
+    claimant may retry: the provider may still act on it. `continuation_for_failed_task`
+    settles that as `awaiting_reconciliation`, which has no approved claimant wording,
+    so nothing is projected and the ordinary safe action stands.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='reconciling')
+        _grant_consent(client, claim_id, revision, key='reconciling')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        recorded_at = datetime(2026, 9, 4, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='tsk_reconciling',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='transport-receipt-reconciling',
+                failure_code=ExternalTaskFailureCode.TIMEOUT,
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            ),
+            stored.customer_id,
+        )
+
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+
+    assert claimant.status_code == 200
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'ready_to_request'
+    assert action['failure_code'] is None
