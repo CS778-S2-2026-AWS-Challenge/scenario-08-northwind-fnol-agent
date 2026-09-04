@@ -49,7 +49,9 @@ function splitRepository(repository: string): { owner: string; repo: string } {
 export function statusForPullRequest(event: PullRequestEvent): ProjectStatus | null {
   switch (event.action) {
     case "closed":
-      return event.pullRequest.merged ? "Done" : "In progress";
+      // Closing a PR without merging does not prove that work is in progress.
+      // Preserve the card's current planning status until another active signal.
+      return event.pullRequest.merged ? "Done" : null;
     case "converted_to_draft":
       return "In progress";
     case "ready_for_review":
