@@ -153,3 +153,33 @@ All five temporary backend containers created for this record were removed. The 
 MinIO compose attempt created in the isolated validation worktree was also removed with its empty
 network and empty volume. The pre-existing healthy project MinIO service and its data were left
 untouched. The local validation image remains available for follow-up issue #265.
+
+## Week 5 Day 5 cloud capability and Week 6 inputs
+
+This section records the Day 5 re-check for issue #450. It is an evidence record, not a provider-profile promotion. On 4 September 2026, `validate_runtime_profiles.py` reported fixture `verified`, MongoDB `partial` with connectivity `unavailable`, AWS and Cloudflare `unavailable`, and local MinIO `unavailable`. `run_regression_entrypoints.py` passed seven fixture-backed checks; its three MinIO/knowledge provider checks were not executed. Docker Desktop was unreachable, so `local_mvp` was not checked.
+
+| Capability | Current status | Week 6 required input and gate |
+| --- | --- | --- |
+| Fixture runtime | `verified` | Retain as deterministic offline regression profile. |
+| Local MinIO evidence/knowledge | `unavailable` in this run | Start the approved service, verify buckets and governed objects, then run the MinIO FastAPI smoke and governed RAG cases. |
+| Local MVP MongoDB + MinIO | `not_checked` in this run | Start the replica set and MinIO, then run `check_runtime_profile.py` and `run_local_mvp_smoke.py`; verify recovery, revision, idempotency, protected bytes, and rollback. |
+| MongoDB / Atlas profile | `partial`; connectivity `unavailable` | Provide approved secret-based URI, network allow-list, database/collection, transaction support, and indexes; a ping alone cannot promote the complete profile. |
+| AWS data profile | `unavailable` | Confirm account/region, IAM actions/resources, service bindings, schemas, credential injection, deployment target, and bounded adapter smokes for success and every failure path. |
+| Cloudflare data profile | `unavailable` | Confirm service/binding, schema, permissions, endpoint, and secret injection before selecting or implementing the profile. |
+| Model gateway | Independent of data profile | Validate endpoint, model identifier, prompt version, structured output, timeout, and secret injection separately; model evidence cannot promote a data profile. |
+
+### Repeatable evidence commands
+
+```powershell
+py -3.12 scripts/validate_runtime_profiles.py
+py -3.12 scripts/validate_runtime_profiles.py --probe-mongodb
+py -3.12 scripts/run_regression_entrypoints.py
+```
+
+These commands must be rerun at the exact commit being reported. A provider-backed check that does not execute is not evidence and must remain `unavailable`, `partial`, or `fixture-dependent`.
+
+### Week 6 connection checklist
+
+For each provider, record the approved endpoint/binding, secret environment reference (never the value), schema and index version, network/permission prerequisites, selected runtime profile, readiness result, and bounded success/no-result/timeout/unavailable/malformed/access-denied evidence. Keep one complete data profile selected per process; never silently combine MongoDB, MinIO, AWS, Cloudflare, or fixture services.
+
+No credentials, customer data, or raw provider payloads are included here. This record is complete for #450's planning/verification scope; implementation work begins only when the missing approved bindings and observed runtime records exist.

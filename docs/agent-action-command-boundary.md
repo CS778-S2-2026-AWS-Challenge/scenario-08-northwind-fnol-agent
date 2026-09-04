@@ -22,6 +22,16 @@ The execution gate rejects stale workflow state, stale revision, unsupported act
 
 This issue does **not** introduce the coordinated target `ExecutionPlan` / `TurnResult` persistence or public transport migration. It also does not publish a new API route or compose every namespaced action into one runtime entry point. Day 4 integration work may consume this internal boundary while the existing action-specific services remain authoritative for concrete writes.
 
+## Day 4 API, persistence, and audit mapping
+
+`map_claim_context_execution_to_api` maps an already-produced execution result into the existing public error vocabulary without creating a second action authority. An `applied` result reuses the action-specific success response and its authoritative resulting revision; it does not create a generic success envelope. Revision, idempotency, resource, state, access, validation, and dependency outcomes map only to error codes that are already part of the current API contract. Executor-only reasons such as an unsupported handler binding, a forbidden tool binding, or an unverifiable persisted transition collapse to `INTERNAL_ERROR` rather than becoming new public reason codes.
+
+`build_claim_context_execution_audit_event` maps only revision-backed outcomes into the existing `AuditEventEnvelope`. Applied outcomes use `action.completed` / `succeeded`; rejected or failed revision-backed outcomes use `action.failed` with the corresponding `rejected` or `failed` outcome. The event remains `audit_only`, preserves the approved authority reference as a source reference and the command idempotency key when present, and never copies raw tool or provider output.
+
+A claim-scoped AuditEvent is not created when the execution result lacks an authoritative Claim revision. In particular, a pre-execution rejection, missing Claim, or dependency failure must not invent a Claim revision merely to produce an event. The owning action-specific mutation boundary remains responsible for persisting a returned event atomically with the state change where that boundary supports audit facts; this mapper does not append an event after a successful write and thereby create a second, non-atomic persistence path.
+
+This mapping adds no public route, no OpenAPI field, no AuditEvent field or event type, and no replacement persistence record. It is an adapter between the #406 execution result and contracts that already exist.
+
 ## Revision and retry rules
 
 Claim mutations and handoffs require an `expected_revision` before execution, except `claim.open_draft`, which creates a new context and therefore has no prior claim revision. If a registered action already includes `expected_revision`, execution metadata must match it exactly.
@@ -58,3 +68,12 @@ The command exposes only tools that are already allow-listed by the approved act
 - bounded dependency failure without false completion;
 - rejection of a handler that reports success without the matching persisted revision; and
 - fail-closed handling for an unsupported action.
+
+`tests/test_agent_action_mapping.py` covers:
+
+- applied execution reusing the authoritative revision and existing `action.completed` audit vocabulary;
+- revision conflict mapping to the current `REVISION_CONFLICT` API error and a rejected audit outcome;
+- dependency failure mapping to `DEPENDENCY_UNAVAILABLE` without a fabricated audit revision;
+- executor-only reason codes remaining internal rather than becoming public API codes;
+- fail-closed handling for an applied result without verified persisted identity; and
+- rejection of mismatched action or Claim scope during audit mapping.
