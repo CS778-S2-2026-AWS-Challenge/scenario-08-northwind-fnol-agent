@@ -1,5 +1,48 @@
-import { CircleAlert, ExternalLink, ShieldCheck } from 'lucide-react'
+import { CircleAlert, Clock3, ExternalLink, ShieldCheck } from 'lucide-react'
 import { formatDateTime, words } from '../format.js'
+
+export function ExternalServiceSummary({ resource }) {
+  if (resource?.loading) return <SummaryState message="Loading third-party tasks..." />
+  if (resource?.error) return <SummaryState message={resource.error} error />
+  if (resource?.status === 'unavailable') {
+    return <SummaryState message={resource.limitation || 'Third-party task records are unavailable.'} error />
+  }
+
+  const records = resource?.items || []
+  return (
+    <section className="detail-section" aria-labelledby="third-party-summary-title">
+      <div className="section-heading">
+        <div><p className="eyebrow">External services</p><h2 id="third-party-summary-title">Third-party tasks</h2></div>
+        <span className="count-badge">{records.length}</span>
+      </div>
+      {records.length ? (
+        <ul className="missing-list">
+          {records.map(({ task }) => {
+            const summary = taskStatusSummary(task)
+            return (
+              <li key={task.task_id}>
+                {summary.attention ? <CircleAlert size={15} /> : <Clock3 size={15} />}
+                <span>
+                  <strong>{words(task.service_identity)} — {summary.label}</strong>
+                  <small>{summary.detail}{task.integration_source === 'fixture' ? ' Synthetic fixture; no production provider completion is verified.' : ''}</small>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      ) : <p className="empty-note">No third-party task is recorded for this Claim.</p>}
+    </section>
+  )
+}
+
+function SummaryState({ message, error = false }) {
+  return (
+    <section className="detail-section" aria-labelledby="third-party-summary-title">
+      <div className="section-heading"><div><p className="eyebrow">External services</p><h2 id="third-party-summary-title">Third-party tasks</h2></div></div>
+      <p className={error ? 'inline-error' : 'empty-note'} role={error ? 'alert' : 'status'}>{message}</p>
+    </section>
+  )
+}
 
 export default function ExternalServiceRecords({ records }) {
   return (
@@ -16,12 +59,13 @@ export default function ExternalServiceRecords({ records }) {
 
 function ExternalServiceRecord({ record }) {
   const { task, request } = record
-  const needsAttention = ['retryable_failure', 'terminal_failure', 'unknown_outcome'].includes(task.status)
+  const summary = taskStatusSummary(task)
+  const needsAttention = summary.attention
   return (
     <details className="record-row external-record">
       <summary>
         <span><strong>{words(task.service_identity)}</strong><small>{words(task.requested_action)} · Updated {formatDateTime(task.updated_at)}</small></span>
-        <span className={`record-status record-status--${needsAttention ? 'attention' : task.status}`}>{words(task.status)}</span>
+        <span className={`record-status record-status--${needsAttention ? 'attention' : task.status}`}>{summary.label}</span>
       </summary>
       <div className="record-body">
         <div className="external-overview">
@@ -71,4 +115,39 @@ function nextStep(task) {
     unknown_outcome: 'Reconcile by operation or provider reference before any retry.',
   }
   return steps[task.status] || 'Review the current request record before continuing.'
+}
+
+function taskStatusSummary(task) {
+  const summaries = {
+    prepared: {
+      label: 'Pending',
+      detail: 'Prepared but not submitted.',
+      attention: false,
+    },
+    accepted: {
+      label: 'Completion not confirmed',
+      detail: 'The provider acknowledged the request; no verified completed result is recorded.',
+      attention: false,
+    },
+    retryable_failure: {
+      label: 'Failed',
+      detail: 'The request failed before a verified result; retry may be possible with the same operation identity.',
+      attention: true,
+    },
+    terminal_failure: {
+      label: 'Failed',
+      detail: 'The request failed and requires staff review.',
+      attention: true,
+    },
+    unknown_outcome: {
+      label: 'Outcome not confirmed',
+      detail: 'Submission may have occurred; reconcile before retrying.',
+      attention: true,
+    },
+  }
+  return summaries[task.status] || {
+    label: 'Status unavailable',
+    detail: 'No supported third-party task status is available.',
+    attention: true,
+  }
 }

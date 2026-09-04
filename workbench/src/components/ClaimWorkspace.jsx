@@ -12,7 +12,7 @@ import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { TagList } from './TagList.jsx'
 import EvidenceRecords from './EvidenceRecords.jsx'
-import ExternalServiceRecords from './ExternalServiceRecords.jsx'
+import ExternalServiceRecords, { ExternalServiceSummary } from './ExternalServiceRecords.jsx'
 import OwnershipActions from './OwnershipActions.jsx'
 import ReferenceRecords from './ReferenceRecords.jsx'
 import { HandoffResolution, SignalReviews, StaffActions } from './ReviewActions.jsx'
@@ -80,7 +80,7 @@ export default function ClaimWorkspace({
       </nav>
 
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
-        {section === 'summary' && <Summary detail={detail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onCoworkRequest={onCoworkRequest} onTransferRequest={onTransferRequest} onRequeue={onRequeue} onCollaborationDecision={onCollaborationDecision} />}
+        {section === 'summary' && <Summary detail={detail} resources={resources} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onCoworkRequest={onCoworkRequest} onTransferRequest={onTransferRequest} onRequeue={onRequeue} onCollaborationDecision={onCollaborationDecision} />}
         {section === 'conversation' && <Conversation detail={detail} resource={resources.messages} draft={draft} onDraft={onDraft} onSend={onSend} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
@@ -116,7 +116,7 @@ function EmptyWorkspace() {
   )
 }
 
-function Summary({ detail, handoffs, collaborationRequests, profile, onAccept, onResolve, onCoworkRequest, onTransferRequest, onRequeue, onCollaborationDecision }) {
+function Summary({ detail, resources, handoffs, collaborationRequests, profile, onAccept, onResolve, onCoworkRequest, onTransferRequest, onRequeue, onCollaborationDecision }) {
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
   const missing = detail.work_summary?.missing_information || []
   const attention = detail.work_summary?.risk_signals || []
@@ -169,6 +169,11 @@ function Summary({ detail, handoffs, collaborationRequests, profile, onAccept, o
       />
 
       <div className="detail-columns">
+        <ClaimContextSummary resource={resources.fields} />
+        <ExternalServiceSummary resource={resources.externalRequests} />
+      </div>
+
+      <div className="detail-columns">
         <section className="detail-section">
           <div className="section-heading"><div><p className="eyebrow">Incomplete</p><h2>Missing information</h2></div><span className="count-badge">{missing.length}</span></div>
           {missing.length ? <ul className="missing-list">{missing.slice(0, 6).map((item) => <li key={`${item.kind}:${item.code}`}><ChevronRight size={15} /><span><strong>{item.label}</strong><small>{words(item.attention)} · {words(item.responsible_party)}</small></span></li>)}</ul> : <p className="empty-note">No blocking or upcoming information gap is projected.</p>}
@@ -193,15 +198,34 @@ function SummaryItem({ label, value }) {
   return <div><span>{label}</span><strong>{value || 'Not recorded'}</strong></div>
 }
 
+function ClaimContextSummary({ resource }) {
+  return (
+    <ResourceBoundary resource={resource}>
+      <section className="detail-section" aria-labelledby="claim-context-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">Source-linked data</p><h2 id="claim-context-title">Claim Context</h2></div>
+          <span className="count-badge">{resource?.items?.length || 0}</span>
+        </div>
+        <FieldLedger items={resource?.items} empty="No structured Claim Context is recorded." />
+      </section>
+    </ResourceBoundary>
+  )
+}
+
 function ClaimFields({ resource }) {
   return (
     <ResourceBoundary resource={resource}>
       <section className="resource-view">
         <header className="content-header"><div><p className="eyebrow">Source-linked data</p><h2>Claim information</h2></div><span>{resource?.items?.length || 0} fields</span></header>
-        <dl className="field-ledger">{(resource?.items || []).map(({ code, field }) => <div key={code}><dt>{words(code.replaceAll('.', ' '))}</dt><dd><strong>{formatValue(field.value)}</strong><small>{words(field.status)} · {words(field.source)} · {words(field.needed_for)}</small></dd></div>)}</dl>
+        <FieldLedger items={resource?.items} empty="No structured Claim Context is recorded." />
       </section>
     </ResourceBoundary>
   )
+}
+
+function FieldLedger({ items = [], empty }) {
+  if (!items.length) return <p className="empty-note">{empty}</p>
+  return <dl className="fact-list">{items.map(({ code, field }) => <div key={code}><dt>{words(code.replaceAll('.', ' '))}</dt><dd><strong>{formatValue(field.value)}</strong><small>{words(field.status)} · {words(field.source)} · {words(field.needed_for)}</small></dd></div>)}</dl>
 }
 
 function Conversation({ detail, resource, draft, onDraft, onSend }) {

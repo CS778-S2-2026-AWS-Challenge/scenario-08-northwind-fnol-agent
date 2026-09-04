@@ -162,6 +162,10 @@ export default function WorkbenchPage() {
 
   const loadSectionResources = useCallback(async (id, section) => {
     const loaders = {
+      summary: [
+        ['fields', () => workbenchApi.fields(token, id)],
+        ['externalRequests', () => workbenchApi.externalRequests(token, id)],
+      ],
       fields: [['fields', () => workbenchApi.fields(token, id)]],
       evidence: [['evidence', () => workbenchApi.evidence(token, id)]],
       references: [['retrievals', () => workbenchApi.retrievals(token, id)]],

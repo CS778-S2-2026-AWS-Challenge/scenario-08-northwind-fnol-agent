@@ -75,4 +75,24 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByText('Queen Street')).toBeInTheDocument()
     expect(screen.getByText(/confirmed.*claimant.*current action/i)).toBeInTheDocument()
   })
+
+  it('shows only API-projected structured Claim Context on the overview', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={{ ...detail, form: { 'internal.hidden': { value: 'must not render' } } }}
+      resources={{
+        handoffs: { items: [] },
+        fields: {
+          status: 'available',
+          items: [{ code: 'incident.description', field: { value: 'Rear-end collision', status: 'confirmed', source: 'claimant', needed_for: 'current_action' } }],
+        },
+        externalRequests: { status: 'available', items: [] },
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Claim Context' })).toBeInTheDocument()
+    expect(screen.getByText('Incident Description')).toBeInTheDocument()
+    expect(screen.getByText('Rear-end collision')).toBeInTheDocument()
+    expect(screen.queryByText('must not render')).not.toBeInTheDocument()
+  })
 })
