@@ -203,10 +203,21 @@ class ExternalServiceConsentStatus(str, Enum):
 
 
 class ClaimantExternalServiceStatus(str, Enum):
+    """Claimant-facing lifecycle of one external-service action.
+
+    The values are the claimant-visible states named by the AT-10 controlled
+    assessor scenario in `tests/fixtures/journeys/`. A failed attempt is one of
+    them: that scenario requires the claimant to receive an honest state and next
+    step, and a failure that showed nothing would read as an offer to request a
+    service whose last attempt had just failed.
+    """
+
     CONSENT_REQUIRED = 'consent_required'
     READY_TO_REQUEST = 'ready_to_request'
     QUEUED = 'queued'
     ASSIGNED = 'assigned'
+    RETRYABLE_FAILURE = 'retryable_failure'
+    TERMINAL_FAILURE = 'terminal_failure'
 
 
 class SupportNeed(str, Enum):
@@ -328,6 +339,7 @@ class ClaimantExternalServiceAction(ContractModel):
     status: ClaimantExternalServiceStatus
     consent_status: ExternalServiceConsentStatus | None = None
     routing: AssessorRoutingResult | None = None
+    failure_code: AssessorRoutingFailureCode | None = None
     can_request: bool
 
 

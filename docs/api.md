@@ -1165,6 +1165,7 @@ Response `201`:
     "status": "consent_required",
     "consent_status": null,
     "routing": null,
+    "failure_code": null,
     "can_request": true
   },
   "customer_next_step": {
@@ -1221,6 +1222,16 @@ Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryabl
 four leave the consented Working Claim revision unchanged, do not report assignment, and retain
 the same operation identity for an unchanged permitted retry. Automatic retry counts remain
 unapproved; the claimant client offers only an explicit retry for retryable failures.
+
+After a failed attempt the claimant state does not return to `ready_to_request`.
+`external_service_action.status` becomes `retryable_failure` for a timeout or unavailable
+response and `terminal_failure` for an access-denied or malformed one, and `failure_code`
+carries the provider-neutral reason. `can_request` stays true only for a retryable failure,
+because a terminal failure requires Northwind to review the request before another attempt.
+The state is derived from the recorded external task rather than stored on the claim: a failed
+attempt leaves every claim field unchanged, so the claimant still sees what happened on a
+later read without the failure having altered the claim. An unresolved outcome has no approved
+claimant wording and is deliberately not projected.
 
 The authorised decision and prepared operation identity are persisted together before the
 provider call. The service also persists one operational `tsk_` task and its `erq_` request,

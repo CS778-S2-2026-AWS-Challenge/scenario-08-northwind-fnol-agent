@@ -14,7 +14,12 @@ from backend.adapters.claims_service import (
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.domain.external_services import (
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskDelivery,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
+    ExternalTaskRecord,
 )
 from backend.domain.models import IntegrationSource, RouteAssessorRequest
 from backend.repositories.fixture import FixtureRepository
@@ -274,7 +279,13 @@ def test_transient_failure_preserves_progress_then_retries_with_the_same_operati
     assert after_failure.assessor_routing is None
     assert after_failure.customer_next_step.status == 'assessor_request_ready'
     assert claimant_after_failure.status_code == 200
-    assert claimant_after_failure.json()['external_service_action']['status'] == 'ready_to_request'
+    # AT-10 requires the claimant to receive an honest state and next step. This
+    # projection previously returned to `ready_to_request`, offering the service
+    # again without saying that the last attempt had failed.
+    action_after_failure = claimant_after_failure.json()['external_service_action']
+    assert action_after_failure['status'] == 'retryable_failure'
+    assert action_after_failure['failure_code'] == failure.value
+    assert action_after_failure['can_request'] is True
     assert retry.status_code == 201
     assert retry.json()['action']['status'] == 'assigned'
     assert replay.status_code == 200
@@ -412,3 +423,144 @@ def test_a_retry_continues_the_failed_task_instead_of_opening_a_second_one() -> 
     assert tasks[0].task_id == after_failure[0].task_id
     assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
     assert tasks[0].updated_at > after_failure[0].updated_at
+
+
+@pytest.mark.parametrize(
+    'failure',
+    [AssessorFixtureFailure.ACCESS_DENIED, AssessorFixtureFailure.MALFORMED],
+)
+def test_a_terminal_failure_is_shown_to_the_claimant_and_withdraws_the_request(
+    failure: AssessorFixtureFailure,
+) -> None:
+    """A terminal failure is honest about itself and stops offering another attempt.
+
+    AT-10 gives these two codes the `terminal_failure` lifecycle status and says
+    Northwind must review the request before trying again, so the claimant keeps
+    the state but loses the affordance. The claim itself is untouched, which is
+    what that scenario's empty `failure_may_change` requires.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter(failure_sequence=(failure,))
+    key = f'terminal-{failure.value}'
+    with TestClient(
+        create_app(
+            DEVELOPER_SETTINGS,
+            repository=repository,
+            assessor_service_adapter=adapter,
+        )
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        before = repository.get_claim_internal(claim_id)
+        headers = {
+            **AUTH,
+            'Idempotency-Key': f'{key}-route',
+            'If-Match': str(consent_revision),
+        }
+
+        failed = client.post(f'/api/v1/claims/{claim_id}/assessor-routing', headers=headers)
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+        another = client.post(
+            f'/api/v1/claims/{claim_id}/assessor-routing',
+            headers={
+                **AUTH,
+                'Idempotency-Key': f'{key}-again',
+                'If-Match': str(consent_revision),
+            },
+        )
+
+    assert failed.status_code == 502
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'terminal_failure'
+    assert action['failure_code'] == failure.value
+    assert action['can_request'] is False
+    assert action['routing'] is None
+    assert another.status_code == 409
+    assert another.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
+    after = repository.get_claim_internal(claim_id)
+    assert before is not None and after is not None
+    assert after.model_dump(mode='json') == before.model_dump(mode='json')
+
+
+def test_a_failure_code_without_claimant_wording_does_not_break_the_claimant_read() -> None:
+    """A provider-neutral code the claimant vocabulary cannot express is not projected.
+
+    `ExternalTaskFailureCode` is wider than `AssessorRoutingFailureCode`: the
+    recovery matrix settles `conflicting` as a terminal failure, and a task
+    carrying it is valid under the domain contract. AT-10 approves no claimant
+    wording for it, so the claimant keeps the ordinary safe action. Reading the
+    claim must not fail, and must not present the code with invented wording.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='unmapped-code')
+        _grant_consent(client, claim_id, revision, key='unmapped-code')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        recorded_at = datetime(2026, 9, 3, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='tsk_unmapped_code',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.TERMINAL_FAILURE,
+                delivery=ExternalTaskDelivery.NOT_SUBMITTED,
+                failure_code=ExternalTaskFailureCode.CONFLICTING,
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            ),
+            stored.customer_id,
+        )
+
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+
+    assert claimant.status_code == 200
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'ready_to_request'
+    assert action['failure_code'] is None
+    assert action['can_request'] is True
+
+
+def test_a_task_awaiting_reconciliation_is_not_shown_as_a_failure() -> None:
+    """The claimant projection follows the continuation, not the operation status.
+
+    A timeout that reached the provider is an unresolved outcome, not a failure the
+    claimant may retry: the provider may still act on it. `continuation_for_failed_task`
+    settles that as `awaiting_reconciliation`, which has no approved claimant wording,
+    so nothing is projected and the ordinary safe action stands.
+    """
+
+    repository = FixtureRepository()
+    with TestClient(create_app(DEVELOPER_SETTINGS, repository=repository)) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='reconciling')
+        _grant_consent(client, claim_id, revision, key='reconciling')
+        stored = repository.get_claim_internal(claim_id)
+        assert stored is not None
+        recorded_at = datetime(2026, 9, 4, tzinfo=UTC)
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id='tsk_reconciling',
+                claim_id=claim_id,
+                service_identity=ASSESSOR_SERVICE_IDENTITY,
+                requested_action=ASSESSOR_REQUESTED_ACTION,
+                integration_source=IntegrationSource.FIXTURE,
+                status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='transport-receipt-reconciling',
+                failure_code=ExternalTaskFailureCode.TIMEOUT,
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            ),
+            stored.customer_id,
+        )
+
+        claimant = client.get(f'/api/v1/claims/{claim_id}', headers=AUTH)
+
+    assert claimant.status_code == 200
+    action = claimant.json()['external_service_action']
+    assert action['status'] == 'ready_to_request'
+    assert action['failure_code'] is None
