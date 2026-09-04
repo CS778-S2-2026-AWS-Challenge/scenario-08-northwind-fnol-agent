@@ -38,6 +38,7 @@ them:
 - [Current API Contract](api.md)
 - [Documentation Index](README.md)
 - [Northwind FNOL Product Soul](product-soul.md) — product direction and principles shared by the repository and the project plan
+- [Frontend and Runtime Quality Standard](frontend-and-runtime-quality-standard.md) — authoritative big-picture, claimant/workbench, component, token, routing, runtime-boundary, and acceptance standard for frontend and runtime design
 
 ## Current Engineering Documents
 
