@@ -1,3 +1,4 @@
+from backend.core.errors import ApiError
 from backend.domain.data_query import (
     DataConnectionState,
     DataQueryError,
@@ -98,6 +99,14 @@ def search_knowledge(
             results=[],
             limitations=[message],
         )
+    except Exception as error:
+        _ = error
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The knowledge provider returned an unusable response.',
+            retryable=False,
+        ) from error
     # Re-check after the call so a provider that lost its verified state while
     # handling the request cannot release evidence from that uncertain window.
     connection_state = _connection_state(retriever)
@@ -110,10 +119,8 @@ def search_knowledge(
             results=[],
             limitations=[NO_KNOWLEDGE_LIMITATION],
         )
-    return KnowledgeSearchResponse(
-        status='evidence_found',
-        connection_state=connection_state,
-        results=[
+    try:
+        results = [
             KnowledgeCitation(
                 document_id=chunk.document_id,
                 chunk_id=chunk.chunk_id,
@@ -125,6 +132,17 @@ def search_knowledge(
                 text=chunk.text,
             )
             for chunk in chunks
-        ],
+        ]
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The knowledge provider returned an unusable response.',
+            retryable=False,
+        ) from error
+    return KnowledgeSearchResponse(
+        status='evidence_found',
+        connection_state=connection_state,
+        results=results,
         limitations=[],
     )
