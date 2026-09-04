@@ -72,6 +72,7 @@ function addCandidates(
     const merged = pullRequest.merged === true;
     const state = optionalString(pullRequest.state) ?? "";
     const status = reconciliationStatus({ draft, merged, state });
+    if (status === null) continue;
     const priority = status === "Done" ? 3 : status === "In review" ? 2 : 1;
 
     for (const issue of connectionNodes(
@@ -94,10 +95,13 @@ export function reconciliationStatus(input: {
   draft: boolean;
   merged: boolean;
   state: string;
-}): ProjectStatus {
+}): ProjectStatus | null {
   if (input.merged) return "Done";
   if (input.state === "OPEN" && !input.draft) return "In review";
-  return "In progress";
+  if (input.state === "OPEN" && input.draft) return "In progress";
+  // A closed, unmerged PR is historical evidence, not an active work signal.
+  // Leave the card's existing planning/acceptance status unchanged.
+  return null;
 }
 
 async function openPullRequests(
