@@ -1,8 +1,13 @@
 import { UsersRound } from 'lucide-react'
 import { useState } from 'react'
+import { isProjectedInputRequired } from '../projected-action.js'
+import { ProjectedActionInput } from './ProjectedAction.jsx'
 
-export default function OwnershipActions({ actions = [], requests = [], onAction }) {
-  const ownershipActions = actions.filter((action) => action.action_code.startsWith('ownership.'))
+export default function OwnershipActions({ actions = [], requests = [], onAction, excludeAction }) {
+  const ownershipActions = actions.filter((action) => (
+    action.action_code.startsWith('ownership.')
+    && `${action.action_code}:${action.target_ref}` !== excludeAction
+  ))
   if (!ownershipActions.length) return null
 
   return (
@@ -27,7 +32,7 @@ export default function OwnershipActions({ actions = [], requests = [], onAction
   )
 }
 
-function ProjectedOwnershipAction({ action, request, onAction }) {
+export function ProjectedOwnershipAction({ action, request, onAction, compact = false }) {
   const [expanded, setExpanded] = useState(false)
   const [values, setValues] = useState(() => initialValues(action.inputs))
   const [busy, setBusy] = useState(false)
@@ -35,7 +40,7 @@ function ProjectedOwnershipAction({ action, request, onAction }) {
   const blocked = action.availability === 'blocked'
   const formId = `ownership-form-${action.action_code.replaceAll('.', '-')}-${action.target_ref}`
   const missingRequiredInput = action.inputs.some((input) => (
-    isRequired(input, values) && !String(values[input.field_code] || '').trim()
+    isProjectedInputRequired(input, values) && !String(values[input.field_code] || '').trim()
   ))
 
   async function submit(event) {
@@ -80,20 +85,23 @@ function ProjectedOwnershipAction({ action, request, onAction }) {
         onClick={() => setExpanded((value) => !value)}
       >
         <UsersRound size={18} />
-        <span><strong>{action.label}</strong><small>{action.purpose}</small></span>
+        <span>
+          <strong>{compact ? 'Provide action details' : action.label}</strong>
+          {!compact && <small>{action.purpose}</small>}
+        </span>
       </button>
       {expanded && (
         <form id={formId} className="ownership-action__form" onSubmit={submit}>
           {request?.reason && <p>Request reason: {request.reason}</p>}
           {action.inputs.map((input) => (
-            <ProjectedInput
+            <ProjectedActionInput
               key={input.field_code}
               input={input}
               value={values[input.field_code] || ''}
-              required={isRequired(input, values)}
-              onChange={(value) => setValues((current) => ({
+              required={isProjectedInputRequired(input, values)}
+              onChange={(event) => setValues((current) => ({
                 ...current,
-                [input.field_code]: value,
+                [input.field_code]: event.target.value,
               }))}
             />
           ))}
@@ -109,32 +117,8 @@ function ProjectedOwnershipAction({ action, request, onAction }) {
   )
 }
 
-function ProjectedInput({ input, value, required, onChange }) {
-  if (input.control === 'select') {
-    return (
-      <label>
-        {input.label}
-        <select value={value} required={required} onChange={(event) => onChange(event.target.value)}>
-          {input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
-        </select>
-      </label>
-    )
-  }
-  if (input.control === 'textarea') {
-    return <label>{input.label}<textarea rows="2" value={value} required={required} onChange={(event) => onChange(event.target.value)} /></label>
-  }
-  return <label>{input.label}<input value={value} required={required} onChange={(event) => onChange(event.target.value)} autoComplete="off" /></label>
-}
-
 function initialValues(inputs) {
   return Object.fromEntries(
     inputs.map((input) => [input.field_code, input.choices?.[0]?.value || '']),
-  )
-}
-
-function isRequired(input, values) {
-  return input.required || (
-    input.required_when
-    && values[input.required_when.field_code] === input.required_when.equals
   )
 }

@@ -174,7 +174,7 @@ describe('review actions', () => {
     expect(screen.queryByRole('button', { name: 'Create action' })).not.toBeInTheDocument()
     await user.click(screen.getByText('Coverage Review'))
     expect(screen.queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
-    expect(screen.getByText(/no matching target action is projected/i)).toBeVisible()
+    expect(screen.getByText(/no work-item update action is projected/i)).toBeVisible()
   })
 
   it('does not expose signal or handoff decisions without projected authority', async () => {
@@ -183,10 +183,36 @@ describe('review actions', () => {
 
     await user.click(screen.getByText(/history review/i))
     expect(screen.queryByRole('button', { name: 'Record decision' })).not.toBeInTheDocument()
-    expect(screen.getByText(/read-only with your current Claim access/i)).toBeVisible()
+    expect(screen.getByText(/no signal-decision action is projected/i)).toBeVisible()
 
     rerender(<HandoffResolution handoff={handoff} allowedAction={undefined} onResolve={vi.fn()} />)
     expect(screen.queryByRole('button', { name: 'Record resolution' })).not.toBeInTheDocument()
+  })
+
+  it('preserves exact blocked reasons for signal, WorkItem, and handoff actions', async () => {
+    const user = userEvent.setup()
+    const blockedSignal = { ...signalAction, availability: 'blocked', blocked_reason: 'A primary owner must decide this signal.' }
+    const blockedWorkItem = { ...workItemUpdateAction(), availability: 'blocked', blocked_reason: 'This WorkItem is assigned to another professional.' }
+    const { rerender } = render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW' }]} allowedActions={[blockedSignal]} onDecision={vi.fn()} />)
+
+    await user.click(screen.getByText(/history review/i))
+    expect(screen.getByText('A primary owner must decide this signal.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Record decision' })).not.toBeInTheDocument()
+
+    rerender(<StaffActions actions={[workItemRecord()]} allowedActions={[blockedWorkItem]} onUpdate={vi.fn()} />)
+    await user.click(screen.getByText('Claimant Support'))
+    expect(screen.getByText('This WorkItem is assigned to another professional.')).toBeVisible()
+
+    rerender(<HandoffResolution handoff={handoff} allowedAction={{ ...handoffAction, availability: 'blocked', blocked_reason: 'Resolve after the evidence review.' }} onResolve={vi.fn()} />)
+    expect(screen.getByText('Resolve after the evidence review.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Record resolution' })).not.toBeInTheDocument()
+  })
+
+  it('renders an available projected signal form as executable', async () => {
+    const user = userEvent.setup()
+    render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW' }]} allowedActions={[{ ...signalAction, availability: 'available' }]} onDecision={vi.fn()} />)
+    await user.click(screen.getByText(/history review/i))
+    expect(screen.getByRole('button', { name: 'Record decision' })).toBeVisible()
   })
 })
 

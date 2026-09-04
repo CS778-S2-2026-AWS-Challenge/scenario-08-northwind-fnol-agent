@@ -76,10 +76,11 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByText(/confirmed.*claimant.*current action/i)).toBeInTheDocument()
   })
 
-  it('shows only API-projected structured Claim Context on the overview', () => {
+  it('uses section summaries instead of rendering full resource records on the overview', async () => {
+    const user = userEvent.setup()
     render(<ClaimWorkspace
       {...props}
-      detail={{ ...detail, form: { 'internal.hidden': { value: 'must not render' } } }}
+      detail={{ ...detail, form: { 'internal.hidden': { value: 'must not render' } }, section_summaries: { fields: { status: 'available', total: 8, needs_attention: 2 } } }}
       resources={{
         handoffs: { items: [] },
         fields: {
@@ -90,9 +91,9 @@ describe('ClaimWorkspace navigation', () => {
       }}
     />)
 
-    expect(screen.getByRole('heading', { name: 'Claim Context' })).toBeInTheDocument()
-    expect(screen.getByText('Incident Description')).toBeInTheDocument()
-    expect(screen.getByText('Rear-end collision')).toBeInTheDocument()
+    await user.click(screen.getByText('Supporting Claim context'))
+    expect(screen.getByText(/8 records.*2 need attention/i)).toBeVisible()
+    expect(screen.queryByText('Incident Description')).not.toBeInTheDocument()
     expect(screen.queryByText('must not render')).not.toBeInTheDocument()
   })
 

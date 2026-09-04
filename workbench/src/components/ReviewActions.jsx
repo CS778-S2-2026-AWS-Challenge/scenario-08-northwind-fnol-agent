@@ -1,13 +1,19 @@
 import { CheckCircle2, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
+import {
+  ProjectedActionInput,
+  ProjectedActionState,
+} from './ProjectedAction.jsx'
+import { canSubmitProjectedAction, findProjectedAction, isProjectedInputRequired } from '../projected-action.js'
 
 export function HandoffResolution({ handoff, allowedAction, onResolve }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  if (!handoff || !allowedAction || !['accepted', 'in_progress'].includes(handoff.status)) return null
+  if (!handoff || !['accepted', 'in_progress'].includes(handoff.status)) return null
+  const executable = canSubmitProjectedAction(allowedAction)
 
   async function submit(event) {
     event.preventDefault()
@@ -31,14 +37,15 @@ export function HandoffResolution({ handoff, allowedAction, onResolve }) {
     <section className="action-panel" aria-labelledby="handoff-resolution-title">
       <div className="action-panel__heading">
         <div><p className="eyebrow">Accepted handoff</p><h2 id="handoff-resolution-title">Continue and resolve staff assistance</h2></div>
-        <span className="assigned-chip">{allowedAction.label}</span>
+        {allowedAction && <span className="assigned-chip">{allowedAction.label}</span>}
       </div>
       <p>{handoff.requested_action}</p>
       <HandoffContext handoff={handoff} />
-      {!open && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
-      {open && (
+      <ProjectedActionState action={allowedAction} absentMessage="No handoff-resolution action is projected for this handoff." />
+      {!open && executable && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
+      {open && executable && (
         <form className="action-form" onSubmit={submit}>
-          {allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}
+          {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
           <p>{allowedAction.confirmation?.message}</p>
           <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>Cancel</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Resolve handoff'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
@@ -53,7 +60,7 @@ export function SignalReviews({ signals, allowedActions = [], onDecision }) {
     <section className="resource-view">
       <header className="content-header"><div><p className="eyebrow">Internal review only</p><h2>Signals</h2></div><span>{signals.length} records</span></header>
       <div className="record-list">
-        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={allowedActions.find((action) => action.action_code === 'signal.record_decision' && action.target_ref === (signal.signal_id || signal.code) && action.availability === 'confirmation_required')} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
+        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={findProjectedAction(allowedActions, 'signal.record_decision', signal.signal_id || signal.code)} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
       </div>
     </section>
   )
@@ -65,6 +72,7 @@ function SignalRecord({ signal, allowedAction, onDecision }) {
   const signalId = signal.signal_id || signal.code
   const decisions = signal.decisions || []
   const latest = decisions.at(-1)
+  const executable = canSubmitProjectedAction(allowedAction)
 
   async function submit(event) {
     event.preventDefault()
@@ -91,12 +99,12 @@ function SignalRecord({ signal, allowedAction, onDecision }) {
       <div className="record-body">
         <p className="record-summary">{signal.summary || signal.reason || 'Review the source-linked signal before recording a decision.'}</p>
         {latest && <p className="decision-history"><CheckCircle2 size={16} /><span><strong>{words(latest.decision)}</strong>{latest.summary} · {formatDateTime(latest.created_at)}</span></p>}
-        {allowedAction ? <form className="action-form" onSubmit={submit}>
-          {allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}
+        {executable ? <form className="action-form" onSubmit={submit}>
+          {allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} />)}
           <p>{allowedAction.confirmation?.message}</p>
           <div className="form-actions"><span>This decision is internal and source-linked.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Record decision'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
-        </form> : <p className="record-note">Signal details are read-only with your current Claim access.</p>}
+        </form> : <ProjectedActionState action={allowedAction} absentMessage="No signal-decision action is projected for this signal." />}
       </div>
     </details>
   )
@@ -107,7 +115,7 @@ export function StaffActions({ actions, allowedActions = [], onUpdate }) {
     <section className="action-ledger" aria-labelledby="staff-actions-title">
       <header className="content-header"><div><p className="eyebrow">Audited work</p><h2 id="staff-actions-title">Staff actions</h2></div><span>{actions.length} records</span></header>
       <div className="record-list">
-        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} allowedAction={allowedActions.find((candidate) => candidate.action_code === 'work_item.update' && candidate.target_ref === action.action_id && candidate.availability === 'confirmation_required')} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
+        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} allowedAction={findProjectedAction(allowedActions, 'work_item.update', action.action_id)} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
       </div>
     </section>
   )
@@ -120,6 +128,7 @@ function StaffActionRecord({ action, allowedAction, onUpdate }) {
     allowedAction?.inputs.find((input) => input.field_code === 'status')?.choices?.[0]?.value || ''
   ))
   const final = ['completed', 'cancelled'].includes(action.status)
+  const executable = canSubmitProjectedAction(allowedAction)
 
   async function update(event) {
     event.preventDefault()
@@ -152,27 +161,10 @@ function StaffActionRecord({ action, allowedAction, onUpdate }) {
       <summary><span><strong>{words(action.action_type)}</strong><small>{action.requested_outcome}</small></span><span className={`record-status record-status--${action.status}`}>{words(action.status)}</span></summary>
       <div className="record-body">
         <dl><dt>Assigned to</dt><dd>{action.assigned_to}</dd><dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>Outcome</dt><dd>{words(action.result.outcome)}</dd><dt>Result</dt><dd>{action.result.summary}</dd></>}</dl>
-        {!final && allowedAction && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} required={isInputRequired(input, { status: selectedStatus })} onChange={input.field_code === 'status' ? (event) => setSelectedStatus(event.target.value) : undefined} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
-        {!final && !allowedAction && <p className="record-note">This action is read-only because no matching target action is projected for you.</p>}
+        {!final && executable && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ProjectedActionInput input={input} key={input.field_code} required={isProjectedInputRequired(input, { status: selectedStatus })} onChange={input.field_code === 'status' ? (event) => setSelectedStatus(event.target.value) : undefined} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && !executable && <ProjectedActionState action={allowedAction} absentMessage="No work-item update action is projected for this exact record." />}
       </div>
     </details>
-  )
-}
-
-function ActionInput({ input, required = input.required, onChange }) {
-  if (input.control === 'select') {
-    return <label>{input.label}<select name={input.field_code} required={required} onChange={onChange}>{input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label>
-  }
-  if (input.control === 'textarea') {
-    return <label>{input.label}<textarea name={input.field_code} rows="3" required={required} /></label>
-  }
-  return <label>{input.label}<input name={input.field_code} required={required} /></label>
-}
-
-function isInputRequired(input, values) {
-  return input.required || (
-    input.required_when
-    && values[input.required_when.field_code] === input.required_when.equals
   )
 }
 

@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-describe('claim detail scrolling', () => {
-  it('uses the constrained open Claim panel as the vertical scroll container', () => {
+describe('Workbench density tokens', () => {
+  it('does not bypass the 14px Workbench minimum for visible text', () => {
     const styles = readFileSync('src/styles.css', 'utf8')
 
-    expect(styles).toMatch(/\.open-claim-panel\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/)
-    expect(styles).toMatch(/\.claim-workspace\s*\{[^}]*overflow:\s*visible;/)
+    expect(styles).not.toMatch(/font-size:\s*(?:1[0-3]|[0-9])px/)
+    expect(styles).toContain('font-size: var(--workbench-font-meta)')
   })
 })
