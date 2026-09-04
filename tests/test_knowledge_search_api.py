@@ -44,6 +44,18 @@ class ControlledRetriever:
         return self.chunks
 
 
+class RaisingRetriever(ControlledRetriever):
+    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        self.last_request = request
+        raise RuntimeError('provider payload could not be decoded')
+
+
+class MalformedChunkRetriever(ControlledRetriever):
+    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        self.last_request = request
+        return [object()]  # type: ignore[list-item]
+
+
 def citation_chunk() -> KnowledgeChunk:
     return KnowledgeChunk(
         document_id='nw-policy-motor-standard-mvp-2026-1',
@@ -116,6 +128,19 @@ def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None
     assert retriever.last_request.document_id == 'nw-policy-motor-standard-mvp-2026-1'
     assert retriever.last_request.insurer == 'Northwind Insurance'
     assert retriever.last_request.effective_at == datetime(2026, 8, 25, tzinfo=UTC)
+
+
+@pytest.mark.parametrize('retriever', [RaisingRetriever(), MalformedChunkRetriever()])
+def test_knowledge_search_bounds_malformed_provider_results(
+    retriever: ControlledRetriever,
+) -> None:
+    with client_for(retriever) as client:
+        response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert response.json()['error']['retryable'] is False
+    assert 'provider payload' not in response.text
 
 
 def test_knowledge_search_reports_empty_and_unavailable_without_inventing_results() -> None:

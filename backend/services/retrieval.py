@@ -1,3 +1,5 @@
+from pydantic import ValidationError
+
 from backend.adapters.policy_history import (
     PolicyHistoryAdapter,
     RetrievalUnavailable,
@@ -105,6 +107,28 @@ def _history_unavailable_response(result_id: str) -> ClaimHistorySearchResponse:
     )
 
 
+def _malformed_provider_error(kind: str, error: Exception) -> ApiError:
+    """Map malformed provider data to a bounded dependency failure.
+
+    Args:
+        kind: Retrieval kind whose provider response failed validation.
+        error: Internal mapping failure; its details are intentionally not exposed.
+
+    Returns:
+        A provider-neutral API error that callers cannot mistake for evidence.
+
+    Raises:
+        None.
+    """
+    _ = error
+    return ApiError(
+        status_code=502,
+        code='DEPENDENCY_FAILED',
+        message=f'The {kind} provider returned an unusable response.',
+        retryable=False,
+    )
+
+
 def _claim(repository: PersistenceRepository, claim_id: str) -> WorkingClaim:
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
@@ -167,15 +191,20 @@ def search_policy(
             limitations=[NO_RECORD_LIMITATION],
             retrieved_at=now_utc(),
         )
+    except Exception as error:
+        raise _malformed_provider_error('policy', error) from error
 
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
         return _policy_unavailable_response(result_id)
-    record = map_policy_provider_payload(
-        retrieval_id=result_id,
-        claim_id=claim.claim_id,
-        envelope=envelope,
-    )
+    try:
+        record = map_policy_provider_payload(
+            retrieval_id=result_id,
+            claim_id=claim.claim_id,
+            envelope=envelope,
+        )
+    except (ValidationError, AttributeError, KeyError, TypeError, ValueError) as error:
+        raise _malformed_provider_error('policy', error) from error
     persist_retrieval_record(repository, record, claim.customer_id)
     return PolicySearchResponse(
         result_id=result_id,
@@ -228,15 +257,20 @@ def search_claim_history(
             limitations=[NO_RECORD_LIMITATION],
             retrieved_at=now_utc(),
         )
+    except Exception as error:
+        raise _malformed_provider_error('claim-history', error) from error
 
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
         return _history_unavailable_response(result_id)
-    record = map_history_provider_payload(
-        retrieval_id=result_id,
-        claim_id=claim.claim_id,
-        envelope=envelope,
-    )
+    try:
+        record = map_history_provider_payload(
+            retrieval_id=result_id,
+            claim_id=claim.claim_id,
+            envelope=envelope,
+        )
+    except (ValidationError, AttributeError, KeyError, TypeError, ValueError) as error:
+        raise _malformed_provider_error('claim-history', error) from error
     persist_retrieval_record(repository, record, claim.customer_id)
     return ClaimHistorySearchResponse(
         result_id=result_id,
