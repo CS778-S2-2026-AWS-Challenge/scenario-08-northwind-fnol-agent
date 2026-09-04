@@ -1,6 +1,5 @@
 """Map approved Claim Context execution outcomes to existing backend contracts."""
 
-from dataclasses import dataclass
 from datetime import datetime
 
 from backend.core.errors import ApiError
@@ -19,17 +18,7 @@ from backend.services.agent_action_execution import (
     ClaimContextExecutionStatus,
 )
 
-
-@dataclass(frozen=True, slots=True)
-class ClaimContextApiMapping:
-    """Public-transport mapping for one internal execution result."""
-
-    claim_id: str | None
-    resulting_revision: int | None
-    error: ApiError | None
-
-
-_API_ERROR_MAP: dict[str, tuple[int, str, str, bool]] = {
+_API_ERRORS: dict[str, tuple[int, str, str, bool]] = {
     'REVISION_CONFLICT': (
         409,
         'REVISION_CONFLICT',
@@ -42,18 +31,8 @@ _API_ERROR_MAP: dict[str, tuple[int, str, str, bool]] = {
         'The approved action conflicts with an earlier request.',
         False,
     ),
-    'CLAIM_NOT_FOUND': (
-        404,
-        'RESOURCE_NOT_FOUND',
-        'The claim was not found.',
-        False,
-    ),
-    'RESOURCE_NOT_FOUND': (
-        404,
-        'RESOURCE_NOT_FOUND',
-        'The requested claim resource was not found.',
-        False,
-    ),
+    'CLAIM_NOT_FOUND': (404, 'RESOURCE_NOT_FOUND', 'The claim was not found.', False),
+    'RESOURCE_NOT_FOUND': (404, 'RESOURCE_NOT_FOUND', 'The claim resource was not found.', False),
     'WORKFLOW_STATE_CHANGED': (
         409,
         'INVALID_STATE_TRANSITION',
@@ -66,12 +45,7 @@ _API_ERROR_MAP: dict[str, tuple[int, str, str, bool]] = {
         'The approved action is not valid for the current claim state.',
         False,
     ),
-    'ACCESS_DENIED': (
-        403,
-        'ACCESS_DENIED',
-        'The approved action is not permitted.',
-        False,
-    ),
+    'ACCESS_DENIED': (403, 'ACCESS_DENIED', 'The approved action is not permitted.', False),
     'VALIDATION_ERROR': (
         422,
         'VALIDATION_ERROR',
@@ -99,17 +73,14 @@ _API_ERROR_MAP: dict[str, tuple[int, str, str, bool]] = {
 }
 
 
-def map_claim_context_execution_to_api(
-    result: ClaimContextExecutionResult,
-) -> ClaimContextApiMapping:
-    """Map one internal command result to the existing public error vocabulary.
+def map_claim_context_execution_to_api(result: ClaimContextExecutionResult) -> ApiError | None:
+    """Map one execution result to the existing public API error vocabulary.
 
     Args:
-        result: Provider-neutral execution outcome returned by the #406 command gate.
+        result: Provider-neutral outcome returned by the approved command execution gate.
 
     Returns:
-        The resulting Claim identity/revision plus an ``ApiError`` for non-applied outcomes.
-        Applied outcomes carry no error and reuse the action-specific API response contract.
+        ``None`` for a verifiable applied result, otherwise a bounded existing ``ApiError``.
 
     Raises:
         TypeError: The supplied result has the wrong runtime type.
@@ -117,47 +88,32 @@ def map_claim_context_execution_to_api(
 
     if not isinstance(result, ClaimContextExecutionResult):
         raise TypeError('result must be a ClaimContextExecutionResult.')
-
     if result.status is ClaimContextExecutionStatus.APPLIED:
         if result.claim_id is not None and result.resulting_revision is not None:
-            return ClaimContextApiMapping(
-                claim_id=result.claim_id,
-                resulting_revision=result.resulting_revision,
-                error=None,
-            )
-        return ClaimContextApiMapping(
-            claim_id=result.claim_id,
-            resulting_revision=result.resulting_revision,
-            error=ApiError(
-                status_code=500,
-                code='INTERNAL_ERROR',
-                message='The approved action did not produce a verifiable persisted result.',
-            ),
+            return None
+        return ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The approved action did not produce a verifiable persisted result.',
         )
 
-    mapped = _API_ERROR_MAP.get(result.reason_code)
+    mapped = _API_ERRORS.get(result.reason_code)
     if mapped is None:
-        error = ApiError(
+        return ApiError(
             status_code=500,
             code='INTERNAL_ERROR',
             message='The approved action could not be mapped to a completed state.',
             retryable=result.retryable,
         )
-    else:
-        status_code, code, message, default_retryable = mapped
-        error = ApiError(
-            status_code=status_code,
-            code=code,
-            message=message,
-            retryable=default_retryable or result.retryable,
-            current_revision=(
-                result.resulting_revision if result.reason_code == 'REVISION_CONFLICT' else None
-            ),
-        )
-    return ClaimContextApiMapping(
-        claim_id=result.claim_id,
-        resulting_revision=result.resulting_revision,
-        error=error,
+    status_code, code, message, retryable = mapped
+    return ApiError(
+        status_code=status_code,
+        code=code,
+        message=message,
+        retryable=retryable or result.retryable,
+        current_revision=(
+            result.resulting_revision if result.reason_code == 'REVISION_CONFLICT' else None
+        ),
     )
 
 
@@ -172,21 +128,16 @@ def build_claim_context_execution_audit_event(
 ) -> AuditEventEnvelope | None:
     """Map a revision-backed execution result to the existing audit envelope.
 
-    The mapper deliberately returns ``None`` when the execution result does not contain an
-    authoritative Claim revision. This avoids fabricating a Claim audit revision after a
-    pre-execution rejection or dependency failure. The caller remains responsible for persisting
-    the returned event inside the applicable action-specific transaction boundary.
-
     Args:
-        command: Immutable approved command that produced the execution result.
-        result: Provider-neutral execution outcome returned by the #406 command gate.
+        command: Immutable approved command that produced the result.
+        result: Provider-neutral execution outcome.
         event_id: Stable audit identity supplied by the owning action boundary.
-        actor: Authenticated runtime or staff identity responsible for execution.
+        actor: Authenticated identity responsible for execution.
         created_at: Server-recorded event timestamp.
         correlation_id: Optional request or operation correlation identity.
 
     Returns:
-        An existing ``AuditEventEnvelope`` for a revision-backed result, otherwise ``None``.
+        An audit event when an authoritative Claim revision is known, otherwise ``None``.
 
     Raises:
         TypeError: A command, result, actor, or timestamp has the wrong runtime type.
@@ -209,17 +160,16 @@ def build_claim_context_execution_audit_event(
     claim_id = result.claim_id or command.claim_id
     if claim_id is None or result.resulting_revision is None:
         return None
-
-    if result.status is ClaimContextExecutionStatus.APPLIED:
-        event_type = AuditEventType.ACTION_COMPLETED
-        outcome = AuditOutcome.SUCCEEDED
-    elif result.status is ClaimContextExecutionStatus.REJECTED:
-        event_type = AuditEventType.ACTION_FAILED
-        outcome = AuditOutcome.REJECTED
-    else:
-        event_type = AuditEventType.ACTION_FAILED
-        outcome = AuditOutcome.FAILED
-
+    event_type = (
+        AuditEventType.ACTION_COMPLETED
+        if result.status is ClaimContextExecutionStatus.APPLIED
+        else AuditEventType.ACTION_FAILED
+    )
+    outcome = {
+        ClaimContextExecutionStatus.APPLIED: AuditOutcome.SUCCEEDED,
+        ClaimContextExecutionStatus.REJECTED: AuditOutcome.REJECTED,
+        ClaimContextExecutionStatus.FAILED: AuditOutcome.FAILED,
+    }[result.status]
     return AuditEventEnvelope(
         event_id=event_id,
         event_type=event_type,
@@ -230,9 +180,7 @@ def build_claim_context_execution_audit_event(
             claim_id=claim_id,
         ),
         actor=actor,
-        reason=(
-            f'{result.action_code} execution {result.status.value}: {result.reason_code}.'
-        ),
+        reason=f'{result.action_code} execution {result.status.value}: {result.reason_code}.',
         source_refs=[command.authority_reference],
         visibility=AuditVisibility.AUDIT_ONLY,
         correlation_id=correlation_id,
