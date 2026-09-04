@@ -1,0 +1,242 @@
+"""Map approved Claim Context execution outcomes to existing backend contracts."""
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from backend.core.errors import ApiError
+from backend.domain.agent_action_commands import ClaimContextCommand
+from backend.domain.audit import (
+    AuditActor,
+    AuditEventEnvelope,
+    AuditEventType,
+    AuditOutcome,
+    AuditSubject,
+    AuditSubjectType,
+    AuditVisibility,
+)
+from backend.services.agent_action_execution import (
+    ClaimContextExecutionResult,
+    ClaimContextExecutionStatus,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimContextApiMapping:
+    """Public-transport mapping for one internal execution result."""
+
+    claim_id: str | None
+    resulting_revision: int | None
+    error: ApiError | None
+
+
+_API_ERROR_MAP: dict[str, tuple[int, str, str, bool]] = {
+    'REVISION_CONFLICT': (
+        409,
+        'REVISION_CONFLICT',
+        'The claim changed before the approved action could be applied.',
+        True,
+    ),
+    'IDEMPOTENCY_CONFLICT': (
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'The approved action conflicts with an earlier request.',
+        False,
+    ),
+    'CLAIM_NOT_FOUND': (
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The claim was not found.',
+        False,
+    ),
+    'RESOURCE_NOT_FOUND': (
+        404,
+        'RESOURCE_NOT_FOUND',
+        'The requested claim resource was not found.',
+        False,
+    ),
+    'WORKFLOW_STATE_CHANGED': (
+        409,
+        'INVALID_STATE_TRANSITION',
+        'The claim state changed before the approved action could be applied.',
+        False,
+    ),
+    'INVALID_STATE_TRANSITION': (
+        409,
+        'INVALID_STATE_TRANSITION',
+        'The approved action is not valid for the current claim state.',
+        False,
+    ),
+    'ACCESS_DENIED': (
+        403,
+        'ACCESS_DENIED',
+        'The approved action is not permitted.',
+        False,
+    ),
+    'VALIDATION_ERROR': (
+        422,
+        'VALIDATION_ERROR',
+        'The approved action did not match the required contract.',
+        False,
+    ),
+    'DEPENDENCY_FAILURE': (
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        'A required service is temporarily unavailable. The claim was not reported as completed.',
+        True,
+    ),
+    'DEPENDENCY_UNAVAILABLE': (
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        'A required service is temporarily unavailable. The claim was not reported as completed.',
+        True,
+    ),
+    'DEPENDENCY_FAILED': (
+        502,
+        'DEPENDENCY_FAILED',
+        'A required service could not complete the approved action.',
+        False,
+    ),
+}
+
+
+def map_claim_context_execution_to_api(
+    result: ClaimContextExecutionResult,
+) -> ClaimContextApiMapping:
+    """Map one internal command result to the existing public error vocabulary.
+
+    Args:
+        result: Provider-neutral execution outcome returned by the #406 command gate.
+
+    Returns:
+        The resulting Claim identity/revision plus an ``ApiError`` for non-applied outcomes.
+        Applied outcomes carry no error and reuse the action-specific API response contract.
+
+    Raises:
+        TypeError: The supplied result has the wrong runtime type.
+    """
+
+    if not isinstance(result, ClaimContextExecutionResult):
+        raise TypeError('result must be a ClaimContextExecutionResult.')
+
+    if result.status is ClaimContextExecutionStatus.APPLIED:
+        if result.claim_id is not None and result.resulting_revision is not None:
+            return ClaimContextApiMapping(
+                claim_id=result.claim_id,
+                resulting_revision=result.resulting_revision,
+                error=None,
+            )
+        return ClaimContextApiMapping(
+            claim_id=result.claim_id,
+            resulting_revision=result.resulting_revision,
+            error=ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The approved action did not produce a verifiable persisted result.',
+            ),
+        )
+
+    mapped = _API_ERROR_MAP.get(result.reason_code)
+    if mapped is None:
+        error = ApiError(
+            status_code=500,
+            code='INTERNAL_ERROR',
+            message='The approved action could not be mapped to a completed state.',
+            retryable=result.retryable,
+        )
+    else:
+        status_code, code, message, default_retryable = mapped
+        error = ApiError(
+            status_code=status_code,
+            code=code,
+            message=message,
+            retryable=default_retryable or result.retryable,
+            current_revision=(
+                result.resulting_revision if result.reason_code == 'REVISION_CONFLICT' else None
+            ),
+        )
+    return ClaimContextApiMapping(
+        claim_id=result.claim_id,
+        resulting_revision=result.resulting_revision,
+        error=error,
+    )
+
+
+def build_claim_context_execution_audit_event(
+    command: ClaimContextCommand,
+    result: ClaimContextExecutionResult,
+    *,
+    event_id: str,
+    actor: AuditActor,
+    created_at: datetime,
+    correlation_id: str | None = None,
+) -> AuditEventEnvelope | None:
+    """Map a revision-backed execution result to the existing audit envelope.
+
+    The mapper deliberately returns ``None`` when the execution result does not contain an
+    authoritative Claim revision. This avoids fabricating a Claim audit revision after a
+    pre-execution rejection or dependency failure. The caller remains responsible for persisting
+    the returned event inside the applicable action-specific transaction boundary.
+
+    Args:
+        command: Immutable approved command that produced the execution result.
+        result: Provider-neutral execution outcome returned by the #406 command gate.
+        event_id: Stable audit identity supplied by the owning action boundary.
+        actor: Authenticated runtime or staff identity responsible for execution.
+        created_at: Server-recorded event timestamp.
+        correlation_id: Optional request or operation correlation identity.
+
+    Returns:
+        An existing ``AuditEventEnvelope`` for a revision-backed result, otherwise ``None``.
+
+    Raises:
+        TypeError: A command, result, actor, or timestamp has the wrong runtime type.
+        ValueError: The result does not belong to the supplied command or Claim scope.
+    """
+
+    if not isinstance(command, ClaimContextCommand):
+        raise TypeError('command must be a ClaimContextCommand.')
+    if not isinstance(result, ClaimContextExecutionResult):
+        raise TypeError('result must be a ClaimContextExecutionResult.')
+    if not isinstance(actor, AuditActor):
+        raise TypeError('actor must be an AuditActor.')
+    if not isinstance(created_at, datetime):
+        raise TypeError('created_at must be a datetime.')
+    if command.action_code != result.action_code:
+        raise ValueError('Execution result action does not match the approved command.')
+    if command.claim_id is not None and result.claim_id not in {None, command.claim_id}:
+        raise ValueError('Execution result Claim scope does not match the approved command.')
+
+    claim_id = result.claim_id or command.claim_id
+    if claim_id is None or result.resulting_revision is None:
+        return None
+
+    if result.status is ClaimContextExecutionStatus.APPLIED:
+        event_type = AuditEventType.ACTION_COMPLETED
+        outcome = AuditOutcome.SUCCEEDED
+    elif result.status is ClaimContextExecutionStatus.REJECTED:
+        event_type = AuditEventType.ACTION_FAILED
+        outcome = AuditOutcome.REJECTED
+    else:
+        event_type = AuditEventType.ACTION_FAILED
+        outcome = AuditOutcome.FAILED
+
+    return AuditEventEnvelope(
+        event_id=event_id,
+        event_type=event_type,
+        outcome=outcome,
+        subject=AuditSubject(
+            subject_type=AuditSubjectType.CLAIM,
+            subject_id=claim_id,
+            claim_id=claim_id,
+        ),
+        actor=actor,
+        reason=(
+            f'{result.action_code} execution {result.status.value}: {result.reason_code}.'
+        ),
+        source_refs=[command.authority_reference],
+        visibility=AuditVisibility.AUDIT_ONLY,
+        correlation_id=correlation_id,
+        idempotency_key=command.idempotency_key,
+        claim_revision=result.resulting_revision,
+        created_at=created_at,
+    )
