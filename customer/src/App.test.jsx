@@ -1712,6 +1712,10 @@ describe('adaptive claimant entry', () => {
     const updatedClaim = {
       ...createdClaim().claim,
       revision: 4,
+      dynamic_form: {
+        ...initialTurn.dynamic_form,
+        claim_revision: 4,
+      },
       handoff: {
         handoff_id: 'hnd_live',
         status: 'in_progress',
@@ -1757,11 +1761,69 @@ describe('adaptive claimant entry', () => {
 
     expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
     expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Motor claim details' })).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Motor claim details' })).toBeVisible()
+    expect(screen.getByText('Updated with revision 4')).toBeVisible()
     expect(realtime.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
       claimId: 'clm_test',
       sessionId: 'ses_test',
       afterRevision: 2,
     }))
+  })
+
+  it('clears a stale dynamic form when an authoritative live claim has no projection', async () => {
+    let publishUpdate
+    realtime.streamClaimUpdates.mockImplementation(({ signal, onEvent }) => {
+      publishUpdate = onEvent
+      return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+    })
+    const initialTurn = {
+      ...firstTurn(),
+      dynamic_form: {
+        claim_id: 'clm_test',
+        claim_revision: 2,
+        field_registry_version: '4',
+        branch_rules_version: 'vp-dynamic-form-branch-rules-v1',
+        selected_family: 'motor',
+        active_branches: ['family.motor'],
+        fields: [
+          {
+            field_code: 'incident.description',
+            selection_state: 'candidate_now',
+            value_state: 'proposed',
+            source: 'claimant',
+            reason: 'This detail describes the incident.',
+          },
+        ],
+      },
+    }
+    const updatedClaim = {
+      ...createdClaim().claim,
+      revision: 4,
+      dynamic_form: null,
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(initialTurn))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'Another car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByRole('heading', { name: 'Motor claim details' })).toBeVisible()
+    await waitFor(() => expect(publishUpdate).toBeTypeOf('function'))
+    fetch
+      .mockResolvedValueOnce(jsonResponse(updatedClaim))
+      .mockResolvedValueOnce(jsonResponse({ items: [], page: { next_cursor: null } }))
+
+    await act(async () => publishUpdate({
+      claim_id: 'clm_test',
+      session_id: 'ses_test',
+      claim_revision: 4,
+      resources: ['claim'],
+    }))
+
+    await waitFor(() => expect(
+      screen.queryByRole('heading', { name: 'Motor claim details' }),
+    ).not.toBeInTheDocument())
   })
 })

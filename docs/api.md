@@ -859,6 +859,7 @@ Response `200`:
   },
   "external_claim": null,
   "external_service_action": null,
+  "dynamic_form": null,
   "customer_next_step": {},
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
@@ -876,6 +877,13 @@ review blocks the action. It contains the service and provider labels, purpose, 
 summary of the minimum data to be shared, consent state, progress/result state, and the
 provider-neutral routing result when accepted. It never exposes the raw consent record,
 authorisation decision, internal signals, or complete claim context.
+
+`dynamic_form` is the claimant-safe Dynamic Form projection applicable to the returned Claim
+snapshot. It is built from the newest applied branch evaluation valid at or before the current
+Claim revision, and its `claim_revision` matches the returned Claim revision. An unrelated Claim
+update can therefore carry the last applicable field selection forward without asking the browser
+to infer whether it is still valid. The field is `null` only when the Claim has no applied branch
+evaluation. Inactive and system-owned fields remain outside this projection.
 
 ### `POST /api/v1/claims/{claim_id}/sessions`
 
@@ -1011,11 +1019,11 @@ Response `200`:
 
 Only the customer-safe decision projection is returned. Internal required tools, confidence, signals, and authority details remain available through authorised internal APIs and events.
 
-`dynamic_form` is a claimant-safe projection of the latest applied branch evaluation whose
-evaluated and resulting revision both equal the current Claim revision. It exposes only active,
-claimant-visible fields; inactive and system-owned fields remain outside this response. Selection
-state (`required_now`, `candidate_now`, or `pending_later` in this projection) is separate from the
-stored value state. The projection is omitted when no current-revision evaluation exists.
+`dynamic_form` is a claimant-safe projection of the applied branch evaluation after the turn. It
+exposes only active, claimant-visible fields; inactive and system-owned fields remain outside this
+response. Selection state (`required_now`, `candidate_now`, or `pending_later` in this projection)
+is separate from the stored value state. The projection is `null` when the Claim has no applied
+branch evaluation.
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 
