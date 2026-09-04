@@ -751,8 +751,6 @@ class CollaborationMutationResponse(ContractModel):
 class CreateStaffActionRequest(ContractModel):
     action_type: str = Field(min_length=1, max_length=100)
     assigned_to: str | None = Field(default=None, min_length=1, max_length=100)
-    requested_outcome: str = Field(min_length=1, max_length=1000)
-    source_refs: list[str] = Field(default_factory=list, max_length=100)
 
 
 class UpdateStaffActionRequest(ContractModel):

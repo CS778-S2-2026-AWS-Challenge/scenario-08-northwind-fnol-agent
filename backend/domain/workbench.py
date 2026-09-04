@@ -17,6 +17,7 @@ from backend.domain.models import (
     MessageRecord,
     PageInfo,
     StaffActionRecord,
+    StateChange,
     StructuredFormField,
     WorkbenchHandoff,
     WorkbenchSession,
@@ -254,8 +255,35 @@ class WorkbenchActionConfirmation(ContractModel):
     message: str | None = None
 
 
+class WorkbenchActionResultDefaults(ContractModel):
+    outcome: str
+    reason_codes: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class WorkbenchCustomerUpdateDefaults(ContractModel):
+    responsible_party: WorkbenchResponsibility
+    related_refs: list[str] = Field(default_factory=list)
+
+
+class WorkbenchActionPayloadDefaults(ContractModel):
+    pass
+
+
+class WorkbenchCompletionPayloadDefaults(WorkbenchActionPayloadDefaults):
+    result: WorkbenchActionResultDefaults | None = None
+    state_changes: list[StateChange] = Field(default_factory=list)
+    customer_update: WorkbenchCustomerUpdateDefaults | None = None
+
+
+class WorkbenchSignalPayloadDefaults(WorkbenchActionPayloadDefaults):
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class WorkbenchAllowedAction(ContractModel):
+    registry_version: str
     action_code: str
+    target_type: str
     target_ref: str
     label: str
     purpose: str
@@ -263,9 +291,16 @@ class WorkbenchAllowedAction(ContractModel):
     blocked_reason: str | None = None
     confirmation: WorkbenchActionConfirmation
     expected_effects: list[str] = Field(default_factory=list)
+    claimant_visible_effects: list[str] = Field(default_factory=list)
+    failure_codes: list[str] = Field(default_factory=list)
+    audit_requirements: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     inputs: list[WorkbenchActionInput] = Field(default_factory=list)
-    payload_defaults: dict[str, Any] = Field(default_factory=dict)
+    payload_defaults: (
+        WorkbenchCompletionPayloadDefaults
+        | WorkbenchSignalPayloadDefaults
+        | WorkbenchActionPayloadDefaults
+    ) = Field(default_factory=WorkbenchActionPayloadDefaults)
     result_state: str = 'not_started'
     based_on_revision: int = Field(ge=1)
 

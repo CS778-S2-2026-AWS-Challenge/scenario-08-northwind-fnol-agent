@@ -41,11 +41,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     created = client.post(
         f'/api/v1/workbench/claims/{claim_id}/staff-actions',
         headers={**staff_auth_headers, 'Idempotency-Key': 'create-review', 'If-Match': '1'},
-        json={
-            'action_type': 'coverage_review',
-            'requested_outcome': 'Review the policy wording.',
-            'source_refs': ['pol_fixture'],
-        },
+        json={'action_type': 'coverage_review'},
     )
     assert created.status_code == 201
     action = created.json()['action']
@@ -61,7 +57,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
                 'outcome': 'professional_review_completed',
                 'summary': 'The fixture wording was reviewed.',
                 'reason_codes': ['POLICY_SECTION_CONFIRMED'],
-                'source_refs': ['pol_fixture'],
+                'source_refs': [],
             },
             'state_changes': [
                 {'path': 'claim_state.coverage', 'to': 'clear'},
@@ -84,6 +80,48 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     assert stored.claim_state.coverage.value == 'clear'
     assert stored.claim_state.workflow_state.value == 'ready_for_next'
     assert len(repository.list_customer_updates(claim_id)) == 1
+    audit_record = repository.find_idempotency(
+        'stf_demo',
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
+        'complete-review',
+    )
+    assert audit_record is not None
+    assert audit_record.action_registry_version == '2026-09-04.1'
+    assert audit_record.action_code == 'work_item.update'
+    assert audit_record.target_ref == action['action_id']
+
+    closed_action = client.patch(
+        f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'complete-review-again',
+            'If-Match': '3',
+        },
+        json={
+            'status': 'completed',
+            'result': {
+                'outcome': 'professional_review_completed',
+                'summary': 'This second completion must not be accepted.',
+                'reason_codes': ['POLICY_SECTION_CONFIRMED'],
+                'source_refs': [],
+            },
+            'state_changes': [
+                {'path': 'claim_state.coverage', 'to': 'clear'},
+                {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+            ],
+            'customer_update': {
+                'summary': 'This update must not be persisted.',
+                'responsible_party': 'claimant',
+                'related_refs': [action['action_id']],
+            },
+        },
+    )
+    assert closed_action.status_code == 403
+    assert closed_action.json()['error']['code'] == 'ACCESS_DENIED'
+    assert closed_action.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'work_item.update'},
+        {'field': 'target_ref', 'reason': action['action_id']},
+    ]
 
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
     assert claimant.status_code == 200
@@ -101,7 +139,7 @@ def test_staff_write_back_requires_staff_current_revision_and_allowed_paths(
     claim = create_claim(client, auth_headers)
     claim_id = str(claim['claim_id'])
     endpoint = f'/api/v1/workbench/claims/{claim_id}/staff-actions'
-    payload = {'action_type': 'claimant_support', 'requested_outcome': 'Review the fixture.'}
+    payload = {'action_type': 'claimant_support'}
     claimant_attempt = client.post(
         endpoint,
         headers={**auth_headers, 'Idempotency-Key': 'claimant-create', 'If-Match': '1'},
@@ -115,13 +153,32 @@ def test_staff_write_back_requires_staff_current_revision_and_allowed_paths(
             'Idempotency-Key': 'unregistered-create',
             'If-Match': '1',
         },
-        json={'action_type': 'free_text_review', 'requested_outcome': 'Invent new work.'},
+        json={'action_type': 'free_text_review'},
     )
     assert unregistered.status_code == 422
+    free_form_registered = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'free-form-registered-create',
+            'If-Match': '1',
+        },
+        json={
+            'action_type': 'coverage_review',
+            'requested_outcome': 'Invent an operator-controlled outcome.',
+            'source_refs': ['invented-source'],
+        },
+    )
+    assert free_form_registered.status_code == 422
+    assert free_form_registered.json()['error']['code'] == 'VALIDATION_ERROR'
     created = client.post(
         endpoint,
         headers={**staff_auth_headers, 'Idempotency-Key': 'staff-create', 'If-Match': '1'},
         json=payload,
+    )
+    assert created.status_code == 201
+    assert created.json()['action']['requested_outcome'] == (
+        'Continue claimant support for this Claim.'
     )
     action_id = created.json()['action']['action_id']
     stale = client.patch(
@@ -199,6 +256,22 @@ def test_signal_decision_is_internal_idempotent_and_never_declares_fraud(
     claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
     assert 'signal_decision' not in claimant
     assert 'SOURCE_RECORD_NOT_COMPARABLE' not in str(claimant)
+
+    closed_signal = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'signal-decision-after-dismissal',
+            'If-Match': '2',
+        },
+        json=payload,
+    )
+    assert closed_signal.status_code == 403
+    assert closed_signal.json()['error']['code'] == 'ACCESS_DENIED'
+    assert closed_signal.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'signal.record_decision'},
+        {'field': 'target_ref', 'reason': 'sig_fixture'},
+    ]
 
 
 def test_signal_decision_finds_claim_decision_without_trigger_message(

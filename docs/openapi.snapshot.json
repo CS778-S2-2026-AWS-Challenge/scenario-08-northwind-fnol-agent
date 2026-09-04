@@ -1986,25 +1986,10 @@
               }
             ],
             "title": "Assigned To"
-          },
-          "requested_outcome": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Requested Outcome",
-            "type": "string"
-          },
-          "source_refs": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 100,
-            "title": "Source Refs",
-            "type": "array"
           }
         },
         "required": [
-          "action_type",
-          "requested_outcome"
+          "action_type"
         ],
         "title": "CreateStaffActionRequest",
         "type": "object"
@@ -6539,6 +6524,40 @@
         "title": "WorkbenchActionInputControl",
         "type": "string"
       },
+      "WorkbenchActionPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "WorkbenchActionPayloadDefaults",
+        "type": "object"
+      },
+      "WorkbenchActionResultDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "WorkbenchActionResultDefaults",
+        "type": "object"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -6606,6 +6625,13 @@
             "title": "Action Code",
             "type": "string"
           },
+          "audit_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audit Requirements",
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/ActionAvailability"
           },
@@ -6625,6 +6651,13 @@
             ],
             "title": "Blocked Reason"
           },
+          "claimant_visible_effects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claimant Visible Effects",
+            "type": "array"
+          },
           "confirmation": {
             "$ref": "#/components/schemas/WorkbenchActionConfirmation"
           },
@@ -6633,6 +6666,13 @@
               "type": "string"
             },
             "title": "Expected Effects",
+            "type": "array"
+          },
+          "failure_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failure Codes",
             "type": "array"
           },
           "inputs": {
@@ -6647,11 +6687,25 @@
             "type": "string"
           },
           "payload_defaults": {
-            "title": "Payload Defaults",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchCompletionPayloadDefaults"
+              },
+              {
+                "$ref": "#/components/schemas/WorkbenchSignalPayloadDefaults"
+              },
+              {
+                "$ref": "#/components/schemas/WorkbenchActionPayloadDefaults"
+              }
+            ],
+            "title": "Payload Defaults"
           },
           "purpose": {
             "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
             "type": "string"
           },
           "result_state": {
@@ -6669,10 +6723,16 @@
           "target_ref": {
             "title": "Target Ref",
             "type": "string"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
           }
         },
         "required": [
+          "registry_version",
           "action_code",
+          "target_type",
           "target_ref",
           "label",
           "purpose",
@@ -6922,6 +6982,40 @@
         "title": "WorkbenchClaimantSummary",
         "type": "object"
       },
+      "WorkbenchCompletionPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchCustomerUpdateDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActionResultDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state_changes": {
+            "items": {
+              "$ref": "#/components/schemas/StateChange"
+            },
+            "title": "State Changes",
+            "type": "array"
+          }
+        },
+        "title": "WorkbenchCompletionPayloadDefaults",
+        "type": "object"
+      },
       "WorkbenchConversationKind": {
         "enum": [
           "claim",
@@ -7069,6 +7163,26 @@
           "requested_outcome"
         ],
         "title": "WorkbenchCurrentWorkItem",
+        "type": "object"
+      },
+      "WorkbenchCustomerUpdateDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "related_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Refs",
+            "type": "array"
+          },
+          "responsible_party": {
+            "$ref": "#/components/schemas/WorkbenchResponsibility"
+          }
+        },
+        "required": [
+          "responsible_party"
+        ],
+        "title": "WorkbenchCustomerUpdateDefaults",
         "type": "object"
       },
       "WorkbenchExternalLifecycle": {
@@ -8489,6 +8603,20 @@
           "summary"
         ],
         "title": "WorkbenchSignalDetail",
+        "type": "object"
+      },
+      "WorkbenchSignalPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          }
+        },
+        "title": "WorkbenchSignalPayloadDefaults",
         "type": "object"
       },
       "WorkbenchStaffSummary": {

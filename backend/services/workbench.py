@@ -38,7 +38,6 @@ from backend.domain.tag_registry import get_staff_tag_definition
 from backend.domain.workbench import (
     ActionAvailability,
     ClaimLifecycleState,
-    ConfirmationLevel,
     CurrentStaffAccess,
     MissingInformationAttention,
     OwnershipState,
@@ -48,7 +47,6 @@ from backend.domain.workbench import (
     WorkbenchActionConfirmation,
     WorkbenchActionInput,
     WorkbenchActionInputChoice,
-    WorkbenchActionInputControl,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -92,21 +90,18 @@ from backend.domain.workbench import (
     WorkbenchWorkSummary,
     WorkPriorityLevel,
 )
+from backend.domain.workbench_action_registry import (
+    WORK_ITEM_TYPE_REGISTRY,
+    WORKBENCH_ACTION_REGISTRY_VERSION,
+    get_workbench_action_definition,
+    handoff_resolution_defaults,
+    work_item_defaults,
+)
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.support import decode_cursor, encode_cursor, now_utc
 from backend.services.tag_projection import project_staff_tags
 
 ResourceT = TypeVar('ResourceT')
-
-SIGNAL_DECISION_REASON_CHOICES = (
-    ('CONFLICT_REQUIRES_REVIEW', 'Conflict requires review'),
-    ('CLAIM_LEVEL_SIGNAL_CONFIRMED', 'Claim-level signal confirmed'),
-    ('POLICY_SECTION_CONFIRMED', 'Policy section confirmed'),
-    ('SOURCE_RECORD_NOT_COMPARABLE', 'Source record not comparable'),
-    ('STAFF_CONFIRMED_INTERPRETATION_REQUIRED', 'Interpretation still required'),
-    ('STAFF_CONFIRMED_REVIEW_REQUIREMENT', 'Review requirement confirmed'),
-    ('STAFF_REVIEWED_SOURCE', 'Source reviewed'),
-)
 
 _PRIORITY_RANK = {
     WorkPriorityLevel.IMMEDIATE: 0,
@@ -587,83 +582,56 @@ def _integration_summary(
     )
 
 
-def _input(
-    field_code: str,
-    label: str,
-    control: WorkbenchActionInputControl,
+def _registered_action(
+    action_code: str,
+    target_ref: str,
+    revision: int,
     *,
-    choices: Sequence[tuple[str, str]] = (),
-    required: bool = True,
-) -> WorkbenchActionInput:
-    return WorkbenchActionInput(
-        field_code=field_code,
-        label=label,
-        control=control,
-        required=required,
-        choices=[
-            WorkbenchActionInputChoice(value=value, label=choice_label)
-            for value, choice_label in choices
-        ],
-    )
-
-
-def handoff_resolution_defaults(handoff: HandoffRecord) -> dict[str, Any]:
-    if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
-        return {
-            'result': {
-                'outcome': 'professional_review_completed',
-                'reason_codes': ['POLICY_SECTION_CONFIRMED'],
-                'source_refs': handoff.packet.source_refs,
-            },
-            'state_changes': [
-                {'path': 'claim_state.coverage', 'to': 'clear'},
-                {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+    availability: ActionAvailability = ActionAvailability.CONFIRMATION_REQUIRED,
+    blocked_reason: str | None = None,
+    source_refs: Sequence[str] = (),
+    payload_defaults: dict[str, Any] | None = None,
+    additional_inputs: Sequence[WorkbenchActionInput] = (),
+    result_state: str = 'awaiting_input',
+) -> WorkbenchAllowedAction:
+    definition = get_workbench_action_definition(action_code)
+    inputs = [
+        WorkbenchActionInput(
+            field_code=item.field_code,
+            label=item.label,
+            control=item.control,
+            required=item.required,
+            choices=[
+                WorkbenchActionInputChoice(value=value, label=label)
+                for value, label in item.choices
             ],
-            'customer_update': {
-                'responsible_party': 'claims_professional',
-                'related_refs': [handoff.handoff_id],
-            },
-        }
-    return {
-        'result': {
-            'outcome': 'support_completed',
-            'reason_codes': ['SUPPORT_NEED_MET'],
-            'source_refs': handoff.packet.source_refs,
-        },
-        'state_changes': [],
-        'customer_update': {
-            'responsible_party': 'claims_professional',
-            'related_refs': [handoff.handoff_id],
-        },
-    }
-
-
-def work_item_defaults(action: StaffActionRecord) -> dict[str, Any]:
-    if action.action_type in {'coverage_review', 'professional_review'}:
-        outcome = 'professional_review_completed'
-        reasons = ['POLICY_SECTION_CONFIRMED']
-        state_changes = [
-            {'path': 'claim_state.coverage', 'to': 'clear'},
-            {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
-        ]
-        customer_update: dict[str, Any] | None = {
-            'responsible_party': 'claimant',
-            'related_refs': [action.action_id],
-        }
-    else:
-        outcome = 'staff_work_completed'
-        reasons = ['SUPPORT_NEED_MET']
-        state_changes = []
-        customer_update = None
-    return {
-        'result': {
-            'outcome': outcome,
-            'reason_codes': reasons,
-            'source_refs': action.source_refs,
-        },
-        'state_changes': state_changes,
-        'customer_update': customer_update,
-    }
+        )
+        for item in definition.inputs
+    ]
+    inputs.extend(additional_inputs)
+    return WorkbenchAllowedAction(
+        registry_version=WORKBENCH_ACTION_REGISTRY_VERSION,
+        action_code=definition.action_code,
+        target_type=definition.target_type.value,
+        target_ref=target_ref,
+        label=definition.label,
+        purpose=definition.purpose,
+        availability=availability,
+        blocked_reason=blocked_reason,
+        confirmation=WorkbenchActionConfirmation(
+            level=definition.confirmation_level,
+            message=definition.confirmation_message,
+        ),
+        expected_effects=list(definition.expected_effects),
+        claimant_visible_effects=list(definition.claimant_visible_effects),
+        failure_codes=list(definition.failure_codes),
+        audit_requirements=list(definition.audit_requirements),
+        source_refs=list(source_refs),
+        inputs=inputs,
+        payload_defaults=payload_defaults or {},
+        result_state=result_state,
+        based_on_revision=revision,
+    )
 
 
 def _allowed_actions(
@@ -673,38 +641,32 @@ def _allowed_actions(
     staff_actions: Sequence[StaffActionRecord],
     risk_signals: Sequence[WorkbenchRiskSignal],
     collaboration_requests: Sequence[ClaimCollaborationRequest],
+    external_tasks: Sequence[ExternalTaskRecord],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
     actions: list[WorkbenchAllowedAction] = []
     if active_handoffs:
         handoff = active_handoffs[-1]
-        if handoff.status in {HandoffStatus.REQUESTED, HandoffStatus.QUEUED}:
-            blocked = (
-                handoff.assigned_to is not None
-                and ownership.current_staff_access is not CurrentStaffAccess.PRIMARY
+        if handoff.status is HandoffStatus.QUEUED:
+            effective_owner = (
+                ownership.primary_assignee.staff_id if ownership.primary_assignee else None
             )
+            blocked = effective_owner not in {None, principal.subject}
             actions.append(
-                WorkbenchAllowedAction(
-                    action_code='human.accept_handoff',
-                    target_ref=handoff.handoff_id,
-                    label='Accept Claim',
-                    purpose='Take responsibility for the requested staff work.',
-                    availability=ActionAvailability.BLOCKED
-                    if blocked
-                    else ActionAvailability.CONFIRMATION_REQUIRED,
-                    blocked_reason='This work is assigned to another staff member.'
-                    if blocked
-                    else None,
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message=(
-                            'Accepting this Claim makes you responsible for the current handoff.'
-                        ),
+                _registered_action(
+                    'human.accept_handoff',
+                    handoff.handoff_id,
+                    claim.revision,
+                    availability=(
+                        ActionAvailability.BLOCKED
+                        if blocked
+                        else ActionAvailability.CONFIRMATION_REQUIRED
                     ),
-                    expected_effects=['handoff.accept', 'ownership.assign'],
+                    blocked_reason=(
+                        'This work is assigned to another staff member.' if blocked else None
+                    ),
                     source_refs=[handoff.handoff_id],
                     result_state='pending_confirmation',
-                    based_on_revision=claim.revision,
                 )
             )
         elif ownership.current_staff_access in {
@@ -712,11 +674,10 @@ def _allowed_actions(
             CurrentStaffAccess.COWORKER,
         }:
             actions.append(
-                WorkbenchAllowedAction(
-                    action_code='conversation.send_claimant_message',
-                    target_ref=claim.active_session_id or handoff.handoff_id,
-                    label='Reply to claimant',
-                    purpose='Continue the accepted claimant conversation.',
+                _registered_action(
+                    'conversation.send_claimant_message',
+                    claim.active_session_id or handoff.handoff_id,
+                    claim.revision,
                     availability=(
                         ActionAvailability.CONFIRMATION_REQUIRED
                         if claim.active_session_id
@@ -725,52 +686,17 @@ def _allowed_actions(
                     blocked_reason=None
                     if claim.active_session_id
                     else 'No active claimant session is available.',
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message='This message will be visible to the claimant.',
-                    ),
-                    expected_effects=['message.append', 'handoff.mark_in_progress'],
                     source_refs=[handoff.handoff_id],
-                    inputs=[
-                        _input(
-                            'content.text',
-                            'Claimant-visible message',
-                            WorkbenchActionInputControl.TEXTAREA,
-                        )
-                    ],
-                    result_state='awaiting_input',
-                    based_on_revision=claim.revision,
                 )
             )
             if ownership.current_staff_access is CurrentStaffAccess.PRIMARY:
                 actions.append(
-                    WorkbenchAllowedAction(
-                        action_code='human.resolve_handoff',
-                        target_ref=handoff.handoff_id,
-                        label='Resolve handoff',
-                        purpose='Record the outcome and the claimant-safe next step.',
-                        availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                        confirmation=WorkbenchActionConfirmation(
-                            level=ConfirmationLevel.EXPLICIT,
-                            message='The recorded outcome will update the shared Claim context.',
-                        ),
-                        expected_effects=['handoff.resolve', 'customer_update.append'],
+                    _registered_action(
+                        'human.resolve_handoff',
+                        handoff.handoff_id,
+                        claim.revision,
                         source_refs=[handoff.handoff_id],
-                        inputs=[
-                            _input(
-                                'result.summary',
-                                'Internal result summary',
-                                WorkbenchActionInputControl.TEXTAREA,
-                            ),
-                            _input(
-                                'customer_update.summary',
-                                'Claimant update',
-                                WorkbenchActionInputControl.TEXTAREA,
-                            ),
-                        ],
                         payload_defaults=handoff_resolution_defaults(handoff),
-                        result_state='awaiting_input',
-                        based_on_revision=claim.revision,
                     )
                 )
     if ownership.current_staff_access is CurrentStaffAccess.PRIMARY:
@@ -778,98 +704,54 @@ def _allowed_actions(
             if signal.status not in {SignalReviewStatus.OPEN, SignalReviewStatus.UNDER_REVIEW}:
                 continue
             actions.append(
-                WorkbenchAllowedAction(
-                    action_code='signal.record_decision',
-                    target_ref=signal.signal_id,
-                    label='Record signal decision',
-                    purpose='Record a source-linked decision for this exact review signal.',
-                    availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message='This internal decision is audited and may change review work.',
-                    ),
-                    expected_effects=['signal.decision.append', 'claim.revision.advance'],
+                _registered_action(
+                    'signal.record_decision',
+                    signal.signal_id,
+                    claim.revision,
                     source_refs=signal.source_refs,
-                    inputs=[
-                        _input(
-                            'decision',
-                            'Decision',
-                            WorkbenchActionInputControl.SELECT,
-                            choices=(
-                                ('confirmed', 'Confirm for review'),
-                                ('dismissed', 'Dismiss signal'),
-                                ('overridden', 'Override signal'),
-                                ('resolved', 'Resolve signal'),
-                            ),
-                        ),
-                        _input(
-                            'reason_codes.0',
-                            'Reason',
-                            WorkbenchActionInputControl.SELECT,
-                            choices=SIGNAL_DECISION_REASON_CHOICES,
-                        ),
-                        _input(
-                            'summary',
-                            'Decision summary',
-                            WorkbenchActionInputControl.TEXTAREA,
-                        ),
-                    ],
                     payload_defaults={'evidence_refs': signal.source_refs},
-                    result_state='awaiting_input',
-                    based_on_revision=claim.revision,
                 )
             )
+    if ownership.current_staff_access in {CurrentStaffAccess.PRIMARY, CurrentStaffAccess.COWORKER}:
+        creation_source_refs = list(
+            active_handoffs[-1].packet.source_refs if active_handoffs else []
+        )
+        for signal in risk_signals:
+            creation_source_refs.extend(signal.source_refs)
+        creation_source_refs = list(dict.fromkeys(creation_source_refs))
+        actions.append(
+            _registered_action(
+                'work_item.create',
+                claim.claim_id,
+                claim.revision,
+                source_refs=creation_source_refs,
+            )
+        )
     for staff_action in staff_actions:
         if staff_action.status in {StaffActionStatus.COMPLETED, StaffActionStatus.CANCELLED}:
             continue
         if staff_action.assigned_to != principal.subject:
             continue
+        if staff_action.action_type not in WORK_ITEM_TYPE_REGISTRY:
+            continue
+        additional_inputs = []
+        if work_item_defaults(staff_action)['customer_update'] is not None:
+            additional_inputs.append(
+                WorkbenchActionInput(
+                    field_code='customer_update.summary',
+                    label='Claimant update',
+                    control='textarea',
+                    required=False,
+                )
+            )
         actions.append(
-            WorkbenchAllowedAction(
-                action_code='work_item.update',
-                target_ref=staff_action.action_id,
-                label='Update assigned work',
-                purpose='Progress or complete this exact assigned WorkItem.',
-                availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                confirmation=WorkbenchActionConfirmation(
-                    level=ConfirmationLevel.EXPLICIT,
-                    message='The selected status and any completion result will be audited.',
-                ),
-                expected_effects=['work_item.update', 'claim.revision.advance'],
+            _registered_action(
+                'work_item.update',
+                staff_action.action_id,
+                claim.revision,
                 source_refs=staff_action.source_refs,
-                inputs=[
-                    _input(
-                        'status',
-                        'Status',
-                        WorkbenchActionInputControl.SELECT,
-                        choices=(
-                            ('in_progress', 'In progress'),
-                            ('completed', 'Completed'),
-                            ('cancelled', 'Cancelled'),
-                        ),
-                    ),
-                    _input(
-                        'result.summary',
-                        'Result summary',
-                        WorkbenchActionInputControl.TEXTAREA,
-                        required=False,
-                    ),
-                    *(
-                        [
-                            _input(
-                                'customer_update.summary',
-                                'Claimant update',
-                                WorkbenchActionInputControl.TEXTAREA,
-                                required=False,
-                            )
-                        ]
-                        if work_item_defaults(staff_action)['customer_update'] is not None
-                        else []
-                    ),
-                ],
+                additional_inputs=additional_inputs,
                 payload_defaults=work_item_defaults(staff_action),
-                result_state='awaiting_input',
-                based_on_revision=claim.revision,
             )
         )
     if (
@@ -877,61 +759,37 @@ def _allowed_actions(
         and ownership.primary_assignee
     ):
         actions.append(
-            WorkbenchAllowedAction(
-                action_code='ownership.request_cowork',
-                target_ref=claim.claim_id,
-                label='Request cowork access',
-                purpose='Ask the primary owner to collaborate on this Claim.',
-                availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                confirmation=WorkbenchActionConfirmation(
-                    level=ConfirmationLevel.EXPLICIT,
-                    message='The current primary owner will receive this request.',
-                ),
-                expected_effects=['collaboration_request.create'],
-                based_on_revision=claim.revision,
-            )
+            _registered_action('ownership.request_cowork', claim.claim_id, claim.revision)
         )
     if ownership.current_staff_access is CurrentStaffAccess.PRIMARY:
+        requeue_blocker = None
+        if any(item.status is StaffActionStatus.IN_PROGRESS for item in staff_actions):
+            requeue_blocker = (
+                'Complete or pause in-progress staff work before returning this Claim.'
+            )
+        elif any(
+            item.status
+            in {
+                ExternalTaskOperationStatus.PREPARED,
+                ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+            }
+            for item in external_tasks
+        ):
+            requeue_blocker = 'Resolve the active external operation before returning this Claim.'
         actions.extend(
             [
-                WorkbenchAllowedAction(
-                    action_code='ownership.invite_cowork',
-                    target_ref=claim.claim_id,
-                    label='Invite coworker',
-                    purpose='Grant another staff member access after they accept the invitation.',
-                    availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message='The invited staff member must accept before access changes.',
+                _registered_action('ownership.invite_cowork', claim.claim_id, claim.revision),
+                _registered_action('ownership.request_transfer', claim.claim_id, claim.revision),
+                _registered_action(
+                    'ownership.requeue',
+                    claim.claim_id,
+                    claim.revision,
+                    availability=(
+                        ActionAvailability.BLOCKED
+                        if requeue_blocker
+                        else ActionAvailability.CONFIRMATION_REQUIRED
                     ),
-                    expected_effects=['collaboration_request.create'],
-                    based_on_revision=claim.revision,
-                ),
-                WorkbenchAllowedAction(
-                    action_code='ownership.request_transfer',
-                    target_ref=claim.claim_id,
-                    label='Request transfer',
-                    purpose='Ask another staff member to become the primary owner.',
-                    availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message='Ownership changes only after the target staff member accepts.',
-                    ),
-                    expected_effects=['collaboration_request.create'],
-                    based_on_revision=claim.revision,
-                ),
-                WorkbenchAllowedAction(
-                    action_code='ownership.requeue',
-                    target_ref=claim.claim_id,
-                    label='Return to queue',
-                    purpose='Release primary ownership when no protected work is active.',
-                    availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                    confirmation=WorkbenchActionConfirmation(
-                        level=ConfirmationLevel.EXPLICIT,
-                        message='This Claim will become available for another staff member.',
-                    ),
-                    expected_effects=['ownership.release', 'queue.recompute'],
-                    based_on_revision=claim.revision,
+                    blocked_reason=requeue_blocker,
                 ),
             ]
         )
@@ -945,36 +803,84 @@ def _allowed_actions(
         )
         if expected_decider != principal.subject:
             continue
-        target = request.target_staff_id or request.requested_by
         actions.append(
-            WorkbenchAllowedAction(
-                action_code=f'ownership.decide_{request.kind.value}',
-                target_ref=request.request_id,
-                label=(
-                    'Review cowork request'
-                    if request.kind is CollaborationRequestKind.COWORK
-                    else 'Review transfer request'
-                ),
-                purpose=(
-                    f'Decide whether {target} may collaborate on this Claim.'
-                    if request.kind is CollaborationRequestKind.COWORK
-                    else f'Decide whether ownership should transfer to {target}.'
-                ),
-                availability=ActionAvailability.CONFIRMATION_REQUIRED,
-                confirmation=WorkbenchActionConfirmation(
-                    level=ConfirmationLevel.EXPLICIT,
-                    message='Accepting this request changes Claim access and is audited.',
-                ),
-                expected_effects=(
-                    ['ownership.cowork_grant']
-                    if request.kind is CollaborationRequestKind.COWORK
-                    else ['ownership.transfer']
-                ),
+            _registered_action(
+                f'ownership.decide_{request.kind.value}',
+                request.request_id,
+                claim.revision,
                 source_refs=[request.request_id],
-                based_on_revision=claim.revision,
             )
         )
     return actions
+
+
+def require_workbench_action(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim: WorkingClaim,
+    expected_revision: int,
+    action_code: str,
+    target_ref: str,
+) -> WorkbenchAllowedAction:
+    """Resolve an executable action from the current Workbench projection.
+
+    Args:
+        repository: Authoritative persistence boundary.
+        principal: Authenticated staff principal.
+        claim: Current internal Claim record.
+        expected_revision: Revision supplied by the mutation request.
+        action_code: Exact registered action code represented by the endpoint.
+        target_ref: Exact resource target represented by the endpoint.
+
+    Returns:
+        The current projected action envelope.
+
+    Raises:
+        ApiError: The revision is stale or the exact action is not executable.
+    """
+    if claim.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+    projection = _build_projection(repository, principal, claim, include_detail=True)
+    assert isinstance(projection, WorkbenchClaimDetail)
+    action = next(
+        (
+            item
+            for item in projection.allowed_actions
+            if item.action_code == action_code and item.target_ref == target_ref
+        ),
+        None,
+    )
+    if (
+        action is None
+        or action.availability is ActionAvailability.BLOCKED
+        or action.based_on_revision != expected_revision
+    ):
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The requested action is not available in the current Workbench projection.',
+            details=[
+                ErrorDetail(field='action_code', reason=action_code),
+                ErrorDetail(field='target_ref', reason=target_ref),
+            ],
+        )
+    if (
+        action.availability is ActionAvailability.CONFIRMATION_REQUIRED
+        and action.confirmation.level.value == 'none'
+    ):
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The requested action has an invalid confirmation contract.',
+            details=[ErrorDetail(field='action_code', reason=action_code)],
+        )
+    return action
 
 
 def _primary_action(
@@ -989,7 +895,7 @@ def _primary_action(
         preferred.append(
             (
                 'human.accept_handoff'
-                if handoff.status in {HandoffStatus.REQUESTED, HandoffStatus.QUEUED}
+                if handoff.status is HandoffStatus.QUEUED
                 else 'human.resolve_handoff',
                 handoff.handoff_id,
             )
@@ -1060,6 +966,7 @@ def _build_projection(
         actions,
         projected_risk_signals,
         collaboration_requests,
+        external_tasks,
         principal,
     )
     primary_action = _primary_action(

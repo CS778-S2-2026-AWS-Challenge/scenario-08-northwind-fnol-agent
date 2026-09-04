@@ -53,6 +53,9 @@ class IdempotencyRecord:
     agent_message_id: str | None = None
     decision_id: str | None = None
     handoff_id: str | None = None
+    action_registry_version: str | None = None
+    action_code: str | None = None
+    target_ref: str | None = None
     response_payload: dict[str, Any] | None = None
 
 

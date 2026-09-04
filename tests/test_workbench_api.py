@@ -990,11 +990,7 @@ def test_requeue_refuses_while_protected_staff_work_is_active(
             'Idempotency-Key': 'protected-action',
             'If-Match': str(accepted['revision']),
         },
-        json={
-            'action_type': 'claimant_support',
-            'requested_outcome': 'Continue the accepted claimant support request.',
-            'source_refs': [handoff_id],
-        },
+        json={'action_type': 'claimant_support'},
     )
     assert action.status_code == 201
     action_body = action.json()
@@ -1018,8 +1014,12 @@ def test_requeue_refuses_while_protected_staff_work_is_active(
         },
         json={'reason': 'Return this Claim for another professional.'},
     )
-    assert requeue.status_code == 409
-    assert requeue.json()['error']['code'] == 'OWNERSHIP_CONFLICT'
+    assert requeue.status_code == 403
+    assert requeue.json()['error']['code'] == 'ACCESS_DENIED'
+    assert requeue.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'ownership.requeue'},
+        {'field': 'target_ref', 'reason': claim_id},
+    ]
 
 
 def test_owner_can_requeue_claim_and_clear_active_handoff(

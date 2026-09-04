@@ -18,6 +18,7 @@ from backend.domain.models import (
     StaffActionStatus,
     WorkingClaim,
 )
+from backend.domain.workbench import WorkbenchAllowedAction
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -30,6 +31,7 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
+from backend.services.workbench import require_workbench_action
 
 
 def _error(status: int, code: str, message: str, *, revision: int | None = None) -> ApiError:
@@ -43,22 +45,12 @@ def _error(status: int, code: str, message: str, *, revision: int | None = None)
 
 
 def _claim(repository: PersistenceRepository, principal: Principal, claim_id: str) -> WorkingClaim:
+    if principal.actor_type != 'staff':
+        raise _error(403, 'ACCESS_DENIED', 'Staff Workbench access is required.')
     claim = repository.get_claim_internal(claim_id)
     if claim is None:
         raise _error(404, 'RESOURCE_NOT_FOUND', 'The claim was not found.')
     return claim
-
-
-def _expected_claim(claim: WorkingClaim, if_match: str | None) -> int:
-    expected = parse_if_match(if_match)
-    if claim.revision != expected:
-        raise _error(
-            409,
-            'REVISION_CONFLICT',
-            'The claim changed after this page was loaded.',
-            revision=claim.revision,
-        )
-    return expected
 
 
 def _active_handoff(repository: PersistenceRepository, claim: WorkingClaim) -> HandoffRecord | None:
@@ -137,6 +129,7 @@ def _idempotency(
     fingerprint: str,
     claim: WorkingClaim,
     response: CollaborationMutationResponse,
+    action: WorkbenchAllowedAction,
 ) -> IdempotencyRecord:
     return IdempotencyRecord(
         actor_id=principal.subject,
@@ -145,6 +138,9 @@ def _idempotency(
         request_fingerprint=fingerprint,
         claim_id=claim.claim_id,
         session_id='',
+        action_registry_version=action.registry_version,
+        action_code=action.action_code,
+        target_ref=action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
 
@@ -164,8 +160,14 @@ def create_cowork_request(
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
-    expected = _expected_claim(claim, if_match)
+    expected = parse_if_match(if_match)
     owner = _primary_owner(repository, claim)
+    action_code = (
+        'ownership.invite_cowork' if owner == principal.subject else 'ownership.request_cowork'
+    )
+    projected_action = require_workbench_action(
+        repository, principal, claim, expected, action_code, claim.claim_id
+    )
     if owner is None:
         raise _error(
             422,
@@ -204,7 +206,7 @@ def create_cowork_request(
         repository,
         updated,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response),
+        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         request,
     )
     return response
@@ -225,7 +227,10 @@ def create_transfer_request(
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
-    expected = _expected_claim(claim, if_match)
+    expected = parse_if_match(if_match)
+    projected_action = require_workbench_action(
+        repository, principal, claim, expected, 'ownership.request_transfer', claim.claim_id
+    )
     owner = _primary_owner(repository, claim)
     if owner != principal.subject:
         raise _error(403, 'ACCESS_DENIED', 'Only the primary owner can request a normal transfer.')
@@ -249,7 +254,7 @@ def create_transfer_request(
         repository,
         updated,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response),
+        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         request,
     )
     return response
@@ -271,7 +276,7 @@ def decide_collaboration_request(
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
-    expected = _expected_claim(claim, if_match)
+    expected = parse_if_match(if_match)
     request = next(
         (
             item
@@ -282,6 +287,14 @@ def decide_collaboration_request(
     )
     if request is None:
         raise _error(404, 'RESOURCE_NOT_FOUND', 'The collaboration request was not found.')
+    projected_action = require_workbench_action(
+        repository,
+        principal,
+        claim,
+        expected,
+        f'ownership.decide_{request.kind.value}',
+        request_id,
+    )
     if request.status is not CollaborationRequestStatus.PENDING:
         raise _error(
             422, 'VALIDATION_ERROR', 'Only a pending collaboration request can be decided.'
@@ -343,7 +356,7 @@ def decide_collaboration_request(
         repository,
         updated_claim,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response),
+        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         decided,
         coworkers=coworkers,
         handoff=handoff
@@ -369,7 +382,10 @@ def requeue_claim(
     if replay is not None:
         return replay
     claim = _claim(repository, principal, claim_id)
-    expected = _expected_claim(claim, if_match)
+    expected = parse_if_match(if_match)
+    projected_action = require_workbench_action(
+        repository, principal, claim, expected, 'ownership.requeue', claim.claim_id
+    )
     if _primary_owner(repository, claim) != principal.subject:
         raise _error(
             403, 'ACCESS_DENIED', 'Only the primary owner can return this Claim to the queue.'
@@ -425,7 +441,7 @@ def requeue_claim(
         repository,
         updated,
         expected,
-        _idempotency(principal, route, key, fingerprint, claim, response),
+        _idempotency(principal, route, key, fingerprint, claim, response, projected_action),
         request,
         coworkers=coworkers,
         handoff=handoff,

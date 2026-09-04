@@ -1625,14 +1625,22 @@ only when staff opens a section:
 
 Each sub-resource returns its own availability and limitation metadata. A failed optional source
 does not invalidate the core Claim projection. `tags` follows the typed Staff Tag Registry contract;
-`allowed_actions` is the authoritative runtime action projection. Each entry contains the exact
-`action_code` and `target_ref`, availability (`available`, `confirmation_required`, or `blocked`),
-confirmation metadata, expected effects, source references, revision, result state, projected
-input definitions, and immutable `payload_defaults`. A mutating Workbench control MUST resolve
+`allowed_actions` is the authoritative runtime action projection. Each entry contains the action
+registry version, exact `action_code`, target type and `target_ref`, availability (`available`,
+`confirmation_required`, or `blocked`), confirmation metadata, expected and claimant-visible
+effects, source references, failure codes, audit requirements, revision, result state, projected
+input definitions, and typed immutable `payload_defaults`. The versioned definitions in
+`backend/domain/workbench_action_registry.py` own these fields, registered choices, permission
+requirements, and fixed completion effects. Projection, mutation validation, and persistence all
+consume that registry. A mutating Workbench control and the corresponding runtime endpoint MUST resolve
 the exact action-code/target pair and MUST NOT infer availability from role, ownership, list order,
 or the presence of another action. `confirmation_required` is not equivalent to `available`: the
-client must complete the projected confirmation step. The client may collect only the projected
-inputs and must submit the projected fixed fields unchanged. `work_summary.primary_action_code`
+client must complete the projected confirmation step, and submitting the dedicated mutation is the
+explicit confirmation recorded by the current endpoints. The runtime returns `403 ACCESS_DENIED`
+with structured `action_code` and `target_ref` details when the exact action is absent or blocked;
+it returns `409 REVISION_CONFLICT` before action resolution when the projection revision is stale.
+The client may collect only the projected inputs and must submit the projected fixed fields unchanged.
+`work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised.
 
@@ -1668,17 +1676,19 @@ Request:
 ```json
 {
   "action_type": "coverage_review",
-  "assigned_to": "stf_01J4Y9ADW2",
-  "requested_outcome": "Decide whether the cited wording applies.",
-  "source_refs": ["pol_01J4Y93M22", "hnd_01J4Y7XG2C"]
+  "assigned_to": "stf_01J4Y9ADW2"
 }
 ```
 
 Response `201` returns the staff action and new claim revision.
 
-The compatibility create route accepts only registered action types: `claimant_support`,
-`coverage_review`, `handoff_support`, and `professional_review`. The Workbench does not expose a
-generic create-action form; runtime controls are derived from `allowed_actions`.
+This route is a legacy compatibility surface and is not rendered as a generic Workbench form. It
+requires the exact current `work_item.create` action targeted at the Claim. `action_type` must be
+one of the registry choices: `claimant_support`, `coverage_review`, `handoff_support`, or
+`professional_review`. The registry supplies the immutable `requested_outcome`; the current Claim
+projection supplies source references. Operator-supplied `requested_outcome` and `source_refs` are
+rejected by the request schema. `assigned_to`, when supplied, remains limited to the primary owner
+or an active coworker by the registered permission rule.
 
 ### `PATCH /api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}`
 
@@ -1733,7 +1743,10 @@ references must match its fixed payload defaults.
 
 ### Handoff Accept and Resolve
 
-`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` accepts the queued handoff for the authenticated staff member or an authorised `assignee_id`.
+`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` requires the exact current
+`human.accept_handoff` action and accepts the queued handoff for the authenticated staff member or
+an authorised `assignee_id`. The action is blocked when the effective Claim owner, taken from the
+active handoff owner or Claim assignee, is another staff member.
 
 After a handoff is accepted, both parties may continue using the persisted session message
 history. A claimant message during an open handoff is routed to staff without an automatic Agent
