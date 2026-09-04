@@ -1137,6 +1137,7 @@ class ClaimantClaim(ContractModel):
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None
+    dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
     handoff: ClaimantHandoff | None = None
     created_at: datetime
@@ -1382,4 +1383,5 @@ class DynamicFormProjection(ContractModel):
     fields: list[FieldSelectionResult] = Field(default_factory=list)
 
 
+ClaimantClaim.model_rebuild()
 MessageTurnResponse.model_rebuild()

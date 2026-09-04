@@ -5,7 +5,6 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import (
     BranchRuleEvaluator,
-    claimant_projection_fields,
     validate_registered_field_value,
 )
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
@@ -25,7 +24,6 @@ from backend.domain.models import (
     Coverage,
     CreateMessageRequest,
     CustomerNextStep,
-    DynamicFormProjection,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
@@ -67,7 +65,10 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
-from backend.services.branching import latest_applied_branch_evaluation
+from backend.services.branching import (
+    claimant_dynamic_form_projection,
+    latest_applied_branch_evaluation,
+)
 from backend.services.handoffs import (
     build_handoff,
     claimant_handoff,
@@ -161,35 +162,10 @@ def _message_turn_response(
         if decision.handoff_id is not None
         else None
     )
-    dynamic_form = None
     claim = repository.get_claim(claim_id, principal.subject)
-    evaluations = repository.list_branch_evaluations(claim_id, principal.subject)
-    valid_evaluation = next(
-        (
-            item
-            for item in reversed(evaluations)
-            if claim is not None
-            and item.status is BranchEvaluationStatus.APPLIED
-            and item.evaluated_against_claim_revision == claim.revision
-            and item.resulting_claim_revision == claim.revision
-        ),
-        None,
+    dynamic_form = (
+        claimant_dynamic_form_projection(repository, claim) if claim is not None else None
     )
-    if valid_evaluation is not None:
-        dynamic_form = DynamicFormProjection(
-            claim_id=claim_id,
-            claim_revision=valid_evaluation.resulting_claim_revision
-            or valid_evaluation.evaluated_against_claim_revision,
-            field_registry_version=valid_evaluation.field_registry_version,
-            branch_rules_version=valid_evaluation.branch_rules_version,
-            selected_family=valid_evaluation.selected_family,
-            active_branches=[
-                result.branch_id
-                for result in valid_evaluation.branch_results
-                if result.status == 'active'
-            ],
-            fields=claimant_projection_fields(valid_evaluation),
-        )
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,

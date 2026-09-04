@@ -41,7 +41,7 @@ describe("Kanban pull-request status rules", () => {
 
   it("uses review readiness, closure, and merge without changing Draft state", () => {
     expect(statusForPullRequest(pullRequestEvent("ready_for_review", false))).toBe("In review");
-    expect(statusForPullRequest(pullRequestEvent("closed", false))).toBe("In progress");
+    expect(statusForPullRequest(pullRequestEvent("closed", false))).toBeNull();
     expect(statusForPullRequest(pullRequestEvent("closed", false, true))).toBe("Done");
   });
 

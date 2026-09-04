@@ -10,9 +10,7 @@ describe("Kanban reconciliation status", () => {
     expect(reconciliationStatus({ draft: false, merged: false, state: "OPEN" })).toBe(
       "In review",
     );
-    expect(reconciliationStatus({ draft: false, merged: false, state: "CLOSED" })).toBe(
-      "In progress",
-    );
+    expect(reconciliationStatus({ draft: false, merged: false, state: "CLOSED" })).toBeNull();
     expect(reconciliationStatus({ draft: false, merged: true, state: "MERGED" })).toBe("Done");
   });
 });

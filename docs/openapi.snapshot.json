@@ -998,6 +998,16 @@
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "evidence_summary": {
             "$ref": "#/components/schemas/EvidenceSummary"
           },
