@@ -32,6 +32,8 @@ Controlled scenarios and fixture adapters remain valid development tools, but th
 
 The product direction is summarised in [Northwind FNOL Product Soul](docs/product-soul.md). Detailed product requirements are maintained in `SPEC/`, sprint plans in `sprint/`, engineering and research documentation in `docs/`, and demonstrators in `prototype/`.
 
+Frontend and frontend-runtime design work follows the [Frontend and Runtime Quality Standard](docs/frontend-and-runtime-quality-standard.md). Read it before changing claimant or Workbench routes, components, tokens, state handling, Agent integration, or Runtime-facing behavior; historical single-page prototypes are migration evidence only.
+
 ## Repository Operation Rules
 
 All contributors and coding agents must follow the
