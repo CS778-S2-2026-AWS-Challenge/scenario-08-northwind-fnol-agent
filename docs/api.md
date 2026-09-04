@@ -1531,6 +1531,8 @@ Supported filters:
 | `tag` | One published staff tag code from the backend Staff Tag Registry |
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
 
+Filters can be combined and are applied before queue ordering and cursor pagination.
+
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
 service timing, and update time. It is a projection of shared claim state, not a separately

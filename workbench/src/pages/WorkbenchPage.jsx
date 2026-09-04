@@ -1,5 +1,5 @@
 import { Menu, PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { workbenchApi } from '../api.js'
 import { useAuth } from '../auth/auth-context.js'
@@ -21,11 +21,14 @@ export default function WorkbenchPage() {
   const openTab = tabs.open
   const [claims, setClaims] = useState([])
   const [view, setView] = useState('all')
+  const [workflowState, setWorkflowState] = useState('')
+  const [priority, setPriority] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [knownTags, setKnownTags] = useState([])
   const [nextCursor, setNextCursor] = useState(null)
   const [queueLoading, setQueueLoading] = useState(true)
   const [queueError, setQueueError] = useState('')
+  const queueRequestId = useRef(0)
   const [conversations, setConversations] = useState([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
   const [conversationsError, setConversationsError] = useState('')
@@ -66,15 +69,19 @@ export default function WorkbenchPage() {
   }, [navigate, tabs])
 
   const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
+    const requestId = ++queueRequestId.current
     setQueueLoading(true)
     setQueueError('')
     try {
       const response = await workbenchApi.claims(token, {
         ...(view === 'all' ? {} : { view }),
+        ...(workflowState ? { workflow_state: workflowState } : {}),
+        ...(priority ? { priority } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
         limit: 25,
         ...(cursor ? { cursor } : {}),
       })
+      if (requestId !== queueRequestId.current) return
       setClaims((current) => append ? [...current, ...response.items] : response.items)
       setNextCursor(response.page?.next_cursor || null)
       setKnownTags((current) => {
@@ -83,11 +90,11 @@ export default function WorkbenchPage() {
         return [...byCode.values()].sort((left, right) => left.label.localeCompare(right.label))
       })
     } catch (error) {
-      setQueueError(error.message)
+      if (requestId === queueRequestId.current) setQueueError(error.message)
     } finally {
-      setQueueLoading(false)
+      if (requestId === queueRequestId.current) setQueueLoading(false)
     }
-  }, [tagFilter, token, view])
+  }, [priority, tagFilter, token, view, workflowState])
 
   const loadDetail = useCallback(async (id) => {
     if (!id) {
@@ -372,7 +379,7 @@ export default function WorkbenchPage() {
           <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onOpenConversation={openConversation} />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
-            {queueVisible && <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} view={view} onView={setView} tagFilter={tagFilter} tags={knownTags} onTag={setTagFilter} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />}
+            {queueVisible && <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} view={view} onView={setView} workflowState={workflowState} onWorkflowState={setWorkflowState} priority={priority} onPriority={setPriority} tagFilter={tagFilter} tags={knownTags} onTag={setTagFilter} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>

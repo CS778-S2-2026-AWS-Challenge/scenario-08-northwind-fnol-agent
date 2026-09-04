@@ -26,21 +26,94 @@ const claim = {
   tags: [tag],
 }
 
+function renderQueue(overrides = {}) {
+  const props = {
+    claims: [claim],
+    loading: false,
+    selectedId: null,
+    view: 'all',
+    onView: vi.fn(),
+    workflowState: '',
+    onWorkflowState: vi.fn(),
+    priority: '',
+    onPriority: vi.fn(),
+    tagFilter: '',
+    tags: [tag],
+    onTag: vi.fn(),
+    nextCursor: null,
+    onLoadMore: vi.fn(),
+    onOpen: vi.fn(),
+    ...overrides,
+  }
+  render(<QueuePanel {...props} />)
+  return props
+}
+
 describe('QueuePanel', () => {
   it('uses backend tag codes for filtering while displaying staff labels', async () => {
     const onTag = vi.fn()
     const user = userEvent.setup()
-    render(<QueuePanel claims={[claim]} loading={false} view="all" onView={vi.fn()} tagFilter="" tags={[tag]} onTag={onTag} nextCursor={null} onLoadMore={vi.fn()} onOpen={vi.fn()} />)
+    renderQueue({ onTag })
 
     expect(screen.getAllByText('Vehicle not drivable')).toHaveLength(2)
     await user.selectOptions(screen.getByLabelText('Staff tag'), tag.code)
     expect(onTag).toHaveBeenCalledWith(tag.code)
   })
 
+  it('exposes supported status and priority filters and visible queue values', async () => {
+    const onWorkflowState = vi.fn()
+    const onPriority = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({ onWorkflowState, onPriority })
+
+    expect(screen.getByText('Priority: Standard')).toBeInTheDocument()
+    expect(screen.getByText('Motor · Status: Collecting')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Claim status'), 'professional_review')
+    await user.selectOptions(screen.getByLabelText('Claim priority'), 'high')
+
+    expect(onWorkflowState).toHaveBeenCalledWith('professional_review')
+    expect(onPriority).toHaveBeenCalledWith('high')
+  })
+
+  it('distinguishes filtered no-results and clears the current filter state', async () => {
+    const onView = vi.fn()
+    const onWorkflowState = vi.fn()
+    const onPriority = vi.fn()
+    const onTag = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({
+      claims: [],
+      view: 'urgent',
+      workflowState: 'professional_review',
+      priority: 'urgent',
+      tagFilter: tag.code,
+      onView,
+      onWorkflowState,
+      onPriority,
+      onTag,
+    })
+
+    expect(screen.getByText('No claims match the current filters.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+
+    expect(onView).toHaveBeenCalledWith('all')
+    expect(onWorkflowState).toHaveBeenCalledWith('')
+    expect(onPriority).toHaveBeenCalledWith('')
+    expect(onTag).toHaveBeenCalledWith('')
+  })
+
+  it('hides filters when the unfiltered queue has no claims', () => {
+    renderQueue({ claims: [], tags: [] })
+
+    expect(screen.getByText('No claims are currently in this queue.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Claim status')).not.toBeInTheDocument()
+  })
+
   it('loads the next backend page only when a cursor is available', async () => {
     const onLoadMore = vi.fn()
     const user = userEvent.setup()
-    render(<QueuePanel claims={[claim]} loading={false} view="all" onView={vi.fn()} tagFilter="" tags={[tag]} onTag={vi.fn()} nextCursor="cursor-2" onLoadMore={onLoadMore} onOpen={vi.fn()} />)
+    renderQueue({ nextCursor: 'cursor-2', onLoadMore })
 
     await user.click(screen.getByRole('button', { name: 'Load more Claims' }))
     expect(onLoadMore).toHaveBeenCalledOnce()

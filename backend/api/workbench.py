@@ -1,6 +1,6 @@
 import base64
 import re
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
@@ -23,6 +23,7 @@ from backend.domain.models import (
     StaffActionMutationResponse,
     StaffMessageResponse,
     UpdateStaffActionRequest,
+    WorkflowState,
 )
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
@@ -40,6 +41,7 @@ from backend.domain.workbench import (
     WorkbenchSessionsResponse,
     WorkbenchSignalsResponse,
     WorkbenchWorkItemsResponse,
+    WorkPriorityLevel,
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.ownership import (
@@ -135,11 +137,22 @@ def read_workbench_claims(
     request: Request,
     principal: Principal = Depends(require_staff),
     view: str | None = Query(default=None),
+    workflow_state: WorkflowState | None = Query(default=None),
+    priority: Literal['standard', 'high', 'urgent', 'immediate'] | None = Query(default=None),
     tag: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
-    return list_workbench_claims(repository_for(request), principal, view, tag, limit, cursor)
+    return list_workbench_claims(
+        repository_for(request),
+        principal,
+        view=view,
+        workflow_state=workflow_state,
+        priority=WorkPriorityLevel(priority) if priority is not None else None,
+        tag=tag,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)

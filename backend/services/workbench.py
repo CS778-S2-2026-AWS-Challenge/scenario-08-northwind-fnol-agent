@@ -923,6 +923,8 @@ def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
     view: str | None = None,
+    workflow_state: WorkflowState | None = None,
+    priority: WorkPriorityLevel | None = None,
     tag: str | None = None,
     limit: int = 25,
     cursor: str | None = None,
@@ -944,6 +946,10 @@ def list_workbench_claims(
         projected = _build_projection(repository, principal, claim, include_detail=False)
         assert isinstance(projected, WorkbenchClaimListItem)
         if not _matches_view(projected, view):
+            continue
+        if workflow_state is not None and projected.workflow_state is not workflow_state:
+            continue
+        if priority is not None and projected.priority_projection.level is not priority:
             continue
         if tag is not None and all(item.code != tag for item in projected.tags):
             continue

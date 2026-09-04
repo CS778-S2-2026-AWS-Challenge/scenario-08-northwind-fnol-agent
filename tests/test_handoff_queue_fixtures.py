@@ -145,3 +145,44 @@ def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> Non
     ]
     assert [item['claim_id'] for item in urgent_items] == [claim_ids['AT-04-urgent']]
     assert [item['claim_id'] for item in human_items] == [claim_ids['AT-05-human-request']]
+
+
+def test_staff_queue_filters_by_status_priority_and_combined_state() -> None:
+    repository = FixtureRepository()
+    claim_ids: dict[str, str] = {}
+    for scenario_id in ('AT-01-clear-motor', 'AT-02-coverage-ambiguity', 'AT-04-urgent'):
+        loaded = load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json')
+        seed_scenario(repository, loaded)
+        claim_ids[scenario_id] = loaded.claim.claim_id
+
+    headers = {'Authorization': 'Bearer synthetic-staff'}
+    with _staff_client(repository) as client:
+        by_status = client.get(
+            '/api/v1/workbench/claims?workflow_state=ready_for_next',
+            headers=headers,
+        )
+        by_priority = client.get(
+            '/api/v1/workbench/claims?priority=high',
+            headers=headers,
+        )
+        combined = client.get(
+            '/api/v1/workbench/claims?workflow_state=professional_review&priority=urgent',
+            headers=headers,
+        )
+        no_match = client.get(
+            '/api/v1/workbench/claims?workflow_state=created&priority=urgent',
+            headers=headers,
+        )
+
+    assert by_status.status_code == 200
+    assert [item['claim_id'] for item in by_status.json()['items']] == [
+        claim_ids['AT-01-clear-motor']
+    ]
+    assert by_priority.status_code == 200
+    assert [item['claim_id'] for item in by_priority.json()['items']] == [
+        claim_ids['AT-02-coverage-ambiguity']
+    ]
+    assert combined.status_code == 200
+    assert [item['claim_id'] for item in combined.json()['items']] == [claim_ids['AT-04-urgent']]
+    assert no_match.status_code == 200
+    assert no_match.json()['items'] == []
