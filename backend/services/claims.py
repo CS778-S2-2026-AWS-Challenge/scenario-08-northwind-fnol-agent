@@ -45,7 +45,10 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
 )
-from backend.services.branching import build_applied_branch_evaluation
+from backend.services.branching import (
+    build_applied_branch_evaluation,
+    claimant_dynamic_form_projection,
+)
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
 from backend.services.handoffs import claimant_handoff
@@ -172,6 +175,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         external_service_action=claimant_assessor_action(repository, claim),
+        dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=claim.customer_next_step,
         handoff=handoff,
         created_at=claim.created_at,

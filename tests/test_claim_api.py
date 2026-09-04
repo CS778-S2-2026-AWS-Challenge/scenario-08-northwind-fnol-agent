@@ -270,6 +270,43 @@ def test_applied_message_evaluation_retains_message_branch_candidates(
         assert claimant_message_id in branch_results[branch_id].source_refs
 
 
+def test_claim_read_carries_the_latest_dynamic_form_to_the_current_revision(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, key='read-dynamic-form').json()
+    claim_id = created['claim']['claim_id']
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        created['session']['session_id'],
+        key='read-dynamic-form-turn',
+        client_message_id='read-dynamic-form-client',
+        text='Another car hit mine.',
+    ).json()
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    unrelated_revision = stored.model_copy(
+        update={
+            'revision': stored.revision + 1,
+            'updated_at': stored.updated_at + timedelta(seconds=1),
+        }
+    )
+    repository.save_claim(unrelated_revision, expected_revision=stored.revision)
+
+    response = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+
+    assert response.status_code == 200
+    projection = response.json()['dynamic_form']
+    assert projection is not None
+    assert projection['claim_revision'] == unrelated_revision.revision
+    assert projection['field_registry_version'] == turn['dynamic_form']['field_registry_version']
+    assert projection['branch_rules_version'] == turn['dynamic_form']['branch_rules_version']
+    assert projection['fields'] == turn['dynamic_form']['fields']
+
+
 def test_create_claim_is_idempotent_and_conflicting_reuse_is_rejected(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -305,6 +342,7 @@ def test_read_claim_and_session_use_same_fixture_state(
 
     assert read_claim.status_code == 200
     assert read_claim.json()['claim_id'] == claim['claim_id']
+    assert read_claim.json()['dynamic_form'] is None
     assert read_session.status_code == 200
     assert read_session.json()['session_id'] == session['session_id']
     assert read_session.json()['resume']['unresolved_questions'] == []
