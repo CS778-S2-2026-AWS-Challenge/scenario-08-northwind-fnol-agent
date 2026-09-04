@@ -337,7 +337,7 @@ function App() {
       latestRevision.current = currentClaim.revision
       setClaim(currentClaim)
       setForm(currentClaim.form)
-      if (currentClaim.dynamic_form) setDynamicForm(currentClaim.dynamic_form)
+      setDynamicForm(currentClaim.dynamic_form || null)
       setNextStep(currentClaim.customer_next_step)
       setHandoff(currentClaim.handoff || null)
       setMessages(conversation.items)

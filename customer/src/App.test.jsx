@@ -1689,6 +1689,26 @@ describe('adaptive claimant entry', () => {
       publishUpdate = onEvent
       return new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
     })
+    const initialTurn = {
+      ...firstTurn(),
+      dynamic_form: {
+        claim_id: 'clm_test',
+        claim_revision: 2,
+        field_registry_version: '4',
+        branch_rules_version: 'vp-dynamic-form-branch-rules-v1',
+        selected_family: 'motor',
+        active_branches: ['family.motor'],
+        fields: [
+          {
+            field_code: 'incident.description',
+            selection_state: 'candidate_now',
+            value_state: 'proposed',
+            source: 'claimant',
+            reason: 'This detail describes the incident.',
+          },
+        ],
+      },
+    }
     const updatedClaim = {
       ...createdClaim().claim,
       revision: 4,
@@ -1718,7 +1738,7 @@ describe('adaptive claimant entry', () => {
     fetch
       .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
       .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
-      .mockResolvedValueOnce(jsonResponse(firstTurn()))
+      .mockResolvedValueOnce(jsonResponse(initialTurn))
     const user = userEvent.setup()
     render(<App />)
     await user.type(screen.getByLabelText('Incident description'), 'Another car hit mine.')
@@ -1737,6 +1757,7 @@ describe('adaptive claimant entry', () => {
 
     expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
     expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Motor claim details' })).not.toBeInTheDocument())
     expect(realtime.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
       claimId: 'clm_test',
       sessionId: 'ses_test',
