@@ -64,6 +64,20 @@ const FIELD_SOURCE_LABELS = {
   staff: 'Provided by Northwind support',
 }
 
+const DYNAMIC_SELECTION_LABELS = {
+  required_now: 'Needed now',
+  candidate_now: 'Helpful now',
+  pending_later: 'Needed later',
+}
+
+const DYNAMIC_VALUE_LABELS = {
+  missing: 'Not provided yet',
+  proposed: 'Suggested from your report',
+  confirmed: 'Confirmed',
+  disputed: 'Needs correction',
+  pending_generation: 'Expected later',
+}
+
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
 }
@@ -76,6 +90,15 @@ function fieldStatusLabel(status) {
 
 function fieldSourceLabel(source) {
   return FIELD_SOURCE_LABELS[source] || 'Source recorded by Northwind'
+}
+
+function dynamicSelectionLabel(selectionState) {
+  return DYNAMIC_SELECTION_LABELS[selectionState] || 'Relevant to your claim'
+}
+
+function dynamicValueLabel(valueState, field) {
+  if (field && valueState === 'missing') return 'Not provided yet'
+  return DYNAMIC_VALUE_LABELS[valueState] || 'Recorded'
 }
 
 function fieldValueText(field) {
@@ -137,6 +160,7 @@ function App() {
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [form, setForm] = useState({})
+  const [dynamicForm, setDynamicForm] = useState(null)
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
@@ -263,6 +287,12 @@ function App() {
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
   const progress = useMemo(() => claimProgress(nextStep, form), [nextStep, form])
+  const visibleDynamicFields = useMemo(
+    () => (dynamicForm?.fields || []).filter(
+      (field) => !['inactive', 'system_owned'].includes(field.selection_state),
+    ),
+    [dynamicForm],
+  )
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -307,6 +337,7 @@ function App() {
       latestRevision.current = currentClaim.revision
       setClaim(currentClaim)
       setForm(currentClaim.form)
+      if (currentClaim.dynamic_form) setDynamicForm(currentClaim.dynamic_form)
       setNextStep(currentClaim.customer_next_step)
       setHandoff(currentClaim.handoff || null)
       setMessages(conversation.items)
@@ -411,6 +442,7 @@ function App() {
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
         setForm(activeClaim.form)
+        setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
       }
       const requested = await requestEvidenceUpload({
@@ -447,6 +479,7 @@ function App() {
     const current = await getClaim(claim.claim_id)
     setClaim(current)
     setForm(current.form)
+    setDynamicForm(current.dynamic_form || null)
     setNextStep(current.customer_next_step)
   }
 
@@ -489,6 +522,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(activeSessionId)
         setForm(created.claim.form)
+        setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
         messageWasSubmitted = true
       }
@@ -507,6 +541,7 @@ function App() {
         ...(turn.agent_message ? [turn.agent_message] : []),
       ])
       setForm((current) => mergeFields(current, turn.form_changes))
+      setDynamicForm(turn.dynamic_form || null)
       setClaim((current) => ({ ...current, revision: turn.claim_revision }))
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
@@ -556,6 +591,7 @@ function App() {
         const refreshedClaim = await getClaim(claim.claim_id)
         setClaim(refreshedClaim)
         setForm(refreshedClaim.form)
+        setDynamicForm(refreshedClaim.dynamic_form || null)
         setNextStep(refreshedClaim.customer_next_step)
         setSessionId(session.session_id)
         setMessages([])
@@ -572,6 +608,7 @@ function App() {
       setSessionId(created.session.session_id)
       setMessages([])
       setForm(created.claim.form)
+      setDynamicForm(created.claim.dynamic_form || null)
       setNextStep(created.claim.customer_next_step)
       setHandoff(null)
       setEvidenceItems([])
@@ -770,6 +807,7 @@ function App() {
         latestRevision.current = current.revision
         setClaim(current)
         setForm(current.form)
+        setDynamicForm(current.dynamic_form || null)
         setNextStep(current.customer_next_step)
         setHandoff(current.handoff || null)
         if (['assigned', 'queued'].includes(currentAction?.status)) {
@@ -841,6 +879,7 @@ function App() {
       setSessionId(session.session_id)
       setMessages(conversation.items)
       setForm(current.form)
+      setDynamicForm(current.dynamic_form || null)
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
       setResumeContext(session.resume)
@@ -866,6 +905,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -877,6 +917,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
@@ -909,6 +950,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
           if (!(promotionError instanceof ApiRequestError && promotionError.status === 404)) throw promotionError
@@ -920,6 +962,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
       setWorkspaceView('chat'); setPage('home'); setAuthStatus('idle')
@@ -939,6 +982,7 @@ function App() {
     setSessionId(null)
     setMessages([])
     setForm({})
+    setDynamicForm(null)
     setNextStep(null)
     setHandoff(null)
     setAttachments([])
@@ -1453,6 +1497,48 @@ function App() {
               </div>
             </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
+            {dynamicForm && (
+              <section className="dynamic-form-summary" aria-labelledby="dynamic-form-title" aria-live="polite">
+                <div className="dynamic-form-heading">
+                  <div>
+                    <p className="eyebrow">Current claim path</p>
+                    <h2 id="dynamic-form-title">
+                      {dynamicForm.selected_family
+                        ? `${dynamicForm.selected_family[0].toUpperCase()}${dynamicForm.selected_family.slice(1)} claim details`
+                        : 'Claim details'}
+                    </h2>
+                  </div>
+                  <span className="dynamic-form-revision">Updated with revision {dynamicForm.claim_revision}</span>
+                </div>
+                {visibleDynamicFields.length === 0 ? (
+                  <p className="dynamic-form-empty">No additional details are needed for the current step.</p>
+                ) : (
+                  <ul className="dynamic-form-fields">
+                    {visibleDynamicFields.map((item) => {
+                      const storedField = form[item.field_code]
+                      return (
+                        <li className="dynamic-form-field" key={item.field_code}>
+                          <div className="dynamic-form-field-heading">
+                            <span>{fieldLabel(item.field_code)}</span>
+                            <span className={`dynamic-selection dynamic-selection-${item.selection_state}`}>
+                              {dynamicSelectionLabel(item.selection_state)}
+                            </span>
+                          </div>
+                          <p className="dynamic-form-value">
+                            {storedField ? fieldValueText(storedField) : dynamicValueLabel(item.value_state)}
+                          </p>
+                          <p className="dynamic-form-meta">
+                            {dynamicValueLabel(item.value_state, storedField)}
+                            {storedField?.source ? ` · ${fieldSourceLabel(storedField.source)}` : ''}
+                          </p>
+                          <p className="dynamic-form-reason">{item.reason}</p>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </section>
+            )}
             {Object.keys(form).length === 0 ? (
               <p className="empty-details">Details from your conversation will appear here.</p>
             ) : (

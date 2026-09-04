@@ -1626,6 +1626,42 @@ describe('adaptive claimant entry', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('renders the server dynamic form projection with selection and value statuses', async () => {
+    const turn = {
+      ...firstTurn(),
+      dynamic_form: {
+        claim_id: 'clm_test',
+        claim_revision: 2,
+        field_registry_version: '4',
+        branch_rules_version: 'vp-dynamic-form-branch-rules-v1',
+        selected_family: 'motor',
+        active_branches: ['family.motor', 'incident.collision'],
+        fields: [
+          { field_code: 'incident.description', selection_state: 'candidate_now', value_state: 'proposed', source: 'claimant', reason: 'This detail helps describe the incident.' },
+          { field_code: 'incident.occurred_at', selection_state: 'required_now', value_state: 'missing', source: null, reason: 'The incident date is needed for the current safe action.' },
+          { field_code: 'authorities.police_report_reference', selection_state: 'pending_later', value_state: 'pending_generation', source: null, reason: 'This report can be added when it becomes available.' },
+          { field_code: 'claimant.client_number', selection_state: 'system_owned', value_state: 'confirmed', source: 'claimant', reason: 'Internal identity field.' },
+        ],
+      },
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(turn))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByRole('heading', { name: 'Motor claim details' })).toBeVisible()
+    expect(screen.getByText('Needed now')).toBeVisible()
+    expect(screen.getByText('Helpful now')).toBeVisible()
+    expect(screen.getByText('Needed later')).toBeVisible()
+    expect(screen.getByText('The incident date is needed for the current safe action.')).toBeVisible()
+    expect(screen.getAllByText('Not provided yet').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Internal identity field.')).not.toBeInTheDocument()
+  })
+
   it('starts an anonymous claim with a browser session header instead of an empty bearer token', async () => {
     fetch
       .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
