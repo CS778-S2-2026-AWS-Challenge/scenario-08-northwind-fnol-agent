@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import ClaimWorkspace from './ClaimWorkspace.jsx'
@@ -96,21 +96,26 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('must not render')).not.toBeInTheDocument()
   })
 
-  it('shows only runtime-projected staff actions that are actually available', () => {
+  it('renders only the backend-selected primary action and removes the generic action list', () => {
     render(<ClaimWorkspace
       {...props}
       detail={{
         ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: 'ownership.request_cowork',
+          primary_action_target_ref: 'clm_1',
+        },
         allowed_actions: [
-          { action_code: 'ownership.request_cowork', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required' },
+          { action_code: 'ownership.request_cowork', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' } },
           { action_code: 'human.accept_handoff', target_ref: 'hnd_1', label: 'Accept Claim', purpose: 'Assigned to another staff member.', availability: 'blocked', blocked_reason: 'This work is assigned to another staff member.' },
         ],
       }}
       resources={{ handoffs: { items: [] }, fields: { items: [] }, externalRequests: { items: [] } }}
     />)
 
-    const availableActions = screen.getByRole('heading', { name: 'Available staff actions' }).closest('section')
-    expect(within(availableActions).getByText('Request cowork access')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Request cowork access' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Available staff actions' })).not.toBeInTheDocument()
     expect(screen.queryByText('Accept Claim')).not.toBeInTheDocument()
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
   })

@@ -289,7 +289,8 @@ def test_staff_lists_claims_for_workbench_queue(
     assert item['claimant']['customer_id'] == 'cus_demo'
     assert item['work_summary']['queue_key'] == 'professional_review'
     assert item['priority_projection']['level'] == 'standard'
-    assert item['work_summary']['primary_action_code'] == 'CONFIRM'
+    assert item['work_summary']['primary_action_code'] is None
+    assert item['work_summary']['primary_action_target_ref'] is None
     assert item['incident']['family'] == 'motor'
     assert item['work_summary']['missing_information']
     assert 'pending_evidence' not in item

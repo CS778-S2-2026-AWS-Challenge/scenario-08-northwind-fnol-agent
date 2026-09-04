@@ -20,11 +20,41 @@ const handoff = {
   },
 }
 
+const handoffAction = {
+  action_code: 'human.resolve_handoff',
+  target_ref: 'hnd_1',
+  label: 'Resolve handoff',
+  availability: 'confirmation_required',
+  confirmation: { message: 'This resolution updates the shared Claim context.' },
+  inputs: [
+    { field_code: 'result.summary', label: 'Internal result summary', control: 'textarea', required: true, choices: [] },
+    { field_code: 'customer_update.summary', label: 'Claimant update', control: 'textarea', required: true, choices: [] },
+  ],
+  payload_defaults: {
+    result: { outcome: 'support_completed', reason_codes: ['SUPPORT_NEED_MET'], source_refs: ['msg_1'] },
+    state_changes: [{ path: 'claim_state.customer_support', to: 'self_service' }],
+    customer_update: { responsible_party: 'claimant', related_refs: ['hnd_1'] },
+  },
+}
+
+const signalAction = {
+  action_code: 'signal.record_decision',
+  target_ref: 'sig_1',
+  availability: 'confirmation_required',
+  confirmation: { message: 'This decision is audited.' },
+  inputs: [
+    { field_code: 'decision', label: 'Decision', control: 'select', required: true, choices: [{ value: 'dismissed', label: 'Dismiss signal' }] },
+    { field_code: 'reason_codes.0', label: 'Reason', control: 'select', required: true, choices: [{ value: 'SOURCE_RECORD_NOT_COMPARABLE', label: 'Source record not comparable' }] },
+    { field_code: 'summary', label: 'Decision summary', control: 'textarea', required: true, choices: [] },
+  ],
+  payload_defaults: { evidence_refs: ['his_1', 'pol_1'] },
+}
+
 describe('review actions', () => {
   it('keeps handoff resolution split into an internal result and claimant update', async () => {
     const onResolve = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<HandoffResolution handoff={handoff} allowedAction={{ label: 'Resolve handoff' }} onResolve={onResolve} />)
+    render(<HandoffResolution handoff={handoff} allowedAction={handoffAction} onResolve={onResolve} />)
 
     await user.click(screen.getByRole('button', { name: 'Record resolution' }))
     await user.type(screen.getByLabelText('Internal result summary'), 'The staff review is complete.')
@@ -33,19 +63,18 @@ describe('review actions', () => {
 
     expect(onResolve).toHaveBeenCalledWith(handoff, expect.objectContaining({
       result: expect.objectContaining({ summary: 'The staff review is complete.', source_refs: ['msg_1'] }),
-      customer_update: expect.objectContaining({ summary: 'We have reviewed this with you and your Claim can continue.' }),
+      state_changes: [{ path: 'claim_state.customer_support', to: 'self_service' }],
+      customer_update: expect.objectContaining({ summary: 'We have reviewed this with you and your Claim can continue.', responsible_party: 'claimant' }),
     }))
   })
 
   it('records a source-linked internal signal decision', async () => {
     const onDecision = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW', summary: 'Records may not match.' }]} canDecide onDecision={onDecision} />)
+    render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW', summary: 'Records may not match.' }]} allowedActions={[signalAction]} onDecision={onDecision} />)
 
     await user.click(screen.getByText(/history review/i))
-    await user.type(screen.getByLabelText('Reason code'), 'SOURCE_RECORD_NOT_COMPARABLE')
     await user.type(screen.getByLabelText('Decision summary'), 'The records concern different insured items.')
-    await user.type(screen.getByLabelText('Evidence references'), 'his_1, pol_1')
     await user.click(screen.getByRole('button', { name: 'Record decision' }))
 
     expect(onDecision).toHaveBeenCalledWith('sig_1', {
@@ -56,20 +85,36 @@ describe('review actions', () => {
     })
   })
 
-  it('creates an audited staff action without claiming a state change', async () => {
-    const onCreate = vi.fn().mockResolvedValue(undefined)
+  it('updates only the exact WorkItem action projected by the runtime', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<StaffActions actions={[]} access="primary" staffId="stf_1" onCreate={onCreate} onUpdate={vi.fn()} />)
+    const action = {
+      action_id: 'act_1', action_type: 'coverage_review', requested_outcome: 'Review policy.',
+      status: 'open', assigned_to: 'stf_1', source_refs: ['pol_1'], created_at: '2026-09-03T01:00:00Z',
+    }
+    const allowedAction = {
+      action_code: 'work_item.update', target_ref: 'act_1', availability: 'confirmation_required',
+      confirmation: { message: 'The completion result is audited.' },
+      inputs: [
+        { field_code: 'status', label: 'Status', control: 'select', required: true, choices: [{ value: 'completed', label: 'Completed' }] },
+        { field_code: 'result.summary', label: 'Result summary', control: 'textarea', required: false, choices: [] },
+      ],
+      payload_defaults: {
+        result: { outcome: 'professional_review_completed', reason_codes: ['POLICY_SECTION_CONFIRMED'], source_refs: ['pol_1'] },
+        state_changes: [{ path: 'claim_state.coverage', to: 'clear' }], customer_update: null,
+      },
+    }
+    render(<StaffActions actions={[action]} allowedActions={[allowedAction]} onUpdate={onUpdate} />)
 
-    await user.type(screen.getByLabelText('Action type'), 'coverage_review')
-    await user.type(screen.getByLabelText('Requested outcome'), 'Review the policy wording.')
-    await user.type(screen.getByLabelText('Source references'), 'pol_1')
-    await user.click(screen.getByRole('button', { name: 'Create action' }))
+    await user.click(screen.getByText('Coverage Review'))
+    await user.type(screen.getByLabelText('Result summary'), 'The policy review is complete.')
+    await user.click(screen.getByRole('button', { name: 'Update action' }))
 
-    expect(onCreate).toHaveBeenCalledWith({
-      action_type: 'coverage_review',
-      requested_outcome: 'Review the policy wording.',
-      source_refs: ['pol_1'],
+    expect(onUpdate).toHaveBeenCalledWith('act_1', {
+      status: 'completed',
+      result: { outcome: 'professional_review_completed', reason_codes: ['POLICY_SECTION_CONFIRMED'], source_refs: ['pol_1'], summary: 'The policy review is complete.' },
+      state_changes: [{ path: 'claim_state.coverage', to: 'clear' }],
+      customer_update: null,
     })
   })
 
@@ -84,12 +129,12 @@ describe('review actions', () => {
       created_at: '2026-09-03T01:00:00Z',
     }
     const user = userEvent.setup()
-    render(<StaffActions actions={[action]} access="read_only" staffId="stf_reader" onCreate={vi.fn()} onUpdate={vi.fn()} />)
+    render(<StaffActions actions={[action]} allowedActions={[]} onUpdate={vi.fn()} />)
 
     expect(screen.queryByRole('button', { name: 'Create action' })).not.toBeInTheDocument()
     await user.click(screen.getByText('Coverage Review'))
     expect(screen.queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
-    expect(screen.getByText(/not assigned within your current authority/i)).toBeVisible()
+    expect(screen.getByText(/no matching target action is projected/i)).toBeVisible()
   })
 
   it('does not expose signal or handoff decisions without projected authority', async () => {

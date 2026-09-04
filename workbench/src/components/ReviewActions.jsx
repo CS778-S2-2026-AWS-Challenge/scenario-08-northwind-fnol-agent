@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardCheck, ShieldAlert } from 'lucide-react'
+import { CheckCircle2, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 
@@ -15,20 +15,10 @@ export function HandoffResolution({ handoff, allowedAction, onResolve }) {
     setBusy(true)
     setError('')
     try {
-      await onResolve(handoff, {
-        result: {
-          outcome: String(data.get('outcome')).trim(),
-          summary: String(data.get('internal_summary')).trim(),
-          reason_codes: [String(data.get('reason_code')).trim()],
-          source_refs: handoff.packet?.source_refs || [],
-        },
-        state_changes: [],
-        customer_update: {
-          summary: String(data.get('customer_update')).trim(),
-          responsible_party: data.get('responsible_party'),
-          related_refs: [handoff.handoff_id],
-        },
-      })
+      const payload = structuredClone(allowedAction.payload_defaults)
+      payload.result.summary = String(data.get('result.summary')).trim()
+      payload.customer_update.summary = String(data.get('customer_update.summary')).trim()
+      await onResolve(handoff, payload)
       setOpen(false)
     } catch (nextError) {
       setError(nextError.message)
@@ -48,11 +38,8 @@ export function HandoffResolution({ handoff, allowedAction, onResolve }) {
       {!open && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
       {open && (
         <form className="action-form" onSubmit={submit}>
-          <label>Outcome code<input name="outcome" defaultValue="support_completed" required /></label>
-          <label>Reason code<input name="reason_code" defaultValue="STAFF_SUPPORT_COMPLETED" required /></label>
-          <label>Internal result summary<textarea name="internal_summary" rows="3" required /></label>
-          <label>Claimant update<textarea name="customer_update" rows="3" required /></label>
-          <label>Who acts next<select name="responsible_party" defaultValue="claimant"><option value="claimant">Claimant</option><option value="claims_professional">Claims professional</option><option value="external_party">External party</option></select></label>
+          {allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}
+          <p>{allowedAction.confirmation?.message}</p>
           <div className="form-actions"><button className="button button--ghost" type="button" onClick={() => setOpen(false)}>Cancel</button><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Resolve handoff'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
         </form>
@@ -61,18 +48,18 @@ export function HandoffResolution({ handoff, allowedAction, onResolve }) {
   )
 }
 
-export function SignalReviews({ signals, canDecide = false, onDecision }) {
+export function SignalReviews({ signals, allowedActions = [], onDecision }) {
   return (
     <section className="resource-view">
       <header className="content-header"><div><p className="eyebrow">Internal review only</p><h2>Signals</h2></div><span>{signals.length} records</span></header>
       <div className="record-list">
-        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} canDecide={canDecide} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
+        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} allowedAction={allowedActions.find((action) => action.action_code === 'signal.record_decision' && action.target_ref === (signal.signal_id || signal.code) && action.availability === 'confirmation_required')} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
       </div>
     </section>
   )
 }
 
-function SignalRecord({ signal, canDecide, onDecision }) {
+function SignalRecord({ signal, allowedAction, onDecision }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const signalId = signal.signal_id || signal.code
@@ -86,10 +73,10 @@ function SignalRecord({ signal, canDecide, onDecision }) {
     setError('')
     try {
       await onDecision(signalId, {
+        ...structuredClone(allowedAction.payload_defaults),
         decision: data.get('decision'),
-        reason_codes: [String(data.get('reason_code')).trim()],
+        reason_codes: [String(data.get('reason_codes.0')).trim()],
         summary: String(data.get('summary')).trim(),
-        evidence_refs: String(data.get('evidence_refs') || '').split(',').map((value) => value.trim()).filter(Boolean),
       })
     } catch (nextError) {
       setError(nextError.message)
@@ -104,11 +91,9 @@ function SignalRecord({ signal, canDecide, onDecision }) {
       <div className="record-body">
         <p className="record-summary">{signal.summary || signal.reason || 'Review the source-linked signal before recording a decision.'}</p>
         {latest && <p className="decision-history"><CheckCircle2 size={16} /><span><strong>{words(latest.decision)}</strong>{latest.summary} · {formatDateTime(latest.created_at)}</span></p>}
-        {canDecide ? <form className="action-form" onSubmit={submit}>
-          <label>Decision<select name="decision" defaultValue="dismissed"><option value="confirmed">Confirm for review</option><option value="dismissed">Dismiss signal</option><option value="overridden">Override signal</option><option value="resolved">Resolve signal</option></select></label>
-          <label>Reason code<input name="reason_code" placeholder="SOURCE_RECORD_REVIEWED" required /></label>
-          <label>Decision summary<textarea name="summary" rows="2" required /></label>
-          <label>Evidence references<input name="evidence_refs" placeholder="Comma-separated evidence IDs" /></label>
+        {allowedAction ? <form className="action-form" onSubmit={submit}>
+          {allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}
+          <p>{allowedAction.confirmation?.message}</p>
           <div className="form-actions"><span>This decision is internal and source-linked.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Record decision'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
         </form> : <p className="record-note">Signal details are read-only with your current Claim access.</p>}
@@ -117,50 +102,18 @@ function SignalRecord({ signal, canDecide, onDecision }) {
   )
 }
 
-export function StaffActions({ actions, access = 'read_only', staffId, onCreate, onUpdate }) {
-  const [creating, setCreating] = useState(false)
-  const [error, setError] = useState('')
-  const canCreate = ['primary', 'coworker'].includes(access)
-
-  async function create(event) {
-    event.preventDefault()
-    const form = event.currentTarget
-    const data = new FormData(form)
-    setCreating(true)
-    setError('')
-    try {
-      await onCreate({
-        action_type: String(data.get('action_type')).trim(),
-        requested_outcome: String(data.get('requested_outcome')).trim(),
-        source_refs: String(data.get('source_refs') || '').split(',').map((value) => value.trim()).filter(Boolean),
-      })
-      form.reset()
-    } catch (nextError) {
-      setError(nextError.message)
-    } finally {
-      setCreating(false)
-    }
-  }
-
+export function StaffActions({ actions, allowedActions = [], onUpdate }) {
   return (
     <section className="action-ledger" aria-labelledby="staff-actions-title">
       <header className="content-header"><div><p className="eyebrow">Audited work</p><h2 id="staff-actions-title">Staff actions</h2></div><span>{actions.length} records</span></header>
-      {canCreate ? <form className="action-form action-form--create" onSubmit={create}>
-        <div className="section-heading"><div><p className="eyebrow">New action</p><h3>Record a bounded task</h3></div><ClipboardCheck size={19} /></div>
-        <label>Action type<input name="action_type" placeholder="coverage_review" required /></label>
-        <label>Requested outcome<textarea name="requested_outcome" rows="2" required /></label>
-        <label>Source references<input name="source_refs" placeholder="Comma-separated source IDs" /></label>
-        <div className="form-actions"><span>Creating this record does not complete or change Claim state.</span><button className="button button--primary" type="submit" disabled={creating}>{creating ? 'Creating...' : 'Create action'}</button></div>
-        {error && <p className="form-error" role="alert">{error}</p>}
-      </form> : <p className="empty-note">Staff action records are read-only with your current Claim access.</p>}
       <div className="record-list">
-        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} canUpdate={access === 'primary' || (access === 'coworker' && action.assigned_to === staffId)} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
+        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} allowedAction={allowedActions.find((candidate) => candidate.action_code === 'work_item.update' && candidate.target_ref === action.action_id && candidate.availability === 'confirmation_required')} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
       </div>
     </section>
   )
 }
 
-function StaffActionRecord({ action, canUpdate, onUpdate }) {
+function StaffActionRecord({ action, allowedAction, onUpdate }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const final = ['completed', 'cancelled'].includes(action.status)
@@ -173,17 +126,17 @@ function StaffActionRecord({ action, canUpdate, onUpdate }) {
     setBusy(true)
     setError('')
     try {
-      await onUpdate(action.action_id, {
-        status,
-        result: completing ? {
-          outcome: String(data.get('outcome')).trim(),
-          summary: String(data.get('summary')).trim(),
-          reason_codes: [String(data.get('reason_code')).trim()],
-          source_refs: action.source_refs || [],
-        } : null,
-        state_changes: [],
-        customer_update: null,
-      })
+      const payload = completing
+        ? structuredClone(allowedAction.payload_defaults)
+        : { result: null, state_changes: [], customer_update: null }
+      payload.status = status
+      if (completing) {
+        payload.result.summary = String(data.get('result.summary')).trim()
+        if (payload.customer_update) {
+          payload.customer_update.summary = String(data.get('customer_update.summary')).trim()
+        }
+      }
+      await onUpdate(action.action_id, payload)
     } catch (nextError) {
       setError(nextError.message)
     } finally {
@@ -196,11 +149,21 @@ function StaffActionRecord({ action, canUpdate, onUpdate }) {
       <summary><span><strong>{words(action.action_type)}</strong><small>{action.requested_outcome}</small></span><span className={`record-status record-status--${action.status}`}>{words(action.status)}</span></summary>
       <div className="record-body">
         <dl><dt>Assigned to</dt><dd>{action.assigned_to}</dd><dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>Outcome</dt><dd>{words(action.result.outcome)}</dd><dt>Result</dt><dd>{action.result.summary}</dd></>}</dl>
-        {!final && canUpdate && <form className="action-form" onSubmit={update}><label>Status<select name="status" defaultValue="in_progress"><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></label><label>Outcome code<input name="outcome" defaultValue="review_completed" /></label><label>Reason code<input name="reason_code" defaultValue="STAFF_REVIEW_COMPLETED" /></label><label>Result summary<textarea name="summary" rows="2" /></label><div className="form-actions"><span>Completion writes an audited result. It does not send a claimant update.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
-        {!final && !canUpdate && <p className="record-note">This action is read-only because it is not assigned within your current authority.</p>}
+        {!final && allowedAction && <form className="action-form" onSubmit={update}>{allowedAction.inputs.map((input) => <ActionInput input={input} key={input.field_code} />)}<p>{allowedAction.confirmation?.message}</p><div className="form-actions"><span>Completion writes the registered audited result.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && !allowedAction && <p className="record-note">This action is read-only because no matching target action is projected for you.</p>}
       </div>
     </details>
   )
+}
+
+function ActionInput({ input }) {
+  if (input.control === 'select') {
+    return <label>{input.label}<select name={input.field_code} required={input.required}>{input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label>
+  }
+  if (input.control === 'textarea') {
+    return <label>{input.label}<textarea name={input.field_code} rows="3" required={input.required} /></label>
+  }
+  return <label>{input.label}<input name={input.field_code} required={input.required} /></label>
 }
 
 function HandoffContext({ handoff }) {

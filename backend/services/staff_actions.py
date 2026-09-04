@@ -11,6 +11,7 @@ from backend.domain.models import (
     CreateStaffActionRequest,
     CreateStaffMessageRequest,
     CustomerNextStep,
+    CustomerSupport,
     CustomerUpdateRecord,
     FraudSignal,
     HandoffMutationResponse,
@@ -45,7 +46,20 @@ from backend.services.support import (
     request_fingerprint,
     require_idempotency_key,
 )
-from backend.services.workbench import workbench_handoff
+from backend.services.workbench import (
+    SIGNAL_DECISION_REASON_CHOICES,
+    handoff_resolution_defaults,
+    risk_signals,
+    work_item_defaults,
+    workbench_handoff,
+)
+
+_REGISTERED_STAFF_ACTION_TYPES = frozenset(
+    {'claimant_support', 'coverage_review', 'handoff_support', 'professional_review'}
+)
+_REGISTERED_SIGNAL_REASON_CODES = frozenset(
+    value for value, _label in SIGNAL_DECISION_REASON_CHOICES
+)
 
 
 def _not_found(message: str) -> ApiError:
@@ -54,6 +68,33 @@ def _not_found(message: str) -> ApiError:
 
 def _validation(message: str) -> ApiError:
     return ApiError(status_code=422, code='VALIDATION_ERROR', message=message)
+
+
+def _validate_fixed_action_payload(
+    payload: ResolveHandoffRequest | UpdateStaffActionRequest,
+    defaults: dict[str, Any],
+) -> None:
+    expected_result = defaults['result']
+    if payload.result is None or (
+        payload.result.outcome != expected_result['outcome']
+        or payload.result.reason_codes != expected_result['reason_codes']
+        or payload.result.source_refs != expected_result['source_refs']
+    ):
+        raise _validation('The result must match the projected registered action contract.')
+    if [item.model_dump(mode='json') for item in payload.state_changes] != defaults[
+        'state_changes'
+    ]:
+        raise _validation('State changes must match the projected registered action contract.')
+    expected_update = defaults['customer_update']
+    if expected_update is None:
+        if payload.customer_update is not None:
+            raise _validation('This registered action does not permit a claimant update.')
+        return
+    if payload.customer_update is None or (
+        payload.customer_update.responsible_party.value != expected_update['responsible_party']
+        or payload.customer_update.related_refs != expected_update['related_refs']
+    ):
+        raise _validation('The claimant update must match the projected action contract.')
 
 
 def _staff_claim(
@@ -341,6 +382,7 @@ def resolve_handoff(
             code='ACCESS_DENIED',
             message='The handoff is assigned to another staff member.',
         )
+    _validate_fixed_action_payload(payload, handoff_resolution_defaults(handoff))
     projected = _apply_state_changes(
         claim,
         UpdateStaffActionRequest(
@@ -450,6 +492,8 @@ def create_staff_action(
             retryable=True,
             current_revision=claim.revision,
         )
+    if payload.action_type not in _REGISTERED_STAFF_ACTION_TYPES:
+        raise _validation('The staff action type is not registered for Workbench use.')
     timestamp = now_utc()
     assigned_to = payload.assigned_to or principal.subject
     permitted_assignees = {
@@ -499,6 +543,7 @@ def _apply_state_changes(claim: WorkingClaim, payload: UpdateStaffActionRequest)
     state = claim.claim_state
     allowed = {
         'claim_state.coverage': Coverage,
+        'claim_state.customer_support': CustomerSupport,
         'claim_state.fraud_signal': FraudSignal,
         'claim_state.workflow_state': WorkflowState,
     }
@@ -532,15 +577,15 @@ def update_staff_action(
     if replay is not None:
         return StaffActionMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
-    access = require_claim_collaborator(repository, claim, principal)
+    require_claim_collaborator(repository, claim, principal)
     action = repository.get_staff_action(claim_id, action_id)
     if action is None:
         raise _not_found('The staff action was not found.')
-    if access is ClaimStaffAccess.COWORKER and action.assigned_to != principal.subject:
+    if action.assigned_to != principal.subject:
         raise ApiError(
             status_code=403,
             code='ACCESS_DENIED',
-            message='A coworker can update only a staff action assigned to their account.',
+            message='A staff member can update only a WorkItem assigned to their account.',
         )
     if claim.revision != expected:
         raise ApiError(
@@ -558,6 +603,8 @@ def update_staff_action(
         payload.state_changes or payload.customer_update
     ):
         raise _validation('State changes and claimant updates require a completed staff action.')
+    if payload.status is StaffActionStatus.COMPLETED:
+        _validate_fixed_action_payload(payload, work_item_defaults(action))
     timestamp = now_utc()
     updated_action = action.model_copy(
         update={
@@ -631,7 +678,13 @@ def decide_signal(
     if replay is not None:
         return SignalDecisionResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
-    require_claim_collaborator(repository, claim, principal)
+    access = require_claim_collaborator(repository, claim, principal)
+    if access is not ClaimStaffAccess.PRIMARY:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='Only the primary Claim owner may decide an internal review signal.',
+        )
     if claim.revision != expected:
         raise ApiError(
             status_code=409,
@@ -640,19 +693,18 @@ def decide_signal(
             retryable=True,
             current_revision=claim.revision,
         )
-    sessions = repository.list_sessions_for_claim(claim_id, claim.customer_id)
-    signal_exists = any(
-        str(message.content.get('signal_id') or message.content.get('code')) == signal_id
-        for session in sessions
-        for message in repository.list_messages(claim_id, session.session_id, claim.customer_id)
-        if message.content.get('type') == 'review_signal'
-    ) or any(
-        str(signal.get('signal_id') or signal.get('code')) == signal_id
-        for decision in repository.list_agent_decisions(claim_id, claim.customer_id)
-        for signal in decision.proposed_signals
+    projected_signal = next(
+        (signal for signal in risk_signals(repository, claim) if signal.signal_id == signal_id),
+        None,
     )
-    if not signal_exists:
+    if projected_signal is None:
         raise _not_found('The internal review signal was not found.')
+    if len(payload.reason_codes) != 1 or payload.reason_codes[0] not in (
+        _REGISTERED_SIGNAL_REASON_CODES
+    ):
+        raise _validation('The signal decision reason is not registered for Workbench use.')
+    if payload.evidence_refs != projected_signal.source_refs:
+        raise _validation('Signal evidence references must match the projected action contract.')
     timestamp = now_utc()
     decision = SignalDecisionRecord(
         **payload.model_dump(),

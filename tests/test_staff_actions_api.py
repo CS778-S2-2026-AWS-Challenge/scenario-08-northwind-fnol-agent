@@ -70,6 +70,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
             'customer_update': {
                 'summary': 'The policy review is complete and your report can continue.',
                 'responsible_party': 'claimant',
+                'related_refs': [action['action_id']],
             },
         },
     )
@@ -100,13 +101,23 @@ def test_staff_write_back_requires_staff_current_revision_and_allowed_paths(
     claim = create_claim(client, auth_headers)
     claim_id = str(claim['claim_id'])
     endpoint = f'/api/v1/workbench/claims/{claim_id}/staff-actions'
-    payload = {'action_type': 'review', 'requested_outcome': 'Review the fixture.'}
+    payload = {'action_type': 'claimant_support', 'requested_outcome': 'Review the fixture.'}
     claimant_attempt = client.post(
         endpoint,
         headers={**auth_headers, 'Idempotency-Key': 'claimant-create', 'If-Match': '1'},
         json=payload,
     )
     assert claimant_attempt.status_code == 403
+    unregistered = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'unregistered-create',
+            'If-Match': '1',
+        },
+        json={'action_type': 'free_text_review', 'requested_outcome': 'Invent new work.'},
+    )
+    assert unregistered.status_code == 422
     created = client.post(
         endpoint,
         headers={**staff_auth_headers, 'Idempotency-Key': 'staff-create', 'If-Match': '1'},
@@ -160,8 +171,18 @@ def test_signal_decision_is_internal_idempotent_and_never_declares_fraud(
         'decision': 'dismissed',
         'reason_codes': ['SOURCE_RECORD_NOT_COMPARABLE'],
         'summary': 'The fixture history concerns a different item.',
-        'evidence_refs': ['his_fixture'],
+        'evidence_refs': [],
     }
+    invented_source = client.post(
+        endpoint,
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'signal-invented-source',
+            'If-Match': '1',
+        },
+        json={**payload, 'evidence_refs': ['unprojected-source']},
+    )
+    assert invented_source.status_code == 422
     response = client.post(endpoint, headers=headers, json=payload)
     replay = client.post(endpoint, headers=headers, json=payload)
     assert response.status_code == 201

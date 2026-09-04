@@ -46,6 +46,9 @@ from backend.domain.workbench import (
     RiskAttentionLevel,
     SignalReviewStatus,
     WorkbenchActionConfirmation,
+    WorkbenchActionInput,
+    WorkbenchActionInputChoice,
+    WorkbenchActionInputControl,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -60,6 +63,7 @@ from backend.domain.workbench import (
     WorkbenchCustomerUpdatesResponse,
     WorkbenchEventsResponse,
     WorkbenchEvidenceResponse,
+    WorkbenchExternalLifecycle,
     WorkbenchExternalRequest,
     WorkbenchExternalRequestsResponse,
     WorkbenchFieldItem,
@@ -93,6 +97,16 @@ from backend.services.support import decode_cursor, encode_cursor, now_utc
 from backend.services.tag_projection import project_staff_tags
 
 ResourceT = TypeVar('ResourceT')
+
+SIGNAL_DECISION_REASON_CHOICES = (
+    ('CONFLICT_REQUIRES_REVIEW', 'Conflict requires review'),
+    ('CLAIM_LEVEL_SIGNAL_CONFIRMED', 'Claim-level signal confirmed'),
+    ('POLICY_SECTION_CONFIRMED', 'Policy section confirmed'),
+    ('SOURCE_RECORD_NOT_COMPARABLE', 'Source record not comparable'),
+    ('STAFF_CONFIRMED_INTERPRETATION_REQUIRED', 'Interpretation still required'),
+    ('STAFF_CONFIRMED_REVIEW_REQUIREMENT', 'Review requirement confirmed'),
+    ('STAFF_REVIEWED_SOURCE', 'Source reviewed'),
+)
 
 _PRIORITY_RANK = {
     WorkPriorityLevel.IMMEDIATE: 0,
@@ -358,7 +372,7 @@ def _signal_status(decision: SignalDecisionValue | None) -> SignalReviewStatus:
     return SignalReviewStatus.OPEN
 
 
-def _risk_signals(
+def risk_signals(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> list[WorkbenchRiskSignal]:
@@ -573,10 +587,91 @@ def _integration_summary(
     )
 
 
+def _input(
+    field_code: str,
+    label: str,
+    control: WorkbenchActionInputControl,
+    *,
+    choices: Sequence[tuple[str, str]] = (),
+    required: bool = True,
+) -> WorkbenchActionInput:
+    return WorkbenchActionInput(
+        field_code=field_code,
+        label=label,
+        control=control,
+        required=required,
+        choices=[
+            WorkbenchActionInputChoice(value=value, label=choice_label)
+            for value, choice_label in choices
+        ],
+    )
+
+
+def handoff_resolution_defaults(handoff: HandoffRecord) -> dict[str, Any]:
+    if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
+        return {
+            'result': {
+                'outcome': 'professional_review_completed',
+                'reason_codes': ['POLICY_SECTION_CONFIRMED'],
+                'source_refs': handoff.packet.source_refs,
+            },
+            'state_changes': [
+                {'path': 'claim_state.coverage', 'to': 'clear'},
+                {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+            ],
+            'customer_update': {
+                'responsible_party': 'claims_professional',
+                'related_refs': [handoff.handoff_id],
+            },
+        }
+    return {
+        'result': {
+            'outcome': 'support_completed',
+            'reason_codes': ['SUPPORT_NEED_MET'],
+            'source_refs': handoff.packet.source_refs,
+        },
+        'state_changes': [],
+        'customer_update': {
+            'responsible_party': 'claims_professional',
+            'related_refs': [handoff.handoff_id],
+        },
+    }
+
+
+def work_item_defaults(action: StaffActionRecord) -> dict[str, Any]:
+    if action.action_type in {'coverage_review', 'professional_review'}:
+        outcome = 'professional_review_completed'
+        reasons = ['POLICY_SECTION_CONFIRMED']
+        state_changes = [
+            {'path': 'claim_state.coverage', 'to': 'clear'},
+            {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+        ]
+        customer_update: dict[str, Any] | None = {
+            'responsible_party': 'claimant',
+            'related_refs': [action.action_id],
+        }
+    else:
+        outcome = 'staff_work_completed'
+        reasons = ['SUPPORT_NEED_MET']
+        state_changes = []
+        customer_update = None
+    return {
+        'result': {
+            'outcome': outcome,
+            'reason_codes': reasons,
+            'source_refs': action.source_refs,
+        },
+        'state_changes': state_changes,
+        'customer_update': customer_update,
+    }
+
+
 def _allowed_actions(
     claim: WorkingClaim,
     ownership: WorkbenchOwnershipProjection,
     active_handoffs: Sequence[HandoffRecord],
+    staff_actions: Sequence[StaffActionRecord],
+    risk_signals: Sequence[WorkbenchRiskSignal],
     collaboration_requests: Sequence[ClaimCollaborationRequest],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
@@ -608,6 +703,7 @@ def _allowed_actions(
                     ),
                     expected_effects=['handoff.accept', 'ownership.assign'],
                     source_refs=[handoff.handoff_id],
+                    result_state='pending_confirmation',
                     based_on_revision=claim.revision,
                 )
             )
@@ -635,6 +731,14 @@ def _allowed_actions(
                     ),
                     expected_effects=['message.append', 'handoff.mark_in_progress'],
                     source_refs=[handoff.handoff_id],
+                    inputs=[
+                        _input(
+                            'content.text',
+                            'Claimant-visible message',
+                            WorkbenchActionInputControl.TEXTAREA,
+                        )
+                    ],
+                    result_state='awaiting_input',
                     based_on_revision=claim.revision,
                 )
             )
@@ -652,9 +756,122 @@ def _allowed_actions(
                         ),
                         expected_effects=['handoff.resolve', 'customer_update.append'],
                         source_refs=[handoff.handoff_id],
+                        inputs=[
+                            _input(
+                                'result.summary',
+                                'Internal result summary',
+                                WorkbenchActionInputControl.TEXTAREA,
+                            ),
+                            _input(
+                                'customer_update.summary',
+                                'Claimant update',
+                                WorkbenchActionInputControl.TEXTAREA,
+                            ),
+                        ],
+                        payload_defaults=handoff_resolution_defaults(handoff),
+                        result_state='awaiting_input',
                         based_on_revision=claim.revision,
                     )
                 )
+    if ownership.current_staff_access is CurrentStaffAccess.PRIMARY:
+        for signal in risk_signals:
+            if signal.status not in {SignalReviewStatus.OPEN, SignalReviewStatus.UNDER_REVIEW}:
+                continue
+            actions.append(
+                WorkbenchAllowedAction(
+                    action_code='signal.record_decision',
+                    target_ref=signal.signal_id,
+                    label='Record signal decision',
+                    purpose='Record a source-linked decision for this exact review signal.',
+                    availability=ActionAvailability.CONFIRMATION_REQUIRED,
+                    confirmation=WorkbenchActionConfirmation(
+                        level=ConfirmationLevel.EXPLICIT,
+                        message='This internal decision is audited and may change review work.',
+                    ),
+                    expected_effects=['signal.decision.append', 'claim.revision.advance'],
+                    source_refs=signal.source_refs,
+                    inputs=[
+                        _input(
+                            'decision',
+                            'Decision',
+                            WorkbenchActionInputControl.SELECT,
+                            choices=(
+                                ('confirmed', 'Confirm for review'),
+                                ('dismissed', 'Dismiss signal'),
+                                ('overridden', 'Override signal'),
+                                ('resolved', 'Resolve signal'),
+                            ),
+                        ),
+                        _input(
+                            'reason_codes.0',
+                            'Reason',
+                            WorkbenchActionInputControl.SELECT,
+                            choices=SIGNAL_DECISION_REASON_CHOICES,
+                        ),
+                        _input(
+                            'summary',
+                            'Decision summary',
+                            WorkbenchActionInputControl.TEXTAREA,
+                        ),
+                    ],
+                    payload_defaults={'evidence_refs': signal.source_refs},
+                    result_state='awaiting_input',
+                    based_on_revision=claim.revision,
+                )
+            )
+    for staff_action in staff_actions:
+        if staff_action.status in {StaffActionStatus.COMPLETED, StaffActionStatus.CANCELLED}:
+            continue
+        if staff_action.assigned_to != principal.subject:
+            continue
+        actions.append(
+            WorkbenchAllowedAction(
+                action_code='work_item.update',
+                target_ref=staff_action.action_id,
+                label='Update assigned work',
+                purpose='Progress or complete this exact assigned WorkItem.',
+                availability=ActionAvailability.CONFIRMATION_REQUIRED,
+                confirmation=WorkbenchActionConfirmation(
+                    level=ConfirmationLevel.EXPLICIT,
+                    message='The selected status and any completion result will be audited.',
+                ),
+                expected_effects=['work_item.update', 'claim.revision.advance'],
+                source_refs=staff_action.source_refs,
+                inputs=[
+                    _input(
+                        'status',
+                        'Status',
+                        WorkbenchActionInputControl.SELECT,
+                        choices=(
+                            ('in_progress', 'In progress'),
+                            ('completed', 'Completed'),
+                            ('cancelled', 'Cancelled'),
+                        ),
+                    ),
+                    _input(
+                        'result.summary',
+                        'Result summary',
+                        WorkbenchActionInputControl.TEXTAREA,
+                        required=False,
+                    ),
+                    *(
+                        [
+                            _input(
+                                'customer_update.summary',
+                                'Claimant update',
+                                WorkbenchActionInputControl.TEXTAREA,
+                                required=False,
+                            )
+                        ]
+                        if work_item_defaults(staff_action)['customer_update'] is not None
+                        else []
+                    ),
+                ],
+                payload_defaults=work_item_defaults(staff_action),
+                result_state='awaiting_input',
+                based_on_revision=claim.revision,
+            )
+        )
     if (
         ownership.current_staff_access is CurrentStaffAccess.READ_ONLY
         and ownership.primary_assignee
@@ -760,6 +977,46 @@ def _allowed_actions(
     return actions
 
 
+def _primary_action(
+    allowed_actions: Sequence[WorkbenchAllowedAction],
+    active_handoffs: Sequence[HandoffRecord],
+    current_work: WorkbenchCurrentWorkItem | None,
+    risk_signals: Sequence[WorkbenchRiskSignal],
+) -> WorkbenchAllowedAction | None:
+    preferred: list[tuple[str, str | None]] = []
+    if active_handoffs:
+        handoff = active_handoffs[-1]
+        preferred.append(
+            (
+                'human.accept_handoff'
+                if handoff.status in {HandoffStatus.REQUESTED, HandoffStatus.QUEUED}
+                else 'human.resolve_handoff',
+                handoff.handoff_id,
+            )
+        )
+    preferred.extend(
+        ('signal.record_decision', signal.signal_id)
+        for signal in risk_signals
+        if signal.status in {SignalReviewStatus.OPEN, SignalReviewStatus.UNDER_REVIEW}
+    )
+    if current_work is not None:
+        preferred.append(('work_item.update', current_work.work_item_id))
+    preferred.append(('ownership.request_cowork', None))
+    for action_code, target_ref in preferred:
+        match = next(
+            (
+                action
+                for action in allowed_actions
+                if action.action_code == action_code
+                and (target_ref is None or action.target_ref == target_ref)
+            ),
+            None,
+        )
+        if match is not None:
+            return match
+    return None
+
+
 def _matches_view(item: WorkbenchClaimListItem, view: str | None) -> bool:
     if view in {None, 'all'}:
         return True
@@ -789,23 +1046,34 @@ def _build_projection(
     sessions = repository.list_sessions_for_claim(claim.claim_id, claim.customer_id)
     messages = _claim_messages(repository, claim, sessions)
     actions = repository.list_staff_actions(claim.claim_id)
-    risk_signals = _risk_signals(repository, claim)
+    projected_risk_signals = risk_signals(repository, claim)
     external_tasks, external_limitation = _external_tasks(repository, claim.claim_id)
     computed_at = now_utc()
     collaboration_requests = repository.list_collaboration_requests(claim.claim_id)
     ownership = _ownership(repository, claim, principal, active_handoffs)
     missing = _missing_information(claim, pending_evidence)
     current_work = _current_work_item(active_handoffs, actions)
+    allowed_actions = _allowed_actions(
+        claim,
+        ownership,
+        active_handoffs,
+        actions,
+        projected_risk_signals,
+        collaboration_requests,
+        principal,
+    )
+    primary_action = _primary_action(
+        allowed_actions,
+        active_handoffs,
+        current_work,
+        projected_risk_signals,
+    )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
     work_summary = WorkbenchWorkSummary(
         queue_key=_queue_key(claim, active_handoffs),
         current_work_item=current_work,
-        primary_action_code=(
-            'human.accept_handoff'
-            if active_handoffs
-            and active_handoffs[-1].status in {HandoffStatus.REQUESTED, HandoffStatus.QUEUED}
-            else claim.claim_state.next_action.value
-        ),
+        primary_action_code=primary_action.action_code if primary_action else None,
+        primary_action_target_ref=primary_action.target_ref if primary_action else None,
         primary_blocker=next(
             (
                 item.label
@@ -815,7 +1083,7 @@ def _build_projection(
             None,
         ),
         missing_information=missing,
-        risk_signals=risk_signals,
+        risk_signals=projected_risk_signals,
         incomplete_context=_incomplete_context(claim, sessions),
         unread_claimant_messages=0,
         last_claimant_activity_at=(
@@ -856,14 +1124,9 @@ def _build_projection(
     unavailable_external = external_limitation is not None
     return WorkbenchClaimDetail(
         **base,
+        active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
-        allowed_actions=_allowed_actions(
-            claim,
-            ownership,
-            active_handoffs,
-            collaboration_requests,
-            principal,
-        ),
+        allowed_actions=allowed_actions,
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,
@@ -886,7 +1149,7 @@ def _build_projection(
             reference_checks=WorkbenchSectionSummary(
                 status=ResourceAvailability.AVAILABLE,
                 total=len(repository.list_retrieval_records(claim.claim_id, claim.customer_id)),
-                needs_attention=len(risk_signals),
+                needs_attention=len(projected_risk_signals),
             ),
             external_services=WorkbenchSectionSummary(
                 status=(
@@ -1136,7 +1399,7 @@ def list_workbench_signals(
         for item in repository.list_retrieval_records(claim_id, claim.customer_id)
     }
     items: list[WorkbenchSignalDetail] = []
-    projected_by_id = {item.signal_id: item for item in _risk_signals(repository, claim)}
+    projected_by_id = {item.signal_id: item for item in risk_signals(repository, claim)}
     for signal in _signal_sources(repository, claim):
         signal_id = str(signal.get('signal_id') or signal.get('code') or '')
         if not signal_id:
@@ -1201,6 +1464,74 @@ def list_workbench_customer_updates(
     return _page(items, limit, cursor)
 
 
+def _external_lifecycle(
+    task: ExternalTaskRecord,
+    request: Any | None,
+) -> WorkbenchExternalLifecycle:
+    status = task.status
+    if status is ExternalTaskOperationStatus.PREPARED:
+        label = 'Pending'
+        detail = 'The request is prepared and has not been submitted.'
+        verification = 'not_started'
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        next_action = 'Review the projected disclosure, authority, and consent before submission.'
+        attention = False
+    elif status is ExternalTaskOperationStatus.ACCEPTED:
+        label = 'Completion not confirmed'
+        detail = 'The provider acknowledged the request; no verified completed result is recorded.'
+        verification = 'pending_verification'
+        owner = WorkbenchResponsibility.EXTERNAL_PARTY
+        next_action = 'Track the provider result and verify it before reconciling Claim State.'
+        attention = False
+    elif status is ExternalTaskOperationStatus.RETRYABLE_FAILURE:
+        label = 'Failed'
+        detail = 'The request failed before a verified result; the same operation may be retried.'
+        verification = 'failed_unverified'
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        next_action = 'Correct the dependency problem, then retry with the same operation identity.'
+        attention = True
+    elif status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        label = 'Outcome not confirmed'
+        detail = 'Submission may have occurred; the result remains unknown.'
+        verification = 'reconciliation_required'
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        next_action = 'Reconcile by operation or provider reference before any retry.'
+        attention = True
+    else:
+        label = 'Failed'
+        detail = 'The request failed and requires staff review.'
+        verification = 'review_required'
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        next_action = 'Review the failure before another request is attempted.'
+        attention = True
+    fixture = task.integration_source.value == 'fixture'
+    limitation = (
+        'Synthetic fixture record; no production provider completion is verified.'
+        if fixture
+        else None
+    )
+    return WorkbenchExternalLifecycle(
+        stakeholder='external_party',
+        service=task.service_identity,
+        request_type=task.requested_action,
+        authority_state='recorded' if request is not None else 'not_recorded',
+        consent_state=(
+            'recorded'
+            if request is not None and request.authorisation.claimant_consent_ref
+            else 'not_recorded'
+        ),
+        delivery_state=task.delivery.value,
+        verification_state=verification,
+        pending_owner=owner,
+        status_label=label,
+        status_detail=detail,
+        result=task.provider_reference,
+        limitation=limitation,
+        next_action=next_action,
+        needs_attention=attention,
+    )
+
+
 def list_workbench_external_requests(
     repository: PersistenceRepository,
     principal: Principal,
@@ -1220,9 +1551,16 @@ def list_workbench_external_requests(
             limitation='External-service records are temporarily unavailable.',
         )
     by_task = {item.task_id: item for item in requests}
-    items = [
-        WorkbenchExternalRequest(request=by_task.get(task.task_id), task=task) for task in tasks
-    ]
+    items = []
+    for task in tasks:
+        external_request = by_task.get(task.task_id)
+        items.append(
+            WorkbenchExternalRequest(
+                request=external_request,
+                task=task,
+                lifecycle=_external_lifecycle(task, external_request),
+            )
+        )
     items.sort(key=lambda item: (item.task.created_at, item.task.task_id))
     return _page(items, limit, cursor)
 

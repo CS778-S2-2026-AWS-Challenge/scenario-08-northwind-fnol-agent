@@ -93,6 +93,25 @@ class ConfirmationLevel(StrEnum):
     HIGH_IMPACT = 'high_impact'
 
 
+class WorkbenchActionInputControl(StrEnum):
+    TEXT = 'text'
+    TEXTAREA = 'textarea'
+    SELECT = 'select'
+
+
+class WorkbenchActionInputChoice(ContractModel):
+    value: str
+    label: str
+
+
+class WorkbenchActionInput(ContractModel):
+    field_code: str
+    label: str
+    control: WorkbenchActionInputControl
+    required: bool = True
+    choices: list[WorkbenchActionInputChoice] = Field(default_factory=list)
+
+
 class WorkbenchResponsibility(StrEnum):
     CLAIMANT = 'claimant'
     CLAIMS_PROFESSIONAL = 'claims_professional'
@@ -207,6 +226,7 @@ class WorkbenchWorkSummary(ContractModel):
     queue_key: str
     current_work_item: WorkbenchCurrentWorkItem | None = None
     primary_action_code: str | None = None
+    primary_action_target_ref: str | None = None
     primary_blocker: str | None = None
     missing_information: list[WorkbenchMissingInformation] = Field(default_factory=list)
     risk_signals: list[WorkbenchRiskSignal] = Field(default_factory=list)
@@ -244,6 +264,9 @@ class WorkbenchAllowedAction(ContractModel):
     confirmation: WorkbenchActionConfirmation
     expected_effects: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
+    inputs: list[WorkbenchActionInput] = Field(default_factory=list)
+    payload_defaults: dict[str, Any] = Field(default_factory=dict)
+    result_state: str = 'not_started'
     based_on_revision: int = Field(ge=1)
 
 
@@ -288,6 +311,7 @@ class WorkbenchClaimListResponse(ContractModel):
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
+    active_session_id: str | None = None
     claim_state: ClaimState
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
@@ -306,9 +330,27 @@ class WorkbenchSignalDetail(WorkbenchRiskSignal):
     created_at: datetime | None = None
 
 
+class WorkbenchExternalLifecycle(ContractModel):
+    stakeholder: str
+    service: str
+    request_type: str
+    authority_state: str
+    consent_state: str
+    delivery_state: str
+    verification_state: str
+    pending_owner: WorkbenchResponsibility
+    status_label: str
+    status_detail: str
+    result: str | None = None
+    limitation: str | None = None
+    next_action: str
+    needs_attention: bool = False
+
+
 class WorkbenchExternalRequest(ContractModel):
     request: ExternalTaskRequest | None = None
     task: ExternalTaskRecord
+    lifecycle: WorkbenchExternalLifecycle
 
 
 class WorkbenchActivityEvent(ContractModel):

@@ -6476,6 +6476,69 @@
         "title": "WorkbenchActionConfirmation",
         "type": "object"
       },
+      "WorkbenchActionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActionInputChoice"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "control": {
+            "$ref": "#/components/schemas/WorkbenchActionInputControl"
+          },
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "field_code",
+          "label",
+          "control"
+        ],
+        "title": "WorkbenchActionInput",
+        "type": "object"
+      },
+      "WorkbenchActionInputChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "WorkbenchActionInputChoice",
+        "type": "object"
+      },
+      "WorkbenchActionInputControl": {
+        "enum": [
+          "text",
+          "textarea",
+          "select"
+        ],
+        "title": "WorkbenchActionInputControl",
+        "type": "string"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -6572,12 +6635,28 @@
             "title": "Expected Effects",
             "type": "array"
           },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActionInput"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
           "label": {
             "title": "Label",
             "type": "string"
           },
+          "payload_defaults": {
+            "title": "Payload Defaults",
+            "type": "object"
+          },
           "purpose": {
             "title": "Purpose",
+            "type": "string"
+          },
+          "result_state": {
+            "default": "not_started",
+            "title": "Result State",
             "type": "string"
           },
           "source_refs": {
@@ -6607,6 +6686,17 @@
       "WorkbenchClaimDetail": {
         "additionalProperties": false,
         "properties": {
+          "active_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Session Id"
+          },
           "allowed_actions": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchAllowedAction"
@@ -6981,9 +7071,102 @@
         "title": "WorkbenchCurrentWorkItem",
         "type": "object"
       },
+      "WorkbenchExternalLifecycle": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_state": {
+            "title": "Authority State",
+            "type": "string"
+          },
+          "consent_state": {
+            "title": "Consent State",
+            "type": "string"
+          },
+          "delivery_state": {
+            "title": "Delivery State",
+            "type": "string"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "needs_attention": {
+            "default": false,
+            "title": "Needs Attention",
+            "type": "boolean"
+          },
+          "next_action": {
+            "title": "Next Action",
+            "type": "string"
+          },
+          "pending_owner": {
+            "$ref": "#/components/schemas/WorkbenchResponsibility"
+          },
+          "request_type": {
+            "title": "Request Type",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "stakeholder": {
+            "title": "Stakeholder",
+            "type": "string"
+          },
+          "status_detail": {
+            "title": "Status Detail",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "verification_state": {
+            "title": "Verification State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stakeholder",
+          "service",
+          "request_type",
+          "authority_state",
+          "consent_state",
+          "delivery_state",
+          "verification_state",
+          "pending_owner",
+          "status_label",
+          "status_detail",
+          "next_action"
+        ],
+        "title": "WorkbenchExternalLifecycle",
+        "type": "object"
+      },
       "WorkbenchExternalRequest": {
         "additionalProperties": false,
         "properties": {
+          "lifecycle": {
+            "$ref": "#/components/schemas/WorkbenchExternalLifecycle"
+          },
           "request": {
             "anyOf": [
               {
@@ -6999,7 +7182,8 @@
           }
         },
         "required": [
-          "task"
+          "task",
+          "lifecycle"
         ],
         "title": "WorkbenchExternalRequest",
         "type": "object"
@@ -8419,6 +8603,17 @@
               }
             ],
             "title": "Primary Action Code"
+          },
+          "primary_action_target_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Action Target Ref"
           },
           "primary_blocker": {
             "anyOf": [

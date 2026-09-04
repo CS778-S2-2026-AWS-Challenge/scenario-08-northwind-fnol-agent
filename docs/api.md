@@ -849,6 +849,7 @@ Response `200`:
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
+  "active_session_id": "ses_01J4Y7RPN8",
   "incident_type": "motor",
   "workflow_state": "ready_for_next",
   "form": {},
@@ -1596,7 +1597,7 @@ large resources are loaded from the dedicated sub-resources below:
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
-  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "missing_information": [], "risk_signals": []},
+  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [], "risk_signals": []},
   "integration_summary": {"external_wait_count": 0},
   "tags": [],
   "claim_state": {},
@@ -1624,7 +1625,25 @@ only when staff opens a section:
 
 Each sub-resource returns its own availability and limitation metadata. A failed optional source
 does not invalidate the core Claim projection. `tags` follows the typed Staff Tag Registry contract;
-`allowed_actions` is a runtime projection and never grants the client authority to invent an action.
+`allowed_actions` is the authoritative runtime action projection. Each entry contains the exact
+`action_code` and `target_ref`, availability (`available`, `confirmation_required`, or `blocked`),
+confirmation metadata, expected effects, source references, revision, result state, projected
+input definitions, and immutable `payload_defaults`. A mutating Workbench control MUST resolve
+the exact action-code/target pair and MUST NOT infer availability from role, ownership, list order,
+or the presence of another action. `confirmation_required` is not equivalent to `available`: the
+client must complete the projected confirmation step. The client may collect only the projected
+inputs and must submit the projected fixed fields unchanged. `work_summary.primary_action_code`
+and `primary_action_target_ref` identify the backend-selected primary action; either may be null
+when no primary action is currently authorised.
+
+### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
+
+Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
+contains stakeholder and service labels, request type, authority, consent, delivery and verification
+states, pending owner, status label/detail, result, limitation, next action, and attention flag. The
+Workbench renders those fields and MUST NOT reconstruct lifecycle status or next steps from raw task
+status strings. Raw task/request objects remain available for identity, timing, failure, and source
+traceability.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -1657,6 +1676,10 @@ Request:
 
 Response `201` returns the staff action and new claim revision.
 
+The compatibility create route accepts only registered action types: `claimant_support`,
+`coverage_review`, `handoff_support`, and `professional_review`. The Workbench does not expose a
+generic create-action form; runtime controls are derived from `allowed_actions`.
+
 ### `PATCH /api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}`
 
 Request to complete:
@@ -1678,12 +1701,17 @@ Request to complete:
   ],
   "customer_update": {
     "summary": "The policy review is complete and your report can continue.",
-    "responsible_party": "northwind"
+    "responsible_party": "claims_professional",
+    "related_refs": ["act_01J4YB8D20"]
   }
 }
 ```
 
-The server validates actor authority and state transitions. Response `200` returns the action, resulting claim revision, and customer update when created.
+The server requires the authenticated primary assignee and an exact `work_item.update` action for
+this `action_id`. For completion, outcome, reason codes, source refs, state changes, responsible
+party, and related refs must equal the registered fields projected in `payload_defaults`; only
+projected input fields such as summaries and status may be supplied by the operator. Response `200`
+returns the action, resulting claim revision, and customer update when created.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions`
 
@@ -1699,6 +1727,9 @@ Request:
 ```
 
 `decision` is `confirmed`, `dismissed`, `overridden`, or `resolved`. Confirmation preserves the signal for authorised follow-up; it does not declare fraud or automatically reject or block claim creation.
+The route requires primary ownership plus an exact `signal.record_decision` action targeted at the
+signal. Decision and reason values must come from that action's projected choices, and evidence
+references must match its fixed payload defaults.
 
 ### Handoff Accept and Resolve
 
@@ -1720,17 +1751,23 @@ Resolve request:
   "result": {
     "outcome": "support_completed",
     "summary": "The claimant's question was answered and the report can continue.",
-    "reason_codes": ["SUPPORT_NEED_MET"]
+    "reason_codes": ["SUPPORT_NEED_MET"],
+    "source_refs": ["msg_01J4Y7T1KC"]
   },
   "state_changes": [],
   "customer_update": {
     "summary": "Your report is ready to continue online.",
-    "responsible_party": "claimant"
+    "responsible_party": "claims_professional",
+    "related_refs": ["hnd_01J4Y7XG2C"]
   }
 }
 ```
 
-Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
+Resolve requires an exact `human.resolve_handoff` action targeted at the accepted handoff. Result
+outcome, reason codes, source refs, state changes, responsible party, and related refs are registered
+server projections; the operator supplies only the projected summaries. Resolving a handoff MUST
+record the staff result, state changes, claimant update, actor, timestamps, and resulting claim
+revision.
 
 ### `POST /api/v1/workbench/demo/seed-scenarios`
 

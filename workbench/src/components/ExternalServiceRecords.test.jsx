@@ -32,6 +32,22 @@ const request = {
     sent_at: '2026-09-03T01:00:00Z',
     operation_id: 'op_1',
   },
+  lifecycle: {
+    stakeholder: 'external_party',
+    service: 'vehicle damage assessor',
+    request_type: 'vehicle damage assessment',
+    authority_state: 'recorded',
+    consent_state: 'recorded',
+    delivery_state: 'submitted',
+    verification_state: 'reconciliation_required',
+    pending_owner: 'claims_professional',
+    status_label: 'Outcome not confirmed',
+    status_detail: 'Submission may have occurred; the result remains unknown.',
+    result: null,
+    limitation: 'Synthetic fixture record; no production provider completion is verified.',
+    next_action: 'Reconcile by operation or provider reference before any retry.',
+    needs_attention: true,
+  },
 }
 
 describe('ExternalServiceRecords', () => {
@@ -40,7 +56,7 @@ describe('ExternalServiceRecords', () => {
     render(<ExternalServiceRecords records={[request]} />)
 
     await user.click(screen.getByText('Vehicle Damage Assessor'))
-    expect(screen.getByText('Northwind authority and claimant consent recorded')).toBeVisible()
+    expect(screen.getByText('Recorded · consent Recorded')).toBeVisible()
     expect(screen.getAllByText('Reconcile by operation or provider reference before any retry.')[0]).toBeVisible()
     expect(screen.getByText('AUTH-1')).toBeVisible()
     expect(screen.getByText('CONSENT-1')).toBeVisible()
@@ -51,7 +67,7 @@ describe('ExternalServiceRecords', () => {
 
   it('states when no request has been prepared', async () => {
     const user = userEvent.setup()
-    render(<ExternalServiceRecords records={[{ ...request, request: null, task: { ...request.task, status: 'prepared', delivery: 'not_submitted', failure_code: null } }]} />)
+    render(<ExternalServiceRecords records={[{ ...request, request: null, task: { ...request.task, status: 'prepared', delivery: 'not_submitted', failure_code: null }, lifecycle: { ...request.lifecycle, authority_state: 'not_recorded', consent_state: 'not_recorded', delivery_state: 'not_submitted', verification_state: 'not_started', status_label: 'Pending', status_detail: 'The request is prepared and has not been submitted.', next_action: 'Review the projected request before submission.', needs_attention: false } }]} />)
 
     await user.click(screen.getByText('Vehicle Damage Assessor'))
     expect(screen.getByText('Request details have not been prepared.')).toBeVisible()
@@ -61,11 +77,11 @@ describe('ExternalServiceRecords', () => {
   it('does not infer completion from an accepted fixture task', () => {
     render(<ExternalServiceSummary resource={{
       status: 'available',
-      items: [{ ...request, task: { ...request.task, status: 'accepted', failure_code: null } }],
+      items: [{ ...request, task: { ...request.task, status: 'accepted', failure_code: null }, lifecycle: { ...request.lifecycle, status_label: 'Completion not confirmed', status_detail: 'The provider acknowledged the request; no verified completed result is recorded.', verification_state: 'pending_verification', pending_owner: 'external_party', needs_attention: false } }],
     }} />)
 
     expect(screen.getByText(/Completion not confirmed/)).toBeInTheDocument()
-    expect(screen.getByText(/Synthetic fixture; no production provider completion is verified/)).toBeInTheDocument()
+    expect(screen.getByText(/Synthetic fixture record; no production provider completion is verified/)).toBeInTheDocument()
     expect(screen.queryByText(/complete$/i)).not.toBeInTheDocument()
   })
 
@@ -77,7 +93,7 @@ describe('ExternalServiceRecords', () => {
   ])('renders %s with truthful summary status %s', (status, label) => {
     render(<ExternalServiceSummary resource={{
       status: 'available',
-      items: [{ ...request, task: { ...request.task, status } }],
+      items: [{ ...request, task: { ...request.task, status }, lifecycle: { ...request.lifecycle, status_label: label } }],
     }} />)
 
     expect(screen.getByText(new RegExp(label))).toBeInTheDocument()

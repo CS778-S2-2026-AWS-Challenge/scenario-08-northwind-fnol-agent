@@ -92,7 +92,7 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
         'decision': 'confirmed',
         'reason_codes': ['STAFF_CONFIRMED_REVIEW_REQUIREMENT'],
         'summary': 'A staff reviewer confirmed this wording requires professional review.',
-        'evidence_refs': ['staff-note-day5'],
+        'evidence_refs': projected_signal['source_refs'],
     }
     decided = client.post(
         f'/api/v1/workbench/claims/{claim_id}/signals/{signal.signal_id}/decisions',
@@ -112,7 +112,6 @@ def test_staff_review_writeback_uses_current_revision_and_stays_internal(
     assert decided_body['signal_decision']['evidence_refs'] == [
         retrieval.retrieval_id,
         retrieval.source.reference,
-        'staff-note-day5',
     ]
 
     stored_claim = repository.get_claim(claim_id, 'cus_demo')

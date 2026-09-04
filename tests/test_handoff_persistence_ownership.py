@@ -147,13 +147,13 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
             'result': {
                 'outcome': 'support_completed',
                 'summary': 'The synthetic support request was completed.',
-                'reason_codes': ['SUPPORT_COMPLETED'],
-                'source_refs': [handoff_id],
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': in_progress.packet.source_refs,
             },
             'state_changes': [],
             'customer_update': {
                 'summary': 'A staff member completed the support step and your claim can continue.',
-                'responsible_party': 'claimant',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff_id],
             },
         },
@@ -622,6 +622,8 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
         handoff_id,
         key='handoff-terminal-rewrite-accept',
     )
+    accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert accepted_handoff is not None
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
         headers={
@@ -633,13 +635,13 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
             'result': {
                 'outcome': 'support_completed',
                 'summary': 'Resolve the synthetic handoff.',
-                'reason_codes': ['SUPPORT_COMPLETED'],
-                'source_refs': [handoff_id],
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': accepted_handoff.packet.source_refs,
             },
             'state_changes': [],
             'customer_update': {
                 'summary': 'The support step is complete.',
-                'responsible_party': 'claimant',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff_id],
             },
         },

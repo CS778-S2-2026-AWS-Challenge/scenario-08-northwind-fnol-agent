@@ -17,14 +17,13 @@ export function ExternalServiceSummary({ resource }) {
       </div>
       {records.length ? (
         <ul className="missing-list">
-          {records.map(({ task }) => {
-            const summary = taskStatusSummary(task)
+          {records.map(({ task, lifecycle }) => {
             return (
               <li key={task.task_id}>
-                {summary.attention ? <CircleAlert size={15} /> : <Clock3 size={15} />}
+                {lifecycle.needs_attention ? <CircleAlert size={15} /> : <Clock3 size={15} />}
                 <span>
-                  <strong>{words(task.service_identity)} — {summary.label}</strong>
-                  <small>{summary.detail}{task.integration_source === 'fixture' ? ' Synthetic fixture; no production provider completion is verified.' : ''}</small>
+                  <strong>{words(lifecycle.service)} — {lifecycle.status_label}</strong>
+                  <small>{lifecycle.status_detail}{lifecycle.limitation ? ` ${lifecycle.limitation}` : ''}</small>
                 </span>
               </li>
             )
@@ -59,31 +58,34 @@ export default function ExternalServiceRecords({ records }) {
 
 function ExternalServiceRecord({ record }) {
   const { task, request } = record
-  const summary = taskStatusSummary(task)
-  const needsAttention = summary.attention
+  const { lifecycle } = record
+  const needsAttention = lifecycle.needs_attention
   return (
     <details className="record-row external-record">
       <summary>
-        <span><strong>{words(task.service_identity)}</strong><small>{words(task.requested_action)} · Updated {formatDateTime(task.updated_at)}</small></span>
-        <span className={`record-status record-status--${needsAttention ? 'attention' : task.status}`}>{summary.label}</span>
+        <span><strong>{words(lifecycle.service)}</strong><small>{words(lifecycle.request_type)} · Updated {formatDateTime(task.updated_at)}</small></span>
+        <span className={`record-status record-status--${needsAttention ? 'attention' : task.status}`}>{lifecycle.status_label}</span>
       </summary>
       <div className="record-body">
         <div className="external-overview">
           <OverviewItem label="Purpose" value={request?.purpose || 'Request details have not been prepared.'} />
           <OverviewItem label="Data sharing" value={request ? `${request.disclosed_fields.length} registered fields` : 'No disclosure manifest recorded'} />
-          <OverviewItem label="Authority" value={request ? 'Northwind authority and claimant consent recorded' : 'Not yet recorded'} />
-          <OverviewItem label="Next step" value={nextStep(task)} attention={needsAttention} />
+          <OverviewItem label="Authority" value={`${words(lifecycle.authority_state)} · consent ${words(lifecycle.consent_state)}`} />
+          <OverviewItem label="Pending owner" value={words(lifecycle.pending_owner)} />
+          <OverviewItem label="Verification" value={words(lifecycle.verification_state)} attention={needsAttention} />
+          <OverviewItem label="Next step" value={lifecycle.next_action} attention={needsAttention} />
         </div>
-        {task.integration_source === 'fixture' && <p className="record-note"><strong>Capability source</strong>Synthetic fixture record; no production provider completion is verified.</p>}
+        {lifecycle.limitation && <p className="record-note"><strong>Capability limitation</strong>{lifecycle.limitation}</p>}
         <section className="external-disclosure" aria-label="External request detail">
           <div className="section-heading"><div><p className="eyebrow">Request detail</p><h3>Disclosure and delivery</h3></div><ExternalLink size={18} /></div>
           <dl>
             <dt>Integration source</dt><dd>{words(task.integration_source)}</dd>
-            <dt>Submission</dt><dd>{words(task.delivery)}</dd>
+            <dt>Stakeholder</dt><dd>{words(lifecycle.stakeholder)}</dd>
+            <dt>Submission</dt><dd>{words(lifecycle.delivery_state)}</dd>
             <dt>Prepared</dt><dd>{request ? formatDateTime(request.prepared_at) : 'Not recorded'}</dd>
             <dt>Sent</dt><dd>{request?.sent_at ? formatDateTime(request.sent_at) : 'Not sent'}</dd>
             <dt>Operation identity</dt><dd>{request?.operation_id || 'Not reserved'}</dd>
-            <dt>Provider reference</dt><dd>{task.provider_reference || 'Not provided'}</dd>
+            <dt>Result</dt><dd>{lifecycle.result || 'No verified result recorded'}</dd>
             <dt>Failure</dt><dd>{task.failure_code ? words(task.failure_code) : 'None recorded'}</dd>
           </dl>
         </section>
@@ -97,7 +99,7 @@ function ExternalServiceRecord({ record }) {
             </dl>
           </section>
         )}
-        {needsAttention && <p className="attention-note"><CircleAlert size={16} />{nextStep(task)}</p>}
+        {needsAttention && <p className="attention-note"><CircleAlert size={16} />{lifecycle.next_action}</p>}
       </div>
     </details>
   )
@@ -105,50 +107,4 @@ function ExternalServiceRecord({ record }) {
 
 function OverviewItem({ label, value, attention = false }) {
   return <div className={attention ? 'needs-attention' : ''}><span>{label}</span><strong>{value}</strong></div>
-}
-
-function nextStep(task) {
-  const steps = {
-    prepared: 'Review the purpose, shared fields, consent, and authority before sending.',
-    accepted: 'Track the provider result and verify it before reconciling Claim State.',
-    retryable_failure: 'Correct the reported dependency problem, then retry with the same operation identity.',
-    terminal_failure: 'A claims professional must review the failure before another request is attempted.',
-    unknown_outcome: 'Reconcile by operation or provider reference before any retry.',
-  }
-  return steps[task.status] || 'Review the current request record before continuing.'
-}
-
-function taskStatusSummary(task) {
-  const summaries = {
-    prepared: {
-      label: 'Pending',
-      detail: 'Prepared but not submitted.',
-      attention: false,
-    },
-    accepted: {
-      label: 'Completion not confirmed',
-      detail: 'The provider acknowledged the request; no verified completed result is recorded.',
-      attention: false,
-    },
-    retryable_failure: {
-      label: 'Failed',
-      detail: 'The request failed before a verified result; retry may be possible with the same operation identity.',
-      attention: true,
-    },
-    terminal_failure: {
-      label: 'Failed',
-      detail: 'The request failed and requires staff review.',
-      attention: true,
-    },
-    unknown_outcome: {
-      label: 'Outcome not confirmed',
-      detail: 'Submission may have occurred; reconcile before retrying.',
-      attention: true,
-    },
-  }
-  return summaries[task.status] || {
-    label: 'Status unavailable',
-    detail: 'No supported third-party task status is available.',
-    attention: true,
-  }
 }
