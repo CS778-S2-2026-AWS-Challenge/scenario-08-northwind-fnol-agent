@@ -1,3 +1,13 @@
+// Claimant wording approved by the AT-10 controlled assessor scenario, one entry per
+// provider-neutral failure code. The claim itself is unchanged by a failure, so this is
+// what the claimant sees when they return to a claim whose last attempt did not succeed.
+const FAILURE_WORDING = {
+  timeout: 'The assessment request did not complete. Your claim is saved; Northwind can safely retry the same request.',
+  unavailable: 'The assessment service is unavailable right now. Your claim is saved, and no assessor has been assigned.',
+  access_denied: 'We could not send the assessment request because its authorisation was not accepted. Northwind must review the request before trying again.',
+  malformed: 'The assessment service returned an unusable response. Your claim is saved; Northwind must review the integration response.',
+}
+
 export default function ExternalServiceAction({
   action,
   consentChecked,
@@ -12,6 +22,8 @@ export default function ExternalServiceAction({
   const needsConsent = action.status === 'consent_required'
   const routing = action.routing
   const succeeded = action.status === 'assigned' || action.status === 'queued'
+  const retryableFailure = action.status === 'retryable_failure'
+  const recordedFailure = !error && (retryableFailure || action.status === 'terminal_failure')
 
   return (
     <section className="external-service" aria-labelledby="external-service-title">
@@ -48,6 +60,13 @@ export default function ExternalServiceAction({
           {!error.retryable && <p>Northwind needs to review this before another request.</p>}
         </div>
       )}
+      {recordedFailure && (
+        <div className="service-result is-error" role="status">
+          <strong>Assessment request not sent</strong>
+          <p>{FAILURE_WORDING[action.failure_code] ?? 'The assessment request did not complete. Your claim is saved, and no assessor has been assigned.'}</p>
+          {!retryableFailure && <p>Northwind needs to review this before another request.</p>}
+        </div>
+      )}
       {succeeded && routing && (
         <div className="service-result is-success" role="status">
           <strong>{action.status === 'assigned' ? 'Assessor assigned' : 'Request accepted into the assessor queue'}</strong>
@@ -57,7 +76,7 @@ export default function ExternalServiceAction({
       )}
       {action.can_request && (!error || error.retryable) && (
         <button className="primary-button" type="button" onClick={onRequest} disabled={isBusy || (needsConsent && !consentChecked)}>
-          {isRecordingConsent ? 'Recording permission...' : isRequesting ? 'Sending request...' : error?.retryable ? 'Retry assessment request' : needsConsent ? 'Agree and request assessor' : 'Request assessor'}
+          {isRecordingConsent ? 'Recording permission...' : isRequesting ? 'Sending request...' : (error?.retryable || retryableFailure) ? 'Retry assessment request' : needsConsent ? 'Agree and request assessor' : 'Request assessor'}
         </button>
       )}
     </section>
