@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import ExternalServiceRecords from './ExternalServiceRecords.jsx'
+import ExternalServiceRecords, { ExternalServiceSummary } from './ExternalServiceRecords.jsx'
 
 const request = {
   task: {
@@ -53,5 +53,48 @@ describe('ExternalServiceRecords', () => {
     await user.click(screen.getByText('Vehicle Damage Assessor'))
     expect(screen.getByText('Request details have not been prepared.')).toBeVisible()
     expect(screen.getByText('No disclosure manifest recorded')).toBeVisible()
+  })
+
+  it('does not infer completion from an accepted fixture task', () => {
+    render(<ExternalServiceSummary resource={{
+      status: 'available',
+      items: [{ ...request, task: { ...request.task, status: 'accepted', failure_code: null } }],
+    }} />)
+
+    expect(screen.getByText(/Completion not confirmed/)).toBeInTheDocument()
+    expect(screen.getByText(/Synthetic fixture; no production provider completion is verified/)).toBeInTheDocument()
+    expect(screen.queryByText(/complete$/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['prepared', 'Pending'],
+    ['retryable_failure', 'Failed'],
+    ['terminal_failure', 'Failed'],
+    ['unknown_outcome', 'Outcome not confirmed'],
+  ])('renders %s with truthful summary status %s', (status, label) => {
+    render(<ExternalServiceSummary resource={{
+      status: 'available',
+      items: [{ ...request, task: { ...request.task, status } }],
+    }} />)
+
+    expect(screen.getByText(new RegExp(label))).toBeInTheDocument()
+  })
+
+  it('preserves unavailable and empty third-party states', () => {
+    const { rerender } = render(<ExternalServiceSummary resource={{
+      status: 'unavailable',
+      limitation: 'External-service records are temporarily unavailable.',
+      items: [],
+    }} />)
+    expect(screen.getByText('External-service records are temporarily unavailable.')).toBeInTheDocument()
+
+    rerender(<ExternalServiceSummary resource={{ status: 'available', items: [] }} />)
+    expect(screen.getByText('No third-party task is recorded for this Claim.')).toBeInTheDocument()
+  })
+
+  it('preserves the loading state', () => {
+    render(<ExternalServiceSummary resource={{ loading: true, items: [] }} />)
+
+    expect(screen.getByText('Loading third-party tasks...')).toBeInTheDocument()
   })
 })
