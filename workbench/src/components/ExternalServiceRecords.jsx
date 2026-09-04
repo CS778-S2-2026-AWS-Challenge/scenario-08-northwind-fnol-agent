@@ -74,11 +74,12 @@ function ExternalServiceRecord({ record }) {
           <OverviewItem label="Authority" value={request ? 'Northwind authority and claimant consent recorded' : 'Not yet recorded'} />
           <OverviewItem label="Next step" value={nextStep(task)} attention={needsAttention} />
         </div>
+        {task.integration_source === 'fixture' && <p className="record-note"><strong>Capability source</strong>Synthetic fixture record; no production provider completion is verified.</p>}
         <section className="external-disclosure" aria-label="External request detail">
           <div className="section-heading"><div><p className="eyebrow">Request detail</p><h3>Disclosure and delivery</h3></div><ExternalLink size={18} /></div>
           <dl>
             <dt>Integration source</dt><dd>{words(task.integration_source)}</dd>
-            <dt>Delivery</dt><dd>{words(task.delivery)}</dd>
+            <dt>Submission</dt><dd>{words(task.delivery)}</dd>
             <dt>Prepared</dt><dd>{request ? formatDateTime(request.prepared_at) : 'Not recorded'}</dd>
             <dt>Sent</dt><dd>{request?.sent_at ? formatDateTime(request.sent_at) : 'Not sent'}</dd>
             <dt>Operation identity</dt><dd>{request?.operation_id || 'Not reserved'}</dd>

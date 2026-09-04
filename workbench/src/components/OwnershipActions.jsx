@@ -34,7 +34,9 @@ export default function OwnershipActions({
   onRequeue,
   onDecision,
 }) {
-  const ownershipActions = actions.filter((action) => action.action_code.startsWith('ownership.'))
+  const ownershipActions = actions.filter((action) => (
+    action.action_code.startsWith('ownership.') && action.availability !== 'blocked'
+  ))
   if (!ownershipActions.length) return null
 
   return (

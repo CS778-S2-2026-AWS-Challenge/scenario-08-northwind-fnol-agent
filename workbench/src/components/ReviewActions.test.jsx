@@ -24,7 +24,7 @@ describe('review actions', () => {
   it('keeps handoff resolution split into an internal result and claimant update', async () => {
     const onResolve = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<HandoffResolution handoff={handoff} profile={{ staff_id: 'stf_1' }} onResolve={onResolve} />)
+    render(<HandoffResolution handoff={handoff} allowedAction={{ label: 'Resolve handoff' }} onResolve={onResolve} />)
 
     await user.click(screen.getByRole('button', { name: 'Record resolution' }))
     await user.type(screen.getByLabelText('Internal result summary'), 'The staff review is complete.')
@@ -40,7 +40,7 @@ describe('review actions', () => {
   it('records a source-linked internal signal decision', async () => {
     const onDecision = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW', summary: 'Records may not match.' }]} onDecision={onDecision} />)
+    render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW', summary: 'Records may not match.' }]} canDecide onDecision={onDecision} />)
 
     await user.click(screen.getByText(/history review/i))
     await user.type(screen.getByLabelText('Reason code'), 'SOURCE_RECORD_NOT_COMPARABLE')
@@ -59,7 +59,7 @@ describe('review actions', () => {
   it('creates an audited staff action without claiming a state change', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<StaffActions actions={[]} onCreate={onCreate} onUpdate={vi.fn()} />)
+    render(<StaffActions actions={[]} access="primary" staffId="stf_1" onCreate={onCreate} onUpdate={vi.fn()} />)
 
     await user.type(screen.getByLabelText('Action type'), 'coverage_review')
     await user.type(screen.getByLabelText('Requested outcome'), 'Review the policy wording.')
@@ -71,5 +71,36 @@ describe('review actions', () => {
       requested_outcome: 'Review the policy wording.',
       source_refs: ['pol_1'],
     })
+  })
+
+  it('does not expose mutation controls with read-only Claim access', async () => {
+    const action = {
+      action_id: 'act_1',
+      action_type: 'coverage_review',
+      requested_outcome: 'Review the policy wording.',
+      status: 'open',
+      assigned_to: 'stf_owner',
+      source_refs: [],
+      created_at: '2026-09-03T01:00:00Z',
+    }
+    const user = userEvent.setup()
+    render(<StaffActions actions={[action]} access="read_only" staffId="stf_reader" onCreate={vi.fn()} onUpdate={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: 'Create action' })).not.toBeInTheDocument()
+    await user.click(screen.getByText('Coverage Review'))
+    expect(screen.queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
+    expect(screen.getByText(/not assigned within your current authority/i)).toBeVisible()
+  })
+
+  it('does not expose signal or handoff decisions without projected authority', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<SignalReviews signals={[{ signal_id: 'sig_1', code: 'HISTORY_REVIEW' }]} onDecision={vi.fn()} />)
+
+    await user.click(screen.getByText(/history review/i))
+    expect(screen.queryByRole('button', { name: 'Record decision' })).not.toBeInTheDocument()
+    expect(screen.getByText(/read-only with your current Claim access/i)).toBeVisible()
+
+    rerender(<HandoffResolution handoff={handoff} allowedAction={undefined} onResolve={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Record resolution' })).not.toBeInTheDocument()
   })
 })

@@ -143,7 +143,7 @@ p { line-height: 1.55; }
 .tag-group h4 { color: var(--color-text-muted); }
 
 .workspace-region { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.open-claim-panel { min-width: 0; min-height: 0; overflow: hidden; }
+.open-claim-panel { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .claim-tabs-wrap { position: relative; display: flex; min-width: 0; min-height: 42px; border-bottom: var(--border-component); background: var(--color-panel); }
 .claim-tabs { display: flex; min-width: 0; overflow-x: auto; }
 .claim-tab { display: flex; min-width: 150px; max-width: 230px; align-items: center; border-right: 1px solid var(--color-divider); color: var(--color-text-muted); }
@@ -155,7 +155,7 @@ p { line-height: 1.55; }
 .tab-menu button { min-height: 36px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; }
 .tab-menu button:hover { background: var(--color-panel); }
 
-.claim-workspace { min-width: 0; min-height: 0; overflow: auto; background: var(--color-page); }
+.claim-workspace { min-width: 0; min-height: 0; overflow: visible; background: var(--color-page); }
 .claim-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px clamp(20px, 3vw, 42px) 18px; background: var(--color-surface); }
 .claim-heading h1 { margin: 0; }
 .claim-heading__meta { display: flex; flex-wrap: wrap; gap: 7px 14px; color: var(--color-text-muted); font-size: var(--workbench-font-meta); }

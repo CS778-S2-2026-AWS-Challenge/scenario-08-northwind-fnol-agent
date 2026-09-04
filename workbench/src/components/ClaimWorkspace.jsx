@@ -86,8 +86,8 @@ export default function ClaimWorkspace({
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
         {section === 'references' && <ResourceBoundary resource={resources.retrievals}><ReferenceRecords records={resources.retrievals?.items || []} /></ResourceBoundary>}
         {section === 'external-services' && <ResourceBoundary resource={resources.externalRequests}><ExternalServiceRecords records={resources.externalRequests?.items || []} /></ResourceBoundary>}
-        {section === 'signals' && <ResourceBoundary resource={resources.signals}><SignalReviews signals={resources.signals?.items || []} onDecision={onSignalDecision} /></ResourceBoundary>}
-        {section === 'activity' && <Activity resources={resources} onCreateAction={onCreateAction} onUpdateAction={onUpdateAction} />}
+        {section === 'signals' && <ResourceBoundary resource={resources.signals}><SignalReviews signals={resources.signals?.items || []} canDecide={canCollaborate(detail)} onDecision={onSignalDecision} /></ResourceBoundary>}
+        {section === 'activity' && <Activity detail={detail} profile={profile} resources={resources} onCreateAction={onCreateAction} onUpdateAction={onUpdateAction} />}
       </div>
     </main>
   )
@@ -120,8 +120,16 @@ function Summary({ detail, resources, handoffs, collaborationRequests, profile, 
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
   const missing = detail.work_summary?.missing_information || []
   const attention = detail.work_summary?.risk_signals || []
-  const primaryAction = detail.allowed_actions?.find((action) => action.action_code === 'human.accept_handoff')
+  const acceptAction = detail.allowed_actions?.find((action) => (
+    action.action_code === 'human.accept_handoff' && action.availability !== 'blocked'
+  ))
+  const primaryAction = acceptAction
     || detail.allowed_actions?.find((action) => action.availability !== 'blocked')
+  const resolveAction = detail.allowed_actions?.find((action) => (
+    action.action_code === 'human.resolve_handoff'
+    && action.target_ref === openHandoff?.handoff_id
+    && action.availability !== 'blocked'
+  ))
   const canAccept = primaryAction?.action_code === 'human.accept_handoff'
     && primaryAction.availability !== 'blocked'
     && openHandoff
@@ -157,7 +165,9 @@ function Summary({ detail, resources, handoffs, collaborationRequests, profile, 
         {canAccept && <button className="button button--primary" type="button" onClick={() => onAccept(openHandoff)}>{primaryAction.label}</button>}
       </section>
 
-      <HandoffResolution handoff={openHandoff} profile={profile} onResolve={onResolve} />
+      <AvailableStaffActions actions={detail.allowed_actions || []} />
+
+      <HandoffResolution handoff={openHandoff} allowedAction={resolveAction} onResolve={onResolve} />
 
       <OwnershipActions
         actions={detail.allowed_actions || []}
@@ -186,6 +196,32 @@ function Summary({ detail, resources, handoffs, collaborationRequests, profile, 
       <section className="detail-section"><div className="section-heading"><div><p className="eyebrow">Classification</p><h2>Claim tags</h2></div></div><TagList tags={detail.tags || []} grouped /></section>
     </div>
   )
+}
+
+function AvailableStaffActions({ actions }) {
+  const available = actions.filter((action) => action.availability !== 'blocked')
+  return (
+    <section className="detail-section" aria-labelledby="available-actions-title">
+      <div className="section-heading">
+        <div><p className="eyebrow">Current Claim state</p><h2 id="available-actions-title">Available staff actions</h2></div>
+        <span className="count-badge">{available.length}</span>
+      </div>
+      {available.length ? (
+        <ul className="missing-list">
+          {available.map((action) => (
+            <li key={`${action.action_code}:${action.target_ref}`}>
+              <ShieldCheck size={15} />
+              <span><strong>{action.label}</strong><small>{action.purpose} · {words(action.availability)}</small></span>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="empty-note">No staff action is available with your current Claim access and state.</p>}
+    </section>
+  )
+}
+
+function canCollaborate(detail) {
+  return ['primary', 'coworker'].includes(detail.ownership?.current_staff_access)
 }
 
 function ownershipLabel(ownership, profile) {
@@ -259,10 +295,10 @@ function Conversation({ detail, resource, draft, onDraft, onSend }) {
   )
 }
 
-function Activity({ resources, onCreateAction, onUpdateAction }) {
+function Activity({ detail, profile, resources, onCreateAction, onUpdateAction }) {
   return (
     <div className="activity-view">
-      <ResourceBoundary resource={resources.workItems}><StaffActions actions={resources.workItems?.items || []} onCreate={onCreateAction} onUpdate={onUpdateAction} /></ResourceBoundary>
+      <ResourceBoundary resource={resources.workItems}><StaffActions actions={resources.workItems?.items || []} access={detail.ownership?.current_staff_access} staffId={profile?.staff_id} onCreate={onCreateAction} onUpdate={onUpdateAction} /></ResourceBoundary>
       <ResourceBoundary resource={resources.events}><section className="resource-view"><header className="content-header"><div><p className="eyebrow">Audit trail</p><h2>Claim activity</h2></div></header><RecordList items={resources.events?.items} empty="No activity is recorded." render={(event) => <article className="reference-card" key={event.event_id}><strong>{words(event.event_type)}</strong><p>{event.summary}</p><small>{formatDateTime(event.created_at)}</small></article>} /></section></ResourceBoundary>
       <ResourceBoundary resource={resources.customerUpdates}><section className="resource-view"><header className="content-header"><div><p className="eyebrow">Claimant-visible</p><h2>Customer updates</h2></div></header><RecordList items={resources.customerUpdates?.items} empty="No claimant-visible update is recorded." render={(update) => <article className="reference-card" key={update.update_id}><strong>{words(update.responsible_party)}</strong><p>{update.summary}</p><small>{formatDateTime(update.created_at)}</small></article>} /></section></ResourceBoundary>
     </div>

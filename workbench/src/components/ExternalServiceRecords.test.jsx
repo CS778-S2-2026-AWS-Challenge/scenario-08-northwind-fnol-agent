@@ -44,6 +44,9 @@ describe('ExternalServiceRecords', () => {
     expect(screen.getAllByText('Reconcile by operation or provider reference before any retry.')[0]).toBeVisible()
     expect(screen.getByText('AUTH-1')).toBeVisible()
     expect(screen.getByText('CONSENT-1')).toBeVisible()
+    expect(screen.getByText('Submission')).toBeVisible()
+    expect(screen.getByText('Submitted')).toBeVisible()
+    expect(screen.getByText(/Synthetic fixture record; no production provider completion is verified/)).toBeVisible()
   })
 
   it('states when no request has been prepared', async () => {

@@ -2,13 +2,12 @@ import { CheckCircle2, ClipboardCheck, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 
-export function HandoffResolution({ handoff, profile, onResolve }) {
+export function HandoffResolution({ handoff, allowedAction, onResolve }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  if (!handoff || !['accepted', 'in_progress'].includes(handoff.status)) return null
-  const assignedToCurrentStaff = !handoff.assigned_to || handoff.assigned_to === profile?.staff_id
+  if (!handoff || !allowedAction || !['accepted', 'in_progress'].includes(handoff.status)) return null
 
   async function submit(event) {
     event.preventDefault()
@@ -42,11 +41,11 @@ export function HandoffResolution({ handoff, profile, onResolve }) {
     <section className="action-panel" aria-labelledby="handoff-resolution-title">
       <div className="action-panel__heading">
         <div><p className="eyebrow">Accepted handoff</p><h2 id="handoff-resolution-title">Continue and resolve staff assistance</h2></div>
-        <span className="assigned-chip">Assigned to {handoff.assigned_to === profile?.staff_id ? 'you' : handoff.assigned_to}</span>
+        <span className="assigned-chip">{allowedAction.label}</span>
       </div>
       <p>{handoff.requested_action}</p>
       <HandoffContext handoff={handoff} />
-      {assignedToCurrentStaff && !open && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
+      {!open && <button className="button button--secondary" type="button" onClick={() => setOpen(true)}>Record resolution</button>}
       {open && (
         <form className="action-form" onSubmit={submit}>
           <label>Outcome code<input name="outcome" defaultValue="support_completed" required /></label>
@@ -62,18 +61,18 @@ export function HandoffResolution({ handoff, profile, onResolve }) {
   )
 }
 
-export function SignalReviews({ signals, onDecision }) {
+export function SignalReviews({ signals, canDecide = false, onDecision }) {
   return (
     <section className="resource-view">
       <header className="content-header"><div><p className="eyebrow">Internal review only</p><h2>Signals</h2></div><span>{signals.length} records</span></header>
       <div className="record-list">
-        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
+        {signals.length ? signals.map((signal, index) => <SignalRecord key={signal.signal_id || signal.code || index} signal={signal} canDecide={canDecide} onDecision={onDecision} />) : <p className="empty-note">No review signals are recorded for this Claim.</p>}
       </div>
     </section>
   )
 }
 
-function SignalRecord({ signal, onDecision }) {
+function SignalRecord({ signal, canDecide, onDecision }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const signalId = signal.signal_id || signal.code
@@ -105,22 +104,23 @@ function SignalRecord({ signal, onDecision }) {
       <div className="record-body">
         <p className="record-summary">{signal.summary || signal.reason || 'Review the source-linked signal before recording a decision.'}</p>
         {latest && <p className="decision-history"><CheckCircle2 size={16} /><span><strong>{words(latest.decision)}</strong>{latest.summary} · {formatDateTime(latest.created_at)}</span></p>}
-        <form className="action-form" onSubmit={submit}>
+        {canDecide ? <form className="action-form" onSubmit={submit}>
           <label>Decision<select name="decision" defaultValue="dismissed"><option value="confirmed">Confirm for review</option><option value="dismissed">Dismiss signal</option><option value="overridden">Override signal</option><option value="resolved">Resolve signal</option></select></label>
           <label>Reason code<input name="reason_code" placeholder="SOURCE_RECORD_REVIEWED" required /></label>
           <label>Decision summary<textarea name="summary" rows="2" required /></label>
           <label>Evidence references<input name="evidence_refs" placeholder="Comma-separated evidence IDs" /></label>
           <div className="form-actions"><span>This decision is internal and source-linked.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Record decision'}</button></div>
           {error && <p className="form-error" role="alert">{error}</p>}
-        </form>
+        </form> : <p className="record-note">Signal details are read-only with your current Claim access.</p>}
       </div>
     </details>
   )
 }
 
-export function StaffActions({ actions, onCreate, onUpdate }) {
+export function StaffActions({ actions, access = 'read_only', staffId, onCreate, onUpdate }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const canCreate = ['primary', 'coworker'].includes(access)
 
   async function create(event) {
     event.preventDefault()
@@ -145,22 +145,22 @@ export function StaffActions({ actions, onCreate, onUpdate }) {
   return (
     <section className="action-ledger" aria-labelledby="staff-actions-title">
       <header className="content-header"><div><p className="eyebrow">Audited work</p><h2 id="staff-actions-title">Staff actions</h2></div><span>{actions.length} records</span></header>
-      <form className="action-form action-form--create" onSubmit={create}>
+      {canCreate ? <form className="action-form action-form--create" onSubmit={create}>
         <div className="section-heading"><div><p className="eyebrow">New action</p><h3>Record a bounded task</h3></div><ClipboardCheck size={19} /></div>
         <label>Action type<input name="action_type" placeholder="coverage_review" required /></label>
         <label>Requested outcome<textarea name="requested_outcome" rows="2" required /></label>
         <label>Source references<input name="source_refs" placeholder="Comma-separated source IDs" /></label>
         <div className="form-actions"><span>Creating this record does not complete or change Claim state.</span><button className="button button--primary" type="submit" disabled={creating}>{creating ? 'Creating...' : 'Create action'}</button></div>
         {error && <p className="form-error" role="alert">{error}</p>}
-      </form>
+      </form> : <p className="empty-note">Staff action records are read-only with your current Claim access.</p>}
       <div className="record-list">
-        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
+        {actions.length ? actions.map((action) => <StaffActionRecord key={action.action_id} action={action} canUpdate={access === 'primary' || (access === 'coworker' && action.assigned_to === staffId)} onUpdate={onUpdate} />) : <p className="empty-note">No staff actions have been recorded.</p>}
       </div>
     </section>
   )
 }
 
-function StaffActionRecord({ action, onUpdate }) {
+function StaffActionRecord({ action, canUpdate, onUpdate }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const final = ['completed', 'cancelled'].includes(action.status)
@@ -196,7 +196,8 @@ function StaffActionRecord({ action, onUpdate }) {
       <summary><span><strong>{words(action.action_type)}</strong><small>{action.requested_outcome}</small></span><span className={`record-status record-status--${action.status}`}>{words(action.status)}</span></summary>
       <div className="record-body">
         <dl><dt>Assigned to</dt><dd>{action.assigned_to}</dd><dt>Sources</dt><dd>{action.source_refs?.join(', ') || 'None recorded'}</dd><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd>{action.result && <><dt>Outcome</dt><dd>{words(action.result.outcome)}</dd><dt>Result</dt><dd>{action.result.summary}</dd></>}</dl>
-        {!final && <form className="action-form" onSubmit={update}><label>Status<select name="status" defaultValue="in_progress"><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></label><label>Outcome code<input name="outcome" defaultValue="review_completed" /></label><label>Reason code<input name="reason_code" defaultValue="STAFF_REVIEW_COMPLETED" /></label><label>Result summary<textarea name="summary" rows="2" /></label><div className="form-actions"><span>Completion writes an audited result. It does not send a claimant update.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && canUpdate && <form className="action-form" onSubmit={update}><label>Status<select name="status" defaultValue="in_progress"><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></label><label>Outcome code<input name="outcome" defaultValue="review_completed" /></label><label>Reason code<input name="reason_code" defaultValue="STAFF_REVIEW_COMPLETED" /></label><label>Result summary<textarea name="summary" rows="2" /></label><div className="form-actions"><span>Completion writes an audited result. It does not send a claimant update.</span><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Recording...' : 'Update action'}</button></div>{error && <p className="form-error" role="alert">{error}</p>}</form>}
+        {!final && !canUpdate && <p className="record-note">This action is read-only because it is not assigned within your current authority.</p>}
       </div>
     </details>
   )
