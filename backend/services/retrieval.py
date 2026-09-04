@@ -191,6 +191,8 @@ def search_policy(
             limitations=[NO_RECORD_LIMITATION],
             retrieved_at=now_utc(),
         )
+    except Exception as error:
+        raise _malformed_provider_error('policy', error) from error
 
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
@@ -255,6 +257,8 @@ def search_claim_history(
             limitations=[NO_RECORD_LIMITATION],
             retrieved_at=now_utc(),
         )
+    except Exception as error:
+        raise _malformed_provider_error('claim-history', error) from error
 
     connection_state = _connection_state(adapter)
     if not _provider_ready(connection_state):
