@@ -107,12 +107,12 @@ def _history_unavailable_response(result_id: str) -> ClaimHistorySearchResponse:
     )
 
 
-def _malformed_provider_error(kind: str, error: ValidationError) -> ApiError:
+def _malformed_provider_error(kind: str, error: Exception) -> ApiError:
     """Map malformed provider data to a bounded dependency failure.
 
     Args:
         kind: Retrieval kind whose provider response failed validation.
-        error: Internal validation failure; its details are intentionally not exposed.
+        error: Internal mapping failure; its details are intentionally not exposed.
 
     Returns:
         A provider-neutral API error that callers cannot mistake for evidence.
@@ -201,7 +201,7 @@ def search_policy(
             claim_id=claim.claim_id,
             envelope=envelope,
         )
-    except ValidationError as error:
+    except (ValidationError, AttributeError, KeyError, TypeError, ValueError) as error:
         raise _malformed_provider_error('policy', error) from error
     persist_retrieval_record(repository, record, claim.customer_id)
     return PolicySearchResponse(
@@ -265,7 +265,7 @@ def search_claim_history(
             claim_id=claim.claim_id,
             envelope=envelope,
         )
-    except ValidationError as error:
+    except (ValidationError, AttributeError, KeyError, TypeError, ValueError) as error:
         raise _malformed_provider_error('claim-history', error) from error
     persist_retrieval_record(repository, record, claim.customer_id)
     return ClaimHistorySearchResponse(

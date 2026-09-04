@@ -446,6 +446,34 @@ def test_malformed_provider_payload_returns_bounded_failure_without_persisting_e
     assert 'malformed-reference' not in response.text
 
 
+@pytest.mark.parametrize('operation', ['policy', 'history'])
+def test_provider_protocol_violation_returns_bounded_failure(
+    operation: str,
+    retrieval_client: TestClient,
+    retrieval_repository: FixtureRepository,
+    retrieval_adapter: MockPolicyHistoryAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    method_name = f'search_{operation}' if operation == 'policy' else 'search_claim_history'
+    monkeypatch.setattr(retrieval_adapter, method_name, lambda _: None)
+
+    with retrieval_client as client:
+        claim_id = create_claim(client, f'{operation}-protocol-violation')
+        endpoint = POLICY_SEARCH if operation == 'policy' else HISTORY_SEARCH
+        reference_key = 'policy_reference' if operation == 'policy' else 'history_reference'
+        reference = 'synthetic-policy-101' if operation == 'policy' else 'synthetic-history-204'
+        response = client.post(
+            endpoint,
+            headers=INTEGRATION_AUTH,
+            json={'claim_id': claim_id, reference_key: reference},
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert response.json()['error']['retryable'] is False
+    assert retrieval_repository.list_retrieval_records(claim_id, 'cus_demo') == []
+
+
 def test_demo_reset_clears_retrieval_state_and_restores_the_provider(
     retrieval_client: TestClient,
     retrieval_adapter: MockPolicyHistoryAdapter,
