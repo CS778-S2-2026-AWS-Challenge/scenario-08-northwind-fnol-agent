@@ -246,13 +246,15 @@ def _record_external_acceptance(
     # persistence contract requires every changed task state to advance time.
     if updated_at <= task.updated_at:
         updated_at = task.updated_at + timedelta(microseconds=1)
-    accepted = task.model_copy(
-        update={
+    accepted = ExternalTaskRecord.model_validate(
+        {
+            **task.model_dump(),
             'status': ExternalTaskOperationStatus.ACCEPTED,
             'delivery': ExternalTaskDelivery.SUBMITTED,
             'delivery_evidence': (
                 f'{task.integration_source.value} routing acknowledgement: {provider_reference}'
             ),
+            'failure_code': None,
             'provider_reference': provider_reference,
             'updated_at': updated_at,
         }
