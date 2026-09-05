@@ -33,6 +33,59 @@ journey, Workbench task model, component and token system, route and state bound
 and Runtime responsibilities, real-API expectations, and acceptance evidence. Do not treat the
 legacy `employee/index.html` or other historical prototypes as the design baseline.
 
+## Required alignment before substantive work
+
+Reading the required files is not permission to start immediately. Before taking ownership of an
+Issue, pushing a pull request, changing a pull request in response to Changes Requested, or making
+another substantive repository/GitHub change, the agent MUST first tell the current user:
+
+1. which governance chapters and other authoritative documents it selected and read for this task;
+2. which concrete rules from those documents it will follow; and
+3. a direct quotation or precise reference to each rule that materially constrains the planned
+   work.
+
+The agent MUST identify the planned source of truth for fields, state, permissions, CI, fixtures,
+and acceptance evidence where applicable. If the task expands, the branch is updated from `main`,
+a new review round begins, or context is compacted, the agent MUST repeat this alignment before
+continuing. A passing check, a pre-filled PR field, or a short context summary does not replace
+this step.
+
+Before editing code or protected configuration, the agent MUST also create or update a GitHub
+Discussion describing the intended change, affected contracts and owners, source-of-truth
+documents, and acceptance evidence. The agent MUST wait for the appropriate direction or Code
+Owner agreement before making the edit. A post-hoc review request does not satisfy this
+pre-change Discussion requirement. This applies to substantive changes to application code,
+tests that define shared behavior, CI/workflows, protected paths, and shared API, persistence,
+agent, or projection contracts. Purely local inspection, formatting-only edits, and changes
+explicitly authorized as part of an already-approved governance operation are exempt.
+
+## Cross-cutting implementation rules
+
+The governance skill remains the normative rule source. The following index makes several rules
+explicit so they are not lost when an agent follows only the entry point:
+
+- **Contract-first inputs:** real product behavior must use the current backend API and repository
+  contracts. Development data, test data, component view models, and API clients obtain fields and
+  enums from schema, OpenAPI, or shared domain definitions; agents must not invent an isolated
+  vocabulary or use fixtures as a runtime substitute. See
+  [fixtures_convention.md](docs/fixtures_convention.md) and the relevant API/domain chapters.
+- **Evidence levels are distinct:** component layout, API contract, authorization, integrated
+  runtime, and real user-journey evidence are different claims. Test names and acceptance notes
+  must state the level they actually cover.
+- **Review comments are not a complete specification:** after receiving CR, reconstruct the
+  product goal, authoritative data sources, task boundary, dependencies, and evidence level before
+  editing. Do not mechanically implement isolated review bullets.
+- **Re-align after context changes:** after scope expansion, merging or updating from `main`, a
+  new CR round, or context compaction, re-read the applicable authority and restate the alignment
+  before continuing.
+- **Workflow changes require governance:** agents generally MUST NOT create a new GitHub Actions
+  workflow on their own. If a new workflow is genuinely necessary, request Code Owner agreement in
+  a Discussion before changing `.github/`; the protected-path review requirement still applies.
+- **Temporary validation files stay local:** fixtures and tests created only while implementing a
+  single feature for the author's self-validation must not be committed. A fixture or test may be
+  committed only when it comes from an explicit design task, has a documented long-term purpose,
+  uses the formal contract, and provides repeatable acceptance or regression value.
+
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical
 reference only. Where an archived document disagrees with the skill, the skill prevails
