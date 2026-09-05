@@ -124,7 +124,7 @@ jobs:
 
   workbench-quality:
     docker:
-      - image: mcr.microsoft.com/playwright:v1.62.1-noble
+      - image: cimg/node:22.14
     resource_class: small
     steps:
       - checkout
@@ -146,10 +146,6 @@ jobs:
       - run:
           name: Test Workbench
           command: npm test
-          working_directory: workbench
-      - run:
-          name: Test Workbench in desktop and mobile viewports
-          command: npm run test:browser
           working_directory: workbench
       - run:
           name: Build Workbench

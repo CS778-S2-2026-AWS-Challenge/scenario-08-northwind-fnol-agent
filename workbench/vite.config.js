@@ -19,7 +19,6 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.js',
-      exclude: ['browser-tests/**', 'node_modules/**', 'dist/**'],
     },
   }
 })
