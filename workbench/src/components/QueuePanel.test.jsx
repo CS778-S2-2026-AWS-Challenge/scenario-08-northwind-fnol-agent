@@ -12,6 +12,23 @@ const tag = {
   source_refs: ['field:vehicle.drivable'],
 }
 
+const filterMetadata = {
+  views: [
+    { value: 'all', label: 'All active work' },
+    { value: 'urgent', label: 'Urgent' },
+  ],
+  workflow_states: [
+    { value: 'collecting', label: 'Collecting' },
+    { value: 'professional_review', label: 'Professional review' },
+  ],
+  priorities: [
+    { value: 'standard', label: 'Standard' },
+    { value: 'high', label: 'High' },
+  ],
+  tags: [{ value: tag.code, label: tag.label, category: tag.category }],
+  tag_registry_version: '0.2',
+}
+
 const claim = {
   claim_id: 'clm_1',
   display_reference: 'NW-1042',
@@ -31,6 +48,7 @@ function renderQueue(overrides = {}) {
     claims: [claim],
     loading: false,
     selectedId: null,
+    filterMetadata,
     view: 'all',
     onView: vi.fn(),
     workflowState: '',
@@ -38,8 +56,10 @@ function renderQueue(overrides = {}) {
     priority: '',
     onPriority: vi.fn(),
     tagFilter: '',
-    tags: [tag],
     onTag: vi.fn(),
+    search: '',
+    onSearch: vi.fn(),
+    onClearFilters: vi.fn(),
     nextCursor: null,
     onLoadMore: vi.fn(),
     onOpen: vi.fn(),
@@ -55,6 +75,7 @@ describe('QueuePanel', () => {
     const user = userEvent.setup()
     renderQueue({ onTag })
 
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     expect(screen.getAllByText('Vehicle not drivable')).toHaveLength(2)
     await user.selectOptions(screen.getByLabelText('Staff tag'), tag.code)
     expect(onTag).toHaveBeenCalledWith(tag.code)
@@ -69,6 +90,7 @@ describe('QueuePanel', () => {
     expect(screen.getByText('Priority: Standard')).toBeInTheDocument()
     expect(screen.getByText('Motor · Status: Collecting')).toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     await user.selectOptions(screen.getByLabelText('Claim status'), 'professional_review')
     await user.selectOptions(screen.getByLabelText('Claim priority'), 'high')
 
@@ -77,10 +99,7 @@ describe('QueuePanel', () => {
   })
 
   it('distinguishes filtered no-results and clears the current filter state', async () => {
-    const onView = vi.fn()
-    const onWorkflowState = vi.fn()
-    const onPriority = vi.fn()
-    const onTag = vi.fn()
+    const onClearFilters = vi.fn()
     const user = userEvent.setup()
     renderQueue({
       claims: [],
@@ -88,26 +107,36 @@ describe('QueuePanel', () => {
       workflowState: 'professional_review',
       priority: 'urgent',
       tagFilter: tag.code,
-      onView,
-      onWorkflowState,
-      onPriority,
-      onTag,
+      search: 'NW-4040',
+      onClearFilters,
     })
 
     expect(screen.getByText('No claims match the current filters.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
 
-    expect(onView).toHaveBeenCalledWith('all')
-    expect(onWorkflowState).toHaveBeenCalledWith('')
-    expect(onPriority).toHaveBeenCalledWith('')
-    expect(onTag).toHaveBeenCalledWith('')
+    expect(onClearFilters).toHaveBeenCalledOnce()
   })
 
-  it('hides filters when the unfiltered queue has no claims', () => {
-    renderQueue({ claims: [], tags: [] })
+  it('keeps queue navigation available when the current view has no claims', () => {
+    renderQueue({ claims: [] })
 
     expect(screen.getByText('No claims are currently in this queue.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Current work')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search claims')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Claim status')).not.toBeInTheDocument()
+  })
+
+  it('uses an accessible disclosure for secondary filters', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+
+    const toggle = screen.getByRole('button', { name: 'Filters' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'queue-secondary-filters')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Claim status')).toBeInTheDocument()
   })
 
   it('loads the next backend page only when a cursor is available', async () => {

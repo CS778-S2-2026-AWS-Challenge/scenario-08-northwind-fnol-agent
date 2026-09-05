@@ -425,3 +425,20 @@ def get_staff_tag_definition(code: str) -> StaffTagDefinition:
     if definition is None or definition.status is not TagDefinitionStatus.PUBLISHED:
         raise ValueError(f'Unknown published staff tag: {code}.')
     return definition
+
+
+def list_filterable_staff_tag_definitions() -> list[StaffTagDefinition]:
+    """Return the canonical published tag options exposed to staff filters.
+
+    Returns:
+        Published, filterable definitions in stable label and code order.
+    """
+
+    return sorted(
+        (
+            definition
+            for definition in STAFF_TAG_REGISTRY.values()
+            if definition.status is TagDefinitionStatus.PUBLISHED and definition.filterable
+        ),
+        key=lambda definition: (definition.staff_label.casefold(), definition.code),
+    )

@@ -6888,6 +6888,52 @@
         "title": "WorkbenchClaimDetail",
         "type": "object"
       },
+      "WorkbenchClaimFilterMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "priorities": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchFilterOption"
+            },
+            "title": "Priorities",
+            "type": "array"
+          },
+          "tag_registry_version": {
+            "title": "Tag Registry Version",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchTagFilterOption"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchFilterOption"
+            },
+            "title": "Views",
+            "type": "array"
+          },
+          "workflow_states": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchFilterOption"
+            },
+            "title": "Workflow States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "views",
+          "workflow_states",
+          "priorities",
+          "tags",
+          "tag_registry_version"
+        ],
+        "title": "WorkbenchClaimFilterMetadata",
+        "type": "object"
+      },
       "WorkbenchClaimListItem": {
         "additionalProperties": false,
         "properties": {
@@ -7357,6 +7403,25 @@
           "field"
         ],
         "title": "WorkbenchFieldItem",
+        "type": "object"
+      },
+      "WorkbenchFilterOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "WorkbenchFilterOption",
         "type": "object"
       },
       "WorkbenchHandoff": {
@@ -7848,6 +7913,21 @@
         ],
         "title": "WorkbenchPriorityReason",
         "type": "object"
+      },
+      "WorkbenchQueueView": {
+        "enum": [
+          "all",
+          "urgent",
+          "human_requests",
+          "new_untriaged",
+          "ready_to_progress",
+          "awaiting_evidence",
+          "professional_review",
+          "ready_to_create",
+          "created_routed"
+        ],
+        "title": "WorkbenchQueueView",
+        "type": "string"
       },
       "WorkbenchReservation": {
         "additionalProperties": false,
@@ -8681,6 +8761,30 @@
           "staff_id"
         ],
         "title": "WorkbenchStaffSummary",
+        "type": "object"
+      },
+      "WorkbenchTagFilterOption": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "category"
+        ],
+        "title": "WorkbenchTagFilterOption",
         "type": "object"
       },
       "WorkbenchWaitingExternalService": {
@@ -11930,7 +12034,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/WorkbenchQueueView"
                 },
                 {
                   "type": "null"
@@ -11991,6 +12095,23 @@
                 }
               ],
               "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
             }
           },
           {
@@ -12061,6 +12182,55 @@
           }
         },
         "summary": "Read Workbench Claims",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/filter-metadata": {
+      "get": {
+        "operationId": "read_workbench_claim_filter_metadata_api_v1_workbench_claims_filter_metadata_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchClaimFilterMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workbench Claim Filter Metadata",
         "tags": [
           "workbench"
         ]

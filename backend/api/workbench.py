@@ -27,6 +27,7 @@ from backend.domain.models import (
 )
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
+    WorkbenchClaimFilterMetadata,
     WorkbenchClaimListResponse,
     WorkbenchCollaborationRequestsResponse,
     WorkbenchConversationsResponse,
@@ -37,6 +38,7 @@ from backend.domain.workbench import (
     WorkbenchFieldsResponse,
     WorkbenchHandoffsResponse,
     WorkbenchMessagesResponse,
+    WorkbenchQueueView,
     WorkbenchRetrievalsResponse,
     WorkbenchSessionsResponse,
     WorkbenchSignalsResponse,
@@ -62,6 +64,7 @@ from backend.services.staff_actions import (
     update_staff_action,
 )
 from backend.services.workbench import (
+    get_workbench_claim_filter_metadata,
     list_workbench_claims,
     list_workbench_collaboration_requests,
     list_workbench_conversations,
@@ -136,10 +139,11 @@ def _safe_download_filename(value: str | None) -> str:
 def read_workbench_claims(
     request: Request,
     principal: Principal = Depends(require_staff),
-    view: str | None = Query(default=None),
+    view: WorkbenchQueueView | None = Query(default=None),
     workflow_state: WorkflowState | None = Query(default=None),
     priority: Literal['standard', 'high', 'urgent', 'immediate'] | None = Query(default=None),
     tag: str | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
@@ -150,9 +154,17 @@ def read_workbench_claims(
         workflow_state=workflow_state,
         priority=WorkPriorityLevel(priority) if priority is not None else None,
         tag=tag,
+        search=search,
         limit=limit,
         cursor=cursor,
     )
+
+
+@router.get('/filter-metadata', response_model=WorkbenchClaimFilterMetadata)
+def read_workbench_claim_filter_metadata(
+    principal: Principal = Depends(require_staff),
+) -> WorkbenchClaimFilterMetadata:
+    return get_workbench_claim_filter_metadata(principal)
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)

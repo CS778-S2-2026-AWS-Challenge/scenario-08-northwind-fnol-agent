@@ -1,6 +1,6 @@
 import { Menu, PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { workbenchApi } from '../api.js'
 import { useAuth } from '../auth/auth-context.js'
 import ClaimTabs from '../components/ClaimTabs.jsx'
@@ -17,14 +17,11 @@ export default function WorkbenchPage() {
   const { claimId, section: routeSection, agentSessionId: routeAgentSessionId, conversationSessionId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const tabs = usePersistentTabs()
   const openTab = tabs.open
   const [claims, setClaims] = useState([])
-  const [view, setView] = useState('all')
-  const [workflowState, setWorkflowState] = useState('')
-  const [priority, setPriority] = useState('')
-  const [tagFilter, setTagFilter] = useState('')
-  const [knownTags, setKnownTags] = useState([])
+  const [filterMetadata, setFilterMetadata] = useState(null)
   const [nextCursor, setNextCursor] = useState(null)
   const [queueLoading, setQueueLoading] = useState(true)
   const [queueError, setQueueError] = useState('')
@@ -47,12 +44,17 @@ export default function WorkbenchPage() {
   const currentSection = CLAIM_SECTIONS.has(routeSection)
     ? routeSection
     : currentTab?.section || 'summary'
+  const queueFilters = useMemo(
+    () => readQueueFilters(searchParams, filterMetadata),
+    [filterMetadata, searchParams],
+  )
+  const { view, workflowState, priority, tagFilter, search } = queueFilters
 
   const openConversation = useCallback((conversation) => {
     if (conversation.kind === 'staff_agent') {
       setAgentSessionId(conversation.session_id)
       setAgentOpen(true)
-      navigate(`/workbench/agent/sessions/${encodeURIComponent(conversation.session_id)}`)
+      navigate(queueRoute(`/workbench/agent/sessions/${encodeURIComponent(conversation.session_id)}`, queueFilters))
       return
     }
     tabs.open({
@@ -63,38 +65,55 @@ export default function WorkbenchPage() {
       section: 'conversation',
       sessionId: conversation.session_id,
     })
-    navigate(
-      `/workbench/claims/${conversation.claim_id}/conversation?session=${encodeURIComponent(conversation.session_id)}`,
-    )
-  }, [navigate, tabs])
+    navigate(queueRoute(`/workbench/claims/${conversation.claim_id}/conversation`, queueFilters, conversation.session_id))
+  }, [navigate, queueFilters, tabs])
 
   const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
+    if (!filterMetadata) return
     const requestId = ++queueRequestId.current
     setQueueLoading(true)
     setQueueError('')
     try {
-      const response = await workbenchApi.claims(token, {
+      const requestFilters = {
         ...(view === 'all' ? {} : { view }),
         ...(workflowState ? { workflow_state: workflowState } : {}),
         ...(priority ? { priority } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
+        ...(search ? { search } : {}),
         limit: 25,
         ...(cursor ? { cursor } : {}),
-      })
+      }
+      const response = await workbenchApi.claims(token, requestFilters)
       if (requestId !== queueRequestId.current) return
       setClaims((current) => append ? [...current, ...response.items] : response.items)
       setNextCursor(response.page?.next_cursor || null)
-      setKnownTags((current) => {
-        const byCode = new Map(current.map((tag) => [tag.code, tag]))
-        response.items.flatMap((claim) => claim.tags || []).forEach((tag) => byCode.set(tag.code, tag))
-        return [...byCode.values()].sort((left, right) => left.label.localeCompare(right.label))
-      })
     } catch (error) {
-      if (requestId === queueRequestId.current) setQueueError(error.message)
+      if (requestId !== queueRequestId.current) return
+      if (append && error.code === 'VALIDATION_ERROR') {
+        try {
+          const response = await workbenchApi.claims(token, {
+            ...(view === 'all' ? {} : { view }),
+            ...(workflowState ? { workflow_state: workflowState } : {}),
+            ...(priority ? { priority } : {}),
+            ...(tagFilter ? { tag: tagFilter } : {}),
+            ...(search ? { search } : {}),
+            limit: 25,
+          })
+          if (requestId !== queueRequestId.current) return
+          setClaims(response.items)
+          setNextCursor(response.page?.next_cursor || null)
+          setQueueError('The saved queue page was invalid or stale, so current work was reloaded from the start.')
+          return
+        } catch (recoveryError) {
+          if (requestId === queueRequestId.current) setQueueError(recoveryError.message)
+          return
+        }
+      }
+      setQueueError(error.message)
     } finally {
       if (requestId === queueRequestId.current) setQueueLoading(false)
     }
-  }, [priority, tagFilter, token, view, workflowState])
+  }, [filterMetadata, priority, search, tagFilter, token, view, workflowState])
 
   const loadDetail = useCallback(async (id) => {
     if (!id) {
@@ -202,6 +221,28 @@ export default function WorkbenchPage() {
   }, [token])
 
   useEffect(() => {
+    let active = true
+    workbenchApi.claimFilterMetadata(token).then(
+      (response) => {
+        if (active) setFilterMetadata(response)
+      },
+      (error) => {
+        if (active) {
+          setQueueError(error.message)
+          setQueueLoading(false)
+        }
+      },
+    )
+    return () => { active = false }
+  }, [token])
+  useEffect(() => {
+    if (!filterMetadata) return
+    const normalized = normalizeQueueSearchParams(searchParams, filterMetadata)
+    if (normalized.toString() !== searchParams.toString()) {
+      setSearchParams(normalized, { replace: true })
+    }
+  }, [filterMetadata, searchParams, setSearchParams])
+  useEffect(() => {
     loadClaims()
   }, [loadClaims])
   useEffect(() => {
@@ -243,7 +284,7 @@ export default function WorkbenchPage() {
 
   function openClaim(claim) {
     tabs.open(claim)
-    navigate(`/workbench/claims/${claim.claim_id}`)
+    navigate(queueRoute(`/workbench/claims/${claim.claim_id}`, queueFilters))
   }
 
   function activateTab(id) {
@@ -253,7 +294,7 @@ export default function WorkbenchPage() {
     const query = tab?.section === 'conversation' && tab.sessionId
       ? `?session=${encodeURIComponent(tab.sessionId)}`
       : ''
-    navigate(`/workbench/claims/${id}${suffix}${query}`)
+    navigate(queueRoute(`/workbench/claims/${id}${suffix}`, queueFilters, query ? tab.sessionId : null))
   }
 
   function closeTab(id) {
@@ -266,7 +307,7 @@ export default function WorkbenchPage() {
       const suffix = neighbour?.section && neighbour.section !== 'summary'
         ? `/${neighbour.section}`
         : ''
-      navigate(neighbour ? `/workbench/claims/${neighbour.claimId}${suffix}` : '/workbench')
+      navigate(queueRoute(neighbour ? `/workbench/claims/${neighbour.claimId}${suffix}` : '/workbench', queueFilters))
     }
   }
 
@@ -277,7 +318,30 @@ export default function WorkbenchPage() {
     const query = section === 'conversation' && currentTab?.sessionId
       ? `?session=${encodeURIComponent(currentTab.sessionId)}`
       : ''
-    navigate(`/workbench/claims/${claimId}${suffix}${query}`, { replace: true })
+    navigate(
+      queueRoute(`/workbench/claims/${claimId}${suffix}`, queueFilters, query ? currentTab.sessionId : null),
+      { replace: true },
+    )
+  }
+
+  function setQueueFilter(name, value) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      const normalized = value.trim()
+      if (!normalized || (name === 'view' && normalized === 'all')) next.delete(name)
+      else next.set(name, normalized)
+      next.delete('cursor')
+      return next
+    }, { replace: true })
+  }
+
+  function clearQueueFilters() {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      for (const name of QUEUE_FILTER_PARAM_NAMES) next.delete(name)
+      next.delete('cursor')
+      return next
+    }, { replace: true })
   }
 
   async function acceptHandoff(handoff) {
@@ -371,7 +435,7 @@ export default function WorkbenchPage() {
           <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onOpenConversation={openConversation} />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
-            {queueVisible && <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} view={view} onView={setView} workflowState={workflowState} onWorkflowState={setWorkflowState} priority={priority} onPriority={setPriority} tagFilter={tagFilter} tags={knownTags} onTag={setTagFilter} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />}
+            {queueVisible && filterMetadata && <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
@@ -416,3 +480,65 @@ function resourceState(response = {}) {
     error: '',
   }
 }
+
+function readQueueFilters(searchParams, metadata) {
+  if (!metadata) return EMPTY_QUEUE_FILTERS
+  return {
+    view: validFilterValue(searchParams.get('view'), metadata.views, 'all'),
+    workflowState: validFilterValue(
+      searchParams.get('workflow_state'),
+      metadata.workflow_states,
+    ),
+    priority: validFilterValue(searchParams.get('priority'), metadata.priorities),
+    tagFilter: validFilterValue(searchParams.get('tag'), metadata.tags),
+    search: (searchParams.get('search') || '').trim().slice(0, 200),
+  }
+}
+
+function validFilterValue(value, options, fallback = '') {
+  return options.some((option) => option.value === value) ? value : fallback
+}
+
+function normalizeQueueSearchParams(searchParams, metadata) {
+  const next = new URLSearchParams(searchParams)
+  const filters = readQueueFilters(next, metadata)
+  setNormalizedParam(next, 'view', filters.view === 'all' ? '' : filters.view)
+  setNormalizedParam(next, 'workflow_state', filters.workflowState)
+  setNormalizedParam(next, 'priority', filters.priority)
+  setNormalizedParam(next, 'tag', filters.tagFilter)
+  setNormalizedParam(next, 'search', filters.search)
+  next.delete('cursor')
+  return next
+}
+
+function setNormalizedParam(params, name, value) {
+  if (value) params.set(name, value)
+  else params.delete(name)
+}
+
+function queueRoute(path, filters, sessionId = null) {
+  const params = new URLSearchParams()
+  if (filters.view !== 'all') params.set('view', filters.view)
+  if (filters.workflowState) params.set('workflow_state', filters.workflowState)
+  if (filters.priority) params.set('priority', filters.priority)
+  if (filters.tagFilter) params.set('tag', filters.tagFilter)
+  if (filters.search) params.set('search', filters.search)
+  if (sessionId) params.set('session', sessionId)
+  return params.size ? `${path}?${params}` : path
+}
+
+const EMPTY_QUEUE_FILTERS = Object.freeze({
+  view: 'all',
+  workflowState: '',
+  priority: '',
+  tagFilter: '',
+  search: '',
+})
+
+const QUEUE_FILTER_PARAM_NAMES = Object.freeze([
+  'view',
+  'workflow_state',
+  'priority',
+  'tag',
+  'search',
+])

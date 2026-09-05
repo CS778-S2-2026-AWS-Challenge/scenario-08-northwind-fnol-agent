@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { workbenchApi } from '../api.js'
 import WorkbenchPage from './WorkbenchPage.jsx'
@@ -19,10 +19,29 @@ const claims = [
   queueClaim('clm_high', 'NW-1003', 'professional_review', 'high'),
 ]
 
+const filterMetadata = {
+  views: [
+    { value: 'all', label: 'All active work' },
+    { value: 'urgent', label: 'Urgent' },
+  ],
+  workflow_states: [
+    { value: 'ready_for_next', label: 'Ready for next' },
+    { value: 'professional_review', label: 'Professional review' },
+  ],
+  priorities: [
+    { value: 'standard', label: 'Standard' },
+    { value: 'high', label: 'High' },
+    { value: 'urgent', label: 'Urgent' },
+  ],
+  tags: [{ value: 'impact.vehicle_not_drivable', label: 'Vehicle not drivable', category: 'impact' }],
+  tag_registry_version: '0.2',
+}
+
 describe('WorkbenchPage queue filters', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.restoreAllMocks()
+    vi.spyOn(workbenchApi, 'claimFilterMetadata').mockResolvedValue(filterMetadata)
     vi.spyOn(workbenchApi, 'claims').mockImplementation(async (_token, filters) => ({
       items: claims.filter((claim) => (
         (!filters.workflow_state || claim.workflow_state === filters.workflow_state)
@@ -43,6 +62,7 @@ describe('WorkbenchPage queue filters', () => {
     )
 
     expect(await screen.findByText('NW-1001')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     await user.selectOptions(screen.getByLabelText('Claim status'), 'professional_review')
     await waitFor(() => expect(screen.queryByText('NW-1001')).not.toBeInTheDocument())
     expect(screen.getByText('NW-1002')).toBeInTheDocument()
@@ -82,6 +102,7 @@ describe('WorkbenchPage queue filters', () => {
     )
 
     expect(await screen.findByText('NW-1001')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     await user.selectOptions(screen.getByLabelText('Claim status'), 'professional_review')
     await waitFor(() => expect(resolveStatusRequest).toBeTypeOf('function'))
     await user.selectOptions(screen.getByLabelText('Claim priority'), 'urgent')
@@ -94,7 +115,74 @@ describe('WorkbenchPage queue filters', () => {
 
     expect(screen.queryByText('NW-1003')).not.toBeInTheDocument()
   })
+
+  it('restores normalized queue filters from the route and discards a stale cursor', async () => {
+    render(
+      <MemoryRouter initialEntries={['/workbench?view=urgent&workflow_state=professional_review&priority=urgent&tag=impact.vehicle_not_drivable&search=NW-1002&cursor=stale']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(workbenchApi.claims).toHaveBeenCalledWith('staff-token', {
+      view: 'urgent',
+      workflow_state: 'professional_review',
+      priority: 'urgent',
+      tag: 'impact.vehicle_not_drivable',
+      search: 'NW-1002',
+      limit: 25,
+    }))
+    expect(screen.getByTestId('location-search')).toHaveTextContent('view=urgent')
+    await waitFor(() => expect(screen.getByTestId('location-search')).not.toHaveTextContent('cursor='))
+    expect(screen.getByLabelText('Search claims')).toHaveValue('NW-1002')
+  })
+
+  it('removes unknown route filters using backend metadata', async () => {
+    render(
+      <MemoryRouter initialEntries={['/workbench?view=obsolete&priority=extreme&search=%20%20']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('location-search')).toBeEmptyDOMElement())
+    await waitFor(() => expect(workbenchApi.claims).toHaveBeenCalledWith('staff-token', {
+      limit: 25,
+    }))
+  })
+
+  it('recovers an invalid backend cursor from the first ranked page', async () => {
+    workbenchApi.claims.mockImplementation(async (_token, filters) => {
+      if (filters.cursor) {
+        const error = new Error('The pagination cursor is invalid.')
+        error.code = 'VALIDATION_ERROR'
+        throw error
+      }
+      return { items: claims, page: { next_cursor: 'stale-cursor' } }
+    })
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench']}>
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Load more Claims' }))
+    expect(await screen.findByText(/invalid or stale/)).toBeInTheDocument()
+    expect(workbenchApi.claims).toHaveBeenLastCalledWith('staff-token', { limit: 25 })
+  })
 })
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location-search">{location.search}</output>
+}
 
 function queueClaim(claimId, displayReference, workflowState, priority) {
   return {

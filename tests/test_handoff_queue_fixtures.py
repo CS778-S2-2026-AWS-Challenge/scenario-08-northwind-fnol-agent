@@ -186,3 +186,55 @@ def test_staff_queue_filters_by_status_priority_and_combined_state() -> None:
     assert [item['claim_id'] for item in combined.json()['items']] == [claim_ids['AT-04-urgent']]
     assert no_match.status_code == 200
     assert no_match.json()['items'] == []
+
+
+def test_staff_queue_searches_all_projected_claims_before_pagination() -> None:
+    repository = FixtureRepository()
+    claim_ids: dict[str, str] = {}
+    for scenario_id in ('AT-01-clear-motor', 'AT-02-coverage-ambiguity', 'AT-04-urgent'):
+        loaded = load_scenario(SCENARIO_DIRECTORY / f'{scenario_id}.json')
+        seed_scenario(repository, loaded)
+        claim_ids[scenario_id] = loaded.claim.claim_id
+
+    headers = {'Authorization': 'Bearer synthetic-staff'}
+    with _staff_client(repository) as client:
+        first_page = client.get(
+            '/api/v1/workbench/claims',
+            params={'limit': 1},
+            headers=headers,
+        ).json()
+        later_claim_id = next(
+            claim_id
+            for claim_id in claim_ids.values()
+            if claim_id != first_page['items'][0]['claim_id']
+        )
+        result = client.get(
+            '/api/v1/workbench/claims',
+            params={'search': later_claim_id.upper(), 'limit': 1},
+            headers=headers,
+        )
+        combined = client.get(
+            '/api/v1/workbench/claims',
+            params={'search': claim_ids['AT-04-urgent'], 'priority': 'urgent', 'limit': 1},
+            headers=headers,
+        )
+
+    assert result.status_code == 200
+    assert [item['claim_id'] for item in result.json()['items']] == [later_claim_id]
+    assert result.json()['page'] == {'next_cursor': None}
+    assert [item['claim_id'] for item in combined.json()['items']] == [claim_ids['AT-04-urgent']]
+
+
+def test_staff_queue_filter_metadata_is_canonical_without_claim_pages() -> None:
+    headers = {'Authorization': 'Bearer synthetic-staff'}
+    with _staff_client(FixtureRepository()) as client:
+        response = client.get('/api/v1/workbench/claims/filter-metadata', headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {'value': 'human_requests', 'label': 'Staff assistance'} in payload['views']
+    assert {'value': 'professional_review', 'label': 'Professional review'} in payload[
+        'workflow_states'
+    ]
+    assert any(option['value'] == 'impact.vehicle_not_drivable' for option in payload['tags'])
+    assert payload['tag_registry_version']

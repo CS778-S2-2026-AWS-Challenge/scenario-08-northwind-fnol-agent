@@ -1454,6 +1454,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
+| `GET` | `/workbench/claims/filter-metadata` | Read canonical staff queue filter options |
 | `GET` | `/workbench/claims/{claim_id}` | Read full authorised claim detail |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
@@ -1534,9 +1535,13 @@ Supported filters:
 | `assignee_id` | Opaque staff ID or `unassigned` |
 | `next_action` | `AgentAction` |
 | `tag` | One published staff tag code from the backend Staff Tag Registry |
+| `search` | Case-insensitive text, up to 200 characters |
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
 
 Filters can be combined and are applied before queue ordering and cursor pagination.
+`search` matches only staff-list projection fields: Claim ID, display reference, projected
+claimant display name, incident family and summary, current requested outcome, and projected tag
+codes and labels. It does not inspect unprojected Claim fields or change the backend rank order.
 
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
@@ -1593,6 +1598,14 @@ an explicit contract extension.
 contains claims with an open claimant-support handoff whose support need is `human_requested`.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
+
+### `GET /api/v1/workbench/claims/filter-metadata`
+
+Returns the backend-owned queue filter contract for authenticated staff. The response contains
+`views`, `workflow_states`, `priorities`, and all published, filterable `tags`, plus
+`tag_registry_version`. Every option contains `value` and `label`; tag options also contain
+`category`. The Workbench uses these values to validate route state and render controls instead of
+maintaining a second enum or deriving options from loaded Claim pages.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 

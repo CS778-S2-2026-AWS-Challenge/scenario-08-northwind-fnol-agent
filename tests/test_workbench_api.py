@@ -345,6 +345,9 @@ def test_workbench_claim_list_rejects_claimant_credentials(
     response = client.get('/api/v1/workbench/claims', headers=auth_headers)
 
     assert response.status_code == 403
+
+    metadata = client.get('/api/v1/workbench/claims/filter-metadata', headers=auth_headers)
+    assert metadata.status_code == 403
     assert response.json()['error']['code'] == 'ACCESS_DENIED'
 
 
