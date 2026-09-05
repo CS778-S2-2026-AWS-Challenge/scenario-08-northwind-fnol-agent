@@ -275,10 +275,10 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
         },
         json={
             'result': {
-                'outcome': 'policy_review_completed',
+                'outcome': 'professional_review_completed',
                 'summary': 'The cited collision wording permits the report to continue.',
-                'reason_codes': ['POLICY_WORDING_REVIEWED'],
-                'source_refs': handoff['packet']['policy_citation_refs'],
+                'reason_codes': ['POLICY_SECTION_CONFIRMED'],
+                'source_refs': handoff['packet']['source_refs'],
             },
             'state_changes': [
                 {'path': 'claim_state.coverage', 'to': resolution['coverage']},

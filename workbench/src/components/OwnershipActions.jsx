@@ -1,40 +1,13 @@
-import { ArrowRightLeft, RotateCcw, UserRoundPlus, UsersRound } from 'lucide-react'
+import { UsersRound } from 'lucide-react'
 import { useState } from 'react'
+import { isProjectedInputRequired } from '../projected-action.js'
+import { ProjectedActionInput } from './ProjectedAction.jsx'
 
-const REQUEST_ACTIONS = {
-  'ownership.request_cowork': {
-    icon: UsersRound,
-    submitLabel: 'Send request',
-    reasonLabel: 'Why do you need access?',
-  },
-  'ownership.invite_cowork': {
-    icon: UserRoundPlus,
-    submitLabel: 'Send invitation',
-    reasonLabel: 'Why is this collaboration needed?',
-    staffLabel: 'Staff ID to invite',
-  },
-  'ownership.request_transfer': {
-    icon: ArrowRightLeft,
-    submitLabel: 'Request transfer',
-    reasonLabel: 'Why should ownership transfer?',
-    staffLabel: 'Target staff ID',
-  },
-  'ownership.requeue': {
-    icon: RotateCcw,
-    submitLabel: 'Return to queue',
-    reasonLabel: 'Why are you releasing this Claim?',
-  },
-}
-
-export default function OwnershipActions({
-  actions = [],
-  requests = [],
-  onCoworkRequest,
-  onTransferRequest,
-  onRequeue,
-  onDecision,
-}) {
-  const ownershipActions = actions.filter((action) => action.action_code.startsWith('ownership.'))
+export default function OwnershipActions({ actions = [], requests = [], onAction, excludeAction }) {
+  const ownershipActions = actions.filter((action) => (
+    action.action_code.startsWith('ownership.')
+    && `${action.action_code}:${action.target_ref}` !== excludeAction
+  ))
   if (!ownershipActions.length) return null
 
   return (
@@ -47,48 +20,59 @@ export default function OwnershipActions({
       </div>
       <div className="ownership-action-list">
         {ownershipActions.map((action) => (
-          action.action_code.startsWith('ownership.decide_')
-            ? <DecisionAction key={action.action_code + action.target_ref} action={action} request={requests.find((item) => item.request_id === action.target_ref)} onDecision={onDecision} />
-            : <RequestAction key={action.action_code} action={action} onCoworkRequest={onCoworkRequest} onTransferRequest={onTransferRequest} onRequeue={onRequeue} />
+          <ProjectedOwnershipAction
+            key={`${action.action_code}:${action.target_ref}`}
+            action={action}
+            request={requests.find((item) => item.request_id === action.target_ref)}
+            onAction={onAction}
+          />
         ))}
       </div>
     </section>
   )
 }
 
-function RequestAction({ action, onCoworkRequest, onTransferRequest, onRequeue }) {
-  const config = REQUEST_ACTIONS[action.action_code]
+export function ProjectedOwnershipAction({ action, request, onAction, compact = false }) {
   const [expanded, setExpanded] = useState(false)
-  const [reason, setReason] = useState('')
-  const [staffId, setStaffId] = useState('')
+  const [values, setValues] = useState(() => initialValues(action.inputs))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  if (!config) return null
-  const Icon = config.icon
+  const blocked = action.availability === 'blocked'
+  const formId = `ownership-form-${action.action_code.replaceAll('.', '-')}-${action.target_ref}`
+  const missingRequiredInput = action.inputs.some((input) => (
+    isProjectedInputRequired(input, values) && !String(values[input.field_code] || '').trim()
+  ))
 
   async function submit(event) {
     event.preventDefault()
-    if (!reason.trim() || (config.staffLabel && !staffId.trim())) return
+    if (blocked || missingRequiredInput) return
     setBusy(true)
     setError('')
     try {
-      if (action.action_code === 'ownership.request_cowork') {
-        await onCoworkRequest({ reason: reason.trim() })
-      } else if (action.action_code === 'ownership.invite_cowork') {
-        await onCoworkRequest({ staff_id: staffId.trim(), reason: reason.trim() })
-      } else if (action.action_code === 'ownership.request_transfer') {
-        await onTransferRequest({ target_staff_id: staffId.trim(), reason: reason.trim() })
-      } else {
-        await onRequeue(reason.trim())
-      }
+      const payload = Object.fromEntries(
+        action.inputs.map((input) => [input.field_code, String(values[input.field_code] || '').trim()]),
+      )
+      await onAction(action, payload)
       setExpanded(false)
-      setReason('')
-      setStaffId('')
+      setValues(initialValues(action.inputs))
     } catch (nextError) {
       setError(nextError.message)
     } finally {
       setBusy(false)
     }
+  }
+
+  if (blocked) {
+    return (
+      <article className="ownership-decision" aria-disabled="true">
+        <UsersRound size={18} />
+        <div>
+          <strong>{action.label}</strong>
+          <p>{action.purpose}</p>
+          <small>Unavailable: {action.blocked_reason || 'This action is not available for the current Claim state.'}</small>
+        </div>
+      </article>
+    )
   }
 
   return (
@@ -97,21 +81,35 @@ function RequestAction({ action, onCoworkRequest, onTransferRequest, onRequeue }
         type="button"
         className="ownership-action__toggle"
         aria-expanded={expanded}
-        aria-controls={`ownership-form-${action.action_code}`}
+        aria-controls={formId}
         onClick={() => setExpanded((value) => !value)}
       >
-        <Icon size={18} />
-        <span><strong>{action.label}</strong><small>{action.purpose}</small></span>
+        <UsersRound size={18} />
+        <span>
+          <strong>{compact ? 'Provide action details' : action.label}</strong>
+          {!compact && <small>{action.purpose}</small>}
+        </span>
       </button>
       {expanded && (
-        <form id={`ownership-form-${action.action_code}`} className="ownership-action__form" onSubmit={submit}>
-          {config.staffLabel && <label>{config.staffLabel}<input value={staffId} onChange={(event) => setStaffId(event.target.value)} autoComplete="off" /></label>}
-          <label>{config.reasonLabel}<textarea rows="2" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <form id={formId} className="ownership-action__form" onSubmit={submit}>
+          {request?.reason && <p>Request reason: {request.reason}</p>}
+          {action.inputs.map((input) => (
+            <ProjectedActionInput
+              key={input.field_code}
+              input={input}
+              value={values[input.field_code] || ''}
+              required={isProjectedInputRequired(input, values)}
+              onChange={(event) => setValues((current) => ({
+                ...current,
+                [input.field_code]: event.target.value,
+              }))}
+            />
+          ))}
           {action.confirmation?.message && <p>{action.confirmation.message}</p>}
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="ownership-action__controls">
             <button type="button" className="button button--quiet" onClick={() => setExpanded(false)}>Cancel</button>
-            <button type="submit" className="button button--primary" disabled={busy || !reason.trim() || Boolean(config.staffLabel && !staffId.trim())}>{busy ? 'Working...' : config.submitLabel}</button>
+            <button type="submit" className="button button--primary" disabled={busy || missingRequiredInput}>{busy ? 'Working...' : action.label}</button>
           </div>
         </form>
       )}
@@ -119,34 +117,8 @@ function RequestAction({ action, onCoworkRequest, onTransferRequest, onRequeue }
   )
 }
 
-function DecisionAction({ action, request, onDecision }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  async function decide(decision) {
-    setBusy(true)
-    setError('')
-    try {
-      await onDecision(action.target_ref, decision)
-    } catch (nextError) {
-      setError(nextError.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <article className="ownership-decision">
-      <div>
-        <strong>{action.label}</strong>
-        <p>{action.purpose}</p>
-        {request?.reason && <small>Reason: {request.reason}</small>}
-      </div>
-      <div className="ownership-action__controls">
-        <button type="button" className="button button--quiet" disabled={busy} onClick={() => decide('rejected')}>Decline</button>
-        <button type="button" className="button button--primary" disabled={busy} onClick={() => decide('accepted')}>Accept</button>
-      </div>
-      {error && <p className="form-error" role="alert">{error}</p>}
-    </article>
+function initialValues(inputs) {
+  return Object.fromEntries(
+    inputs.map((input) => [input.field_code, input.choices?.[0]?.value || '']),
   )
 }

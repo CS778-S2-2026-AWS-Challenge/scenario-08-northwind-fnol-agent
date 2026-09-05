@@ -289,7 +289,8 @@ def test_staff_lists_claims_for_workbench_queue(
     assert item['claimant']['customer_id'] == 'cus_demo'
     assert item['work_summary']['queue_key'] == 'professional_review'
     assert item['priority_projection']['level'] == 'standard'
-    assert item['work_summary']['primary_action_code'] == 'CONFIRM'
+    assert item['work_summary']['primary_action_code'] is None
+    assert item['work_summary']['primary_action_target_ref'] is None
     assert item['incident']['family'] == 'motor'
     assert item['work_summary']['missing_information']
     assert 'pending_evidence' not in item
@@ -819,6 +820,45 @@ def test_non_owner_cowork_request_owner_approval_and_coworker_message(
     )
     assert accepted.status_code == 200
 
+    owner_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers
+    ).json()
+    owner_actions = {action['action_code']: action for action in owner_detail['allowed_actions']}
+    assert [item['field_code'] for item in owner_actions['ownership.invite_cowork']['inputs']] == [
+        'staff_id',
+        'reason',
+    ]
+    assert [
+        item['field_code'] for item in owner_actions['ownership.request_transfer']['inputs']
+    ] == ['target_staff_id', 'reason']
+    assert [item['field_code'] for item in owner_actions['ownership.requeue']['inputs']] == [
+        'reason'
+    ]
+
+    coworker_detail = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers
+    ).json()
+    cowork_request_action = next(
+        action
+        for action in coworker_detail['allowed_actions']
+        if action['action_code'] == 'ownership.request_cowork'
+    )
+    assert [item['field_code'] for item in cowork_request_action['inputs']] == ['reason']
+    unprojected_target = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'cowork-unprojected-target',
+            'If-Match': str(accepted.json()['revision']),
+        },
+        json={
+            'staff_id': coworker_id,
+            'reason': 'I can help with the claimant conversation.',
+        },
+    )
+    assert unprojected_target.status_code == 422
+    assert unprojected_target.json()['error']['code'] == 'VALIDATION_ERROR'
+
     requested = client.post(
         f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
         headers={
@@ -989,11 +1029,7 @@ def test_requeue_refuses_while_protected_staff_work_is_active(
             'Idempotency-Key': 'protected-action',
             'If-Match': str(accepted['revision']),
         },
-        json={
-            'action_type': 'claimant_support',
-            'requested_outcome': 'Continue the accepted claimant support request.',
-            'source_refs': [handoff_id],
-        },
+        json={'action_type': 'claimant_support'},
     )
     assert action.status_code == 201
     action_body = action.json()
@@ -1017,8 +1053,12 @@ def test_requeue_refuses_while_protected_staff_work_is_active(
         },
         json={'reason': 'Return this Claim for another professional.'},
     )
-    assert requeue.status_code == 409
-    assert requeue.json()['error']['code'] == 'OWNERSHIP_CONFLICT'
+    assert requeue.status_code == 403
+    assert requeue.json()['error']['code'] == 'ACCESS_DENIED'
+    assert requeue.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'ownership.requeue'},
+        {'field': 'target_ref', 'reason': claim_id},
+    ]
 
 
 def test_owner_can_requeue_claim_and_clear_active_handoff(

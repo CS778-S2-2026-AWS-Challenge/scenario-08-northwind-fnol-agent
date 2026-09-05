@@ -76,10 +76,11 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByText(/confirmed.*claimant.*current action/i)).toBeInTheDocument()
   })
 
-  it('shows only API-projected structured Claim Context on the overview', () => {
+  it('uses section summaries instead of rendering full resource records on the overview', async () => {
+    const user = userEvent.setup()
     render(<ClaimWorkspace
       {...props}
-      detail={{ ...detail, form: { 'internal.hidden': { value: 'must not render' } } }}
+      detail={{ ...detail, form: { 'internal.hidden': { value: 'must not render' } }, section_summaries: { fields: { status: 'available', total: 8, needs_attention: 2 } } }}
       resources={{
         handoffs: { items: [] },
         fields: {
@@ -90,9 +91,33 @@ describe('ClaimWorkspace navigation', () => {
       }}
     />)
 
-    expect(screen.getByRole('heading', { name: 'Claim Context' })).toBeInTheDocument()
-    expect(screen.getByText('Incident Description')).toBeInTheDocument()
-    expect(screen.getByText('Rear-end collision')).toBeInTheDocument()
+    await user.click(screen.getByText('Supporting Claim context'))
+    expect(screen.getByText(/8 records.*2 need attention/i)).toBeVisible()
+    expect(screen.queryByText('Incident Description')).not.toBeInTheDocument()
     expect(screen.queryByText('must not render')).not.toBeInTheDocument()
+  })
+
+  it('renders only the backend-selected primary action and removes the generic action list', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: {
+          ...detail.work_summary,
+          primary_action_code: 'ownership.request_cowork',
+          primary_action_target_ref: 'clm_1',
+        },
+        allowed_actions: [
+          { action_code: 'ownership.request_cowork', target_type: 'claim', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }] },
+          { action_code: 'human.accept_handoff', target_ref: 'hnd_1', label: 'Accept Claim', purpose: 'Assigned to another staff member.', availability: 'blocked', blocked_reason: 'This work is assigned to another staff member.' },
+        ],
+      }}
+      resources={{ handoffs: { items: [] }, fields: { items: [] }, externalRequests: { items: [] } }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Request cowork access' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Available staff actions' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Accept Claim')).not.toBeInTheDocument()
+    expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
   })
 })

@@ -283,10 +283,10 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
         },
         json={
             'result': {
-                'outcome': 'support_contact_started',
+                'outcome': 'support_completed',
                 'summary': 'A staff member reviewed the saved context and accepted the report.',
-                'reason_codes': ['HANDOFF_ACCEPTED'],
-                'source_refs': [handoff['handoff_id']],
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': handoff['packet']['source_refs'],
             },
             'state_changes': [],
             'customer_update': {

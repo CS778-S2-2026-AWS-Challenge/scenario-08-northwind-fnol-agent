@@ -1996,25 +1996,10 @@
               }
             ],
             "title": "Assigned To"
-          },
-          "requested_outcome": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Requested Outcome",
-            "type": "string"
-          },
-          "source_refs": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 100,
-            "title": "Source Refs",
-            "type": "array"
           }
         },
         "required": [
-          "action_type",
-          "requested_outcome"
+          "action_type"
         ],
         "title": "CreateStaffActionRequest",
         "type": "object"
@@ -6486,6 +6471,132 @@
         "title": "WorkbenchActionConfirmation",
         "type": "object"
       },
+      "WorkbenchActionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActionInputChoice"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "control": {
+            "$ref": "#/components/schemas/WorkbenchActionInputControl"
+          },
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "required_when": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActionInputCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "field_code",
+          "label",
+          "control"
+        ],
+        "title": "WorkbenchActionInput",
+        "type": "object"
+      },
+      "WorkbenchActionInputChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "WorkbenchActionInputChoice",
+        "type": "object"
+      },
+      "WorkbenchActionInputCondition": {
+        "additionalProperties": false,
+        "properties": {
+          "equals": {
+            "title": "Equals",
+            "type": "string"
+          },
+          "field_code": {
+            "title": "Field Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_code",
+          "equals"
+        ],
+        "title": "WorkbenchActionInputCondition",
+        "type": "object"
+      },
+      "WorkbenchActionInputControl": {
+        "enum": [
+          "text",
+          "textarea",
+          "select"
+        ],
+        "title": "WorkbenchActionInputControl",
+        "type": "string"
+      },
+      "WorkbenchActionPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "WorkbenchActionPayloadDefaults",
+        "type": "object"
+      },
+      "WorkbenchActionResultDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "WorkbenchActionResultDefaults",
+        "type": "object"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -6553,6 +6664,13 @@
             "title": "Action Code",
             "type": "string"
           },
+          "audit_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Audit Requirements",
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/ActionAvailability"
           },
@@ -6572,6 +6690,13 @@
             ],
             "title": "Blocked Reason"
           },
+          "claimant_visible_effects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claimant Visible Effects",
+            "type": "array"
+          },
           "confirmation": {
             "$ref": "#/components/schemas/WorkbenchActionConfirmation"
           },
@@ -6582,12 +6707,49 @@
             "title": "Expected Effects",
             "type": "array"
           },
+          "failure_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failure Codes",
+            "type": "array"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchActionInput"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
           "label": {
             "title": "Label",
             "type": "string"
           },
+          "payload_defaults": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchCompletionPayloadDefaults"
+              },
+              {
+                "$ref": "#/components/schemas/WorkbenchSignalPayloadDefaults"
+              },
+              {
+                "$ref": "#/components/schemas/WorkbenchActionPayloadDefaults"
+              }
+            ],
+            "title": "Payload Defaults"
+          },
           "purpose": {
             "title": "Purpose",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "result_state": {
+            "default": "not_started",
+            "title": "Result State",
             "type": "string"
           },
           "source_refs": {
@@ -6600,10 +6762,16 @@
           "target_ref": {
             "title": "Target Ref",
             "type": "string"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
           }
         },
         "required": [
+          "registry_version",
           "action_code",
+          "target_type",
           "target_ref",
           "label",
           "purpose",
@@ -6617,6 +6785,17 @@
       "WorkbenchClaimDetail": {
         "additionalProperties": false,
         "properties": {
+          "active_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Session Id"
+          },
           "allowed_actions": {
             "items": {
               "$ref": "#/components/schemas/WorkbenchAllowedAction"
@@ -6842,6 +7021,40 @@
         "title": "WorkbenchClaimantSummary",
         "type": "object"
       },
+      "WorkbenchCompletionPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "customer_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchCustomerUpdateDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchActionResultDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state_changes": {
+            "items": {
+              "$ref": "#/components/schemas/StateChange"
+            },
+            "title": "State Changes",
+            "type": "array"
+          }
+        },
+        "title": "WorkbenchCompletionPayloadDefaults",
+        "type": "object"
+      },
       "WorkbenchConversationKind": {
         "enum": [
           "claim",
@@ -6991,9 +7204,122 @@
         "title": "WorkbenchCurrentWorkItem",
         "type": "object"
       },
+      "WorkbenchCustomerUpdateDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "related_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Refs",
+            "type": "array"
+          },
+          "responsible_party": {
+            "$ref": "#/components/schemas/WorkbenchResponsibility"
+          }
+        },
+        "required": [
+          "responsible_party"
+        ],
+        "title": "WorkbenchCustomerUpdateDefaults",
+        "type": "object"
+      },
+      "WorkbenchExternalLifecycle": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_state": {
+            "title": "Authority State",
+            "type": "string"
+          },
+          "consent_state": {
+            "title": "Consent State",
+            "type": "string"
+          },
+          "delivery_state": {
+            "title": "Delivery State",
+            "type": "string"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "needs_attention": {
+            "default": false,
+            "title": "Needs Attention",
+            "type": "boolean"
+          },
+          "next_action": {
+            "title": "Next Action",
+            "type": "string"
+          },
+          "pending_owner": {
+            "$ref": "#/components/schemas/WorkbenchResponsibility"
+          },
+          "request_type": {
+            "title": "Request Type",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "stakeholder": {
+            "title": "Stakeholder",
+            "type": "string"
+          },
+          "status_detail": {
+            "title": "Status Detail",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "verification_state": {
+            "title": "Verification State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stakeholder",
+          "service",
+          "request_type",
+          "authority_state",
+          "consent_state",
+          "delivery_state",
+          "verification_state",
+          "pending_owner",
+          "status_label",
+          "status_detail",
+          "next_action"
+        ],
+        "title": "WorkbenchExternalLifecycle",
+        "type": "object"
+      },
       "WorkbenchExternalRequest": {
         "additionalProperties": false,
         "properties": {
+          "lifecycle": {
+            "$ref": "#/components/schemas/WorkbenchExternalLifecycle"
+          },
           "request": {
             "anyOf": [
               {
@@ -7009,7 +7335,8 @@
           }
         },
         "required": [
-          "task"
+          "task",
+          "lifecycle"
         ],
         "title": "WorkbenchExternalRequest",
         "type": "object"
@@ -8317,6 +8644,20 @@
         "title": "WorkbenchSignalDetail",
         "type": "object"
       },
+      "WorkbenchSignalPayloadDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          }
+        },
+        "title": "WorkbenchSignalPayloadDefaults",
+        "type": "object"
+      },
       "WorkbenchStaffSummary": {
         "additionalProperties": false,
         "properties": {
@@ -8429,6 +8770,17 @@
               }
             ],
             "title": "Primary Action Code"
+          },
+          "primary_action_target_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Action Target Ref"
           },
           "primary_blocker": {
             "anyOf": [
