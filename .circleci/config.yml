@@ -148,6 +148,14 @@ jobs:
           command: npm test
           working_directory: workbench
       - run:
+          name: Install Workbench browser
+          command: npx playwright install --with-deps chromium
+          working_directory: workbench
+      - run:
+          name: Test Workbench in desktop and mobile viewports
+          command: npm run test:browser
+          working_directory: workbench
+      - run:
           name: Build Workbench
           command: npm run build
           working_directory: workbench

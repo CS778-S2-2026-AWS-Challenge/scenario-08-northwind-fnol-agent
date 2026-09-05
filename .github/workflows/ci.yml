@@ -129,42 +129,6 @@ jobs:
         working-directory: customer
         run: npm run build
 
-  workbench-quality:
-    name: Workbench quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: workbench/package-lock.json
-
-      - name: Install Workbench dependencies
-        working-directory: workbench
-        run: npm ci
-
-      - name: Lint Workbench
-        working-directory: workbench
-        run: npm run lint
-
-      - name: Test Workbench
-        working-directory: workbench
-        run: npm test
-
-      - name: Test Workbench in desktop and mobile viewports
-        working-directory: workbench
-        run: npm run test:browser
-
-      - name: Build Workbench
-        working-directory: workbench
-        run: npm run build
-
   docs-quality:
     name: Docs quality
     if: github.event_name == 'pull_request'
