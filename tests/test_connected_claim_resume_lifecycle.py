@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.domain.models import HandoffStatus, SessionStatus
@@ -28,16 +29,26 @@ def _pause_active_session(repository: FixtureRepository, claim_id: str) -> int:
     return updated.revision
 
 
+@pytest.mark.parametrize(
+    ('product_family', 'description'),
+    [
+        ('motor', 'My parked car was hit from behind.'),
+        ('home', 'A burst pipe damaged the kitchen wall.'),
+        ('contents', 'Water damaged my laptop and furniture.'),
+    ],
+)
 def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
     repository: FixtureRepository,
+    product_family: str,
+    description: str,
 ) -> None:
     created = client.post(
         '/api/v1/claims',
         headers={**auth_headers, 'Idempotency-Key': 'issue-257-claim'},
-        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': product_family},
     )
     assert created.status_code == 201
     claim_id = created.json()['claim']['claim_id']
@@ -53,7 +64,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
         },
         json={
             'client_message_id': 'issue-257-first-message',
-            'content': {'type': 'text', 'text': 'My parked car was hit from behind.'},
+            'content': {'type': 'text', 'text': description},
             'evidence_refs': [],
         },
     )
@@ -214,6 +225,7 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert resumed_turn.json()['claim_revision'] == 9
     assert resumed_turn.json()['decision'] is None
     assert resumed_turn.json()['agent_message'] is None
+    resumed_message_id = resumed_turn.json()['claimant_message']['message_id']
 
     final_claim = repository.get_claim(claim_id, 'cus_demo')
     sessions = repository.list_sessions_for_claim(claim_id, 'cus_demo')
@@ -221,9 +233,46 @@ def test_connected_handoff_reply_continuation_and_resume_share_one_claim(
     assert final_claim is not None
     assert final_handoff is not None
     assert final_claim.revision == 9
+    assert final_claim.incident_type == product_family
     assert final_claim.active_session_id == resumed_session_id
     assert final_handoff.status is HandoffStatus.IN_PROGRESS
     assert final_handoff.assigned_to == 'stf_demo'
     assert repository.claim_count == 1
     assert sum(session.status is SessionStatus.ACTIVE for session in sessions) == 1
     assert all(session.context_revision <= final_claim.revision for session in sessions)
+
+    evaluations = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    applied_evaluations = [item for item in evaluations if item.status.value == 'applied']
+    assert applied_evaluations
+    assert all(item.selected_family == product_family for item in applied_evaluations)
+    assert all(
+        item.resulting_claim_revision == item.evaluated_against_claim_revision
+        for item in applied_evaluations
+    )
+    recomputation_reasons = {item.recomputation_reason for item in applied_evaluations}
+    assert {'agent_turn_applied', 'handoff_created', 'session_resumed'} <= recomputation_reasons
+
+    events_response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/events?limit=100',
+        headers=staff_auth_headers,
+    )
+    assert events_response.status_code == 200
+    events = events_response.json()['items']
+    created_event = next(item for item in events if item['event_type'] == 'claim.created')
+    assert created_event['source_refs'] == [claim_id]
+    assert created_event['resulting_revision'] == 1
+
+    handoff_event = next(item for item in events if item['event_id'] == handoff_id)
+    assert handoff_event['event_type'] == 'handoff.in_progress'
+    assert handoff_event['actor_id'] == 'stf_demo'
+    assert handoff_event['source_refs'] == [handoff_id]
+
+    staff_event = next(item for item in events if item['event_id'] == staff_message_id)
+    assert staff_event['event_type'] == 'message.appended'
+    assert staff_event['actor_id'] == 'staff'
+    assert staff_event['source_refs'] == [staff_message_id, first_session_id]
+
+    resumed_event = next(item for item in events if item['event_id'] == resumed_message_id)
+    assert resumed_event['event_type'] == 'message.appended'
+    assert resumed_event['actor_id'] == 'claimant'
+    assert resumed_event['source_refs'] == [resumed_message_id, resumed_session_id]
