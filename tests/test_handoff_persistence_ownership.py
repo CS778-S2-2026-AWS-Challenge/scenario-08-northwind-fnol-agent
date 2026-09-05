@@ -147,13 +147,13 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
             'result': {
                 'outcome': 'support_completed',
                 'summary': 'The synthetic support request was completed.',
-                'reason_codes': ['SUPPORT_COMPLETED'],
-                'source_refs': [handoff_id],
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': in_progress.packet.source_refs,
             },
             'state_changes': [],
             'customer_update': {
                 'summary': 'A staff member completed the support step and your claim can continue.',
-                'responsible_party': 'claimant',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff_id],
             },
         },
@@ -175,6 +175,88 @@ def test_handoff_owner_status_and_writeback_follow_one_claim_revision(
     assert stored_handoff.status is HandoffStatus.RESOLVED
     assert stored_handoff.assigned_to == 'stf_demo'
     assert stored_handoff.resolved_at is not None
+
+
+def test_handoff_mutations_require_the_exact_current_projected_action(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id = create_claim_and_handoff(
+        client, auth_headers, key_prefix='projected-handoff-action'
+    )
+    queued_claim = repository.get_claim_internal(claim_id)
+    assert queued_claim is not None
+    repository._claims[claim_id] = queued_claim.model_copy(update={'assignee_id': 'stf_other'})
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+    accept_action = next(
+        item
+        for item in detail['allowed_actions']
+        if item['action_code'] == 'human.accept_handoff' and item['target_ref'] == handoff_id
+    )
+    assert accept_action['availability'] == 'blocked'
+
+    blocked_accept = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'projected-handoff-blocked-accept',
+            'If-Match': '2',
+        },
+        json={},
+    )
+    assert blocked_accept.status_code == 403
+    assert blocked_accept.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'human.accept_handoff'},
+        {'field': 'target_ref', 'reason': handoff_id},
+    ]
+
+    repository._claims[claim_id] = queued_claim
+    accepted = accept_handoff(
+        client,
+        staff_auth_headers,
+        claim_id,
+        handoff_id,
+        key='projected-handoff-valid-accept',
+    )
+    accepted_handoff = repository.get_handoff(claim_id, handoff_id, queued_claim.customer_id)
+    accepted_claim = repository.get_claim_internal(claim_id)
+    assert accepted_handoff is not None
+    assert accepted_claim is not None
+    repository.save_handoff(
+        accepted_handoff.model_copy(update={'assigned_to': None}), accepted_claim.customer_id
+    )
+    repository._claims[claim_id] = accepted_claim.model_copy(update={'assignee_id': 'stf_other'})
+
+    blocked_resolve = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'projected-handoff-blocked-resolve',
+            'If-Match': str(accepted['revision']),
+        },
+        json={
+            'result': {
+                'outcome': 'support_completed',
+                'summary': 'This result must not be persisted.',
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': accepted_handoff.packet.source_refs,
+            },
+            'state_changes': [],
+            'customer_update': {
+                'summary': 'This update must not be persisted.',
+                'responsible_party': 'claims_professional',
+                'related_refs': [handoff_id],
+            },
+        },
+    )
+    assert blocked_resolve.status_code == 403
+    assert blocked_resolve.json()['error']['details'] == [
+        {'field': 'action_code', 'reason': 'human.resolve_handoff'},
+        {'field': 'target_ref', 'reason': handoff_id},
+    ]
 
 
 def test_staff_message_requires_handoff_owner_and_same_session_reply_reference(
@@ -622,6 +704,8 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
         handoff_id,
         key='handoff-terminal-rewrite-accept',
     )
+    accepted_handoff = repository.get_handoff(claim_id, handoff_id, 'cus_demo')
+    assert accepted_handoff is not None
     resolved = client.post(
         f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve',
         headers={
@@ -633,13 +717,13 @@ def test_guard_rejects_invalid_payload_and_terminal_rewrite(
             'result': {
                 'outcome': 'support_completed',
                 'summary': 'Resolve the synthetic handoff.',
-                'reason_codes': ['SUPPORT_COMPLETED'],
-                'source_refs': [handoff_id],
+                'reason_codes': ['SUPPORT_NEED_MET'],
+                'source_refs': accepted_handoff.packet.source_refs,
             },
             'state_changes': [],
             'customer_update': {
                 'summary': 'The support step is complete.',
-                'responsible_party': 'claimant',
+                'responsible_party': 'claims_professional',
                 'related_refs': [handoff_id],
             },
         },

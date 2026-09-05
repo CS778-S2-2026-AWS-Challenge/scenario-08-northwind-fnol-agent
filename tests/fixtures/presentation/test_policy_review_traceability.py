@@ -149,7 +149,7 @@ def test_demo_policy_uncertainty_remains_sourced_through_staff_writeback(
             'decision': 'confirmed',
             'reason_codes': ['STAFF_CONFIRMED_INTERPRETATION_REQUIRED'],
             'summary': staff_summary,
-            'evidence_refs': [],
+            'evidence_refs': review_signal.source_refs,
         },
     )
     assert decision.status_code == 201

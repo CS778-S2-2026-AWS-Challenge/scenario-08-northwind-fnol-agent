@@ -17,6 +17,7 @@ from backend.domain.models import (
     MessageRecord,
     PageInfo,
     StaffActionRecord,
+    StateChange,
     StructuredFormField,
     WorkbenchHandoff,
     WorkbenchSession,
@@ -91,6 +92,31 @@ class ConfirmationLevel(StrEnum):
     NONE = 'none'
     EXPLICIT = 'explicit'
     HIGH_IMPACT = 'high_impact'
+
+
+class WorkbenchActionInputControl(StrEnum):
+    TEXT = 'text'
+    TEXTAREA = 'textarea'
+    SELECT = 'select'
+
+
+class WorkbenchActionInputChoice(ContractModel):
+    value: str
+    label: str
+
+
+class WorkbenchActionInputCondition(ContractModel):
+    field_code: str
+    equals: str
+
+
+class WorkbenchActionInput(ContractModel):
+    field_code: str
+    label: str
+    control: WorkbenchActionInputControl
+    required: bool = True
+    required_when: WorkbenchActionInputCondition | None = None
+    choices: list[WorkbenchActionInputChoice] = Field(default_factory=list)
 
 
 class WorkbenchResponsibility(StrEnum):
@@ -207,6 +233,7 @@ class WorkbenchWorkSummary(ContractModel):
     queue_key: str
     current_work_item: WorkbenchCurrentWorkItem | None = None
     primary_action_code: str | None = None
+    primary_action_target_ref: str | None = None
     primary_blocker: str | None = None
     missing_information: list[WorkbenchMissingInformation] = Field(default_factory=list)
     risk_signals: list[WorkbenchRiskSignal] = Field(default_factory=list)
@@ -234,8 +261,35 @@ class WorkbenchActionConfirmation(ContractModel):
     message: str | None = None
 
 
+class WorkbenchActionResultDefaults(ContractModel):
+    outcome: str
+    reason_codes: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class WorkbenchCustomerUpdateDefaults(ContractModel):
+    responsible_party: WorkbenchResponsibility
+    related_refs: list[str] = Field(default_factory=list)
+
+
+class WorkbenchActionPayloadDefaults(ContractModel):
+    pass
+
+
+class WorkbenchCompletionPayloadDefaults(WorkbenchActionPayloadDefaults):
+    result: WorkbenchActionResultDefaults | None = None
+    state_changes: list[StateChange] = Field(default_factory=list)
+    customer_update: WorkbenchCustomerUpdateDefaults | None = None
+
+
+class WorkbenchSignalPayloadDefaults(WorkbenchActionPayloadDefaults):
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class WorkbenchAllowedAction(ContractModel):
+    registry_version: str
     action_code: str
+    target_type: str
     target_ref: str
     label: str
     purpose: str
@@ -243,7 +297,17 @@ class WorkbenchAllowedAction(ContractModel):
     blocked_reason: str | None = None
     confirmation: WorkbenchActionConfirmation
     expected_effects: list[str] = Field(default_factory=list)
+    claimant_visible_effects: list[str] = Field(default_factory=list)
+    failure_codes: list[str] = Field(default_factory=list)
+    audit_requirements: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
+    inputs: list[WorkbenchActionInput] = Field(default_factory=list)
+    payload_defaults: (
+        WorkbenchCompletionPayloadDefaults
+        | WorkbenchSignalPayloadDefaults
+        | WorkbenchActionPayloadDefaults
+    ) = Field(default_factory=WorkbenchActionPayloadDefaults)
+    result_state: str = 'not_started'
     based_on_revision: int = Field(ge=1)
 
 
@@ -288,6 +352,7 @@ class WorkbenchClaimListResponse(ContractModel):
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
+    active_session_id: str | None = None
     claim_state: ClaimState
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
@@ -306,9 +371,27 @@ class WorkbenchSignalDetail(WorkbenchRiskSignal):
     created_at: datetime | None = None
 
 
+class WorkbenchExternalLifecycle(ContractModel):
+    stakeholder: str
+    service: str
+    request_type: str
+    authority_state: str
+    consent_state: str
+    delivery_state: str
+    verification_state: str
+    pending_owner: WorkbenchResponsibility
+    status_label: str
+    status_detail: str
+    result: str | None = None
+    limitation: str | None = None
+    next_action: str
+    needs_attention: bool = False
+
+
 class WorkbenchExternalRequest(ContractModel):
     request: ExternalTaskRequest | None = None
     task: ExternalTaskRecord
+    lifecycle: WorkbenchExternalLifecycle
 
 
 class WorkbenchActivityEvent(ContractModel):

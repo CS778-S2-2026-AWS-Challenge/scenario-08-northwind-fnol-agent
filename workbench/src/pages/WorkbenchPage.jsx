@@ -169,10 +169,7 @@ export default function WorkbenchPage() {
 
   const loadSectionResources = useCallback(async (id, section) => {
     const loaders = {
-      summary: [
-        ['fields', () => workbenchApi.fields(token, id)],
-        ['externalRequests', () => workbenchApi.externalRequests(token, id)],
-      ],
+      summary: [],
       fields: [['fields', () => workbenchApi.fields(token, id)]],
       evidence: [['evidence', () => workbenchApi.evidence(token, id)]],
       references: [['retrievals', () => workbenchApi.retrievals(token, id)]],
@@ -329,29 +326,24 @@ export default function WorkbenchPage() {
     await Promise.all([loadDetail(detail.claim_id), loadClaims()])
   }
 
-  async function requestCowork(payload) {
-    await workbenchApi.requestCowork(token, detail.claim_id, detail.revision, payload)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
-  }
-
-  async function requestTransfer(payload) {
-    await workbenchApi.requestTransfer(token, detail.claim_id, detail.revision, payload)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
-  }
-
-  async function requeueClaim(reason) {
-    await workbenchApi.requeue(token, detail.claim_id, detail.revision, reason)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
-  }
-
-  async function decideCollaboration(requestId, decision) {
-    await workbenchApi.decideCollaboration(
-      token,
-      detail.claim_id,
-      requestId,
-      detail.revision,
-      decision,
-    )
+  async function performOwnershipAction(action, payload) {
+    if (action.action_code === 'ownership.request_cowork' || action.action_code === 'ownership.invite_cowork') {
+      await workbenchApi.requestCowork(token, detail.claim_id, detail.revision, payload)
+    } else if (action.action_code === 'ownership.request_transfer') {
+      await workbenchApi.requestTransfer(token, detail.claim_id, detail.revision, payload)
+    } else if (action.action_code === 'ownership.requeue') {
+      await workbenchApi.requeue(token, detail.claim_id, detail.revision, payload)
+    } else if (action.target_type === 'collaboration_request') {
+      await workbenchApi.decideCollaboration(
+        token,
+        detail.claim_id,
+        action.target_ref,
+        detail.revision,
+        payload,
+      )
+    } else {
+      throw new Error('This ownership action is not connected. Refresh the Claim and try again.')
+    }
     await Promise.all([loadDetail(detail.claim_id), loadClaims()])
   }
 
@@ -383,7 +375,7 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onCoworkRequest={requestCowork} onTransferRequest={requestTransfer} onRequeue={requeueClaim} onCollaborationDecision={decideCollaboration} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} />
               </div>
             </section>
           </div>

@@ -849,6 +849,7 @@ Response `200`:
 {
   "claim_id": "clm_01J4Y7Q2AW",
   "revision": 7,
+  "active_session_id": "ses_01J4Y7RPN8",
   "incident_type": "motor",
   "workflow_state": "ready_for_next",
   "form": {},
@@ -1457,6 +1458,10 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
 | `POST` | `/workbench/claims/{claim_id}/assignments` | Assign or reassign ownership |
+| `POST` | `/workbench/claims/{claim_id}/cowork-requests` | Request or invite cowork access through a projected ownership action |
+| `POST` | `/workbench/claims/{claim_id}/transfer-requests` | Request a primary-owner transfer through a projected ownership action |
+| `PATCH` | `/workbench/claims/{claim_id}/collaboration-requests/{request_id}` | Accept or reject a projected cowork or transfer request |
+| `POST` | `/workbench/claims/{claim_id}/requeue` | Release primary ownership when the projected action is executable |
 | `POST` | `/workbench/claims/{claim_id}/staff-actions` | Create a staff action |
 | `PATCH` | `/workbench/claims/{claim_id}/staff-actions/{action_id}` | Progress or complete a staff action |
 | `POST` | `/workbench/claims/{claim_id}/signals/{signal_id}/decisions` | Decide an internal signal |
@@ -1606,7 +1611,7 @@ large resources are loaded from the dedicated sub-resources below:
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
-  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "missing_information": [], "risk_signals": []},
+  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [], "risk_signals": []},
   "integration_summary": {"external_wait_count": 0},
   "tags": [],
   "claim_state": {},
@@ -1634,7 +1639,42 @@ only when staff opens a section:
 
 Each sub-resource returns its own availability and limitation metadata. A failed optional source
 does not invalidate the core Claim projection. `tags` follows the typed Staff Tag Registry contract;
-`allowed_actions` is a runtime projection and never grants the client authority to invent an action.
+`allowed_actions` is the authoritative runtime action projection. Each entry contains the action
+registry version, exact `action_code`, target type and `target_ref`, availability (`available`,
+`confirmation_required`, or `blocked`), confirmation metadata, expected and claimant-visible
+effects, source references, failure codes, audit requirements, revision, result state, projected
+input definitions, and typed immutable `payload_defaults`. The versioned definitions in
+`backend/domain/workbench_action_registry.py` own these fields, registered choices, permission
+requirements, and fixed completion effects. Projection, mutation validation, and persistence all
+consume that registry. A mutating Workbench control and the corresponding runtime endpoint MUST resolve
+the exact action-code/target pair and MUST NOT infer availability from role, ownership, list order,
+or the presence of another action. `confirmation_required` is not equivalent to `available`: the
+client must complete the projected confirmation step, and submitting the dedicated mutation is the
+explicit confirmation recorded by the current endpoints. The runtime returns `403 ACCESS_DENIED`
+with structured `action_code` and `target_ref` details when the exact action is absent or blocked;
+it returns `409 REVISION_CONFLICT` before action resolution when the projection revision is stale.
+The client may collect only the projected inputs and must submit the projected fixed fields unchanged.
+An input with `required: true` is always required. An input with `required: false` and a
+`required_when` object becomes required when the named projected field equals the registered value;
+for example, `result.summary` and any projected `customer_update.summary` are required when
+`status` is `completed`, but remain optional for `in_progress` and `cancelled` WorkItem
+transitions. Ownership actions project their complete mutation inputs: cowork access requests and
+requeue require `reason`; cowork invitations require `staff_id` and `reason`; transfer requests
+require `target_staff_id` and `reason`; and cowork or transfer decisions require a registered
+`decision` choice. Ownership mutation routes reject fields that are not present in the exact
+projected action input set.
+`work_summary.primary_action_code`
+and `primary_action_target_ref` identify the backend-selected primary action; either may be null
+when no primary action is currently authorised.
+
+### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
+
+Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
+contains stakeholder and service labels, request type, authority, consent, delivery and verification
+states, pending owner, status label/detail, result, limitation, next action, and attention flag. The
+Workbench renders those fields and MUST NOT reconstruct lifecycle status or next steps from raw task
+status strings. Raw task/request objects remain available for identity, timing, failure, and source
+traceability.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -1659,13 +1699,19 @@ Request:
 ```json
 {
   "action_type": "coverage_review",
-  "assigned_to": "stf_01J4Y9ADW2",
-  "requested_outcome": "Decide whether the cited wording applies.",
-  "source_refs": ["pol_01J4Y93M22", "hnd_01J4Y7XG2C"]
+  "assigned_to": "stf_01J4Y9ADW2"
 }
 ```
 
 Response `201` returns the staff action and new claim revision.
+
+This route is a legacy compatibility surface and is not rendered as a generic Workbench form. It
+requires the exact current `work_item.create` action targeted at the Claim. `action_type` must be
+one of the registry choices: `claimant_support`, `coverage_review`, `handoff_support`, or
+`professional_review`. The registry supplies the immutable `requested_outcome`; the current Claim
+projection supplies source references. Operator-supplied `requested_outcome` and `source_refs` are
+rejected by the request schema. `assigned_to`, when supplied, remains limited to the primary owner
+or an active coworker by the registered permission rule.
 
 ### `PATCH /api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}`
 
@@ -1688,12 +1734,17 @@ Request to complete:
   ],
   "customer_update": {
     "summary": "The policy review is complete and your report can continue.",
-    "responsible_party": "northwind"
+    "responsible_party": "claims_professional",
+    "related_refs": ["act_01J4YB8D20"]
   }
 }
 ```
 
-The server validates actor authority and state transitions. Response `200` returns the action, resulting claim revision, and customer update when created.
+The server requires the authenticated primary assignee and an exact `work_item.update` action for
+this `action_id`. For completion, outcome, reason codes, source refs, state changes, responsible
+party, and related refs must equal the registered fields projected in `payload_defaults`; only
+projected input fields such as summaries and status may be supplied by the operator. Response `200`
+returns the action, resulting claim revision, and customer update when created.
 
 ### `POST /api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions`
 
@@ -1709,10 +1760,16 @@ Request:
 ```
 
 `decision` is `confirmed`, `dismissed`, `overridden`, or `resolved`. Confirmation preserves the signal for authorised follow-up; it does not declare fraud or automatically reject or block claim creation.
+The route requires primary ownership plus an exact `signal.record_decision` action targeted at the
+signal. Decision and reason values must come from that action's projected choices, and evidence
+references must match its fixed payload defaults.
 
 ### Handoff Accept and Resolve
 
-`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` accepts the queued handoff for the authenticated staff member or an authorised `assignee_id`.
+`POST /api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept` requires the exact current
+`human.accept_handoff` action and accepts the queued handoff for the authenticated staff member or
+an authorised `assignee_id`. The action is blocked when the effective Claim owner, taken from the
+active handoff owner or Claim assignee, is another staff member.
 
 After a handoff is accepted, both parties may continue using the persisted session message
 history. A claimant message during an open handoff is routed to staff without an automatic Agent
@@ -1730,17 +1787,23 @@ Resolve request:
   "result": {
     "outcome": "support_completed",
     "summary": "The claimant's question was answered and the report can continue.",
-    "reason_codes": ["SUPPORT_NEED_MET"]
+    "reason_codes": ["SUPPORT_NEED_MET"],
+    "source_refs": ["msg_01J4Y7T1KC"]
   },
   "state_changes": [],
   "customer_update": {
     "summary": "Your report is ready to continue online.",
-    "responsible_party": "claimant"
+    "responsible_party": "claims_professional",
+    "related_refs": ["hnd_01J4Y7XG2C"]
   }
 }
 ```
 
-Resolving a handoff MUST record the staff result, state changes, claimant update, actor, timestamps, and resulting claim revision.
+Resolve requires an exact `human.resolve_handoff` action targeted at the accepted handoff. Result
+outcome, reason codes, source refs, state changes, responsible party, and related refs are registered
+server projections; the operator supplies only the projected summaries. Resolving a handoff MUST
+record the staff result, state changes, claimant update, actor, timestamps, and resulting claim
+revision.
 
 ### `POST /api/v1/workbench/demo/seed-scenarios`
 

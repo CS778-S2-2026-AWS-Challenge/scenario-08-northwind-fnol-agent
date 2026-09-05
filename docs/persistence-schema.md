@@ -191,6 +191,10 @@ failure, access, or configuration event is already wired.
 - An idempotency record identifies an accepted operation and request fingerprint. An
   identical replay returns the current authorised projection; changed input under the
   same key is a conflict.
+- A Workbench mutation idempotency record also retains the Action Registry version, exact
+  `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
+  runtime authorization decision with the existing atomic Claim mutation; they do not create a
+  second action-state record or concurrency token.
 - External-service consent records are claim-scoped and retain service identity, requested
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
@@ -351,6 +355,9 @@ failure, access, or configuration event is already wired.
   competing ownership.
 - Staff write-back records actor, reason, outcome, evidence references, and a separate
   claimant-safe update.
+- Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
+  exact current projected action. Its idempotency record stores the registry version, action code,
+  and target alongside the resulting response.
 
 ## Agent Turn and Action Invariants
 

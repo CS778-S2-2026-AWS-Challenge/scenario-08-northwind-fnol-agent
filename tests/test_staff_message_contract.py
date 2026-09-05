@@ -88,8 +88,12 @@ def test_staff_message_fails_closed_without_authoritative_active_session(
         json={'content': {'type': 'text', 'text': 'I can help with your report.'}},
     )
 
-    assert response.status_code == 422
-    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.status_code == 403
+    assert response.json()['error']['code'] == 'ACCESS_DENIED'
+    assert response.json()['error']['details'][0] == {
+        'field': 'action_code',
+        'reason': 'conversation.send_claimant_message',
+    }
     after = repository.get_claim_internal(claim_id)
     assert after is not None
     assert after.revision == revision
