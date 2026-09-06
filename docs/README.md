@@ -25,6 +25,7 @@ The current time-bound direction and weekly execution records are maintained und
 - [Sprint 3 Validation Prototype Overview](../sprint/sprint3.md)
 - [Sprint 3 Week 5 Plan](../sprint/week5/sprint3-week5-plan.md)
 - [Sprint 3 Week 5 Kanban Draft](../sprint/week5/sprint3-week5-kanban-draft.md)
+- [Sprint 3 Week 6 Kanban Draft](../sprint/week6/sprint3-week6-kanban-draft.md)
 - [Sprint 2 Week 3 Parallel Plan](../sprint/week3/sprint2-week1-parallel-plan.md)
 - [Sprint 2 Week 4 Integration Plan](../sprint/week4/sprint2-week2-integration-plan.md)
 
