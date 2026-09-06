@@ -1531,7 +1531,7 @@ Supported filters:
 | `cursor` | Opaque cursor returned by the preceding page |
 | `view` | `urgent`, `human_requests`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
-| `priority` | `standard`, `high`, `urgent`, `immediate` |
+| `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
 | `next_action` | `AgentAction` |
 | `tag` | One published staff tag code from the backend Staff Tag Registry |
@@ -1606,6 +1606,8 @@ Returns the backend-owned queue filter contract for authenticated staff. The res
 `tag_registry_version`. Every option contains `value` and `label`; tag options also contain
 `category`. The Workbench uses these values to validate route state and render controls instead of
 maintaining a second enum or deriving options from loaded Claim pages.
+`priorities` contains every `WorkPriorityLevel` that the queue can project, including `routine`
+for Claims whose workflow state is still `collecting`.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 

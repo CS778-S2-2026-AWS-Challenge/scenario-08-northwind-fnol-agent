@@ -351,6 +351,29 @@ def test_workbench_claim_list_rejects_claimant_credentials(
     assert response.json()['error']['code'] == 'ACCESS_DENIED'
 
 
+def test_workbench_filter_metadata_and_query_include_routine_priority(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'routine-priority-filter'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+
+    metadata = client.get('/api/v1/workbench/claims/filter-metadata', headers=staff_auth_headers)
+    filtered = client.get('/api/v1/workbench/claims?priority=routine', headers=staff_auth_headers)
+
+    assert metadata.status_code == 200
+    assert {'value': 'routine', 'label': 'Routine'} in metadata.json()['priorities']
+    assert filtered.status_code == 200
+    assert [item['claim_id'] for item in filtered.json()['items']] == [claim_id]
+    assert filtered.json()['items'][0]['priority_projection']['level'] == 'routine'
+
+
 def test_created_claim_route_does_not_override_workbench_queue(
     client: TestClient,
     auth_headers: dict[str, str],

@@ -12066,13 +12066,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "enum": [
-                    "standard",
-                    "high",
-                    "urgent",
-                    "immediate"
-                  ],
-                  "type": "string"
+                  "$ref": "#/components/schemas/WorkPriorityLevel"
                 },
                 {
                   "type": "null"

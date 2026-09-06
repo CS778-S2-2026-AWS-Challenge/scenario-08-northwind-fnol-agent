@@ -139,13 +139,6 @@ _QUEUE_VIEW_LABELS = {
     WorkbenchQueueView.CREATED_ROUTED: 'Created and routed',
 }
 
-_FILTERABLE_PRIORITIES = (
-    WorkPriorityLevel.STANDARD,
-    WorkPriorityLevel.HIGH,
-    WorkPriorityLevel.URGENT,
-    WorkPriorityLevel.IMMEDIATE,
-)
-
 
 def _staff_access_required() -> ApiError:
     return ApiError(
@@ -994,7 +987,7 @@ def get_workbench_claim_filter_metadata(
         ],
         priorities=[
             WorkbenchFilterOption(value=value.value, label=value.value.capitalize())
-            for value in _FILTERABLE_PRIORITIES
+            for value in WorkPriorityLevel
         ],
         tags=[
             WorkbenchTagFilterOption(

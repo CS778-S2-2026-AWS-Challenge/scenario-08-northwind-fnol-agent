@@ -1,6 +1,6 @@
 import base64
 import re
-from typing import Literal, cast
+from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
@@ -141,7 +141,7 @@ def read_workbench_claims(
     principal: Principal = Depends(require_staff),
     view: WorkbenchQueueView | None = Query(default=None),
     workflow_state: WorkflowState | None = Query(default=None),
-    priority: Literal['standard', 'high', 'urgent', 'immediate'] | None = Query(default=None),
+    priority: WorkPriorityLevel | None = Query(default=None),
     tag: str | None = Query(default=None),
     search: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=25, ge=1, le=100),
@@ -152,7 +152,7 @@ def read_workbench_claims(
         principal,
         view=view,
         workflow_state=workflow_state,
-        priority=WorkPriorityLevel(priority) if priority is not None else None,
+        priority=priority,
         tag=tag,
         search=search,
         limit=limit,

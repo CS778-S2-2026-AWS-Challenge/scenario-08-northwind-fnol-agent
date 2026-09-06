@@ -22,8 +22,11 @@ export default function WorkbenchPage() {
   const openTab = tabs.open
   const [claims, setClaims] = useState([])
   const [filterMetadata, setFilterMetadata] = useState(null)
+  const [filterMetadataLoading, setFilterMetadataLoading] = useState(true)
+  const [filterMetadataError, setFilterMetadataError] = useState('')
+  const [filterMetadataAttempt, setFilterMetadataAttempt] = useState(0)
   const [nextCursor, setNextCursor] = useState(null)
-  const [queueLoading, setQueueLoading] = useState(true)
+  const [queueLoading, setQueueLoading] = useState(false)
   const [queueError, setQueueError] = useState('')
   const queueRequestId = useRef(0)
   const [conversations, setConversations] = useState([])
@@ -222,19 +225,23 @@ export default function WorkbenchPage() {
 
   useEffect(() => {
     let active = true
+    ++queueRequestId.current
+    setFilterMetadata(null)
+    setFilterMetadataLoading(true)
+    setFilterMetadataError('')
+    setQueueLoading(false)
     workbenchApi.claimFilterMetadata(token).then(
       (response) => {
         if (active) setFilterMetadata(response)
       },
       (error) => {
-        if (active) {
-          setQueueError(error.message)
-          setQueueLoading(false)
-        }
+        if (active) setFilterMetadataError(error.message)
       },
-    )
+    ).finally(() => {
+      if (active) setFilterMetadataLoading(false)
+    })
     return () => { active = false }
-  }, [token])
+  }, [filterMetadataAttempt, token])
   useEffect(() => {
     if (!filterMetadata) return
     const normalized = normalizeQueueSearchParams(searchParams, filterMetadata)
@@ -420,7 +427,7 @@ export default function WorkbenchPage() {
           <div><strong>Claims Workbench</strong><span>Source-linked operational view</span></div>
           <div className="topbar-actions">
             {!isConversations && <button className="icon-button" type="button" onClick={() => setQueueVisible((value) => !value)} aria-label={queueVisible ? 'Hide Claim queue' : 'Show Claim queue'}>{queueVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>}
-            <button className="icon-button" type="button" onClick={loadClaims} aria-label="Refresh Workbench projection"><RefreshCw size={17} /></button>
+            <button className="icon-button" type="button" onClick={filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label="Refresh Workbench projection"><RefreshCw size={17} /></button>
           </div>
         </header>
         {queueError && <div className="global-error" role="alert">{queueError}</div>}
@@ -435,7 +442,9 @@ export default function WorkbenchPage() {
           <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onOpenConversation={openConversation} />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
-            {queueVisible && filterMetadata && <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />}
+            {queueVisible && (filterMetadata
+              ? <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+              : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
@@ -456,6 +465,29 @@ export default function WorkbenchPage() {
         }}
       />
     </div>
+  )
+}
+
+function QueueMetadataState({ loading, error, onRetry }) {
+  return (
+    <aside className="queue-panel" aria-label="Claim queue">
+      <header className="queue-panel__header">
+        <div>
+          <p className="eyebrow">My work</p>
+          <h2>Claim queue</h2>
+        </div>
+      </header>
+      <div className="queue-list" aria-live="polite" aria-busy={loading}>
+        {loading && <p className="queue-state" role="status">Loading queue filters...</p>}
+        {!loading && error && (
+          <div className="queue-state" role="alert">
+            <strong>Claim queue unavailable</strong>
+            <p>{error}</p>
+            <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
+          </div>
+        )}
+      </div>
+    </aside>
   )
 }
 

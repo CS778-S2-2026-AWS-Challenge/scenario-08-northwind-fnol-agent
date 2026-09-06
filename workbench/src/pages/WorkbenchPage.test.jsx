@@ -29,6 +29,7 @@ const filterMetadata = {
     { value: 'professional_review', label: 'Professional review' },
   ],
   priorities: [
+    { value: 'routine', label: 'Routine' },
     { value: 'standard', label: 'Standard' },
     { value: 'high', label: 'High' },
     { value: 'urgent', label: 'Urgent' },
@@ -177,6 +178,37 @@ describe('WorkbenchPage queue filters', () => {
     expect(await screen.findByText(/invalid or stale/)).toBeInTheDocument()
     expect(workbenchApi.claims).toHaveBeenLastCalledWith('staff-token', { limit: 25 })
   })
+
+  it('keeps an open Claim workspace usable when filter metadata fails and retries the queue', async () => {
+    const user = userEvent.setup()
+    workbenchApi.claimFilterMetadata
+      .mockRejectedValueOnce(new Error('Queue filter metadata could not be loaded.'))
+      .mockResolvedValueOnce(filterMetadata)
+    vi.spyOn(workbenchApi, 'claim').mockResolvedValue(claimDetail())
+    vi.spyOn(workbenchApi, 'handoffs').mockResolvedValue({ items: [], page: { next_cursor: null } })
+    vi.spyOn(workbenchApi, 'collaborationRequests').mockResolvedValue({ items: [], page: { next_cursor: null } })
+
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_ready']}>
+        <Routes>
+          <Route path="/workbench/claims/:claimId/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const queueAlert = await screen.findByRole('alert')
+    expect(queueAlert).toHaveTextContent('Claim queue unavailable')
+    expect(queueAlert).toHaveTextContent('Queue filter metadata could not be loaded.')
+    expect(screen.getByRole('heading', { name: 'Claim queue' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Synthetic claimant' })).toBeInTheDocument()
+    expect(workbenchApi.claims).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(workbenchApi.claimFilterMetadata).toHaveBeenCalledTimes(2))
+    expect(await screen.findAllByText('NW-1001')).not.toHaveLength(0)
+    expect(screen.getByRole('heading', { name: 'Synthetic claimant' })).toBeInTheDocument()
+  })
 })
 
 function LocationProbe() {
@@ -197,5 +229,25 @@ function queueClaim(claimId, displayReference, workflowState, priority) {
     work_summary: { queue_key: workflowState, current_work_item: null },
     updated_at: '2026-09-03T01:00:00Z',
     tags: [],
+  }
+}
+
+function claimDetail() {
+  return {
+    ...queueClaim('clm_ready', 'NW-1001', 'ready_for_next', 'standard'),
+    revision: 1,
+    claimant: { customer_id: 'cus_clm_ready', display_name: 'Synthetic claimant' },
+    ownership: { state: 'unassigned', current_staff_access: 'read_only', coworkers: [] },
+    work_summary: {
+      queue_key: 'ready_for_next',
+      current_work_item: null,
+      primary_action_code: null,
+      primary_action_target_ref: null,
+      missing_information: [],
+      risk_signals: [],
+    },
+    section_summaries: {},
+    customer_next_step: { summary: 'Continue reviewing this Claim.' },
+    allowed_actions: [],
   }
 }
