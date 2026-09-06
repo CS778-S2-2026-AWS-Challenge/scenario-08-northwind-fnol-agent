@@ -1775,6 +1775,28 @@
         "title": "ConfigurationRecord",
         "type": "object"
       },
+      "ConfigurationReference": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "revision"
+        ],
+        "title": "ConfigurationReference",
+        "type": "object"
+      },
       "ConfigurationState": {
         "enum": [
           "draft",
@@ -4914,6 +4936,211 @@
         "title": "RegistrationRequest",
         "type": "object"
       },
+      "ReleaseSetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "minProperties": 1,
+            "title": "Configuration Refs",
+            "type": "object"
+          },
+          "environment": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "runtime_profile": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Runtime Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment",
+          "runtime_profile",
+          "configuration_refs",
+          "reason"
+        ],
+        "title": "ReleaseSetCreate",
+        "type": "object"
+      },
+      "ReleaseSetRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "configuration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Configuration Refs",
+            "type": "object"
+          },
+          "effective_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Time"
+          },
+          "environment": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "previous_release_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Release Set Id"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "release_set_id": {
+            "title": "Release Set Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          },
+          "runtime_profile": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Runtime Profile",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReleaseSetState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          }
+        },
+        "required": [
+          "release_set_id",
+          "environment",
+          "runtime_profile",
+          "revision",
+          "state",
+          "configuration_refs",
+          "author",
+          "reason",
+          "updated_at"
+        ],
+        "title": "ReleaseSetRecord",
+        "type": "object"
+      },
+      "ReleaseSetState": {
+        "enum": [
+          "draft",
+          "validation",
+          "published",
+          "superseded",
+          "withdrawn"
+        ],
+        "title": "ReleaseSetState",
+        "type": "string"
+      },
+      "ReleaseSetTransitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReleaseSetTransitionRequest",
+        "type": "object"
+      },
+      "ReleaseSetValidationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scenario_results": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationScenarioResult"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Scenario Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenario_results"
+        ],
+        "title": "ReleaseSetValidationRequest",
+        "type": "object"
+      },
       "RequestEvidenceUploadRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5210,6 +5437,44 @@
           "models"
         ],
         "title": "RuntimeCapabilitiesResponse",
+        "type": "object"
+      },
+      "RuntimeSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "configurations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationRecord"
+            },
+            "title": "Configurations",
+            "type": "object"
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "loaded_at": {
+            "format": "date-time",
+            "title": "Loaded At",
+            "type": "string"
+          },
+          "release_set_id": {
+            "title": "Release Set Id",
+            "type": "string"
+          },
+          "runtime_profile": {
+            "title": "Runtime Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_set_id",
+          "environment",
+          "runtime_profile",
+          "loaded_at",
+          "configurations"
+        ],
+        "title": "RuntimeSnapshot",
         "type": "object"
       },
       "SessionStatus": {
@@ -15295,6 +15560,647 @@
           }
         },
         "summary": "Withdraw Configuration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets": {
+      "get": {
+        "operationId": "list_release_sets_internal_v1_admin_release_sets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "environment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runtime_profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runtime Profile"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response List Release Sets Internal V1 Admin Release Sets Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Release Sets",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_release_set_internal_v1_admin_release_sets_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}": {
+      "get": {
+        "operationId": "get_release_set_internal_v1_admin_release_sets__release_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/audit": {
+      "get": {
+        "operationId": "audit_release_set_internal_v1_admin_release_sets__release_set_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Audit Release Set Internal V1 Admin Release Sets  Release Set Id  Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/publish": {
+      "post": {
+        "operationId": "publish_release_set_internal_v1_admin_release_sets__release_set_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetTransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/rollback": {
+      "post": {
+        "operationId": "rollback_release_set_internal_v1_admin_release_sets__release_set_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetTransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/validate": {
+      "post": {
+        "operationId": "validate_release_set_internal_v1_admin_release_sets__release_set_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/runtime-snapshots": {
+      "get": {
+        "operationId": "get_runtime_snapshot_internal_v1_admin_runtime_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "environment",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Environment",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runtime_profile",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Runtime Profile",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Runtime Snapshot",
         "tags": [
           "administration"
         ]

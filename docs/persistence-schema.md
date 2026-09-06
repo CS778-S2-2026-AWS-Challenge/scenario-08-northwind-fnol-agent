@@ -430,6 +430,16 @@ Each configuration revision contains `configuration_id`, `domain`, `revision`, `
 secret values. Audit events are append-only and are not
 deleted or rewritten during withdrawal, supersession, or rollback.
 
+Release Set records use `rel_` identifiers and contain `release_set_id`, `environment`,
+`runtime_profile`, `revision`, `state`, immutable `configuration_refs` (configuration ID plus
+revision), `author`, `reason`, optional validation evidence, effective time, previous release
+set, rollback target, and `updated_at`. A Runtime Snapshot is a read projection of one published
+Release Set and its referenced published configuration revisions; it is not an independent
+mutable source of configuration truth. Release Set audit events use `aud_` identifiers and are
+append-only. The repository must support lookup of the active Release Set by
+`(environment, runtime_profile)`, immutable revision reads, optimistic-concurrency writes,
+idempotent transitions, and atomic supersede/publication or rollback/publication.
+
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the single active `published` record for a domain and fail closed
   when no publication exists; drafts and unverified provider records are never runtime fallback.

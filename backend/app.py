@@ -19,6 +19,7 @@ from backend.adapters.staff_identity import (
     SQLiteStaffIdentityRepository,
 )
 from backend.api.admin import router as admin_router
+from backend.api.admin_release_sets import router as admin_release_sets_router
 from backend.api.capabilities import router as capabilities_router
 from backend.api.claims import router as claims_router
 from backend.api.demo import router as demo_router
@@ -54,6 +55,7 @@ from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.handoff_guard import guarded_handoff_repository
 from backend.repositories.identity import IdentityRepository
 from backend.repositories.protocols import PersistenceRepository
+from backend.repositories.release_set import ReleaseSetRepository
 from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.agent import AgentTurnProvider, ControlledAgent, InvariantGuardedAgent
 from backend.services.external_service_entry import (
@@ -144,6 +146,7 @@ def create_app(
             )
         app.state.staff_identity_repository = staff_repository
     app.state.configuration_repository = configuration_repository or ConfigurationRepository()
+    app.state.release_set_repository = ReleaseSetRepository()
     app.state.data_runtime_bundle = bundle
     app.state.knowledge_document_store = bundle.knowledge_documents
     app.state.knowledge_retriever = bundle.knowledge_retrieval
@@ -226,4 +229,5 @@ def create_app(
     app.include_router(demo_router)
     app.include_router(handoffs_router)
     app.include_router(admin_router)
+    app.include_router(admin_release_sets_router)
     return app

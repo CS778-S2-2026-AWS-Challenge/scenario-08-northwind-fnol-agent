@@ -193,6 +193,14 @@ Claim State, WorkItems, handoffs, or claimant messages.
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` and `Idempotency-Key` |
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/configurations/{configuration_id}/audit` | Read append-only lifecycle audit events |
+| `GET` | `/internal/v1/admin/release-sets` | List runtime release sets, optionally filtered by environment and runtime profile |
+| `POST` | `/internal/v1/admin/release-sets` | Create a draft release set from versioned configuration references; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/release-sets/{release_set_id}` | Read one release set |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/validate` | Validate referenced configuration versions; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/publish` | Publish a validated release set; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/rollback` | Publish a validated prior release set as a new record; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/release-sets/{release_set_id}/audit` | Read append-only release-set audit events |
+| `GET` | `/internal/v1/admin/runtime-snapshots` | Resolve the complete published release set for an environment and runtime profile |
 
 Configuration records contain an opaque `configuration_id`, monotonically increasing `revision`,
 `domain`, `impact`, lifecycle `state`, non-secret `values`, protected `secret_references`,
@@ -250,6 +258,22 @@ from a draft or superseded record. The runtime repeats the deployment-binding ch
 constructing a provider adapter or reading a credential environment variable. A stored published
 record cannot redirect a deployment-approved credential to another endpoint or weaken the
 claimant Runtime's purpose, privacy, prompt-version, or structured-output boundary.
+
+Release Sets provide the cross-domain publication boundary. A release set contains immutable
+references to configuration IDs and revisions, an environment, and a runtime profile. Its
+lifecycle is `draft`, `validation`, `published`, `superseded`, or `withdrawn`. Validation fails
+when a referenced configuration is missing or is not itself `published`; a failed validation
+does not change any configuration or release-set state. Publication makes one complete release
+set active for the `(environment, runtime_profile)` pair and supersedes the previous active set
+atomically. Rollback creates a new published release set that references the selected prior set
+and preserves both histories. Release-set writes use `If-Match` and `Idempotency-Key`, and every
+accepted or rejected transition records an append-only audit event.
+
+`GET /internal/v1/admin/runtime-snapshots` returns the active release set and the referenced
+configuration records as one runtime snapshot. It fails with `404 ACTIVE_RELEASE_SET_NOT_FOUND`
+when no published set exists and with `409 RELEASE_SET_CONFIGURATION_UNAVAILABLE` when a
+published set cannot resolve one of its referenced immutable configuration versions. Runtime
+consumers must not combine fields from separate release sets.
 
 ## Claimant Identity and Account API
 
