@@ -425,9 +425,11 @@ Each configuration revision contains `configuration_id`, `domain`, `revision`, `
 `impact`, non-secret `values`, protected `secret_references`, `author`, `reason`, optional
 `validation_evidence`, `effective_time`, `previous_version`, `rollback_target`, and
 `updated_at`. Audit events contain `event_id`, `configuration_id`, `revision`, optional
-`previous_revision`, `actor`, `action`, `reason`, `outcome`, top-level `changed_fields`, and
-`created_at`. `changed_fields` records field names only and never duplicates configuration or
-secret values. Audit events are append-only and are not
+`previous_revision`, `actor`, `action`, `reason`, `outcome`, optional stable `error_code`,
+top-level `changed_fields`, and `created_at`. Rejected draft updates use `action=update_draft`,
+`outcome=rejected`, and retain the API error code without creating a new configuration revision.
+`changed_fields` records field names only and never duplicates configuration or secret values.
+Audit events are append-only and are not
 deleted or rewritten during withdrawal, supersession, or rollback.
 
 - Draft configuration is separate from the active published version.

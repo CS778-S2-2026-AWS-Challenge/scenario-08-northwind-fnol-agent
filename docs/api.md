@@ -208,7 +208,9 @@ author. An author publication attempt returns `403 CONFIGURATION_APPROVER_CONFLI
 record awaiting approval. Every transition, including a
 rejected transition, records actor, reason, outcome, revision, prior revision when applicable,
 top-level changed fields, and timestamp in the audit collection. Changed-field metadata names
-fields only and never copies configuration or secret values. State-changing POST requests require
+fields only and never copies configuration or secret values. A rejected draft update uses
+`action=update_draft`, `outcome=rejected`, and records the stable API `error_code` that prevented
+the write without creating a new configuration revision. State-changing POST requests require
 `Idempotency-Key`; replaying the same request
 returns the original response and reusing a key with different parameters returns `409
 IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 REVISION_CONFLICT` or

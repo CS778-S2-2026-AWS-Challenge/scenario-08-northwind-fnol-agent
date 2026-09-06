@@ -180,6 +180,64 @@ def test_admin_boundary_and_revision_errors() -> None:
         )
         assert stale.status_code == 409
         assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        rejected = audits[-1]
+        assert rejected['action'] == 'update_draft'
+        assert rejected['outcome'] == 'rejected'
+        assert rejected['error_code'] == 'REVISION_CONFLICT'
+        assert rejected['revision'] == 1
+        assert rejected['actor'] == 'adm_demo'
+
+
+def test_failed_draft_update_is_audited_without_mutating_revision() -> None:
+    with _client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('failed-update-create'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'fixture',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Create a valid draft.',
+            },
+        ).json()
+        configuration_id = created['configuration_id']
+
+        invalid = client.patch(
+            f'/internal/v1/admin/configurations/{configuration_id}',
+            headers=_post_headers('failed-update-invalid', 1),
+            json={
+                'values': {
+                    'data_runtime_profile': 'local_mvp',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject an incoherent provider bundle.',
+            },
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()['error']['code'] == 'PROVIDER_CONFIGURATION_INVALID'
+
+        stored = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        ).json()
+        assert stored['revision'] == 1
+        assert stored['values'] == {
+            'data_runtime_profile': 'fixture',
+            'object_storage_adapter': 'fixture',
+        }
+        audits = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+        ).json()['items']
+        rejected = audits[-1]
+        assert rejected['action'] == 'update_draft'
+        assert rejected['outcome'] == 'rejected'
+        assert rejected['error_code'] == 'PROVIDER_CONFIGURATION_INVALID'
+        assert rejected['revision'] == 1
+        assert rejected['changed_fields'] == []
 
 
 def test_draft_update_records_version_actor_time_and_changed_fields() -> None:

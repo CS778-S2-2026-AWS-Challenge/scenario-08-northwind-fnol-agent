@@ -144,6 +144,7 @@ class AuditEvent(BaseModel):
     action: str
     reason: str
     outcome: str
+    error_code: str | None = None
     changed_fields: list[str] = Field(default_factory=list)
     created_at: datetime
 

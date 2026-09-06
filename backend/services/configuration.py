@@ -44,6 +44,7 @@ def _audit(
     outcome: str,
     *,
     previous_revision: int | None = None,
+    error_code: str | None = None,
     changed_fields: Sequence[str] = (),
 ) -> None:
     repo.add_audit(
@@ -56,6 +57,7 @@ def _audit(
             action=action,
             reason=reason,
             outcome=outcome,
+            error_code=error_code,
             changed_fields=sorted(set(changed_fields)),
             created_at=now_utc(),
         )
@@ -136,20 +138,50 @@ def patch(
 ) -> ConfigurationRecord:
     current = read(repo, configuration_id)
     if current.revision != expected_revision:
-        raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
-    if current.state is not ConfigurationState.DRAFT:
-        raise _error(
-            400, 'INVALID_CONFIGURATION_TRANSITION', 'Only a draft configuration can be updated.'
+        reason = 'The configuration revision is stale.'
+        _audit(
+            repo,
+            current,
+            actor,
+            'update_draft',
+            reason,
+            'rejected',
+            error_code='REVISION_CONFLICT',
         )
+        raise _error(409, 'REVISION_CONFLICT', reason)
+    if current.state is not ConfigurationState.DRAFT:
+        reason = 'Only a draft configuration can be updated.'
+        _audit(
+            repo,
+            current,
+            actor,
+            'update_draft',
+            reason,
+            'rejected',
+            error_code='INVALID_CONFIGURATION_TRANSITION',
+        )
+        raise _error(400, 'INVALID_CONFIGURATION_TRANSITION', reason)
     values = payload.values if payload.values is not None else current.values
-    _reject_plaintext_secrets(values)
     secret_references = (
         payload.secret_references
         if payload.secret_references is not None
         else current.secret_references
     )
-    _validate_secret_references(secret_references)
-    _validate_configuration_values(current.domain, values, for_validation=False)
+    try:
+        _reject_plaintext_secrets(values)
+        _validate_secret_references(secret_references)
+        _validate_configuration_values(current.domain, values, for_validation=False)
+    except ApiError as error:
+        _audit(
+            repo,
+            current,
+            actor,
+            'update_draft',
+            error.message,
+            'rejected',
+            error_code=error.code,
+        )
+        raise
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
