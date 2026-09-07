@@ -66,7 +66,7 @@ class WorkbenchQueueView(StrEnum):
     ALL = 'all'
     URGENT = 'urgent'
     HUMAN_REQUESTS = 'human_requests'
-    NEW_UNTRIAGED = 'new_untriaged'
+    INCOMPLETE_CLAIMS = 'incomplete_claims'
     READY_TO_PROGRESS = 'ready_to_progress'
     AWAITING_EVIDENCE = 'awaiting_evidence'
     PROFESSIONAL_REVIEW = 'professional_review'

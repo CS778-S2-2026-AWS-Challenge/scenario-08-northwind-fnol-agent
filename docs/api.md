@@ -1529,7 +1529,7 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `urgent`, `human_requests`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -1539,9 +1539,10 @@ Supported filters:
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
 
 Filters can be combined and are applied before queue ordering and cursor pagination.
-`search` matches only staff-list projection fields: Claim ID, display reference, projected
-claimant display name, incident family and summary, current requested outcome, and projected tag
-codes and labels. It does not inspect unprojected Claim fields or change the backend rank order.
+`search` matches only staff-list projection fields: Claim ID, display reference, incident family
+and summary, current requested outcome, and projected tag codes and labels. Claimant display name
+is not searchable until an authorised staff-safe identity projection populates it. Search does not
+inspect unprojected Claim fields or change the backend rank order.
 
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
@@ -1596,6 +1597,8 @@ an explicit contract extension.
 
 `urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
 contains claims with an open claimant-support handoff whose support need is `human_requested`.
+`incomplete_claims` contains Claims in the existing collecting/incomplete queue. It does not
+represent or infer a triage status.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
 

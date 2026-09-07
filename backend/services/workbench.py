@@ -131,7 +131,7 @@ _QUEUE_VIEW_LABELS = {
     WorkbenchQueueView.ALL: 'All active work',
     WorkbenchQueueView.URGENT: 'Urgent',
     WorkbenchQueueView.HUMAN_REQUESTS: 'Staff assistance',
-    WorkbenchQueueView.NEW_UNTRIAGED: 'New and untriaged',
+    WorkbenchQueueView.INCOMPLETE_CLAIMS: 'Incomplete claims',
     WorkbenchQueueView.READY_TO_PROGRESS: 'Ready to progress',
     WorkbenchQueueView.AWAITING_EVIDENCE: 'Awaiting evidence',
     WorkbenchQueueView.PROFESSIONAL_REVIEW: 'Professional review',
@@ -1013,7 +1013,7 @@ def _matches_view(item: WorkbenchClaimListItem, view: WorkbenchQueueView | None)
         return item.work_summary.queue_key == 'claimant_support'
     if view is WorkbenchQueueView.AWAITING_EVIDENCE:
         return any(value.kind == 'evidence' for value in item.work_summary.missing_information)
-    if view is WorkbenchQueueView.NEW_UNTRIAGED:
+    if view is WorkbenchQueueView.INCOMPLETE_CLAIMS:
         return item.work_summary.queue_key == 'incomplete_claims'
     if view is WorkbenchQueueView.READY_TO_CREATE:
         return item.lifecycle_state is ClaimLifecycleState.READY_TO_CREATE
@@ -1029,7 +1029,6 @@ def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
     values = [
         item.claim_id,
         item.display_reference,
-        item.claimant.display_name,
         item.incident.family,
         item.incident.summary,
         (

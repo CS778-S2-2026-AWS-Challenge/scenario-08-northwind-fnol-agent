@@ -7919,7 +7919,7 @@
           "all",
           "urgent",
           "human_requests",
-          "new_untriaged",
+          "incomplete_claims",
           "ready_to_progress",
           "awaiting_evidence",
           "professional_review",

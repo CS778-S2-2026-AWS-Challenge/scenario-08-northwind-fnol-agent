@@ -23,6 +23,7 @@ const filterMetadata = {
   views: [
     { value: 'all', label: 'All active work' },
     { value: 'urgent', label: 'Urgent' },
+    { value: 'incomplete_claims', label: 'Incomplete claims' },
   ],
   workflow_states: [
     { value: 'ready_for_next', label: 'Ready for next' },

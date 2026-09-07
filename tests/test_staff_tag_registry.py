@@ -1,5 +1,10 @@
+from dataclasses import replace
+from types import MappingProxyType
+
+import pytest
 from fastapi.testclient import TestClient
 
+import backend.domain.tag_registry as tag_registry
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -163,6 +168,7 @@ def test_workbench_tag_filter_uses_the_published_backend_registry(
     client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     motor_id = _create_claim(
         client,
@@ -194,9 +200,27 @@ def test_workbench_tag_filter_uses_the_published_backend_registry(
         '/api/v1/workbench/claims?tag=stakeholder.engineer_specialist',
         headers=staff_auth_headers,
     )
+    retired_code = 'claim_type.retired_test'
+    retired = replace(
+        STAFF_TAG_REGISTRY['claim_type.motor'],
+        code=retired_code,
+        status=TagDefinitionStatus.RETIRED,
+    )
+    monkeypatch.setattr(
+        tag_registry,
+        'STAFF_TAG_REGISTRY',
+        MappingProxyType({**STAFF_TAG_REGISTRY, retired_code: retired}),
+    )
+    retired_only = client.get(
+        f'/api/v1/workbench/claims?tag={retired_code}',
+        headers=staff_auth_headers,
+    )
     assert unknown.status_code == 400
     assert unknown.json()['error']['code'] == 'INVALID_TAG_FILTER'
     assert draft_only.status_code == 400
+    assert draft_only.json()['error']['code'] == 'INVALID_TAG_FILTER'
+    assert retired_only.status_code == 400
+    assert retired_only.json()['error']['code'] == 'INVALID_TAG_FILTER'
 
 
 def test_claimant_projection_does_not_expose_staff_tags(

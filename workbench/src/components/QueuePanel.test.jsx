@@ -16,6 +16,7 @@ const filterMetadata = {
   views: [
     { value: 'all', label: 'All active work' },
     { value: 'urgent', label: 'Urgent' },
+    { value: 'incomplete_claims', label: 'Incomplete claims' },
   ],
   workflow_states: [
     { value: 'collecting', label: 'Collecting' },
@@ -79,6 +80,17 @@ describe('QueuePanel', () => {
     expect(screen.getAllByText('Vehicle not drivable')).toHaveLength(2)
     await user.selectOptions(screen.getByLabelText('Staff tag'), tag.code)
     expect(onTag).toHaveBeenCalledWith(tag.code)
+  })
+
+  it('uses the backend incomplete-claims value and label', async () => {
+    const onView = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({ onView })
+
+    await user.selectOptions(screen.getByLabelText('Current work'), 'incomplete_claims')
+
+    expect(screen.getByRole('option', { name: 'Incomplete claims' })).toHaveValue('incomplete_claims')
+    expect(onView).toHaveBeenCalledWith('incomplete_claims')
   })
 
   it('exposes supported status and priority filters and visible queue values', async () => {
