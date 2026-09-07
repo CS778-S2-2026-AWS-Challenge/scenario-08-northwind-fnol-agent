@@ -155,6 +155,47 @@ def test_claimant_contents_projection_hides_internal_assessment_metadata() -> No
     assert not hasattr(projected[0], 'updated_by')
 
 
+def test_claimant_contents_projection_drops_non_public_source_references() -> None:
+    from backend.services.claims import _claimant_contents_items
+
+    item = contents_item().model_copy(
+        update={'source_refs': ['msg_public', 'staff_action_1', 'ret_policy_1', 'field:secret']}
+    )
+    claim = make_claim().model_copy(update={'contents_items': [item]})
+
+    projected = _claimant_contents_items(FixtureRepository(), claim)
+
+    assert projected[0].source_refs == ['msg_public']
+
+
+def test_contents_items_round_trip_through_fixture_and_mongo_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = make_claim().model_copy(update={'contents_items': [contents_item()]})
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    fixture_repository = FixtureRepository()
+    mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'contents_round_trip')
+    # mongomock intentionally has no session/transaction implementation.  Keep
+    # the repository's normal create_claim path and execute its atomic callback
+    # without a session so this test still verifies Mongo document mapping and
+    # model round-trip rather than silently dropping the persistence contract.
+    monkeypatch.setattr(mongo_repository, '_atomic', lambda operation: operation(None))
+    for repository in (fixture_repository, mongo_repository):
+        repository.create_claim(claim, session)
+        restored = repository.get_claim(claim.claim_id, claim.customer_id)
+        assert restored is not None
+        assert restored.revision == claim.revision
+        assert restored.contents_items == claim.contents_items
+        assert restored.contents_items[0].estimated_value is not None
+        assert restored.contents_items[0].estimated_value.currency == 'NZD'
+
+
 def evaluation_record(
     claim: WorkingClaim,
     *,

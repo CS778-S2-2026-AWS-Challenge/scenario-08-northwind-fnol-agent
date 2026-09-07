@@ -164,7 +164,11 @@ def _claimant_contents_items(
     }
     projected: list[ClaimantContentsItem] = []
     for item in claim.contents_items:
-        visible_refs = [ref for ref in item.source_refs if ref not in internal_refs]
+        visible_refs = [
+            ref
+            for ref in item.source_refs
+            if ref not in internal_refs and (ref.startswith('msg_') or ref.startswith('evd_'))
+        ]
         projected.append(
             ClaimantContentsItem(
                 item_id=item.item_id,

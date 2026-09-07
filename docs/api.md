@@ -564,14 +564,15 @@ source-aware record and is not flattened into the Dynamic Form. Evidence associa
 separate Evidence records until the item-association contract is implemented.
 
 Claimant projections use a role-safe `ClaimantContentsItem` view: `confidence` and `updated_by`
-are internal assessment metadata and are omitted. Workbench projections retain those fields for
-authorised staff review.
+are internal assessment metadata and are omitted. `source_refs` is limited to public message and
+evidence identifiers (`msg_*` and `evd_*`); retrieval, staff, policy, inference, and other
+internal references are omitted. Workbench projections retain the full authorised record.
 
 | Property | Type | Rule |
 |---|---|---|
 | `item_id` | string | Stable identifier unique within a Claim |
 | `description` | string | Claimant- or staff-sourced item description |
-| `category` | string | Bounded display category; no free-form authority is implied |
+| `category` | string | Opaque display category; category vocabulary/bounding is a follow-up registry decision |
 | `quantity` | integer | At least 1 |
 | `loss_type` | enum | `damaged`, `lost`, `stolen`, or `destroyed` |
 | `ownership` | enum | `owned`, `leased`, `borrowed`, `gifted`, or `other` |
