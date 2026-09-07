@@ -7083,6 +7083,9 @@
           "section_summaries": {
             "$ref": "#/components/schemas/WorkbenchSectionSummaries"
           },
+          "source_summary": {
+            "$ref": "#/components/schemas/WorkbenchSourceSummary"
+          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/StaffTag"
@@ -7117,6 +7120,7 @@
           "created_at",
           "updated_at",
           "claim_state",
+          "source_summary",
           "section_summaries",
           "customer_next_step"
         ],
@@ -7659,6 +7663,18 @@
         "title": "WorkbenchFilterOption",
         "type": "object"
       },
+      "WorkbenchGapStatus": {
+        "enum": [
+          "missing",
+          "disputed",
+          "conflicting",
+          "pending",
+          "unavailable",
+          "uncertain"
+        ],
+        "title": "WorkbenchGapStatus",
+        "type": "string"
+      },
       "WorkbenchHandoff": {
         "additionalProperties": false,
         "description": "Staff-only handoff projection including the complete transfer packet.",
@@ -7964,12 +7980,16 @@
             },
             "title": "Source Refs",
             "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchGapStatus"
           }
         },
         "required": [
           "kind",
           "code",
           "label",
+          "status",
           "attention",
           "responsible_party"
         ],
@@ -8972,6 +8992,142 @@
         },
         "title": "WorkbenchSignalPayloadDefaults",
         "type": "object"
+      },
+      "WorkbenchSourceItem": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "needed_for": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Needed For",
+            "type": "array"
+          },
+          "record_ref": {
+            "title": "Record Ref",
+            "type": "string"
+          },
+          "related_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Fields",
+            "type": "array"
+          },
+          "responsible_party": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchResponsibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "kind",
+          "record_ref",
+          "label",
+          "context",
+          "source_label",
+          "status"
+        ],
+        "title": "WorkbenchSourceItem",
+        "type": "object"
+      },
+      "WorkbenchSourceSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchSourceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchSourceSummaryStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchSourceSummary",
+        "type": "object"
+      },
+      "WorkbenchSourceSummaryStatus": {
+        "enum": [
+          "available",
+          "empty",
+          "partial",
+          "unavailable"
+        ],
+        "title": "WorkbenchSourceSummaryStatus",
+        "type": "string"
       },
       "WorkbenchStaffSummary": {
         "additionalProperties": false,

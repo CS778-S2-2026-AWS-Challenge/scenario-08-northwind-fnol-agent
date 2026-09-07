@@ -11,21 +11,21 @@ export default function MissingInformation({ items = [] }) {
   return (
     <section className="detail-section missing-information" aria-labelledby="missing-information-title">
       <div className="section-heading">
-        <div><p className="eyebrow">Incomplete</p><h2 id="missing-information-title">Missing information</h2></div>
+        <div><p className="eyebrow">Operational context</p><h2 id="missing-information-title">Gap</h2></div>
         <span className="count-badge">{items.length}</span>
       </div>
-      {items.length ? <MissingList items={summary} detailed={false} /> : <p className="empty-note">No blocking or upcoming information gap is projected.</p>}
+      {items.length ? <MissingList items={summary} /> : <p className="empty-note">No missing, disputed, conflicting, pending, unavailable, or uncertain gap is projected.</p>}
       {items.length > SUMMARY_LIMIT && (
         <div className="missing-information__all">
-          <button className="disclosure-button" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide full missing information' : 'Show all missing information'}</button>
-          <div id={panelId} hidden={!expanded}><MissingList items={items} detailed /></div>
+          <button className="disclosure-button" type="button" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Hide all gaps' : 'Show all gaps'}</button>
+          <div id={panelId} hidden={!expanded}><MissingList items={items} /></div>
         </div>
       )}
     </section>
   )
 }
 
-function MissingList({ items, detailed }) {
+function MissingList({ items }) {
   return (
     <ul className="missing-list">
       {items.map((item) => (
@@ -33,8 +33,11 @@ function MissingList({ items, detailed }) {
           <ChevronRight size={16} aria-hidden="true" />
           <span>
             <strong>{item.label}</strong>
-            <small>{words(item.attention)} · {words(item.responsible_party)}</small>
-            {detailed && <MissingDetails item={item} />}
+            <small>{words(item.status)} · {words(item.attention)} · {words(item.responsible_party)}</small>
+            <details>
+              <summary>Traceability</summary>
+              <MissingDetails item={item} />
+            </details>
           </span>
         </li>
       ))}

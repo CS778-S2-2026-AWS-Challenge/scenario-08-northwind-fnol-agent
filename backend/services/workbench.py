@@ -6,7 +6,11 @@ from typing import Any, TypeVar
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.external_services import ExternalTaskOperationStatus, ExternalTaskRecord
+from backend.domain.external_services import (
+    ExternalTaskFailureCode,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
+)
 from backend.domain.models import (
     ClaimCollaborationRequest,
     CollaborationRequestKind,
@@ -73,6 +77,7 @@ from backend.domain.workbench import (
     WorkbenchFieldItem,
     WorkbenchFieldsResponse,
     WorkbenchFilterOption,
+    WorkbenchGapStatus,
     WorkbenchHandoffsResponse,
     WorkbenchIncidentSummary,
     WorkbenchIncompleteContext,
@@ -92,6 +97,9 @@ from backend.domain.workbench import (
     WorkbenchSessionsResponse,
     WorkbenchSignalDetail,
     WorkbenchSignalsResponse,
+    WorkbenchSourceItem,
+    WorkbenchSourceSummary,
+    WorkbenchSourceSummaryStatus,
     WorkbenchStaffSummary,
     WorkbenchTagFilterOption,
     WorkbenchWaitingExternalService,
@@ -378,6 +386,14 @@ def _responsibility(value: ResponsibleParty | None) -> WorkbenchResponsibility:
     return WorkbenchResponsibility.CLAIMS_PROFESSIONAL
 
 
+def _human_label(value: str) -> str:
+    return value.replace('.', ' ').replace('_', ' ').title()
+
+
+def _unique_refs(*groups: Sequence[str | None]) -> list[str]:
+    return list(dict.fromkeys(reference for group in groups for reference in group if reference))
+
+
 def _signal_status(decision: SignalDecisionValue | None) -> SignalReviewStatus:
     if decision is SignalDecisionValue.DISMISSED:
         return SignalReviewStatus.DISMISSED
@@ -453,49 +469,186 @@ def _signal_sources(
 
 def _missing_information(
     claim: WorkingClaim,
-    pending_evidence: Sequence[EvidenceRecord],
+    evidence_records: Sequence[EvidenceRecord],
+    active_handoffs: Sequence[HandoffRecord],
+    staff_actions: Sequence[StaffActionRecord],
+    external_tasks: Sequence[ExternalTaskRecord],
+    external_limitation: str | None,
 ) -> list[WorkbenchMissingInformation]:
     items: list[WorkbenchMissingInformation] = []
+    represented_codes = set(claim.form)
     for code, field in claim.form.items():
-        if field.status is not FormStatus.MISSING:
+        status = {
+            FormStatus.MISSING: WorkbenchGapStatus.MISSING,
+            FormStatus.DISPUTED: WorkbenchGapStatus.DISPUTED,
+            FormStatus.PENDING_GENERATION: WorkbenchGapStatus.PENDING,
+            FormStatus.PROPOSED: WorkbenchGapStatus.UNCERTAIN,
+        }.get(field.status)
+        if status is None:
             continue
         current = field.needed_for is NeededFor.CURRENT_ACTION
         items.append(
             WorkbenchMissingInformation(
                 kind='field',
                 code=code,
-                label=code.replace('.', ' ').replace('_', ' ').title(),
+                label=_human_label(code),
+                status=status,
                 attention=(
                     MissingInformationAttention.REQUIRED_NOW
                     if current
                     else MissingInformationAttention.NEEDED_NEXT
                 ),
                 blocked_action=claim.claim_state.next_action.value if current else None,
-                responsible_party=WorkbenchResponsibility.CLAIMANT,
+                responsible_party=(
+                    WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+                    if status is WorkbenchGapStatus.DISPUTED
+                    else _responsibility(claim.customer_next_step.responsible_party)
+                    if current
+                    else WorkbenchResponsibility.CLAIMANT
+                ),
                 source_refs=field.source_refs,
             )
         )
-    for evidence in pending_evidence:
+    for evidence in evidence_records:
+        represented_codes.update({evidence.evidence_id, evidence.kind})
+        status = _evidence_gap_status(evidence)
+        if status is None:
+            continue
+        current = NeededFor.CURRENT_ACTION in evidence.needed_for
         items.append(
             WorkbenchMissingInformation(
                 kind='evidence',
                 code=evidence.kind,
-                label=evidence.kind.replace('_', ' ').title(),
+                label=_human_label(evidence.kind),
+                status=status,
                 attention=(
                     MissingInformationAttention.REQUIRED_NOW
-                    if NeededFor.CURRENT_ACTION in evidence.needed_for
+                    if current
                     else MissingInformationAttention.NEEDED_NEXT
                 ),
-                blocked_action=(
-                    claim.claim_state.next_action.value
-                    if NeededFor.CURRENT_ACTION in evidence.needed_for
-                    else None
-                ),
+                blocked_action=(claim.claim_state.next_action.value if current else None),
                 responsible_party=_responsibility(evidence.responsible_party),
                 source_refs=[evidence.evidence_id],
             )
         )
-    return items
+    for handoff in active_handoffs:
+        packet = handoff.packet
+        packet_refs = _unique_refs([handoff.handoff_id], packet.source_refs)
+        for status, values in (
+            (WorkbenchGapStatus.MISSING, packet.missing_items),
+            (WorkbenchGapStatus.PENDING, packet.pending_items),
+            (WorkbenchGapStatus.CONFLICTING, packet.conflicts),
+            (WorkbenchGapStatus.UNCERTAIN, packet.low_confidence_items),
+        ):
+            for code in values:
+                if code in represented_codes:
+                    continue
+                items.append(
+                    WorkbenchMissingInformation(
+                        kind='handoff',
+                        code=code,
+                        label=_human_label(code),
+                        status=status,
+                        attention=MissingInformationAttention.REQUIRED_NOW,
+                        responsible_party=WorkbenchResponsibility.CLAIMS_PROFESSIONAL,
+                        source_refs=packet_refs,
+                    )
+                )
+    for action in staff_actions:
+        if action.status in {StaffActionStatus.COMPLETED, StaffActionStatus.CANCELLED}:
+            continue
+        items.append(
+            WorkbenchMissingInformation(
+                kind='work_item',
+                code=action.action_type,
+                label=_human_label(action.action_type),
+                status=WorkbenchGapStatus.PENDING,
+                attention=MissingInformationAttention.REQUIRED_NOW,
+                responsible_party=WorkbenchResponsibility.CLAIMS_PROFESSIONAL,
+                source_refs=_unique_refs([action.action_id], action.source_refs),
+            )
+        )
+    for task in external_tasks:
+        status = _external_gap_status(task)
+        if status is None:
+            continue
+        items.append(
+            WorkbenchMissingInformation(
+                kind='external_service',
+                code=task.service_identity,
+                label=_human_label(task.service_identity),
+                status=status,
+                attention=MissingInformationAttention.FOLLOW_UP,
+                blocked_action=(
+                    task.requested_action
+                    if status in {WorkbenchGapStatus.UNAVAILABLE, WorkbenchGapStatus.UNCERTAIN}
+                    else None
+                ),
+                responsible_party=WorkbenchResponsibility.EXTERNAL_PARTY,
+                source_refs=_unique_refs(
+                    [task.task_id, task.provider_reference, task.delivery_evidence]
+                ),
+            )
+        )
+    if external_limitation:
+        items.append(
+            WorkbenchMissingInformation(
+                kind='external_service',
+                code='external_service_records',
+                label='External Service Records',
+                status=WorkbenchGapStatus.UNAVAILABLE,
+                attention=MissingInformationAttention.FOLLOW_UP,
+                responsible_party=WorkbenchResponsibility.SYSTEM,
+            )
+        )
+    unique = {(item.kind, item.code, item.status): item for item in items}
+    attention_order = {
+        MissingInformationAttention.REQUIRED_NOW: 0,
+        MissingInformationAttention.NEEDED_NEXT: 1,
+        MissingInformationAttention.FOLLOW_UP: 2,
+    }
+    return sorted(
+        unique.values(),
+        key=lambda item: (
+            attention_order[item.attention],
+            item.label.casefold(),
+            item.status.value,
+        ),
+    )
+
+
+def _evidence_gap_status(evidence: EvidenceRecord) -> WorkbenchGapStatus | None:
+    if evidence.status is EvidenceStatus.INCONSISTENT:
+        return WorkbenchGapStatus.CONFLICTING
+    if evidence.file_status is EvidenceFileStatus.FAILED:
+        return WorkbenchGapStatus.UNAVAILABLE
+    if evidence.status in {
+        EvidenceStatus.PENDING_GENERATION,
+        EvidenceStatus.INCOMPLETE,
+        EvidenceStatus.UNOFFICIAL,
+    } or evidence.file_status in {
+        EvidenceFileStatus.AWAITING_UPLOAD,
+        EvidenceFileStatus.UPLOADING,
+        EvidenceFileStatus.UPLOADED,
+        EvidenceFileStatus.PROCESSING,
+    }:
+        return WorkbenchGapStatus.PENDING
+    return None
+
+
+def _external_gap_status(task: ExternalTaskRecord) -> WorkbenchGapStatus | None:
+    if task.status is ExternalTaskOperationStatus.ACCEPTED:
+        return None
+    if task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        return WorkbenchGapStatus.UNCERTAIN
+    if task.failure_code is ExternalTaskFailureCode.CONFLICTING:
+        return WorkbenchGapStatus.CONFLICTING
+    if task.status in {
+        ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+        ExternalTaskOperationStatus.TERMINAL_FAILURE,
+    }:
+        return WorkbenchGapStatus.UNAVAILABLE
+    return WorkbenchGapStatus.PENDING
 
 
 def _current_work_item(
@@ -847,6 +1000,155 @@ def _allowed_actions(
     return actions
 
 
+def _source_summary(
+    claim: WorkingClaim,
+    evidence_records: Sequence[EvidenceRecord],
+    handoffs: Sequence[HandoffRecord],
+    staff_actions: Sequence[StaffActionRecord],
+    allowed_actions: Sequence[WorkbenchAllowedAction],
+    external_tasks: Sequence[ExternalTaskRecord],
+    external_limitation: str | None,
+) -> WorkbenchSourceSummary:
+    items: list[WorkbenchSourceItem] = []
+    source_labels = {
+        'claimant': 'Claimant statement',
+        'image': 'Image evidence',
+        'document': 'Document evidence',
+        'policy': 'Policy record',
+        'claim_history': 'Claim history',
+        'inference': 'Agent inference',
+        'staff': 'Staff record',
+        'external_system': 'External system',
+        'fixture': 'Controlled fixture service',
+        'configured_service': 'Configured external service',
+    }
+    for code, field in claim.form.items():
+        label = _human_label(code)
+        items.append(
+            WorkbenchSourceItem(
+                kind='field',
+                record_ref=f'field:{code}',
+                label=label,
+                context=(
+                    f'{label} is recorded for the {_human_label(field.needed_for.value).lower()}.'
+                ),
+                source_label=source_labels[field.source.value],
+                status=field.status.value,
+                source_refs=field.source_refs,
+                needed_for=[field.needed_for.value],
+                confidence=field.confidence,
+                updated_at=field.updated_at,
+            )
+        )
+    for evidence in evidence_records:
+        related = [_human_label(code) for code in evidence.related_fields]
+        context = (
+            evidence.context_summary
+            or evidence.claimant_note
+            or (
+                f'Evidence linked to {", ".join(related)}.'
+                if related
+                else 'Evidence recorded for this Claim.'
+            )
+        )
+        provenance_refs = [
+            value for value in evidence.provenance.values() if isinstance(value, str)
+        ]
+        items.append(
+            WorkbenchSourceItem(
+                kind='evidence',
+                record_ref=evidence.evidence_id,
+                label=_human_label(evidence.kind),
+                context=context,
+                source_label=source_labels[evidence.source.value],
+                status=evidence.status.value,
+                source_refs=_unique_refs([evidence.evidence_id], provenance_refs),
+                related_fields=evidence.related_fields,
+                needed_for=[str(value) for value in evidence.needed_for],
+                responsible_party=_responsibility(evidence.responsible_party),
+                updated_at=evidence.updated_at,
+            )
+        )
+    for handoff in handoffs:
+        items.append(
+            WorkbenchSourceItem(
+                kind='handoff',
+                record_ref=handoff.handoff_id,
+                label=f'{_human_label(handoff.type.value)} Handoff',
+                context=handoff.requested_action,
+                source_label='Claim handoff',
+                status=handoff.status.value,
+                source_refs=_unique_refs(
+                    [handoff.handoff_id, handoff.source_message_id],
+                    handoff.packet.source_refs,
+                ),
+                responsible_party=WorkbenchResponsibility.CLAIMS_PROFESSIONAL,
+                updated_at=handoff.resolved_at or handoff.accepted_at or handoff.created_at,
+            )
+        )
+    for work_item in staff_actions:
+        items.append(
+            WorkbenchSourceItem(
+                kind='work_item',
+                record_ref=work_item.action_id,
+                label=_human_label(work_item.action_type),
+                context=work_item.requested_outcome,
+                source_label='Staff work item',
+                status=work_item.status.value,
+                source_refs=_unique_refs([work_item.action_id], work_item.source_refs),
+                responsible_party=WorkbenchResponsibility.CLAIMS_PROFESSIONAL,
+                updated_at=work_item.completed_at or work_item.created_at,
+            )
+        )
+    for task in external_tasks:
+        items.append(
+            WorkbenchSourceItem(
+                kind='external_service',
+                record_ref=task.task_id,
+                label=_human_label(task.service_identity),
+                context=_human_label(task.requested_action),
+                source_label=source_labels[task.integration_source.value],
+                status=task.status.value,
+                source_refs=_unique_refs(
+                    [task.task_id, task.provider_reference, task.delivery_evidence]
+                ),
+                responsible_party=WorkbenchResponsibility.EXTERNAL_PARTY,
+                updated_at=task.updated_at,
+            )
+        )
+    for projected_action in allowed_actions:
+        if not projected_action.source_refs:
+            continue
+        items.append(
+            WorkbenchSourceItem(
+                kind='authorised_action',
+                record_ref=(f'{projected_action.action_code}:{projected_action.target_ref}'),
+                label=projected_action.label,
+                context=projected_action.purpose,
+                source_label='Runtime action projection',
+                status=projected_action.availability.value,
+                source_refs=projected_action.source_refs,
+            )
+        )
+    if items:
+        status = (
+            WorkbenchSourceSummaryStatus.PARTIAL
+            if external_limitation
+            else WorkbenchSourceSummaryStatus.AVAILABLE
+        )
+    else:
+        status = (
+            WorkbenchSourceSummaryStatus.UNAVAILABLE
+            if external_limitation
+            else WorkbenchSourceSummaryStatus.EMPTY
+        )
+    return WorkbenchSourceSummary(
+        status=status,
+        items=items,
+        limitation=external_limitation,
+    )
+
+
 def require_workbench_action(
     repository: PersistenceRepository,
     principal: Principal,
@@ -948,6 +1250,7 @@ def _primary_action(
                 for action in allowed_actions
                 if action.action_code == action_code
                 and (target_ref is None or action.target_ref == target_ref)
+                and action.availability is not ActionAvailability.BLOCKED
             ),
             None,
         )
@@ -1012,7 +1315,10 @@ def _matches_view(item: WorkbenchClaimListItem, view: WorkbenchQueueView | None)
     if view is WorkbenchQueueView.HUMAN_REQUESTS:
         return item.work_summary.queue_key == 'claimant_support'
     if view is WorkbenchQueueView.AWAITING_EVIDENCE:
-        return any(value.kind == 'evidence' for value in item.work_summary.missing_information)
+        return any(
+            value.kind == 'evidence' and value.status is WorkbenchGapStatus.PENDING
+            for value in item.work_summary.missing_information
+        )
     if view is WorkbenchQueueView.INCOMPLETE_CLAIMS:
         return item.work_summary.queue_key == 'incomplete_claims'
     if view is WorkbenchQueueView.READY_TO_CREATE:
@@ -1061,7 +1367,14 @@ def _build_projection(
     computed_at = now_utc()
     collaboration_requests = repository.list_collaboration_requests(claim.claim_id)
     ownership = _ownership(repository, claim, principal, active_handoffs)
-    missing = _missing_information(claim, pending_evidence)
+    missing = _missing_information(
+        claim,
+        evidence,
+        active_handoffs,
+        actions,
+        external_tasks,
+        external_limitation,
+    )
     current_work = _current_work_item(active_handoffs, actions)
     allowed_actions = _allowed_actions(
         claim,
@@ -1138,6 +1451,15 @@ def _build_projection(
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
         contents_items=claim.contents_items,
+        source_summary=_source_summary(
+            claim,
+            evidence,
+            handoffs,
+            actions,
+            allowed_actions,
+            external_tasks,
+            external_limitation,
+        ),
         allowed_actions=allowed_actions,
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(

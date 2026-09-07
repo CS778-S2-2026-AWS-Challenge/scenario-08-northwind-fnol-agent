@@ -1659,10 +1659,11 @@ large resources are loaded from the dedicated sub-resources below:
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
-  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [], "risk_signals": []},
+  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [{"kind": "field", "code": "incident.description", "label": "Incident Description", "status": "disputed", "attention": "required_now", "blocked_action": "confirm", "responsible_party": "claims_professional", "source_refs": ["msg_01J4Y7T1KC"]}], "risk_signals": []},
   "integration_summary": {"external_wait_count": 0},
   "tags": [],
   "claim_state": {},
+  "source_summary": {"status": "available", "items": [{"kind": "field", "record_ref": "field:incident.description", "label": "Incident Description", "context": "Incident Description is recorded for the current action.", "source_label": "Claimant statement", "status": "disputed", "source_refs": ["msg_01J4Y7T1KC"], "related_fields": [], "needed_for": ["current_action"], "responsible_party": null, "confidence": 0.96, "updated_at": "2026-08-10T03:42:12Z"}], "limitation": null},
   "allowed_actions": [],
   "section_summaries": {"fields": {}, "conversation": {}, "evidence": {}, "reference_checks": {}, "external_services": {}, "activity": {}},
   "customer_next_step": {},
@@ -1686,7 +1687,25 @@ only when staff opens a section:
 | Audit activity | `GET /workbench/claims/{claim_id}/events` |
 
 Each sub-resource returns its own availability and limitation metadata. A failed optional source
-does not invalidate the core Claim projection. `tags` follows the typed Staff Tag Registry contract;
+does not invalidate the core Claim projection.
+`source_summary` is a staff-only, source-preserving overview assembled from structured fields,
+Evidence, active Handoffs, WorkItems, external tasks, and source-linked allowed actions. Its
+`status` is `available`, `empty`, `partial`, or `unavailable`. `partial` and `unavailable` include
+an honest `limitation`. Each item contains a stable `kind` and `record_ref`, a human-readable
+`label`, `context`, and `source_label`, the source record's explicit `status`, and available
+traceability dimensions: `source_refs`, `related_fields`, `needed_for`, `responsible_party`,
+`confidence`, and `updated_at`. Opaque references supplement the human-readable context; they are
+not the only explanation.
+
+`work_summary.missing_information` is the staff Gap projection. Each entry contains `kind`, `code`,
+`label`, explicit `status`, `attention`, `blocked_action` when supported, `responsible_party`, and
+`source_refs`. Supported status values are `missing`, `disputed`, `conflicting`, `pending`,
+`unavailable`, and `uncertain`. The projection derives these states from structured fields,
+Evidence, active Handoff packets, open WorkItems, external-task records, and explicit source
+availability. It does not infer provider success, verification, risk conclusions, or ownership
+from free text.
+
+`tags` follows the typed Staff Tag Registry contract;
 `allowed_actions` is the authoritative runtime action projection. Each entry contains the action
 registry version, exact `action_code`, target type and `target_ref`, availability (`available`,
 `confirmation_required`, or `blocked`), confirmation metadata, expected and claimant-visible
@@ -1713,7 +1732,11 @@ require `target_staff_id` and `reason`; and cowork or transfer decisions require
 projected action input set.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
-when no primary action is currently authorised.
+when no primary action is currently authorised. The pair always identifies the exact same
+non-blocked `allowed_actions` entry. Clients display a Staff next action only when both values
+exactly resolve to a non-blocked entry; they do not fall back to another action or infer one from
+tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
+claimant-safe projection.
 
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 

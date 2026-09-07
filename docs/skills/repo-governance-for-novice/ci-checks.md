@@ -63,6 +63,21 @@ one:
   full coverage gate remains on `main`. The selector is itself covered by
   tests and must never return an empty selection for a backend behavior change.
 
+- **Two-signal backend coverage**: the existing total coverage floor and changed-line
+  coverage answer different questions and are both required:
+  1. Full backend runs keep `fail_under = 90` in `pyproject.toml`; this prevents the
+     repository-wide signal from silently falling.
+  2. Full and scoped backend runs also emit `coverage.json` and run
+     `python scripts/check_diff_coverage.py --base origin/main --min 85`.
+  3. Diff coverage measures only added executable Python lines under `backend/` in the
+     exact PR diff. Deleted lines, non-Python changes, and lines omitted from coverage.py's
+     executable-line report are excluded.
+  4. The check is implemented inside the existing GitHub/CircleCI backend quality profiles;
+     Codecov, Coveralls, and a second remote quality provider are not required.
+  5. A passing diff check does not replace the total floor, and a passing total report does
+     not prove that new behavior has focused tests. Both results must be recorded against the
+     exact PR head.
+
 - Markdown lint: `DavidAnson/markdownlint-cli2-action`, linting only the
   markdown files changed in the current PR (no back-scan of existing
   documents, to avoid an enormous first run).

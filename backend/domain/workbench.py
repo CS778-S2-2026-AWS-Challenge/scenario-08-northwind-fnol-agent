@@ -81,6 +81,22 @@ class MissingInformationAttention(StrEnum):
     FOLLOW_UP = 'follow_up'
 
 
+class WorkbenchGapStatus(StrEnum):
+    MISSING = 'missing'
+    DISPUTED = 'disputed'
+    CONFLICTING = 'conflicting'
+    PENDING = 'pending'
+    UNAVAILABLE = 'unavailable'
+    UNCERTAIN = 'uncertain'
+
+
+class WorkbenchSourceSummaryStatus(StrEnum):
+    AVAILABLE = 'available'
+    EMPTY = 'empty'
+    PARTIAL = 'partial'
+    UNAVAILABLE = 'unavailable'
+
+
 class RiskAttentionLevel(StrEnum):
     NOTICE = 'notice'
     REVIEW_REQUIRED = 'review_required'
@@ -214,10 +230,32 @@ class WorkbenchMissingInformation(ContractModel):
     kind: str
     code: str
     label: str
+    status: WorkbenchGapStatus
     attention: MissingInformationAttention
     blocked_action: str | None = None
     responsible_party: WorkbenchResponsibility
     source_refs: list[str] = Field(default_factory=list)
+
+
+class WorkbenchSourceItem(ContractModel):
+    kind: str
+    record_ref: str
+    label: str
+    context: str
+    source_label: str
+    status: str
+    source_refs: list[str] = Field(default_factory=list)
+    related_fields: list[str] = Field(default_factory=list)
+    needed_for: list[str] = Field(default_factory=list)
+    responsible_party: WorkbenchResponsibility | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    updated_at: datetime | None = None
+
+
+class WorkbenchSourceSummary(ContractModel):
+    status: WorkbenchSourceSummaryStatus
+    items: list[WorkbenchSourceItem] = Field(default_factory=list)
+    limitation: str | None = None
 
 
 class WorkbenchRiskSignal(ContractModel):
@@ -385,6 +423,7 @@ class WorkbenchClaimDetail(WorkbenchClaimListItem):
     active_session_id: str | None = None
     claim_state: ClaimState
     contents_items: list[ContentsItem] = Field(default_factory=list)
+    source_summary: WorkbenchSourceSummary
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep

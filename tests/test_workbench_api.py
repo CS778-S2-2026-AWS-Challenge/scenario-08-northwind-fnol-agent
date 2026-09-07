@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError
-from backend.domain.external_services import ExternalTaskRecord
+from backend.domain.external_services import (
+    ExternalTaskDelivery,
+    ExternalTaskFailureCode,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
+)
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -18,9 +23,13 @@ from backend.domain.models import (
     ContentsLossType,
     ContentsOwnership,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceStatus,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
+    FormStatus,
     FraudSignal,
+    IntegrationSource,
     MessageRecord,
     MessageVisibility,
     ResponsibleParty,
@@ -340,6 +349,174 @@ def test_staff_reads_progressive_claim_detail_and_paged_resources(
     assert any(item['message_id'] == 'msg_internal_note' for item in messages['items'])
 
 
+def test_staff_detail_projects_source_context_and_disputed_or_conflicting_gaps(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(client, auth_headers, repository)
+    claim = repository.get_claim_internal(claim_id)
+    evidence = repository.list_evidence(claim_id, 'cus_demo')[0]
+    assert claim is not None
+    field_code, field = next(iter(claim.form.items()))
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'revision': claim.revision + 1,
+                'form': {
+                    **claim.form,
+                    field_code: field.model_copy(
+                        update={'status': FormStatus.DISPUTED, 'source_refs': ['msg_dispute']}
+                    ),
+                },
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+    repository.save_evidence(
+        evidence.model_copy(
+            update={
+                'status': EvidenceStatus.INCONSISTENT,
+                'file_status': EvidenceFileStatus.READY,
+            }
+        ),
+        'cus_demo',
+    )
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+
+    gaps = {
+        (item['kind'], item['code']): item for item in detail['work_summary']['missing_information']
+    }
+    assert gaps[('field', field_code)]['status'] == 'disputed'
+    assert gaps[('field', field_code)]['responsible_party'] == 'claims_professional'
+    assert gaps[('evidence', evidence.kind)]['status'] == 'conflicting'
+    sources = {item['record_ref']: item for item in detail['source_summary']['items']}
+    assert detail['source_summary']['status'] == 'available'
+    assert sources[f'field:{field_code}']['source_refs'] == ['msg_dispute']
+    assert sources[evidence.evidence_id]['status'] == 'inconsistent'
+    assert sources[evidence.evidence_id]['related_fields'] == evidence.related_fields
+
+
+def test_staff_detail_distinguishes_empty_and_unavailable_source_context(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'empty-source-claim'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    ).json()
+    claim_id = created['claim']['claim_id']
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository.save_claim(
+        claim.model_copy(update={'revision': claim.revision + 1, 'form': {}}),
+        expected_revision=claim.revision,
+    )
+
+    empty = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+    assert empty['source_summary'] == {'status': 'empty', 'items': [], 'limitation': None}
+
+    def unavailable_external_records(_claim_id: str) -> list[ExternalTaskRecord]:
+        raise RuntimeError('synthetic unavailable source')
+
+    monkeypatch.setattr(
+        repository,
+        'list_external_tasks_internal',
+        unavailable_external_records,
+    )
+    unavailable = client.get(
+        f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers
+    ).json()
+    assert unavailable['source_summary']['status'] == 'unavailable'
+    assert unavailable['source_summary']['limitation']
+    assert any(
+        item['status'] == 'unavailable'
+        for item in unavailable['work_summary']['missing_information']
+    )
+
+
+def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='unknown-external'
+    )
+    recorded_at = now_utc()
+    task = ExternalTaskRecord(
+        task_id='tsk_unknown',
+        claim_id=claim_id,
+        service_identity='damage_assessment',
+        requested_action='request_assessment',
+        integration_source=IntegrationSource.FIXTURE,
+        status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+        delivery=ExternalTaskDelivery.SUBMITTED,
+        delivery_evidence='delivery_receipt_unknown',
+        failure_code=ExternalTaskFailureCode.TIMEOUT,
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+    repository.save_external_task(task, 'cus_demo')
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+    gap = next(
+        item
+        for item in detail['work_summary']['missing_information']
+        if item['kind'] == 'external_service'
+    )
+    source = next(
+        item for item in detail['source_summary']['items'] if item['record_ref'] == task.task_id
+    )
+
+    assert gap['status'] == 'uncertain'
+    assert gap['blocked_action'] == task.requested_action
+    assert gap['source_refs'] == [task.task_id, task.delivery_evidence]
+    assert source['source_label'] == 'Controlled fixture service'
+    assert source['status'] == 'unknown_outcome'
+
+
+def test_staff_primary_action_pair_resolves_to_the_exact_non_blocked_action(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, _ = _request_staff_support(client, auth_headers, repository)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository.save_claim(
+        claim.model_copy(
+            update={'revision': claim.revision + 1, 'assignee_id': 'stf_another_owner'}
+        ),
+        expected_revision=claim.revision,
+    )
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+    accept = next(
+        action
+        for action in detail['allowed_actions']
+        if action['action_code'] == 'human.accept_handoff' and action['target_ref'] == handoff_id
+    )
+    primary = next(
+        action
+        for action in detail['allowed_actions']
+        if action['action_code'] == detail['work_summary']['primary_action_code']
+        and action['target_ref'] == detail['work_summary']['primary_action_target_ref']
+    )
+
+    assert accept['availability'] == 'blocked'
+    assert primary['action_code'] == 'ownership.request_cowork'
+    assert primary['availability'] != 'blocked'
+
+
 def test_staff_lists_claims_for_workbench_queue(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -541,6 +718,9 @@ def test_claimant_projections_do_not_expose_workbench_only_data(
     assert 'signals' not in claimant_claim
     assert 'decisions' not in claimant_claim
     assert 'sessions' not in claimant_claim
+    assert 'source_summary' not in claimant_claim
+    assert 'work_summary' not in claimant_claim
+    assert 'allowed_actions' not in claimant_claim
     assert all(
         message['message_id'] != 'msg_internal_note' for message in claimant_messages['items']
     )
@@ -581,6 +761,13 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
     claimant_claim = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
 
     assert staff_response.status_code == 200
+    staff_detail = staff_response.json()
+    source_kinds = {item['kind'] for item in staff_detail['source_summary']['items']}
+    assert {'handoff', 'authorised_action'} <= source_kinds
+    assert not any(
+        item['kind'] == 'handoff' and item['code'] in stored_handoffs[0].packet.evidence_refs
+        for item in staff_detail['work_summary']['missing_information']
+    )
     handoffs_response = client.get(
         f'/api/v1/workbench/claims/{claim_id}/handoffs', headers=staff_auth_headers
     )
