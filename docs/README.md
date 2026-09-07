@@ -92,6 +92,7 @@ documents remain authoritative for implemented behaviour.
 ## Current Status Records
 
 - [Agent Runtime Progress](status/agent-runtime-progress.md)
+- [Claim Data Readiness Inventory](status/claim-data-readiness.md)
 - [Runtime Profile Validation Record](status/runtime-profile-validation.md)
 - [MVP Capability Register](status/mvp-capability-register.md)
 
