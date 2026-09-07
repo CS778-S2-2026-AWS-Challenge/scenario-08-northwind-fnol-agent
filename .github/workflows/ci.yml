@@ -75,10 +75,12 @@ jobs:
           mode="${{ steps.impact.outputs.mode }}"
           case "$mode" in
             full)
-              python -m pytest --cov=backend --cov-report=term-missing tests
+              python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
+              python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
               ;;
             scoped)
-              python -m pytest $(python scripts/select_backend_tests.py --tests)
+              python -m pytest --cov=backend --cov-report=json:coverage.json $(python scripts/select_backend_tests.py --tests)
+              python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
               ;;
             skip)
               echo "No backend behavior changed; backend pytest skipped."
