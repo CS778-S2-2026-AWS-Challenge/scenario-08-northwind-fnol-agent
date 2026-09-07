@@ -4,7 +4,7 @@ The backend validates execution safety here; it does not choose Agent behaviour 
 execute provider adapters.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -165,6 +165,8 @@ def build_claim_context_command(
     workflow_state: WorkflowState,
     expected_revision: int | None = None,
     idempotency_key: str | None = None,
+    allowed_action_codes: Collection[str] | None = None,
+    allowed_tools: Collection[str] | None = None,
 ) -> ClaimContextCommand:
     """Validate an approved action and produce side-effect-free execution intent.
 
@@ -212,6 +214,9 @@ def build_claim_context_command(
     except ValueError as error:
         raise UnknownAgentActionError(str(error)) from error
 
+    if allowed_action_codes is not None and action_code not in allowed_action_codes:
+        raise AgentActionCommandError(f'{action_code} is disabled by the active tool policy.')
+
     if (
         contract.namespace not in _CLAIM_CONTEXT_NAMESPACES
         or contract.state_effect not in _CLAIM_CONTEXT_EFFECTS
@@ -242,6 +247,11 @@ def build_claim_context_command(
     if contract.idempotency_policy is not ActionIdempotencyPolicy.NOT_REQUIRED and key is None:
         raise AgentActionCommandError(f'{action_code} requires idempotency_key metadata.')
 
+    effective_tools = (
+        contract.permitted_tools
+        if allowed_tools is None
+        else tuple(tool for tool in contract.permitted_tools if tool in allowed_tools)
+    )
     return ClaimContextCommand(
         action_code=contract.action_code,
         contract_version=contract.version,
@@ -254,7 +264,7 @@ def build_claim_context_command(
         expected_revision=revision,
         idempotency_key=key,
         idempotency_policy=contract.idempotency_policy,
-        permitted_tools=contract.permitted_tools,
+        permitted_tools=effective_tools,
         visibility=contract.visibility,
         failure_policy=contract.failure_policy,
     )

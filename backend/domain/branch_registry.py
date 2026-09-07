@@ -244,8 +244,16 @@ def build_default_registry() -> BranchRegistrySnapshot:
 class BranchRuleEvaluator:
     """Evaluate branch and field relevance without I/O or Claim State mutation."""
 
-    def __init__(self, registry: BranchRegistrySnapshot | None = None) -> None:
+    def __init__(
+        self,
+        registry: BranchRegistrySnapshot | None = None,
+        *,
+        disabled_rule_ids: frozenset[str] | None = None,
+        observation_rule_ids: frozenset[str] | None = None,
+    ) -> None:
         self.registry = registry or build_default_registry()
+        self.disabled_rule_ids = disabled_rule_ids or frozenset()
+        self.observation_rule_ids = observation_rule_ids or frozenset()
 
     def evaluate(
         self,
@@ -298,6 +306,7 @@ class BranchRuleEvaluator:
             previous_evaluation,
             trigger_source_refs,
         )
+        branch_results = [self._apply_controlled_rule_policy(result) for result in branch_results]
         active = [result.branch_id for result in branch_results if result.status == 'active']
         candidate = [result.branch_id for result in branch_results if result.status == 'candidate']
         suspended = [result.branch_id for result in branch_results if result.status == 'suspended']
@@ -348,6 +357,28 @@ class BranchRuleEvaluator:
             permitted_tools=[],
             recomputation_reason=recomputation_reason,
         )
+
+    def _apply_controlled_rule_policy(self, result: BranchResult) -> BranchResult:
+        if result.rule_id in self.disabled_rule_ids and result.status != 'exited':
+            return result.model_copy(
+                update={
+                    'status': 'exited',
+                    'registered_fields': [],
+                    'reason': 'The published controlled-rule configuration disables this rule.',
+                }
+            )
+        if result.rule_id in self.observation_rule_ids and result.status == 'active':
+            return result.model_copy(
+                update={
+                    'status': 'candidate',
+                    'registered_fields': [],
+                    'reason': (
+                        'The published controlled-rule configuration keeps this rule in '
+                        'observation mode without activating its effects.'
+                    ),
+                }
+            )
+        return result
 
     def _family_state(
         self, claim: WorkingClaim, text: str, trigger_source_refs: Sequence[str]

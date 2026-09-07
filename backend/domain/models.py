@@ -495,6 +495,27 @@ class ModelDecisionProvenance(ContractModel):
     prompt_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class ConfigurationRevisionReference(ContractModel):
+    configuration_id: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+
+
+class KnowledgeRevisionReference(ContractModel):
+    knowledge_id: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+    version: str = Field(min_length=1, max_length=100)
+
+
+class RuntimeConfigurationProvenance(ContractModel):
+    """Exact published Control Plane coordinates used for one Agent turn."""
+
+    release_set_id: str | None = Field(default=None, max_length=100)
+    environment: str = Field(min_length=1, max_length=50)
+    runtime_profile: str = Field(min_length=1, max_length=80)
+    configurations: dict[str, ConfigurationRevisionReference] = Field(default_factory=dict)
+    knowledge: dict[str, KnowledgeRevisionReference] = Field(default_factory=dict)
+
+
 class AgentDecisionRecord(ContractModel):
     decision_id: str
     claim_id: str
@@ -514,6 +535,7 @@ class AgentDecisionRecord(ContractModel):
     authority: AgentAuthority
     proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
     model_provenance: ModelDecisionProvenance | None = None
+    runtime_configuration: RuntimeConfigurationProvenance | None = None
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
     resulting_revision: int = Field(ge=1)
     created_at: datetime

@@ -152,6 +152,36 @@ jobs:
           command: npm run build
           working_directory: workbench
 
+  admin-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-admin-node-{{ arch }}-{{ checksum "admin/package-lock.json" }}
+      - run:
+          name: Install Control Plane dependencies
+          command: npm ci
+          working_directory: admin
+      - save_cache:
+          key: v1-admin-node-{{ arch }}-{{ checksum "admin/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint Control Plane
+          command: npm run lint
+          working_directory: admin
+      - run:
+          name: Test Control Plane
+          command: npm test
+          working_directory: admin
+      - run:
+          name: Build Control Plane
+          command: npm run build
+          working_directory: admin
+
   github-automation-quality:
     docker:
       - image: cimg/node:22.14
@@ -247,6 +277,7 @@ workflows:
       - backend-quality
       - customer-quality
       - workbench-quality
+      - admin-quality
       - github-automation-quality
       - pr-policy
       - docs-quality

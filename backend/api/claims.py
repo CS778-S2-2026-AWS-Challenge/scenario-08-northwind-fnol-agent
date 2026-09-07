@@ -48,6 +48,7 @@ from backend.services.external_services import grant_assessor_consent, request_a
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
 from backend.services.resume import start_session_with_recovery
+from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
 
@@ -73,6 +74,10 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 def agent_for(request: Request) -> AgentTurnProvider:
     return cast(AgentTurnProvider, request.app.state.agent_turn_provider)
+
+
+def runtime_agent_policy_for(request: Request) -> RuntimeAgentPolicyResolver:
+    return cast(RuntimeAgentPolicyResolver, request.app.state.runtime_agent_policy_resolver)
 
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
@@ -275,6 +280,7 @@ def create_message(
         payload,
         idempotency_key,
         if_match,
+        runtime_agent_policy_for(request),
     )
 
 

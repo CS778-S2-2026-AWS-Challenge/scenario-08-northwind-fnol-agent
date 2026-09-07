@@ -189,15 +189,213 @@ Claim State, WorkItems, handoffs, or claimant messages.
 | `GET` | `/internal/v1/admin/configurations/{configuration_id}` | Read a configuration revision |
 | `PATCH` | `/internal/v1/admin/configurations/{configuration_id}` | Create a new draft revision; requires `If-Match` |
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/validate` | Validate a draft against supplied scenario results; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/configurations/{configuration_id}/approval` | Record one independent approval decision for an awaiting-approval revision; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/configurations/{configuration_id}/approvals` | Read immutable approval decisions, optionally filtered by revision |
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/publish` | Publish an approved high-impact draft; requires `If-Match` and `Idempotency-Key` |
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/withdraw` | Withdraw a draft or published revision; requires `If-Match` and `Idempotency-Key` |
 | `POST` | `/internal/v1/admin/configurations/{configuration_id}/rollback` | Publish an approved prior revision as a new record; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/internal/v1/admin/configurations/{configuration_id}/audit` | Read append-only lifecycle audit events |
+| `GET` | `/internal/v1/admin/release-sets` | List runtime release sets, optionally filtered by environment and runtime profile |
+| `POST` | `/internal/v1/admin/release-sets` | Create a draft release set from versioned configuration references; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/release-sets/{release_set_id}` | Read one release set |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/validate` | Validate referenced configuration versions; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/publish` | Publish a validated release set; requires `If-Match` and `Idempotency-Key` |
+| `POST` | `/internal/v1/admin/release-sets/{release_set_id}/rollback` | Publish a validated prior release set as a new record; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/release-sets/{release_set_id}/audit` | Read append-only release-set audit events |
+| `GET` | `/internal/v1/admin/runtime-snapshots` | Resolve the complete published release set for an environment and runtime profile |
+| `GET` | `/internal/v1/admin/accounts/customers` | List customer account projections with cursor pagination |
+| `POST` | `/internal/v1/admin/accounts/customers` | Create a customer account; requires `Idempotency-Key` |
+| `PATCH` | `/internal/v1/admin/accounts/customers/{customer_id}` | Update an approved customer account profile or active state; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/accounts/customers/{customer_id}/sessions` | List safe customer session projections with cursor pagination |
+| `POST` | `/internal/v1/admin/accounts/customers/{customer_id}/sessions/{session_id}/revoke` | Revoke an active customer session; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/accounts/customers/{customer_id}/audit` | Read append-only customer account audit events |
+| `GET` | `/internal/v1/admin/accounts/staff` | List staff account projections with cursor pagination |
+| `POST` | `/internal/v1/admin/accounts/staff` | Create a staff account with registered roles; requires `Idempotency-Key` |
+| `PATCH` | `/internal/v1/admin/accounts/staff/{staff_id}` | Update a staff display name, roles, or active state; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/accounts/staff/{staff_id}/sessions` | List safe staff session projections with cursor pagination |
+| `POST` | `/internal/v1/admin/accounts/staff/{staff_id}/sessions/{session_id}/revoke` | Revoke an active staff session; requires `If-Match` and `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/accounts/staff/{staff_id}/audit` | Read append-only staff account audit events |
+| `GET` | `/internal/v1/admin/access/policies` | List versioned role and scope access-policy projections |
+| `POST` | `/internal/v1/admin/access/policies` | Create an access-policy configuration draft; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/audit` | Search bounded append-only audit events by type, subject, actor, or time |
+| `GET` | `/internal/v1/admin/integrations` | List adapter health, capability, source, and published configuration references |
+| `GET` | `/internal/v1/admin/integrations/{integration_id}` | Run one bounded health check and return the registered integration projection |
+| `POST` | `/internal/v1/admin/integrations/{integration_id}/health-check` | Run and persist one bounded integration health check |
+| `GET` | `/internal/v1/admin/integrations/{integration_id}/health-checks` | Read bounded persisted health-check history |
+| `GET` | `/internal/v1/admin/operations` | List Control Plane operation records by kind or state |
+| `GET` | `/internal/v1/admin/operations/metrics` | Read operation counts, model usage, estimated cost, rate-limit state, and configured alerts |
+| `GET` | `/internal/v1/admin/operations/{operation_id}` | Read one operation record and its current status |
+| `POST` | `/internal/v1/admin/evaluations` | Record immutable model/knowledge/rule evaluation evidence; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/evaluations` | List evaluation evidence by purpose or state |
+| `GET` | `/internal/v1/admin/evaluations/{evaluation_id}` | Read one immutable evaluation record |
+| `POST` | `/internal/v1/admin/knowledge` | Create a governed knowledge source version; requires `Idempotency-Key` |
+| `GET` | `/internal/v1/admin/knowledge` | List knowledge source versions and lifecycle states |
+| `GET` | `/internal/v1/admin/knowledge/{knowledge_id}` | Read safe metadata and ingestion/publication status |
+| `POST` | `/internal/v1/admin/knowledge/{knowledge_id}/ingest` | Run bounded parsing/chunking/indexing and return its operation record |
+| `POST` | `/internal/v1/admin/knowledge/{knowledge_id}/validate` | Record retrieval/publication validation scenarios |
+| `POST` | `/internal/v1/admin/knowledge/{knowledge_id}/retrieval-check` | Run a scoped retrieval check with exact citations |
+| `POST` | `/internal/v1/admin/knowledge/{knowledge_id}/publish` | Publish an indexed validated version after independent review |
+| `POST` | `/internal/v1/admin/knowledge/{knowledge_id}/withdraw` | Withdraw a draft or published knowledge version |
+| `GET` | `/internal/v1/admin/knowledge/{knowledge_id}/audit` | Read append-only knowledge lifecycle audit events |
+| `GET` | `/internal/v1/admin/agent-rules` | List independently versioned Agent instruction, tool-permission, controlled-rule, and feature records |
+| `POST` | `/internal/v1/admin/agent-rules/{component}` | Create a versioned Agent-rule component draft; requires `Idempotency-Key` |
+
+Configuration, Release Set, knowledge, Integration, customer-account, staff-account, and account-
+session list or detail projections include `allowed_actions`. Each action contains `action_code`, `availability`
+(`available`, `confirmation_required`, or `blocked`), `expected_revision`, and a bounded `reason`.
+The projection is derived for the authenticated principal from the current server state; clients
+must not reconstruct lifecycle or permission rules from resource fields. A client may submit only
+an `available` action directly, must obtain explicit user confirmation for
+`confirmation_required`, and must not submit a `blocked` action. `expected_revision` supplies the
+`If-Match` value for resources whose HTTP mutation contract exposes optimistic revision and is null
+where that client-visible contract is absent. The mutation endpoint independently revalidates
+identity and state, plus revision when exposed, so the projection is guidance rather than delegated
+authority.
+
+`GET /internal/v1/admin/integrations` is a read-only projection of the adapters assembled by the
+composition root. It reports only bounded health states (`using_fixture`, `verified`,
+`configured_service`, `pending_confirmation`, `unavailable`, or `unknown`), implementation type,
+capability, source class, and published integration configuration IDs. It does not expose provider
+payloads, credentials, endpoint secrets, or Claim-level external task records. The list supports
+the standard `limit` (1–100) and opaque `cursor` parameters. The per-integration route runs the
+same connection-status check for one registered ID and returns bounded latency and failure
+metadata; it never invokes a claim operation or provider business action.
+The POST health-check route persists only the bounded result (status, source, implementation,
+latency, failure code, operation identity, and timestamp); the history route returns those records
+and never exposes credentials or provider payloads. Each health check also creates a Control Plane
+operation record so queued, running, succeeded, and failed execution status is queryable without
+turning the health result into a mutable progress field.
+
+Control Plane operation records use opaque `opr_` identifiers and report a typed kind, subject,
+state, monotonic revision, bounded progress, status URL, result or stable error code, and timestamps.
+They are operational records only; they cannot mutate Claim State, WorkItems, handoffs, messages,
+or configuration values. The operation list supports bounded filters and cursor-shaped responses.
+
+Each claimant or staff model call creates a `model_invocation` operation. Its bounded result contains
+the model purpose, provider-reported model identifier when available, nullable input/output/total
+token counts, and measured latency in milliseconds. Controlled failures use a stable `MODEL_*`
+error code. The record never contains prompts, credentials, provider request payloads, raw provider
+responses, or claimant message content.
+
+`GET /internal/v1/admin/operations/metrics` aggregates the complete persisted operation ledger. Its
+response contains `total`, `by_state`, `by_kind`, model `usage`, `cost`, `rate_limit`, `alerts`, and
+`source`. Usage distinguishes all calls from calls with provider-reported total tokens. Cost is a
+rounded estimate in currency microunits and reports `configured`, `partial`, or `unconfigured` plus
+priced and unpriced call counts. A missing usage report or model price makes the estimate partial;
+it is never replaced with zero-cost certainty. Rate-limit state counts `MODEL_RATE_LIMIT` records in
+the published window. Token and cost alerts report `unknown` when their aggregate is incomplete.
+
+The single-instance `operational` configuration domain has a closed `values` schema containing
+`currency`, one or more unique `model_cost_rates`, `rate_limit_window_seconds`,
+`token_alert_threshold`, `cost_alert_threshold_microunits`, and `rate_limit_alert_count`. Each model
+rate names `model_identifier`, `input_microunits_per_million_tokens`, and
+`output_microunits_per_million_tokens`. Invalid or incomplete values return `422
+OPERATIONAL_CONFIGURATION_INVALID`. The metrics projection resolves only the active published
+configuration selected by the runtime boundary; absent or invalid configuration remains explicit.
+
+Evaluation records use opaque `eval_` identifiers and retain the model, knowledge, rule,
+configuration, dataset, fixture, and source versions used for one evaluation run. They contain
+bounded scenario outcomes and numeric metrics, but never store prompts, claimant messages, provider
+payloads, credentials, or unrestricted personal data. The evaluation API is append-only: a new
+run creates a new record, and an idempotency replay returns the original record.
+
+Knowledge administration uses opaque `knw_` identifiers for immutable source versions. The
+metadata contract requires source identity, insurer/product applicability, jurisdiction,
+document type, authority, visibility, effective period, source URI/key, and a SHA-256 checksum.
+Optional Markdown content is written to the configured object-store adapter; it is never returned
+by the metadata API. The workflow records draft, indexed, failed, awaiting-approval, published,
+withdrawn, and superseded states. Indexing and retrieval checks create bounded operation records,
+and retrieval responses preserve document/version/section/checksum citations. Claim State,
+claim-history, customer policy records, and staff decisions are rejected as ordinary RAG sources.
+
+Agent-rule administration exposes four independent configuration domains: `agent_instruction`,
+`agent_tool_policy`, `agent_rule`, and `feature`. They reuse the configuration repository's
+revision, validation, approval, publication, rollback, supersession, withdrawal, idempotency,
+and audit semantics. Instruction, tool-permission, and controlled-rule changes are forced to the
+high-impact path; feature settings may use normal impact only when they do not weaken an existing
+safety, access, authority, or side-effect boundary. Runtime still consumes only a complete
+published Release Set and deterministic action/authority checks remain outside the configuration
+record.
+
+Each component accepts one closed `values` schema. Unknown fields, values from another component,
+unknown Registry entries, duplicate allow-list entries, and incomplete values return `422
+AGENT_CONFIGURATION_INVALID`.
+
+| Component path | Configuration domain | Required `values` fields |
+| --- | --- | --- |
+| `instructions` | `agent_instruction` | `prompt_version`, `purpose` (`claimant_agent`), and `system_prompt` |
+| `tool_permissions` | `agent_tool_policy` | `policy_version`, `allowed_action_codes`, and `allowed_tool_names` |
+| `controlled_rules` | `agent_rule` | `rules_version`, `disabled_rule_ids`, and `observation_rule_ids` |
+| `features` | `feature` | `feature_version`, `model_assisted_turns`, and `knowledge_retrieval` |
+
+The tool policy can only restrict server-registered actions and tools. It must retain
+`conversation.state_limitation`, `human.create_handoff`, `runtime.fail_safe`,
+`runtime.interrupt_urgent`, and `handoff_store.create`. Controlled rules can disable or observe
+only registered non-protected branch rules; claim-family, urgent, professional-review, and human-
+support rules cannot be disabled or reduced to observation. A Release Set that omits any of the
+four Agent domains, selects invalid values, or selects an instruction whose `prompt_version` does
+not match the selected model fails before the turn with `503
+AGENT_RUNTIME_CONFIGURATION_UNAVAILABLE`. A proposal outside the selected action or tool
+allow-list fails before Claim State mutation with `503 AGENT_ACTION_NOT_PERMITTED` or `503
+AGENT_TOOL_NOT_PERMITTED`.
 
 Configuration records contain an opaque `configuration_id`, monotonically increasing `revision`,
-`domain`, `impact`, lifecycle `state`, non-secret `values`, protected `secret_references`,
+`domain`, `configuration_key`, `impact`, lifecycle `state`, non-secret `values`, protected `secret_references`,
 `author`, `reason`, optional `validation_evidence`, `effective_time`, `previous_version`, and
-`rollback_target`. Secret values are rejected in `values` and are never returned.
+`rollback_target`. `configuration_key` is `default` for single-instance domains and equals
+`service_id` for Integration records. Publication and rollback replace only the active record with
+the same `(domain, configuration_key)`. Secret values are rejected in `values` and are never
+returned.
+
+In the normal runtime profile, Control Plane configuration and Release Set records are persisted
+through the configured `NORTHWIND_CONTROL_PLANE_DB_PATH` repository. Developer/test mode may use
+the in-memory repository explicitly for isolated fixtures; this does not change the API contract
+or permit runtime fallback to an unpublished record.
+
+Account administration uses the existing identity repositories and their configured database
+boundaries. Customer creation accepts `email`, `initial_password`, `display_name`, and optional
+`phone`; staff creation accepts `email`, `initial_password`, `display_name`, and one or more
+registered `roles`. Create responses return the safe account resource and never return password
+hashes or credentials. Account projections include `revision` and `updated_at`; PATCH requests use
+the projected revision in `If-Match` and return `409 REVISION_CONFLICT` without changing the
+account when stale. Deactivating a customer or staff account prevents new authentication while
+preserving existing sessions until normal expiry or explicit revocation.
+
+Session list routes return only opaque `ias_` session IDs, state, revision, creation, expiry,
+revocation and update timestamps, plus server-projected actions. They never return bearer values
+or token hashes. Revocation is a confirmation-required, revision-checked, idempotent operation;
+an already expired or revoked session does not become active again. Every accepted account create,
+update, and session revocation appends an administration-only audit event. These routes do not
+assign Claim ownership, alter Workbench authority, or write Claim State.
+
+Access-policy administration stores role, actor type, scopes, visibility classes, and an optional
+protected credential reference as versioned `access` configuration records. A published policy can
+restrict the static scopes of matching authenticated actor types; it cannot grant authority beyond
+the identity/session boundary or assign roles dynamically. The route exposes only non-secret
+projections and reuses configuration revision, validation, approval, publication, withdrawal,
+rollback, and audit semantics; it never edits Claim State or grants a browser direct access to a
+credential. The cross-resource audit search is an administration-only projection over the same
+append-only audit repository and supports bounded filters without returning raw prompts, provider
+payloads, secrets, or unrestricted claimant content.
+
+Integration health routes return bounded status, source, implementation, latency, failure code,
+and timestamp only. They never expose credentials, provider payloads, or Claim-level external
+task records; health checks are operational evidence, not Claim State. A selected Integration's
+`health_check_timeout_seconds` bounds its connection-status check. Timeout returns an unavailable
+projection with `INTEGRATION_HEALTH_TIMEOUT` and does not invoke a provider business action.
+
+An `integration` configuration's values are provider-neutral and must contain `service_id`,
+`capability`, `source` (`fixture` or `configured_service`), `enabled`, and an optional bounded
+`health_check_timeout_seconds`. The service ID must be one of the integrations assembled by the
+runtime and its capability must match the registered capability; provider-specific payloads,
+credentials, and claim-level task data are not valid values. Multiple services can remain
+published concurrently because each service has its own Integration publication key.
+When an active Release Set exists, internal policy, history, knowledge, evidence-processing,
+claim-creation, and assessor routes invoke only their selected, enabled Integration configuration.
+An omitted service returns `503 RELEASE_SET_INTEGRATION_NOT_SELECTED`; a disabled service returns
+`503 INTEGRATION_DISABLED`; a selected source that contradicts the assembled adapter returns `503
+INTEGRATION_CONFIGURATION_MISMATCH`. Handoff notification uses the same guard, but a disabled or
+unselected dispatcher preserves the durable handoff and reports the existing local-queue fallback.
 
 Lifecycle states are `draft`, `awaiting_approval`, `published`, `withdrawn`, or `superseded`.
 Validation accepts explicit results for each named scenario, including evidence. A failed result
@@ -215,6 +413,14 @@ IDEMPOTENCY_CONFLICT`. Stale or missing/invalid `If-Match` values return `409 RE
 `409 REVISION_REQUIRED`; missing resources return `404 CONFIGURATION_NOT_FOUND`; invalid state
 changes return `400 INVALID_CONFIGURATION_TRANSITION`; plaintext secrets return
 `422 SECRET_VALUE_FORBIDDEN`.
+
+High-impact publication requires an immutable approval decision recorded for the exact validated
+revision by an administrator other than the configuration author. The approval endpoint records
+the reviewer, decision, reason, revision, and timestamp without editing configuration values.
+An approved decision keeps the revision in `awaiting_approval` until the separate publish request;
+a rejected decision records the review and creates the next draft revision with validation evidence
+cleared. Reusing an approval identity for the same revision is rejected, and approval records are
+never rewritten or returned with secret values.
 
 For the `data_profile` domain, `values` is a closed object containing exactly
 `data_runtime_profile` (`fixture`, `local_mvp`, `cloudflare`, `mongodb`, or `aws`) and
@@ -250,6 +456,31 @@ from a draft or superseded record. The runtime repeats the deployment-binding ch
 constructing a provider adapter or reading a credential environment variable. A stored published
 record cannot redirect a deployment-approved credential to another endpoint or weaken the
 claimant Runtime's purpose, privacy, prompt-version, or structured-output boundary.
+
+Release Sets provide the cross-domain publication boundary. A release set contains immutable
+domain-keyed configuration references, service-keyed Integration references, product-keyed
+knowledge references, an environment, and a runtime profile. Each reference carries the selected
+record ID and revision. Its lifecycle is `draft`, `validation`, `published`,
+`superseded`, or `withdrawn`. Validation fails when a referenced configuration or knowledge
+version is missing, has the wrong domain, service or product key, or is not itself `published`; a failed
+validation does not change any configuration, knowledge, or release-set state. Publication makes
+one complete release set active for the `(environment, runtime_profile)` pair and supersedes the
+previous active set atomically. Rollback creates a new published release set that references the
+selected prior set and preserves both histories. Release-set writes use `If-Match` and
+`Idempotency-Key`, and every accepted or rejected transition records an append-only audit event.
+
+`GET /internal/v1/admin/runtime-snapshots` returns the active release set, its referenced
+configuration records, service-keyed Integration records, and selected published knowledge
+versions as one runtime snapshot. It
+fails with `404 ACTIVE_RELEASE_SET_NOT_FOUND` when no published set exists, with
+`409 RELEASE_SET_CONFIGURATION_UNAVAILABLE` when a published set cannot resolve one of its
+referenced immutable configuration versions, with `422 RELEASE_SET_INTEGRATION_NOT_FOUND` or `422
+RELEASE_SET_INTEGRATION_NOT_PUBLISHED` when a selected Integration revision cannot be resolved,
+and with `422 RELEASE_SET_KNOWLEDGE_NOT_FOUND` or
+`422 RELEASE_SET_KNOWLEDGE_NOT_PUBLISHED` when a selected knowledge version cannot be resolved.
+Runtime consumers must not combine fields
+from separate release sets or silently replace a missing selected Integration or knowledge
+version with another published version.
 
 ## Claimant Identity and Account API
 
@@ -2538,15 +2769,20 @@ All errors use one envelope:
 | `AUTHENTICATION_REQUIRED` | `401` | No valid principal |
 | `ACCESS_DENIED` | `403` | Principal lacks permission |
 | `RESOURCE_NOT_FOUND` | `404` | Resource absent or concealed |
+| `ACCOUNT_NOT_FOUND` | `404` | Customer or staff account is absent |
+| `SESSION_NOT_FOUND` | `404` | Account session is absent or does not belong to the requested account |
 | `INVALID_STATE_TRANSITION` | `400` | Requested transition is not allowed |
 | `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown, unpublished, or not exposed as filterable by the backend Registry |
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
+| `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
+| `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
 | `CONFIGURATION_APPROVER_CONFLICT` | `403` | A high-impact configuration's sole author attempted publication |
 | `PROVIDER_CONFIGURATION_INVALID` | `422` | Provider configuration is incomplete or structurally invalid |
 | `PROVIDER_CONFIGURATION_UNAVAILABLE` | `422` | Provider configuration is unverified or outside deployment authority |
+| `OPERATIONAL_CONFIGURATION_INVALID` | `422` | Operational cost, rate-limit, or alert configuration is incomplete or invalid |
 | `SECRET_VALUE_FORBIDDEN` | `422` | Secret values must use protected references |
 | `ACTIVE_SESSION_EXISTS` | `409` | A conflicting active session exists |
 | `UNSUPPORTED_MEDIA_TYPE` | `415` | File type is not allowed |
@@ -2594,6 +2830,8 @@ Returns readiness without secrets or private configuration:
     "data_runtime_profile": "fixture",
     "object_storage_adapter": "fixture",
     "agent": "not_configured",
+    "control_plane_release_set": "none",
+    "control_plane_domains": "none",
     "policy": "using_fixture",
     "claim_history": "using_fixture",
     "knowledge_documents": "using_fixture",
@@ -2615,6 +2853,12 @@ connected service.
 bundle and object-store adapter. They are labels only; connection credentials, endpoints,
 physical keys, and provider payloads are never returned. A process must report one profile and
 must not combine capabilities from another profile.
+
+`control_plane_release_set` identifies the active published Release Set by its opaque ID, or
+`none` when the explicit development/bootstrap fallback is in use. `control_plane_domains` is a
+comma-separated list of configuration domains loaded from that Release Set. These fields expose
+which published boundary the process resolved without returning configuration values or secrets;
+an `unavailable` value means the active Release Set could not be resolved safely.
 
 The `agent` check is `not_configured` for the default controlled prototype provider and
 `configured` when the provider-neutral model gateway has composed successfully. The

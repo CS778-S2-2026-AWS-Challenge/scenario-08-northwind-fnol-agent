@@ -58,10 +58,10 @@ projections, fixtures, and transaction tests change together.
 
 | Group | Records | Primary ownership |
 | --- | --- | --- |
-| Customer | authorised identity reference, permitted contact and communication preferences | `customer_id` |
-| Claimant auth session | hash of an opaque development/test token, authenticated customer reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `customer_id` |
-| Staff account | local/runtime staff identity, salted password hash, display name, roles, and active state | `staff_id` |
-| Staff auth session | hash of an opaque staff token, authenticated staff reference, creation, expiry, and revocation timestamps | `token_hash`, linked to `staff_id` |
+| Customer | authorised identity reference, permitted contact and communication preferences, active state, revision, and update time | `customer_id` |
+| Claimant auth session | `ias_` session identity, hash of an opaque development/test token, authenticated customer reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `customer_id`; token lookup uses `token_hash` |
+| Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
+| Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
@@ -73,11 +73,11 @@ projections, fixtures, and transaction tests change together.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | `claim_id` and consent or operation identity |
+| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | integration identity, `claim_id`, or consent/operation identity |
 | External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
-| Audit | append-only claim, integration, configuration, and access events | event identity and subject |
+| Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
 | Retention | expiry, hold, purge eligibility, deletion or anonymisation result | subject identity and retention job |
 
 Original evidence bytes, policy documents, and other large objects are stored through
@@ -120,6 +120,12 @@ remains compatible with the Admin API and separate from this cross-domain reposi
 envelope. #415 does not redefine that API projection or claim that every target action,
 failure, access, or configuration event is already wired.
 
+Control Plane access policies are persisted as versioned `configuration` records with
+`domain=access`. Their values contain a role, actor type, scopes, visibility classes, and an
+optional protected credential reference; account password hashes and bearer tokens remain in the
+identity stores and are never copied into Control Plane records. Administration audit search reads
+the append-only audit collection through a bounded, filterable projection.
+
 ## Required Access Patterns
 
 1. Read one claim after verifying customer ownership or authorised staff access.
@@ -137,40 +143,50 @@ failure, access, or configuration event is already wired.
 12. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
 13. Resolve the active configuration version and read its immutable publication record.
-14. Read customer memory only through a purpose-limited, visibility-filtered access path.
-15. Create and process follow-up tasks by due time, responsibility, priority, and status.
-16. Append audit events and query them by authorised subject and time range.
-17. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
+14. List administration audit events by bounded actor, subject, event type, and time filters without
+    exposing unrestricted claimant or provider payloads.
+15. Read customer memory only through a purpose-limited, visibility-filtered access path.
+16. Create and process follow-up tasks by due time, responsibility, priority, and status.
+17. Append audit events and query them by authorised subject and time range.
+18. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
     state effect, and final role projection without exposing hidden or restricted data.
-18. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
+19. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
     priority without treating Claim lifecycle as the only work status.
-19. Reconcile an external request by Northwind operation identity, idempotency key, or
+20. Reconcile an external request by Northwind operation identity, idempotency key, or
     provider reference before any retry after an unknown outcome.
-20. Resolve one active, evaluated Model Profile by purpose and privacy class without
+21. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
-21. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+22. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
     browser-supplied customer identifier to alter the authenticated principal.
-22. Read and update the authenticated claimant's approved profile and communication
+23. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
-23. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+24. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-24. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+25. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-25. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+26. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-26. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+27. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-27. Append one Staff Agent question and answer atomically, resolve retries by
+28. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn.
+29. Create a unique Customer or Staff account through its identity repository without exposing the
+    password hash or allowing an administration retry to create a duplicate account.
+30. Conditionally update approved Customer or Staff account fields by account revision; a stale
+    write returns the current revision without changing the record.
+31. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+    without returning bearer values or token hashes.
+32. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+    session under another account is not exposed and a retry cannot reactivate it.
 
 ## Development/Test Identity Invariants
 
 - Raw claimant access tokens are returned once and are never persisted; repositories retain
   only a one-way token hash.
-- A session binds exactly one server-selected `customer_id`, creation time, expiry time, and
-  optional revocation time.
+- A session binds one opaque `ias_` identity to exactly one server-selected account, revision,
+  creation time, expiry time, update time, and optional revocation time.
 - Expired or revoked sessions cannot authenticate and logout is immediately effective.
 - Synthetic credential verification and session persistence are fixture capabilities only;
   selecting a production environment fails closed until an approved identity provider and
@@ -179,6 +195,16 @@ failure, access, or configuration event is already wired.
 - Authentication data cannot grant staff roles, change claim ownership, or enter Claim State.
 - Staff password hashes and session hashes remain in the staff identity store; they are not Claim,
   claimant session, or Workbench projection fields.
+- Customer account active state is persisted in the claimant identity store and staff account
+  active state is persisted in the independent staff identity store. Administration reads and
+  updates these records through their repository interfaces; no Control Plane route writes Claim
+  State or Workbench records.
+- Customer and Staff account writes use monotonically increasing revisions. Session revocation
+  advances only the targeted session revision and preserves its prior creation and expiry times.
+- Existing local SQLite identity databases are upgraded in place with account revisions,
+  timestamps, opaque session IDs, and session revisions. The migration preserves account/session
+  relationships and assigns each legacy session one stable `ias_` ID before creating its unique
+  lookup index.
 - Staff logout revokes the server-side session immediately. The local adapter does not by itself
   establish production IdP, MFA, recovery, or per-Claim entitlement readiness.
 
@@ -416,23 +442,125 @@ failure, access, or configuration event is already wired.
 
 ## Configuration and Control Plane Invariants
 
-The fixture configuration repository used by the bounded Admin API stores immutable revisions
-behind the same provider-neutral boundary that later profiles must implement. Configuration IDs
+The configuration repository stores immutable revisions behind a provider-neutral boundary.
+Developer/test mode may use an in-memory implementation; the normal local/runtime path uses a
+SQLite implementation selected by `NORTHWIND_CONTROL_PLANE_DB_PATH`. Configuration IDs
 use the `cfg_` prefix and audit event IDs use `aud_`; the physical partition and sort-key mapping
 is profile-specific and must preserve these access patterns.
 
-Each configuration revision contains `configuration_id`, `domain`, `revision`, `state`,
+Each configuration revision contains `configuration_id`, `domain`, `configuration_key`, `revision`, `state`,
 `impact`, non-secret `values`, protected `secret_references`, `author`, `reason`, optional
 `validation_evidence`, `effective_time`, `previous_version`, `rollback_target`, and
-`updated_at`. Audit events contain `event_id`, `configuration_id`, `revision`, optional
+`updated_at`. Single-instance domains use `configuration_key=default`; Integration records use
+their registered `service_id`. Active publication and rollback access patterns are scoped by
+`(domain, configuration_key)`. Records written before this field existed derive the Integration
+key from `values.service_id` and otherwise use `default`. Audit events contain `event_id`,
+`configuration_id`, `revision`, optional
 `previous_revision`, `actor`, `action`, `reason`, `outcome`, top-level `changed_fields`, and
 `created_at`. `changed_fields` records field names only and never duplicates configuration or
 secret values. Audit events are append-only and are not
 deleted or rewritten during withdrawal, supersession, or rollback.
 
+Active configuration lookup inspects only the latest immutable revision of each logical
+`configuration_id`. A historical published revision is not active after a later revision withdraws
+or supersedes it. The in-memory and SQLite repositories use the same rule, so fixture execution
+cannot revive a historical publication that the normal persistence adapter would exclude.
+
+Configuration approval records use `apr_` identifiers and contain
+`approval_id`, `configuration_id`, `configuration_revision`, `reviewer`, `decision`, `reason`,
+and `created_at`. One immutable decision is allowed for a configuration revision. Approval records
+are stored separately from configuration revisions and are read only for the matching revision;
+they never contain configuration values, secret values, or Claim State. A rejected decision is
+written atomically with the next draft revision and its audit events. The normal local SQLite
+repository stores these records in `configuration_approvals` beside the configuration and audit
+tables.
+
+Release Set records use `rel_` identifiers and contain `release_set_id`, `environment`,
+`runtime_profile`, `revision`, `state`, immutable `configuration_refs` (configuration ID plus
+revision), service-keyed immutable `integration_refs` (configuration ID plus revision),
+product-keyed immutable `knowledge_refs` (knowledge ID plus revision), `author`,
+`reason`, optional validation evidence, effective time, previous release set, rollback target, and
+`updated_at`. A Runtime Snapshot is a read projection of one published Release Set, its
+referenced published configuration revisions, selected Integration revisions, and selected
+published knowledge versions; it
+is not an independent mutable source of configuration truth. Release Set validation verifies that
+each Integration and knowledge reference exists, matches its service or product key, and is
+published. Release Set audit
+events use `aud_` identifiers and are append-only. The SQLite implementation persists these
+records and idempotency keys in the same Control Plane database path. The repository must support
+lookup of the active Release Set by `(environment, runtime_profile)`, immutable revision reads,
+optimistic-concurrency writes, idempotent transitions, and atomic supersede/publication or
+rollback/publication.
+
+Integration health-check records use `ihc_` identifiers and persist only the registered
+integration ID, bounded health/source/implementation result, latency, failure code, and check
+timestamp. They may reference an `opr_` operation record that owns the health-check execution
+status. They are operational evidence, not Claim State or external-task records.
+
+Control Plane operation records use `opr_` identifiers and are stored in
+`control_plane_operations`. Each record contains its operation kind, subject type and ID, typed
+state, monotonic revision, bounded progress, status URL, optional bounded result, optional stable
+error code, and created/updated timestamps. State updates use the revision as an optimistic
+concurrency guard. Operation records remain separate from Claim State and do not carry credentials,
+provider payloads, or unrestricted personal data.
+
+A `model_invocation` operation stores only its purpose, nullable provider model identifier,
+nullable provider-reported input/output/total token counts, measured latency, outcome, and stable
+failure code. It does not store the prompt, claimant or staff message, provider request identifier,
+credential, or raw response. Aggregate cost is not persisted as a second source of truth. The Admin
+service calculates it from these immutable usage records and the active published `operational`
+configuration. That configuration is a normal single-instance configuration record whose closed
+values contain currency, unique per-model input/output rates in currency microunits per million
+tokens, one rate-limit window, and token, cost, and rate-limit alert thresholds.
+
+Evaluation evidence uses `eval_` identifiers and is stored in `control_plane_evaluations`. Each
+immutable record identifies its purpose, model version, optional knowledge/rule/configuration
+versions, dataset and fixture versions, source versions, bounded scenario outcomes, metrics,
+threshold, and completion/error state. Evaluation records are evidence for publication and
+operations; they are not Claim State, do not contain prompts or provider payloads, and are never
+updated in place.
+
+Knowledge source metadata uses `knw_` identifiers and is stored in
+`control_plane_knowledge_sources`. A row represents one immutable `(document_id, version)`
+candidate and stores only governed metadata, lifecycle/revision state, checksum, chunk count,
+operation reference, validation evidence, and version links. Source bytes, chunks, and indexes
+remain in the configured knowledge object store. The repository enforces unique document/version
+identity and optimistic revision writes; publication supersedes the prior published version for
+that document while retaining its record. Knowledge records never contain Claim State, claim
+history, staff decisions, credentials, or provider payloads.
+
+Agent instruction, tool-permission, controlled-rule, and feature settings are stored as separate
+versioned `configuration_records` domains (`agent_instruction`, `agent_tool_policy`, `agent_rule`,
+and `feature`). Each component keeps its own immutable revisions and lifecycle/audit history, so a
+tool-permission change cannot silently rewrite instructions or feature settings. High-impact
+components use the existing independent approval record and publication guard; no component may
+write production Claim State.
+
+An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
+turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID
+and revision, and each selected knowledge ID, revision, and external version. It does not copy
+configuration values, system instructions, knowledge content, endpoint data, or secret references.
+The record is an audit coordinate into immutable Control Plane history rather than a second source
+of runtime configuration truth.
+
+Access policies use the same `configuration_records` table with `domain=access`. Their closed
+values contain the named role, actor type, scopes, visibility classes, active flag, and optional
+protected credential reference. They describe an administration policy; they do not replace the
+identity stores, assign roles by browser input, or grant permission until a published policy is
+resolved by a server-side authorization boundary.
+
+Admin list and detail responses may add an `allowed_actions` projection containing the registered
+action code, availability, expected revision, and a bounded reason. This field is not persisted.
+The application service derives it from the latest resource revision, lifecycle state, immutable
+approval records, and authenticated principal on every read. A cached or client-supplied action
+projection never grants mutation authority and cannot replace the endpoint's state, identity, and
+revision checks.
+
 - Draft configuration is separate from the active published version.
-- Runtime reads resolve only the single active `published` record for a domain and fail closed
+- Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
   when no publication exists; drafts and unverified provider records are never runtime fallback.
+  Knowledge reads resolve the exact product-keyed version selected by the active Release Set and
+  never fall back to a different published version while that Release Set is active.
 - Publication records author, reason, validation evidence, approver when required,
   effective time, previous version, and rollback target.
 - Published versions are immutable. Rollback publishes or reactivates an approved prior
@@ -446,6 +574,14 @@ deleted or rewritten during withdrawal, supersession, or rollback.
   `fixture` with either adapter and requires `s3_compatible` for `local_mvp`, `cloudflare`,
   `mongodb`, and `aws`; unverified cloudflare, mongodb, and aws profiles remain draft-only
   until their complete provider bundles are verified.
+- An `integration` configuration revision stores provider-neutral metadata only: registered
+  `service_id`, capability, source class, enabled flag, and bounded health-check timeout. The
+  service ID must match the runtime registry; provider payloads and secret values remain outside
+  the record. Each service uses its `service_id` as the publication key, so publishing one
+  Integration does not supersede another service.
+- Integration health-check records use `ihc_` identifiers and persist only the registered
+  integration ID, bounded health/source/implementation result, latency, failure code, and check
+  timestamp. They are operational evidence, not Claim State or external-task records.
 - Administrative configuration must not provide unrestricted direct edits to production
   Claim State.
 - Retention and purge configuration is versioned policy, not an unreviewed database job
