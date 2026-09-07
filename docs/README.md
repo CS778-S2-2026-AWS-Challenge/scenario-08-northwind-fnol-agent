@@ -52,6 +52,7 @@ them:
 - [First Control Plane Interface Contract](control-plane-interface.md)
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
+- [Demonstration Material Catalogue](demonstration-material-catalogue.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [Identity and Developer-Mode Contract](identity-and-developer-mode.md)
