@@ -62,6 +62,18 @@ class WorkPriorityLevel(StrEnum):
     IMMEDIATE = 'immediate'
 
 
+class WorkbenchQueueView(StrEnum):
+    ALL = 'all'
+    URGENT = 'urgent'
+    HUMAN_REQUESTS = 'human_requests'
+    INCOMPLETE_CLAIMS = 'incomplete_claims'
+    READY_TO_PROGRESS = 'ready_to_progress'
+    AWAITING_EVIDENCE = 'awaiting_evidence'
+    PROFESSIONAL_REVIEW = 'professional_review'
+    READY_TO_CREATE = 'ready_to_create'
+    CREATED_ROUTED = 'created_routed'
+
+
 class MissingInformationAttention(StrEnum):
     REQUIRED_NOW = 'required_now'
     NEEDED_NEXT = 'needed_next'
@@ -349,6 +361,23 @@ class WorkbenchClaimListItem(ContractModel):
 class WorkbenchClaimListResponse(ContractModel):
     items: list[WorkbenchClaimListItem]
     page: PageInfo
+
+
+class WorkbenchFilterOption(ContractModel):
+    value: str
+    label: str
+
+
+class WorkbenchTagFilterOption(WorkbenchFilterOption):
+    category: str
+
+
+class WorkbenchClaimFilterMetadata(ContractModel):
+    views: list[WorkbenchFilterOption]
+    workflow_states: list[WorkbenchFilterOption]
+    priorities: list[WorkbenchFilterOption]
+    tags: list[WorkbenchTagFilterOption]
+    tag_registry_version: str
 
 
 class WorkbenchClaimDetail(WorkbenchClaimListItem):

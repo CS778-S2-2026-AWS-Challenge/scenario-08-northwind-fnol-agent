@@ -1454,6 +1454,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
+| `GET` | `/workbench/claims/filter-metadata` | Read canonical staff queue filter options |
 | `GET` | `/workbench/claims/{claim_id}` | Read full authorised claim detail |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content-data` | Read browser-safe evidence content as authorised staff |
@@ -1528,13 +1529,20 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `urgent`, `human_requests`, `new_untriaged`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
-| `priority` | `standard`, `high`, `urgent`, `immediate` |
+| `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
 | `next_action` | `AgentAction` |
 | `tag` | One published staff tag code from the backend Staff Tag Registry |
+| `search` | Case-insensitive text, up to 200 characters |
 | `updated_before`, `updated_after` | RFC 3339 timestamp |
+
+Filters can be combined and are applied before queue ordering and cursor pagination.
+`search` matches only staff-list projection fields: Claim ID, display reference, incident family
+and summary, current requested outcome, and projected tag codes and labels. Claimant display name
+is not searchable until an authorised staff-safe identity projection populates it. Search does not
+inspect unprojected Claim fields or change the backend rank order.
 
 Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
@@ -1582,15 +1590,28 @@ Signal decision, handoff, Evidence change, WorkItem transition, or authorised bu
 changes the source record and the backend recomputes the projection. Claimant routes MUST NOT
 include this staff-only projection.
 
-The `tag` filter uses the same backend Registry. Unknown, draft, deprecated, or retired codes
-return `400 INVALID_TAG_FILTER`; a published code returns only Claims whose computed `tags`
-contains that code. The current endpoint accepts one code. Future grouped OR/AND filtering requires
-an explicit contract extension.
+The `tag` filter uses the same backend Registry and filterability rule as `filter-metadata`.
+Unknown, draft, deprecated, retired, or non-filterable codes return `400 INVALID_TAG_FILTER`; a
+published, filterable code returns only Claims whose computed `tags` contains that code. The
+current endpoint accepts one code. Future grouped OR/AND filtering requires an explicit contract
+extension.
 
 `urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
 contains claims with an open claimant-support handoff whose support need is `human_requested`.
+`incomplete_claims` contains Claims in the existing collecting/incomplete queue. It does not
+represent or infer a triage status.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
+
+### `GET /api/v1/workbench/claims/filter-metadata`
+
+Returns the backend-owned queue filter contract for authenticated staff. The response contains
+`views`, `workflow_states`, `priorities`, and all published, filterable `tags`, plus
+`tag_registry_version`. Every option contains `value` and `label`; tag options also contain
+`category`. The Workbench uses these values to validate route state and render controls instead of
+maintaining a second enum or deriving options from loaded Claim pages.
+`priorities` contains every `WorkPriorityLevel` that the queue can project, including `routine`
+for Claims whose workflow state is still `collecting`.
 
 ### `GET /api/v1/workbench/claims/{claim_id}`
 
@@ -2495,7 +2516,7 @@ All errors use one envelope:
 | `ACCESS_DENIED` | `403` | Principal lacks permission |
 | `RESOURCE_NOT_FOUND` | `404` | Resource absent or concealed |
 | `INVALID_STATE_TRANSITION` | `400` | Requested transition is not allowed |
-| `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown or is not published in the backend Registry |
+| `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown, unpublished, or not exposed as filterable by the backend Registry |
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |

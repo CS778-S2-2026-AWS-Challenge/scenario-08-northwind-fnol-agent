@@ -12,6 +12,24 @@ const tag = {
   source_refs: ['field:vehicle.drivable'],
 }
 
+const filterMetadata = {
+  views: [
+    { value: 'all', label: 'All active work' },
+    { value: 'urgent', label: 'Urgent' },
+    { value: 'incomplete_claims', label: 'Incomplete claims' },
+  ],
+  workflow_states: [
+    { value: 'collecting', label: 'Collecting' },
+    { value: 'professional_review', label: 'Professional review' },
+  ],
+  priorities: [
+    { value: 'standard', label: 'Standard' },
+    { value: 'high', label: 'High' },
+  ],
+  tags: [{ value: tag.code, label: tag.label, category: tag.category }],
+  tag_registry_version: '0.2',
+}
+
 const claim = {
   claim_id: 'clm_1',
   display_reference: 'NW-1042',
@@ -26,23 +44,128 @@ const claim = {
   tags: [tag],
 }
 
+function renderQueue(overrides = {}) {
+  const props = {
+    claims: [claim],
+    loading: false,
+    error: '',
+    onRetry: vi.fn(),
+    selectedId: null,
+    filterMetadata,
+    view: 'all',
+    onView: vi.fn(),
+    workflowState: '',
+    onWorkflowState: vi.fn(),
+    priority: '',
+    onPriority: vi.fn(),
+    tagFilter: '',
+    onTag: vi.fn(),
+    search: '',
+    onSearch: vi.fn(),
+    onClearFilters: vi.fn(),
+    nextCursor: null,
+    onLoadMore: vi.fn(),
+    onOpen: vi.fn(),
+    ...overrides,
+  }
+  render(<QueuePanel {...props} />)
+  return props
+}
+
 describe('QueuePanel', () => {
   it('uses backend tag codes for filtering while displaying staff labels', async () => {
     const onTag = vi.fn()
     const user = userEvent.setup()
-    render(<QueuePanel claims={[claim]} loading={false} view="all" onView={vi.fn()} tagFilter="" tags={[tag]} onTag={onTag} nextCursor={null} onLoadMore={vi.fn()} onOpen={vi.fn()} />)
+    renderQueue({ onTag })
 
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     expect(screen.getAllByText('Vehicle not drivable')).toHaveLength(2)
     await user.selectOptions(screen.getByLabelText('Staff tag'), tag.code)
     expect(onTag).toHaveBeenCalledWith(tag.code)
   })
 
+  it('uses the backend incomplete-claims value and label', async () => {
+    const onView = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({ onView })
+
+    await user.selectOptions(screen.getByLabelText('Current work'), 'incomplete_claims')
+
+    expect(screen.getByRole('option', { name: 'Incomplete claims' })).toHaveValue('incomplete_claims')
+    expect(onView).toHaveBeenCalledWith('incomplete_claims')
+  })
+
+  it('exposes supported status and priority filters and visible queue values', async () => {
+    const onWorkflowState = vi.fn()
+    const onPriority = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({ onWorkflowState, onPriority })
+
+    expect(screen.getByText('Priority: Standard')).toBeInTheDocument()
+    expect(screen.getByText('Motor · Status: Collecting')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    await user.selectOptions(screen.getByLabelText('Claim status'), 'professional_review')
+    await user.selectOptions(screen.getByLabelText('Claim priority'), 'high')
+
+    expect(onWorkflowState).toHaveBeenCalledWith('professional_review')
+    expect(onPriority).toHaveBeenCalledWith('high')
+  })
+
+  it('distinguishes filtered no-results and clears the current filter state', async () => {
+    const onClearFilters = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({
+      claims: [],
+      view: 'urgent',
+      workflowState: 'professional_review',
+      priority: 'urgent',
+      tagFilter: tag.code,
+      search: 'NW-4040',
+      onClearFilters,
+    })
+
+    expect(screen.getByText('No claims match the current filters.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+
+    expect(onClearFilters).toHaveBeenCalledOnce()
+  })
+
+  it('keeps queue navigation available when the current view has no claims', () => {
+    renderQueue({ claims: [] })
+
+    expect(screen.getByText('No claims are currently in this queue.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Current work')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search claims')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Claim status')).not.toBeInTheDocument()
+  })
+
+  it('uses an accessible disclosure for secondary filters', async () => {
+    const user = userEvent.setup()
+    renderQueue()
+
+    const toggle = screen.getByRole('button', { name: 'Filters' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'queue-secondary-filters')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Claim status')).toBeInTheDocument()
+  })
+
   it('loads the next backend page only when a cursor is available', async () => {
     const onLoadMore = vi.fn()
     const user = userEvent.setup()
-    render(<QueuePanel claims={[claim]} loading={false} view="all" onView={vi.fn()} tagFilter="" tags={[tag]} onTag={vi.fn()} nextCursor="cursor-2" onLoadMore={onLoadMore} onOpen={vi.fn()} />)
+    renderQueue({ nextCursor: 'cursor-2', onLoadMore })
 
     await user.click(screen.getByRole('button', { name: 'Load more Claims' }))
     expect(onLoadMore).toHaveBeenCalledOnce()
+  })
+
+  it('labels the visible count as loaded when more filtered results are available', () => {
+    renderQueue({ priority: 'high', nextCursor: 'cursor-2' })
+
+    expect(screen.getByText('1 loaded')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load more Claims' })).toBeInTheDocument()
   })
 })

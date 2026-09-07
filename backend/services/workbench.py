@@ -34,7 +34,11 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.staff_agent import StaffAgentMessageRole
-from backend.domain.tag_registry import get_staff_tag_definition
+from backend.domain.tag_registry import (
+    TAG_REGISTRY_VERSION,
+    get_filterable_staff_tag_definition,
+    list_filterable_staff_tag_definitions,
+)
 from backend.domain.workbench import (
     ActionAvailability,
     ClaimLifecycleState,
@@ -52,6 +56,7 @@ from backend.domain.workbench import (
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
     WorkbenchClaimDetail,
+    WorkbenchClaimFilterMetadata,
     WorkbenchClaimListItem,
     WorkbenchClaimListResponse,
     WorkbenchCollaborationRequestsResponse,
@@ -67,6 +72,7 @@ from backend.domain.workbench import (
     WorkbenchExternalRequestsResponse,
     WorkbenchFieldItem,
     WorkbenchFieldsResponse,
+    WorkbenchFilterOption,
     WorkbenchHandoffsResponse,
     WorkbenchIncidentSummary,
     WorkbenchIncompleteContext,
@@ -76,6 +82,7 @@ from backend.domain.workbench import (
     WorkbenchOwnershipProjection,
     WorkbenchPriorityProjection,
     WorkbenchPriorityReason,
+    WorkbenchQueueView,
     WorkbenchResourcePage,
     WorkbenchResponsibility,
     WorkbenchRetrievalsResponse,
@@ -86,6 +93,7 @@ from backend.domain.workbench import (
     WorkbenchSignalDetail,
     WorkbenchSignalsResponse,
     WorkbenchStaffSummary,
+    WorkbenchTagFilterOption,
     WorkbenchWaitingExternalService,
     WorkbenchWorkItemsResponse,
     WorkbenchWorkSummary,
@@ -117,6 +125,18 @@ _HANDOFF_PRIORITY = {
     HandoffPriority.URGENT: WorkPriorityLevel.URGENT,
     HandoffPriority.HIGH: WorkPriorityLevel.HIGH,
     HandoffPriority.STANDARD: WorkPriorityLevel.STANDARD,
+}
+
+_QUEUE_VIEW_LABELS = {
+    WorkbenchQueueView.ALL: 'All active work',
+    WorkbenchQueueView.URGENT: 'Urgent',
+    WorkbenchQueueView.HUMAN_REQUESTS: 'Staff assistance',
+    WorkbenchQueueView.INCOMPLETE_CLAIMS: 'Incomplete claims',
+    WorkbenchQueueView.READY_TO_PROGRESS: 'Ready to progress',
+    WorkbenchQueueView.AWAITING_EVIDENCE: 'Awaiting evidence',
+    WorkbenchQueueView.PROFESSIONAL_REVIEW: 'Professional review',
+    WorkbenchQueueView.READY_TO_CREATE: 'Ready to create',
+    WorkbenchQueueView.CREATED_ROUTED: 'Created and routed',
 }
 
 
@@ -936,19 +956,90 @@ def _primary_action(
     return None
 
 
-def _matches_view(item: WorkbenchClaimListItem, view: str | None) -> bool:
-    if view in {None, 'all'}:
+def get_workbench_claim_filter_metadata(
+    principal: Principal,
+) -> WorkbenchClaimFilterMetadata:
+    """Return the canonical options supported by the staff queue.
+
+    Args:
+        principal: Authenticated staff principal.
+
+    Returns:
+        Backend-owned labels and values for every queue filter.
+
+    Raises:
+        ApiError: The caller is not an authenticated staff principal.
+    """
+
+    if principal.actor_type != 'staff':
+        raise _staff_access_required()
+    return WorkbenchClaimFilterMetadata(
+        views=[
+            WorkbenchFilterOption(value=value.value, label=_QUEUE_VIEW_LABELS[value])
+            for value in WorkbenchQueueView
+        ],
+        workflow_states=[
+            WorkbenchFilterOption(
+                value=value.value,
+                label=value.value.replace('_', ' ').capitalize(),
+            )
+            for value in WorkflowState
+        ],
+        priorities=[
+            WorkbenchFilterOption(value=value.value, label=value.value.capitalize())
+            for value in WorkPriorityLevel
+        ],
+        tags=[
+            WorkbenchTagFilterOption(
+                value=definition.code,
+                label=definition.staff_label,
+                category=definition.category.value,
+            )
+            for definition in list_filterable_staff_tag_definitions()
+        ],
+        tag_registry_version=TAG_REGISTRY_VERSION,
+    )
+
+
+def _matches_view(item: WorkbenchClaimListItem, view: WorkbenchQueueView | None) -> bool:
+    if view is None or view is WorkbenchQueueView.ALL:
         return True
-    if view == 'urgent':
+    if view is WorkbenchQueueView.URGENT:
         return item.priority_projection.level in {
             WorkPriorityLevel.IMMEDIATE,
             WorkPriorityLevel.URGENT,
         }
-    if view == 'human_requests':
+    if view is WorkbenchQueueView.HUMAN_REQUESTS:
         return item.work_summary.queue_key == 'claimant_support'
-    if view == 'awaiting_evidence':
+    if view is WorkbenchQueueView.AWAITING_EVIDENCE:
         return any(value.kind == 'evidence' for value in item.work_summary.missing_information)
-    return item.work_summary.queue_key == view
+    if view is WorkbenchQueueView.INCOMPLETE_CLAIMS:
+        return item.work_summary.queue_key == 'incomplete_claims'
+    if view is WorkbenchQueueView.READY_TO_CREATE:
+        return item.lifecycle_state is ClaimLifecycleState.READY_TO_CREATE
+    return item.work_summary.queue_key == view.value
+
+
+def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
+    if search is None:
+        return True
+    query = search.strip().casefold()
+    if not query:
+        return True
+    values = [
+        item.claim_id,
+        item.display_reference,
+        item.incident.family,
+        item.incident.summary,
+        (
+            item.work_summary.current_work_item.requested_outcome
+            if item.work_summary.current_work_item is not None
+            else None
+        ),
+    ]
+    values.extend(tag.code for tag in item.tags)
+    values.extend(tag.label for tag in item.tags)
+    return any(query in value.casefold() for value in values if value)
 
 
 def _build_projection(
@@ -1105,8 +1196,11 @@ def _incident_summary(claim: WorkingClaim) -> str:
 def list_workbench_claims(
     repository: PersistenceRepository,
     principal: Principal,
-    view: str | None = None,
+    view: WorkbenchQueueView | None = None,
+    workflow_state: WorkflowState | None = None,
+    priority: WorkPriorityLevel | None = None,
     tag: str | None = None,
+    search: str | None = None,
     limit: int = 25,
     cursor: str | None = None,
 ) -> WorkbenchClaimListResponse:
@@ -1114,12 +1208,12 @@ def list_workbench_claims(
         raise _staff_access_required()
     if tag is not None:
         try:
-            get_staff_tag_definition(tag)
+            get_filterable_staff_tag_definition(tag)
         except ValueError as error:
             raise ApiError(
                 status_code=400,
                 code='INVALID_TAG_FILTER',
-                message='The requested staff tag is not published.',
+                message='The requested staff tag is not available as a queue filter.',
                 details=[ErrorDetail(field='tag', reason=tag)],
             ) from error
     items: list[WorkbenchClaimListItem] = []
@@ -1128,7 +1222,13 @@ def list_workbench_claims(
         assert isinstance(projected, WorkbenchClaimListItem)
         if not _matches_view(projected, view):
             continue
+        if workflow_state is not None and projected.workflow_state is not workflow_state:
+            continue
+        if priority is not None and projected.priority_projection.level is not priority:
+            continue
         if tag is not None and all(item.code != tag for item in projected.tags):
+            continue
+        if not _matches_search(projected, search):
             continue
         items.append(projected)
     items.sort(

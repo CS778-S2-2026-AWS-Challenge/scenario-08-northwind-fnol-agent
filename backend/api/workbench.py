@@ -23,9 +23,11 @@ from backend.domain.models import (
     StaffActionMutationResponse,
     StaffMessageResponse,
     UpdateStaffActionRequest,
+    WorkflowState,
 )
 from backend.domain.workbench import (
     WorkbenchClaimDetail,
+    WorkbenchClaimFilterMetadata,
     WorkbenchClaimListResponse,
     WorkbenchCollaborationRequestsResponse,
     WorkbenchConversationsResponse,
@@ -36,10 +38,12 @@ from backend.domain.workbench import (
     WorkbenchFieldsResponse,
     WorkbenchHandoffsResponse,
     WorkbenchMessagesResponse,
+    WorkbenchQueueView,
     WorkbenchRetrievalsResponse,
     WorkbenchSessionsResponse,
     WorkbenchSignalsResponse,
     WorkbenchWorkItemsResponse,
+    WorkPriorityLevel,
 )
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.ownership import (
@@ -60,6 +64,7 @@ from backend.services.staff_actions import (
     update_staff_action,
 )
 from backend.services.workbench import (
+    get_workbench_claim_filter_metadata,
     list_workbench_claims,
     list_workbench_collaboration_requests,
     list_workbench_conversations,
@@ -134,12 +139,32 @@ def _safe_download_filename(value: str | None) -> str:
 def read_workbench_claims(
     request: Request,
     principal: Principal = Depends(require_staff),
-    view: str | None = Query(default=None),
+    view: WorkbenchQueueView | None = Query(default=None),
+    workflow_state: WorkflowState | None = Query(default=None),
+    priority: WorkPriorityLevel | None = Query(default=None),
     tag: str | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
-    return list_workbench_claims(repository_for(request), principal, view, tag, limit, cursor)
+    return list_workbench_claims(
+        repository_for(request),
+        principal,
+        view=view,
+        workflow_state=workflow_state,
+        priority=priority,
+        tag=tag,
+        search=search,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@router.get('/filter-metadata', response_model=WorkbenchClaimFilterMetadata)
+def read_workbench_claim_filter_metadata(
+    principal: Principal = Depends(require_staff),
+) -> WorkbenchClaimFilterMetadata:
+    return get_workbench_claim_filter_metadata(principal)
 
 
 @router.get('/{claim_id}', response_model=WorkbenchClaimDetail)

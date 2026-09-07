@@ -85,6 +85,9 @@ export const workbenchApi = {
     const query = params.size ? `?${params}` : ''
     return request(`/api/v1/workbench/claims${query}`, { token })
   },
+  claimFilterMetadata(token) {
+    return request('/api/v1/workbench/claims/filter-metadata', { token })
+  },
   conversations(token, cursor) {
     const params = new URLSearchParams({ limit: '50' })
     if (cursor) params.set('cursor', cursor)
