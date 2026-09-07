@@ -1,6 +1,9 @@
 from datetime import datetime
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 
 
 def test_legacy_and_versioned_liveness_routes(client: TestClient) -> None:
@@ -40,3 +43,36 @@ def test_readiness_reports_every_dependency_honestly(client: TestClient) -> None
     assert payload['checks']['control_plane_domains'] == 'none'
 
     assert datetime.fromisoformat(payload['checked_at'])
+
+
+def test_readiness_reports_unavailable_when_active_release_cannot_be_resolved(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    class FailingResolver:
+        def snapshot(self) -> None:
+            raise RuntimeConfigurationResolutionError('Synthetic release resolution failure.')
+
+    app.state.runtime_configuration_resolver = FailingResolver()
+
+    response = client.get('/health/ready')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['status'] == 'unavailable'
+    assert payload['checks']['control_plane_release_set'] == 'unavailable'
+    assert payload['checks']['control_plane_domains'] == 'unavailable'
+
+
+def test_readiness_reports_unconfigured_release_resolver(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    app.state.runtime_configuration_resolver = None
+
+    response = client.get('/health/ready')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['checks']['control_plane_release_set'] == 'not_configured'
+    assert payload['checks']['control_plane_domains'] == 'not_configured'

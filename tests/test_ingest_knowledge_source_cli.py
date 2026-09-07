@@ -99,3 +99,35 @@ def test_manifest_loader_rejects_invalid_governed_entries(
 
     with pytest.raises(KnowledgeManifestError, match=message):
         load_approved_sources(write_json(tmp_path / 'manifest.json', manifest))
+
+
+@pytest.mark.parametrize(
+    ('manifest', 'message'),
+    [
+        ([], 'documents list'),
+        ({}, 'documents list'),
+        ({'documents': ['not-an-object']}, 'entry 1 must be an object'),
+        (
+            {'documents': [{'document_id': 'missing-required-fields'}]},
+            'entry 1 is invalid',
+        ),
+    ],
+)
+def test_manifest_loader_rejects_invalid_document_envelopes(
+    tmp_path: Path, manifest: object, message: str
+) -> None:
+    with pytest.raises(KnowledgeManifestError, match=message):
+        load_approved_sources(write_json(tmp_path / 'invalid-manifest.json', manifest))
+
+
+def test_manifest_loader_rejects_unreadable_json_and_duplicate_identity(tmp_path: Path) -> None:
+    malformed = tmp_path / 'malformed.json'
+    malformed.write_text('{not-json', encoding='utf-8')
+    with pytest.raises(KnowledgeManifestError, match='cannot be read'):
+        load_approved_sources(malformed)
+
+    manifest_path = Path('config/knowledge-sources.json')
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    manifest['documents'].append(dict(manifest['documents'][0]))
+    with pytest.raises(KnowledgeManifestError, match='duplicate identity'):
+        load_approved_sources(write_json(tmp_path / 'duplicate-manifest.json', manifest))

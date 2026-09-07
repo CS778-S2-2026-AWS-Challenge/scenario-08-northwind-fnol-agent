@@ -1,7 +1,12 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.agent_runtime_configuration import (
+    AgentToolPolicyConfiguration,
+    ControlledRulesConfiguration,
+)
 
 
 def _client() -> TestClient:
@@ -76,6 +81,51 @@ def test_non_feature_agent_components_are_high_impact() -> None:
         )
     assert response.status_code == 201
     assert response.json()['impact'] == 'high'
+
+
+def test_feature_settings_preserve_requested_normal_impact() -> None:
+    with _client() as client:
+        response = client.post(
+            '/internal/v1/admin/agent-rules/feature_settings',
+            headers=_headers('agent-feature-impact'),
+            json={
+                'impact': 'normal',
+                'values': {
+                    'feature_version': 'features-v1',
+                    'model_assisted_turns': True,
+                    'knowledge_retrieval': False,
+                },
+                'reason': 'Disable retrieval for a controlled evaluation profile.',
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()['domain'] == 'feature'
+    assert response.json()['impact'] == 'normal'
+
+
+def test_agent_rule_configuration_rejects_duplicate_and_overlapping_rules() -> None:
+    with pytest.raises(ValueError, match='allowed_action_codes'):
+        AgentToolPolicyConfiguration(
+            policy_version='tools-v1',
+            allowed_action_codes=['conversation.ask', 'conversation.ask'],
+        )
+    with pytest.raises(ValueError, match='disabled_rule_ids'):
+        ControlledRulesConfiguration(
+            rules_version='rules-v1',
+            disabled_rule_ids=['rule.one', 'rule.one'],
+        )
+    with pytest.raises(ValueError, match='observation_rule_ids'):
+        ControlledRulesConfiguration(
+            rules_version='rules-v1',
+            observation_rule_ids=['rule.one', 'rule.one'],
+        )
+    with pytest.raises(ValueError, match='both disabled and observed'):
+        ControlledRulesConfiguration(
+            rules_version='rules-v1',
+            disabled_rule_ids=['rule.one'],
+            observation_rule_ids=['rule.one'],
+        )
 
 
 def test_agent_rule_endpoint_rejects_a_component_schema_from_another_domain() -> None:

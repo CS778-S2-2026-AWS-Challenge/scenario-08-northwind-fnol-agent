@@ -69,6 +69,49 @@ def test_access_policy_is_a_real_versioned_configuration() -> None:
         assert replay.json() == created.json()
 
 
+def test_access_policy_rejects_wrong_domain_and_idempotency_conflict() -> None:
+    with _client() as client:
+        wrong_domain = client.post(
+            '/internal/v1/admin/access/policies',
+            headers=_headers('wrong-domain'),
+            json={
+                'domain': 'model',
+                'impact': 'high',
+                'values': {},
+                'reason': 'This must not be stored as an access policy.',
+            },
+        )
+        assert wrong_domain.status_code == 422
+        assert wrong_domain.json()['error']['code'] == 'ACCESS_POLICY_INVALID'
+
+        payload = {
+            'domain': 'access',
+            'impact': 'high',
+            'values': {
+                'role': 'claims_reviewer',
+                'actor_type': 'staff',
+                'scopes': ['workbench:read'],
+                'visibility': ['claim_shared'],
+                'active': True,
+            },
+            'reason': 'Create the first version.',
+        }
+        created = client.post(
+            '/internal/v1/admin/access/policies',
+            headers=_headers('access-conflict'),
+            json=payload,
+        )
+        conflict = client.post(
+            '/internal/v1/admin/access/policies',
+            headers=_headers('access-conflict'),
+            json={**payload, 'reason': 'Attempt a conflicting reuse.'},
+        )
+
+        assert created.status_code == 201, created.text
+        assert conflict.status_code == 409
+        assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
 def test_admin_audit_search_is_filtered_and_protected() -> None:
     with _client() as client:
         denied = client.get('/internal/v1/admin/audit')

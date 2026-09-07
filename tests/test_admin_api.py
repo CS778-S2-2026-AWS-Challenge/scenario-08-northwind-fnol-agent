@@ -19,7 +19,14 @@ from backend.repositories.configuration import (
     ConfigurationIdempotencyRecord,
     SQLiteConfigurationRepository,
 )
-from backend.services.configuration import read_active, validate
+from backend.services.configuration import (
+    _configuration_key,
+    _reject_plaintext_secrets,
+    _validate_configuration_values,
+    _validate_secret_references,
+    read_active,
+    validate,
+)
 
 
 def _client() -> TestClient:
@@ -933,6 +940,137 @@ def test_failed_validation_and_transition_are_audited() -> None:
         ).json()['items']
         assert audits[-2]['outcome'] == 'rejected'
         assert audits[-1]['outcome'] == 'rejected'
+
+
+def test_configuration_withdrawal_and_rollback_reject_invalid_transitions() -> None:
+    with _client() as client:
+        draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('withdraw-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Create a draft for withdrawal.',
+            },
+        ).json()
+        configuration_id = draft['configuration_id']
+
+        withdrawn = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-draft', 1),
+            json={'reason': 'Remove the unused draft.'},
+        )
+        assert withdrawn.status_code == 200
+        assert withdrawn.json()['state'] == 'withdrawn'
+
+        stale = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-stale', 1),
+            json={'reason': 'Stale withdrawal.'},
+        )
+        assert stale.status_code == 409
+        assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+
+        invalid_state = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-invalid-state', 2),
+            json={'reason': 'Withdraw it again.'},
+        )
+        assert invalid_state.status_code == 400
+        assert invalid_state.json()['error']['code'] == 'INVALID_CONFIGURATION_TRANSITION'
+
+        published = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('rollback-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(False),
+                'reason': 'Create a publication for rollback validation.',
+            },
+        ).json()
+        published_id = published['configuration_id']
+        validated = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/validate',
+            headers=_post_headers('rollback-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'rollback', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert validated.status_code == 200
+        missing_target = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/rollback',
+            headers=_post_headers('rollback-missing-target', 2),
+            json={'reason': 'No target supplied.'},
+        )
+        assert missing_target.status_code == 400
+        assert missing_target.json()['error']['code'] == 'ROLLBACK_TARGET_REQUIRED'
+
+        invalid_target = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/rollback',
+            headers=_post_headers('rollback-invalid-target', 2),
+            json={'reason': 'Draft is not a rollback target.', 'rollback_target': configuration_id},
+        )
+        assert invalid_target.status_code == 400
+        assert invalid_target.json()['error']['code'] == 'INVALID_ROLLBACK_TARGET'
+
+
+@pytest.mark.parametrize(
+    ('domain', 'values', 'code'),
+    [
+        ('agent_rule', {}, 'AGENT_CONFIGURATION_INVALID'),
+        ('model', {}, 'PROVIDER_CONFIGURATION_INVALID'),
+        ('access', {}, 'ACCESS_POLICY_INVALID'),
+        ('operational', {}, 'OPERATIONAL_CONFIGURATION_INVALID'),
+        ('integration', {}, 'INTEGRATION_CONFIGURATION_INVALID'),
+        ('data_profile', {}, 'PROVIDER_CONFIGURATION_INVALID'),
+    ],
+)
+def test_provider_configuration_validator_rejects_incomplete_domains(
+    domain: str, values: dict[str, object], code: str
+) -> None:
+    from backend.core.errors import ApiError
+
+    with pytest.raises(ApiError) as error:
+        _validate_configuration_values(domain, values, for_validation=False)
+    assert error.value.code == code
+
+
+def test_provider_configuration_validator_enforces_secret_references_and_model_binding() -> None:
+    from backend.core.errors import ApiError
+    from backend.domain.configuration import ModelRuntimeBinding
+
+    with pytest.raises(ApiError) as plaintext:
+        _reject_plaintext_secrets({'api_key': 'never-store'})
+    assert plaintext.value.code == 'SECRET_VALUE_FORBIDDEN'
+
+    with pytest.raises(ApiError) as invalid_reference:
+        _validate_secret_references({'api_key': 'plain-text'})
+    assert invalid_reference.value.code == 'SECRET_REFERENCE_INVALID'
+
+    assert (
+        _configuration_key('integration', {'service_id': 'assessor_service'})
+        == 'assessor_service'
+    )
+    assert _configuration_key('feature', {}) == 'default'
+
+    with pytest.raises(ApiError) as mismatch:
+        _validate_configuration_values(
+            'model',
+            _model_values(),
+            for_validation=True,
+            model_runtime_binding=ModelRuntimeBinding(
+                protocol='openai_compatible',
+                base_url='https://different.example/v1',
+                credential_environment_variable='NORTHWIND_MODEL_API_KEY',
+                purpose='agent_turn',
+                privacy_class='synthetic_fnol',
+                prompt_version='northwind-fnol-motor-claimant-v4',
+                structured_output=True,
+            ),
+        )
+    assert mismatch.value.code == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
 
 
 def test_idempotent_create_replays_and_conflicts() -> None:
