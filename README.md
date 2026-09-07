@@ -114,6 +114,18 @@ and atomic timeout, malformed, incomplete, and unauthorised-output failures. Thi
 transport is repeatable contract evidence, not a live-provider claim; a live run additionally
 requires an approved endpoint and secret supplied through the documented model environment.
 
+To check changed backend lines locally after a coverage run, use:
+
+```powershell
+py -3.12 -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
+py -3.12 scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
+```
+
+The repository keeps two separate backend coverage signals. The full suite must continue to
+meet the existing 90% total coverage floor. The diff check requires at least 85% of executable
+lines added or modified under `backend/` to be covered by the current test run. Deleted lines,
+non-Python files, and non-executable lines are not part of the diff denominator.
+
 In another terminal, start the claimant client:
 
 ```powershell
