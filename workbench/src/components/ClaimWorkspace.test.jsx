@@ -120,4 +120,36 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.queryByText('Accept Claim')).not.toBeInTheDocument()
     expect(screen.queryByText('This work is assigned to another staff member.')).not.toBeInTheDocument()
   })
+
+  it('does not present a blocked or inexact backend pair as the staff next action', () => {
+    const blocked = {
+      action_code: 'human.accept_handoff',
+      target_ref: 'hnd_1',
+      label: 'Accept Claim',
+      purpose: 'Accept the handoff.',
+      availability: 'blocked',
+      blocked_reason: 'Assigned elsewhere.',
+    }
+    const { rerender } = render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: { ...detail.work_summary, primary_action_code: blocked.action_code, primary_action_target_ref: blocked.target_ref },
+        allowed_actions: [blocked],
+      }}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Accept Claim' })).not.toBeInTheDocument()
+
+    rerender(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: { ...detail.work_summary, primary_action_code: 'human.accept_handoff', primary_action_target_ref: 'hnd_other' },
+        allowed_actions: [{ ...blocked, availability: 'confirmation_required' }],
+      }}
+    />)
+    expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
+  })
 })

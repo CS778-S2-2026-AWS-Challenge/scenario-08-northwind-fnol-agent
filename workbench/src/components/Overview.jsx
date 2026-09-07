@@ -1,16 +1,17 @@
 import { UserRoundCheck } from 'lucide-react'
 import { formatDateTime, words } from '../format.js'
 import OwnershipActions from './OwnershipActions.jsx'
-import { findProjectedAction } from '../projected-action.js'
+import { findPrimaryProjectedAction, findProjectedAction } from '../projected-action.js'
 import { HandoffResolution } from './ReviewActions.jsx'
 import MissingInformation from './MissingInformation.jsx'
 import PrimaryAction from './PrimaryAction.jsx'
 import SignalsSummary from './SignalsSummary.jsx'
+import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 
 export default function Overview({ detail, handoffs, collaborationRequests, profile, onAccept, onResolve, onOwnershipAction, onSection }) {
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
-  const primaryAction = findProjectedAction(detail.allowed_actions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref)
+  const primaryAction = findPrimaryProjectedAction(detail.allowed_actions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref)
   const resolveAction = findProjectedAction(detail.allowed_actions, 'human.resolve_handoff', openHandoff?.handoff_id)
   const primaryKey = primaryAction ? `${primaryAction.action_code}:${primaryAction.target_ref}` : null
   const summaries = detail.section_summaries || {}
@@ -19,6 +20,7 @@ export default function Overview({ detail, handoffs, collaborationRequests, prof
     <div className="claim-content">
       <WorkSummary detail={detail} profile={profile} />
       <PrimaryAction action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onSection={onSection} />
+      <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
 
       <details className="purpose-disclosure">

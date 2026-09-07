@@ -249,6 +249,7 @@ p { line-height: 1.55; }
 .source-group__title { display: flex; align-items: center; gap: var(--space-2); }
 .source-group__title h3 { margin: 0; font-size: var(--workbench-font-control); }
 .source-group .record-list { overflow: hidden; border: var(--border-component); border-radius: var(--radius-md); background: var(--color-surface); }
+.source-summary > .record-list { overflow: hidden; margin-top: var(--space-3); border: var(--border-component); border-radius: var(--radius-md); }
 .record-summary-grid { display: grid; gap: var(--space-3); padding: var(--space-4); grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--color-page); }
 .record-summary-grid > div, .external-overview > div { display: grid; gap: var(--space-1); min-width: 0; }
 .record-summary-grid span, .external-overview span { color: var(--color-text-muted); font-size: var(--workbench-font-meta); }
