@@ -1137,6 +1137,7 @@ def _build_projection(
         **base,
         active_session_id=claim.active_session_id,
         claim_state=claim.claim_state,
+        contents_items=claim.contents_items,
         allowed_actions=allowed_actions,
         section_summaries=WorkbenchSectionSummaries(
             fields=WorkbenchSectionSummary(

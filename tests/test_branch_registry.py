@@ -19,6 +19,9 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationStatus,
     Channel,
+    ContentsItem,
+    ContentsLossType,
+    ContentsOwnership,
     Coverage,
     CustomerNextStep,
     CustomerSupport,
@@ -42,6 +45,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claims import _claimant_form
 
 FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
 
@@ -75,6 +79,80 @@ def field(value: object, status: FormStatus = FormStatus.CONFIRMED) -> Structure
         updated_at=FIXED_TIME,
         updated_by={'actor_type': 'claimant', 'actor_id': 'cus_branch'},
     )
+
+
+def contents_item(item_id: str = 'item_1') -> ContentsItem:
+    return ContentsItem(
+        item_id=item_id,
+        description='Synthetic laptop',
+        category='electronics',
+        loss_type=ContentsLossType.DAMAGED,
+        ownership=ContentsOwnership.OWNED,
+        estimated_value={'amount': 1200.0, 'currency': 'NZD'},
+        source=FormSource.CLAIMANT,
+        source_refs=['msg_source'],
+        status=FormStatus.PROPOSED,
+        needed_for='later_action',
+        confidence=0.8,
+        updated_at=FIXED_TIME,
+        updated_by={'actor_type': 'claimant', 'actor_id': 'cus_branch'},
+    )
+
+
+def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
+    registry = build_default_registry()
+
+    assert registry.field_registry_version == '5'
+    assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
+    assert registry.field_by_code['property.habitable'].value_type == 'boolean'
+    assert registry.branch_by_id['family.home'].fields >= {
+        'property.ongoing_risk',
+        'property.habitable',
+    }
+    assert registry.branch_by_id['family.contents'].fields == registry.branch_by_id[
+        'family.motor'
+    ].fields - {
+        'authorities.police_report_reference',
+        'authorities.emergency_services_notified',
+        'vehicle.registration',
+        'vehicle.damage_description',
+        'vehicle.drivable',
+    }
+
+
+def test_working_claim_rejects_duplicate_contents_item_ids() -> None:
+    with pytest.raises(ValueError, match='Contents item identifiers'):
+        WorkingClaim.model_validate(
+            make_claim().model_dump() | {'contents_items': [contents_item(), contents_item()]}
+        )
+
+
+def test_claimant_form_hides_system_owned_client_number() -> None:
+    claim = make_claim().model_copy(
+        update={
+            'form': {
+                'claimant.client_number': field('internal-123'),
+                'incident.description': field('A synthetic loss.'),
+            }
+        }
+    )
+
+    projected = _claimant_form(FixtureRepository(), claim)
+
+    assert 'claimant.client_number' not in projected
+    assert 'incident.description' in projected
+
+
+def test_claimant_contents_projection_hides_internal_assessment_metadata() -> None:
+    from backend.services.claims import _claimant_contents_items
+
+    claim = make_claim().model_copy(update={'contents_items': [contents_item()]})
+    projected = _claimant_contents_items(FixtureRepository(), claim)
+
+    assert projected[0].item_id == 'item_1'
+    assert projected[0].source_refs == ['msg_source']
+    assert not hasattr(projected[0], 'confidence')
+    assert not hasattr(projected[0], 'updated_by')
 
 
 def evaluation_record(

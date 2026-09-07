@@ -20,7 +20,9 @@ REGISTERED_FIELD_CODES = frozenset(
         'vehicle.drivable',
         'property.address',
         'property.affected_areas',
+        'property.ongoing_risk',
+        'property.habitable',
     }
 )
 
-FIELD_REGISTRY_VERSION = '4'
+FIELD_REGISTRY_VERSION = '5'

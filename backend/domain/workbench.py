@@ -10,6 +10,7 @@ from backend.domain.external_services import ExternalTaskRecord, ExternalTaskReq
 from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimState,
+    ContentsItem,
     ContractModel,
     CustomerNextStep,
     CustomerUpdateRecord,
@@ -383,6 +384,7 @@ class WorkbenchClaimFilterMetadata(ContractModel):
 class WorkbenchClaimDetail(WorkbenchClaimListItem):
     active_session_id: str | None = None
     claim_state: ClaimState
+    contents_items: list[ContentsItem] = Field(default_factory=list)
     allowed_actions: list[WorkbenchAllowedAction] = Field(default_factory=list)
     section_summaries: WorkbenchSectionSummaries
     customer_next_step: CustomerNextStep
