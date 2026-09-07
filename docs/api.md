@@ -399,6 +399,7 @@ The canonical backend record has these fields. API projections omit fields the c
 | `incident_type` | string | No | Compatibility projection of the registered product family; may be unknown at creation. Branch evaluation reconciles it with the source-aware `claim.product_family` form field. The independent `incident.type` field records the event subtype. |
 | `claim_state` | `ClaimState` | Yes | Canonical internal multi-dimensional state |
 | `form` | field map | Yes | Registered field code to `StructuredFormField`; initially empty |
+| `contents_items` | object array | Yes | Optional source-aware `ContentsItem` records; empty unless the Claim is a contents path |
 | `evidence_summary` | `EvidenceSummary` | Yes | Authoritative aggregate over the full persisted evidence set; claimant projections recompute it from claimant-visible evidence only |
 | `route` | string | No | Configured processing route, not a decision outcome |
 | `active_session_id` | string | No | Current active session when one exists |
@@ -553,6 +554,34 @@ Initial common field codes:
 | `vehicle.drivable` | boolean | Motor-specific immediate status |
 | `property.address` | object | Home or contents risk location |
 | `property.affected_areas` | array | Home-specific affected areas |
+| `property.ongoing_risk` | enum | `none`, `active_leak`, `fire`, `collapse`, `exposure`, or `other`; current home safety condition |
+| `property.habitable` | boolean | Whether the home is currently safe to occupy; does not replace professional safety advice |
+
+### Contents items
+
+`contents_items` is an optional list on Claim projections. Each item is an independent,
+source-aware record and is not flattened into the Dynamic Form. Evidence associations remain
+separate Evidence records until the item-association contract is implemented.
+
+Claimant projections use a role-safe `ClaimantContentsItem` view: `confidence` and `updated_by`
+are internal assessment metadata and are omitted. `source_refs` is limited to public message and
+evidence identifiers (`msg_*` and `evd_*`); retrieval, staff, policy, inference, and other
+internal references are omitted. Workbench projections retain the full authorised record.
+
+| Property | Type | Rule |
+|---|---|---|
+| `item_id` | string | Stable identifier unique within a Claim |
+| `description` | string | Claimant- or staff-sourced item description |
+| `category` | string | Opaque display category; category vocabulary/bounding is a follow-up registry decision |
+| `quantity` | integer | At least 1 |
+| `loss_type` | enum | `damaged`, `lost`, `stolen`, or `destroyed` |
+| `ownership` | enum | `owned`, `leased`, `borrowed`, `gifted`, or `other` |
+| `estimated_value` | object/null | Non-negative `amount` plus ISO-4217-style three-letter `currency`; not a settlement value |
+| `source` / `source_refs` | enum / string array | Same provenance boundary as structured form fields |
+| `status` | enum | Existing `FormStatus`; `proposed` is used for inference and `disputed` for conflicts |
+| `needed_for` | enum | `current_action` or `later_action` |
+| `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
+| `updated_at` / `updated_by` | timestamp / actor reference | Server-maintained provenance |
 
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
 

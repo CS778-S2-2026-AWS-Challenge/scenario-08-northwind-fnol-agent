@@ -74,7 +74,14 @@ FAMILY_FIELDS = {
             'vehicle.drivable',
         }
     ),
-    'home': frozenset({'property.address', 'property.affected_areas'}),
+    'home': frozenset(
+        {
+            'property.address',
+            'property.affected_areas',
+            'property.ongoing_risk',
+            'property.habitable',
+        }
+    ),
     'contents': frozenset(),
 }
 SYSTEM_OWNED_FIELDS = frozenset({'claimant.client_number'})
@@ -114,6 +121,11 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
     'vehicle.drivable': ('boolean', frozenset()),
     'property.address': ('location', frozenset()),
     'property.affected_areas': ('text_list', frozenset()),
+    'property.ongoing_risk': (
+        'enum',
+        frozenset({'none', 'active_leak', 'fire', 'collapse', 'exposure', 'other'}),
+    ),
+    'property.habitable': ('boolean', frozenset()),
 }
 
 
