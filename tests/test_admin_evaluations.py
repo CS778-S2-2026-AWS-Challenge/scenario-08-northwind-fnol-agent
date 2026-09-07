@@ -1,10 +1,11 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
-from backend.repositories.evaluations import SQLiteEvaluationRepository
+from backend.repositories.evaluations import EvaluationRepository, SQLiteEvaluationRepository
 
 
 def _client() -> TestClient:
@@ -101,3 +102,47 @@ def test_evaluation_repository_survives_reopen(tmp_path: Path) -> None:
     durable.create(EvaluationRecord.model_validate(record))
     reopened = SQLiteEvaluationRepository(str(path))
     assert reopened.get(record['evaluation_id']) == EvaluationRecord.model_validate(record)
+
+
+def test_evaluation_repositories_filter_immutable_records_and_reject_duplicates(
+    tmp_path: Path,
+) -> None:
+    from backend.domain.evaluation import EvaluationRecord, EvaluationState
+
+    first = EvaluationRecord.model_validate(
+        {
+            'evaluation_id': 'eval_first',
+            **_payload(),
+            'state': 'succeeded',
+            'created_at': '2026-09-06T00:00:00Z',
+            'completed_at': '2026-09-06T00:01:00Z',
+        }
+    )
+    second = first.model_copy(
+        update={
+            'evaluation_id': 'eval_second',
+            'purpose': 'staff_assistance',
+            'state': EvaluationState.FAILED,
+            'error_code': 'PROVIDER_TIMEOUT',
+            'created_at': first.created_at.replace(day=7),
+        }
+    )
+
+    repository = EvaluationRepository()
+    assert repository.get('eval_missing') is None
+    assert repository.create(first) == first
+    assert repository.create(second) == second
+    assert repository.list(purpose='claimant_motor_intake') == [first]
+    assert repository.list(state='failed') == [second]
+    assert repository.list(limit=1) == [second]
+    with pytest.raises(ValueError, match='evaluation_exists'):
+        repository.create(first)
+
+    durable = SQLiteEvaluationRepository(str(tmp_path / 'evaluations.sqlite3'))
+    assert durable.create(first) == first
+    assert durable.create(second) == second
+    assert durable.list(purpose='claimant_motor_intake') == [first]
+    assert durable.list(state='failed') == [second]
+    assert durable.list(limit=1) == [second]
+    with pytest.raises(ValueError, match='evaluation_exists'):
+        durable.create(first)
