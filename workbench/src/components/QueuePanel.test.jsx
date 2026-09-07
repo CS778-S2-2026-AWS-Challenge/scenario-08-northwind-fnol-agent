@@ -48,6 +48,8 @@ function renderQueue(overrides = {}) {
   const props = {
     claims: [claim],
     loading: false,
+    error: '',
+    onRetry: vi.fn(),
     selectedId: null,
     filterMetadata,
     view: 'all',
@@ -158,5 +160,12 @@ describe('QueuePanel', () => {
 
     await user.click(screen.getByRole('button', { name: 'Load more Claims' }))
     expect(onLoadMore).toHaveBeenCalledOnce()
+  })
+
+  it('labels the visible count as loaded when more filtered results are available', () => {
+    renderQueue({ priority: 'high', nextCursor: 'cursor-2' })
+
+    expect(screen.getByText('1 loaded')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load more Claims' })).toBeInTheDocument()
   })
 })

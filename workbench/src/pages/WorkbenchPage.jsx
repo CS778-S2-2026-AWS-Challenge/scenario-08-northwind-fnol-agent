@@ -28,6 +28,7 @@ export default function WorkbenchPage() {
   const [nextCursor, setNextCursor] = useState(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueError, setQueueError] = useState('')
+  const [queueNotice, setQueueNotice] = useState('')
   const queueRequestId = useRef(0)
   const [conversations, setConversations] = useState([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
@@ -76,6 +77,8 @@ export default function WorkbenchPage() {
     const requestId = ++queueRequestId.current
     setQueueLoading(true)
     setQueueError('')
+    setQueueNotice('')
+    if (!append) setNextCursor(null)
     try {
       const requestFilters = {
         ...(view === 'all' ? {} : { view }),
@@ -105,7 +108,7 @@ export default function WorkbenchPage() {
           if (requestId !== queueRequestId.current) return
           setClaims(response.items)
           setNextCursor(response.page?.next_cursor || null)
-          setQueueError('The saved queue page was invalid or stale, so current work was reloaded from the start.')
+          setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
           if (requestId === queueRequestId.current) setQueueError(recoveryError.message)
@@ -430,7 +433,7 @@ export default function WorkbenchPage() {
             <button className="icon-button" type="button" onClick={filterMetadata ? loadClaims : () => setFilterMetadataAttempt((attempt) => attempt + 1)} aria-label="Refresh Workbench projection"><RefreshCw size={17} /></button>
           </div>
         </header>
-        {queueError && <div className="global-error" role="alert">{queueError}</div>}
+        {queueNotice && <div className="global-error" role="status">{queueNotice}</div>}
         {revisionNotice && revisionNotice.claimId === claimId && (
           <div className="revision-notice" role="status">
             <span>This Claim changed in another session (revision {revisionNotice.revision}).</span>
@@ -443,7 +446,7 @@ export default function WorkbenchPage() {
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
             {queueVisible && (filterMetadata
-              ? <QueuePanel claims={claims} loading={queueLoading} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+              ? <QueuePanel claims={claims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
               : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />

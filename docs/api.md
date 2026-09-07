@@ -1590,10 +1590,11 @@ Signal decision, handoff, Evidence change, WorkItem transition, or authorised bu
 changes the source record and the backend recomputes the projection. Claimant routes MUST NOT
 include this staff-only projection.
 
-The `tag` filter uses the same backend Registry. Unknown, draft, deprecated, or retired codes
-return `400 INVALID_TAG_FILTER`; a published code returns only Claims whose computed `tags`
-contains that code. The current endpoint accepts one code. Future grouped OR/AND filtering requires
-an explicit contract extension.
+The `tag` filter uses the same backend Registry and filterability rule as `filter-metadata`.
+Unknown, draft, deprecated, retired, or non-filterable codes return `400 INVALID_TAG_FILTER`; a
+published, filterable code returns only Claims whose computed `tags` contains that code. The
+current endpoint accepts one code. Future grouped OR/AND filtering requires an explicit contract
+extension.
 
 `urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
 contains claims with an open claimant-support handoff whose support need is `human_requested`.
@@ -2515,7 +2516,7 @@ All errors use one envelope:
 | `ACCESS_DENIED` | `403` | Principal lacks permission |
 | `RESOURCE_NOT_FOUND` | `404` | Resource absent or concealed |
 | `INVALID_STATE_TRANSITION` | `400` | Requested transition is not allowed |
-| `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown or is not published in the backend Registry |
+| `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown, unpublished, or not exposed as filterable by the backend Registry |
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |

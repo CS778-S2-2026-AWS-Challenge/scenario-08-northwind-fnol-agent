@@ -210,6 +210,101 @@ describe('WorkbenchPage queue filters', () => {
     expect(await screen.findAllByText('NW-1001')).not.toHaveLength(0)
     expect(screen.getByRole('heading', { name: 'Synthetic claimant' })).toBeInTheDocument()
   })
+
+  it('renders an unavailable queue instead of an empty queue when the initial query fails', async () => {
+    workbenchApi.claims.mockRejectedValue(new Error('The queue projection service timed out.'))
+
+    render(
+      <MemoryRouter initialEntries={['/workbench']}>
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const queueAlert = await screen.findByRole('alert')
+    expect(queueAlert).toHaveTextContent('Claim queue unavailable')
+    expect(queueAlert).toHaveTextContent('The queue projection service timed out.')
+    expect(screen.queryByText('No claims are currently in this queue.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('preserves the last successful list when a filtered refresh fails', async () => {
+    workbenchApi.claims.mockImplementation(async (_token, filters) => {
+      if (filters.priority === 'urgent') {
+        throw new Error('The filtered queue could not be refreshed.')
+      }
+      return { items: claims, page: { next_cursor: null } }
+    })
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench']}>
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('NW-1001')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    await user.selectOptions(screen.getByLabelText('Claim priority'), 'urgent')
+
+    const queueAlert = await screen.findByRole('alert')
+    expect(queueAlert).toHaveTextContent('The Claims below are from the last successful load.')
+    expect(screen.getByText('NW-1001')).toBeInTheDocument()
+    expect(screen.queryByText('No claims match the current filters.')).not.toBeInTheDocument()
+  })
+
+  it('retries a failed queue query with the current URL filters', async () => {
+    workbenchApi.claims
+      .mockRejectedValueOnce(new Error('The queue is temporarily unavailable.'))
+      .mockResolvedValueOnce({ items: [claims[1]], page: { next_cursor: null } })
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench?priority=urgent']}>
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText('NW-1002')).toBeInTheDocument()
+    expect(workbenchApi.claims).toHaveBeenLastCalledWith('staff-token', {
+      priority: 'urgent',
+      limit: 25,
+    })
+  })
+
+  it('debounces search requests and reloads the unfiltered queue when search is cleared', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench']}>
+        <Routes>
+          <Route path="/workbench/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('NW-1001')).toBeInTheDocument()
+    const searchInput = screen.getByLabelText('Search claims')
+    await user.type(searchInput, 'motor')
+
+    expect(workbenchApi.claims).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(workbenchApi.claims).toHaveBeenLastCalledWith('staff-token', {
+      search: 'motor',
+      limit: 25,
+    }))
+    expect(workbenchApi.claims.mock.calls.filter(([, filters]) => filters.search)).toEqual([
+      ['staff-token', { search: 'motor', limit: 25 }],
+    ])
+
+    await user.clear(screen.getByLabelText('Search claims'))
+    await waitFor(() => expect(workbenchApi.claims).toHaveBeenLastCalledWith('staff-token', {
+      limit: 25,
+    }))
+  })
 })
 
 function LocationProbe() {

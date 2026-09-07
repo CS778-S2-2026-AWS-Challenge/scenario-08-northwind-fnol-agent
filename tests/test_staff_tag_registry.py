@@ -223,6 +223,38 @@ def test_workbench_tag_filter_uses_the_published_backend_registry(
     assert retired_only.json()['error']['code'] == 'INVALID_TAG_FILTER'
 
 
+def test_workbench_tag_filter_rejects_published_non_filterable_definition(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code = 'claim_type.non_filterable_test'
+    definition = replace(
+        STAFF_TAG_REGISTRY['claim_type.motor'],
+        code=code,
+        filterable=False,
+    )
+    monkeypatch.setattr(
+        tag_registry,
+        'STAFF_TAG_REGISTRY',
+        MappingProxyType({**STAFF_TAG_REGISTRY, code: definition}),
+    )
+
+    metadata = client.get(
+        '/api/v1/workbench/claims/filter-metadata',
+        headers=staff_auth_headers,
+    )
+    response = client.get(
+        f'/api/v1/workbench/claims?tag={code}',
+        headers=staff_auth_headers,
+    )
+
+    assert metadata.status_code == 200
+    assert code not in {item['value'] for item in metadata.json()['tags']}
+    assert response.status_code == 400
+    assert response.json()['error']['code'] == 'INVALID_TAG_FILTER'
+
+
 def test_claimant_projection_does_not_expose_staff_tags(
     client: TestClient,
     auth_headers: dict[str, str],

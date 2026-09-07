@@ -1,12 +1,28 @@
 import { ChevronDown, Filter, Inbox, Search } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { TagList } from './TagList.jsx'
 
-export default function QueuePanel({ claims, loading, selectedId, filterMetadata, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, onClearFilters, nextCursor, onLoadMore, onOpen }) {
+export default function QueuePanel({ claims, loading, error, onRetry, selectedId, filterMetadata, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, onClearFilters, nextCursor, onLoadMore, onOpen }) {
   const hasSecondaryFilters = Boolean(workflowState || priority || tagFilter)
   const [filtersOpen, setFiltersOpen] = useState(hasSecondaryFilters)
+  const searchInput = useRef(null)
+  const searchTimer = useRef(null)
   const hasActiveFilters = view !== 'all' || hasSecondaryFilters || search
+
+  useEffect(() => {
+    window.clearTimeout(searchTimer.current)
+    if (searchInput.current && searchInput.current.value !== search) {
+      searchInput.current.value = search
+    }
+    return () => window.clearTimeout(searchTimer.current)
+  }, [search])
+
+  function changeSearch(event) {
+    const value = event.target.value
+    window.clearTimeout(searchTimer.current)
+    searchTimer.current = window.setTimeout(() => onSearch(value), 275)
+  }
 
   function clearFilters() {
     onClearFilters()
@@ -19,7 +35,7 @@ export default function QueuePanel({ claims, loading, selectedId, filterMetadata
           <p className="eyebrow">My work</p>
           <h2>Claim queue</h2>
         </div>
-        <span className="queue-count">{claims.length}</span>
+        <span className="queue-count">{claims.length} loaded</span>
       </header>
       <>
         <label className="queue-work-view">
@@ -34,8 +50,9 @@ export default function QueuePanel({ claims, loading, selectedId, filterMetadata
           <input
             type="search"
             placeholder="Search claims"
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
+            defaultValue={search}
+            ref={searchInput}
+            onChange={changeSearch}
           />
         </label>
         <div className="queue-filter-disclosure">
@@ -64,15 +81,25 @@ export default function QueuePanel({ claims, loading, selectedId, filterMetadata
         </div>
       </>
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
-        {loading && <p className="queue-state">Loading current work...</p>}
-        {!loading && !claims.length && (
+        {loading && <p className="queue-state" role="status">{claims.length ? 'Updating current work...' : 'Loading current work...'}</p>}
+        {!loading && error && (
+          <div className="queue-state" role="alert">
+            <strong>Claim queue unavailable</strong>
+            <p>{claims.length
+              ? 'The latest queue query could not be loaded. The Claims below are from the last successful load.'
+              : 'Current work could not be loaded because the queue service did not return a usable projection.'}</p>
+            <p>{error}</p>
+            <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
+          </div>
+        )}
+        {!loading && !error && !claims.length && (
           <div className="queue-state">
             <Inbox size={20} aria-hidden="true" />
             <p>{hasActiveFilters ? 'No claims match the current filters.' : 'No claims are currently in this queue.'}</p>
             {hasActiveFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
           </div>
         )}
-        {!loading && claims.map((claim) => (
+        {claims.map((claim) => (
           <button
             className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}`}
             type="button"
@@ -98,7 +125,7 @@ export default function QueuePanel({ claims, loading, selectedId, filterMetadata
             </span>
           </button>
         ))}
-        {!loading && nextCursor && <button className="queue-load-more" type="button" onClick={onLoadMore}>Load more Claims</button>}
+        {!loading && !error && nextCursor && <button className="queue-load-more" type="button" onClick={onLoadMore}>Load more Claims</button>}
       </div>
     </aside>
   )

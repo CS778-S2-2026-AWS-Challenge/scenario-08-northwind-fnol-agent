@@ -427,6 +427,29 @@ def get_staff_tag_definition(code: str) -> StaffTagDefinition:
     return definition
 
 
+def _is_filterable_staff_tag_definition(definition: StaffTagDefinition) -> bool:
+    return definition.status is TagDefinitionStatus.PUBLISHED and definition.filterable
+
+
+def get_filterable_staff_tag_definition(code: str) -> StaffTagDefinition:
+    """Return one published tag definition accepted by staff queue filters.
+
+    Args:
+        code: Stable namespaced tag code.
+
+    Returns:
+        The matching published, filterable definition.
+
+    Raises:
+        ValueError: The code is unknown, unpublished, or not filterable.
+    """
+
+    definition = STAFF_TAG_REGISTRY.get(code)
+    if definition is None or not _is_filterable_staff_tag_definition(definition):
+        raise ValueError(f'Unknown filterable staff tag: {code}.')
+    return definition
+
+
 def list_filterable_staff_tag_definitions() -> list[StaffTagDefinition]:
     """Return the canonical published tag options exposed to staff filters.
 
@@ -438,7 +461,7 @@ def list_filterable_staff_tag_definitions() -> list[StaffTagDefinition]:
         (
             definition
             for definition in STAFF_TAG_REGISTRY.values()
-            if definition.status is TagDefinitionStatus.PUBLISHED and definition.filterable
+            if _is_filterable_staff_tag_definition(definition)
         ),
         key=lambda definition: (definition.staff_label.casefold(), definition.code),
     )

@@ -36,7 +36,7 @@ from backend.domain.models import (
 from backend.domain.staff_agent import StaffAgentMessageRole
 from backend.domain.tag_registry import (
     TAG_REGISTRY_VERSION,
-    get_staff_tag_definition,
+    get_filterable_staff_tag_definition,
     list_filterable_staff_tag_definitions,
 )
 from backend.domain.workbench import (
@@ -1208,12 +1208,12 @@ def list_workbench_claims(
         raise _staff_access_required()
     if tag is not None:
         try:
-            get_staff_tag_definition(tag)
+            get_filterable_staff_tag_definition(tag)
         except ValueError as error:
             raise ApiError(
                 status_code=400,
                 code='INVALID_TAG_FILTER',
-                message='The requested staff tag is not published.',
+                message='The requested staff tag is not available as a queue filter.',
                 details=[ErrorDetail(field='tag', reason=tag)],
             ) from error
     items: list[WorkbenchClaimListItem] = []
