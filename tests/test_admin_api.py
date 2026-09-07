@@ -1050,8 +1050,7 @@ def test_provider_configuration_validator_enforces_secret_references_and_model_b
     assert invalid_reference.value.code == 'SECRET_REFERENCE_INVALID'
 
     assert (
-        _configuration_key('integration', {'service_id': 'assessor_service'})
-        == 'assessor_service'
+        _configuration_key('integration', {'service_id': 'assessor_service'}) == 'assessor_service'
     )
     assert _configuration_key('feature', {}) == 'default'
 

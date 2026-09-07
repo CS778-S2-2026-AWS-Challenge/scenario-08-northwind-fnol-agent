@@ -364,9 +364,7 @@ def test_configuration_repositories_commit_atomic_publication_and_approval(
             reason='Return for correction.',
             created_at=_timestamp(),
         )
-        returned = awaiting.model_copy(
-            update={'revision': 2, 'state': ConfigurationState.DRAFT}
-        )
+        returned = awaiting.model_copy(update={'revision': 2, 'state': ConfigurationState.DRAFT})
         approval_event = AuditEvent(
             event_id='aud_approval_transition',
             configuration_id=awaiting.configuration_id,
@@ -378,9 +376,10 @@ def test_configuration_repositories_commit_atomic_publication_and_approval(
             outcome='succeeded',
             created_at=_timestamp(),
         )
-        assert repository.save_approval_transition(
-            approval, returned, 1, (approval_event,)
-        ) == returned
+        assert (
+            repository.save_approval_transition(approval, returned, 1, (approval_event,))
+            == returned
+        )
         assert repository.approvals(awaiting.configuration_id, 1) == [approval]
         assert repository.approvals(awaiting.configuration_id) == [approval]
         assert repository.get(awaiting.configuration_id) == returned
@@ -406,9 +405,12 @@ def test_configuration_repositories_commit_atomic_publication_and_approval(
             outcome='succeeded',
             created_at=_timestamp(),
         )
-        assert repository.replace_active_with_new(
-            published, published_superseded, rollback, (rollback_event,)
-        ) == rollback
+        assert (
+            repository.replace_active_with_new(
+                published, published_superseded, rollback, (rollback_event,)
+            )
+            == rollback
+        )
         assert repository.active('feature') == rollback
 
 
@@ -559,7 +561,10 @@ def test_release_set_repositories_commit_atomic_replace_and_rollback(
             outcome='succeeded',
             created_at=_timestamp(),
         )
-        assert repository.replace_active_with_new(
-            published, published_superseded, rollback, (rollback_event,)
-        ) == rollback
+        assert (
+            repository.replace_active_with_new(
+                published, published_superseded, rollback, (rollback_event,)
+            )
+            == rollback
+        )
         assert repository.active('test', 'fixture') == rollback
