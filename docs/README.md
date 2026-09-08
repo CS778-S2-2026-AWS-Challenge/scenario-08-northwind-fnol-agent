@@ -113,6 +113,7 @@ superseded when the implementation state changes.
 - [User Personas](research/user-personas.md)
 - [FNOL As-Is Process and Reporting Fields](research/fnol-as-is-process-and-reporting-fields.md)
 - [Existing Claims Fraud Controls and Verification](research/existing-claims-fraud-controls-and-verification.md)
+- [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)
 - [Claimant Survey Response Export](research/claimant-survey-final-responses.csv)
