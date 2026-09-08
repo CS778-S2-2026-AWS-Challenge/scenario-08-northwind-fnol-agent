@@ -597,6 +597,7 @@ guard advances the accepted staff presence revision in both Fixture and MongoDB 
 provider-neutral lease revision is the transaction conflict point.
 Staff logout revokes the server-side auth session even when this best-effort presence cleanup
 cannot be persisted; presence failure must never leave the bearer session active.
+An acceptance using a stale presence revision is rejected before the Claim assignment is stored.
 
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
