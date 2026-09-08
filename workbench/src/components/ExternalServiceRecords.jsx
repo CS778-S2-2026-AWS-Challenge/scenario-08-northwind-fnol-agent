@@ -85,7 +85,14 @@ function ExternalServiceRecord({ record }) {
             <dt>Prepared</dt><dd>{request ? formatDateTime(request.prepared_at) : 'Not recorded'}</dd>
             <dt>Sent</dt><dd>{request?.sent_at ? formatDateTime(request.sent_at) : 'Not sent'}</dd>
             <dt>Operation identity</dt><dd>{request?.operation_id || 'Not reserved'}</dd>
+            <dt>Provider reference</dt><dd>{lifecycle.provider_reference || 'Not recorded'}</dd>
             <dt>Result</dt><dd>{lifecycle.result || 'No verified result recorded'}</dd>
+            <dt>Result source</dt><dd>{lifecycle.result_source ? `${words(lifecycle.result_source.system)} · ${lifecycle.result_source.reference}` : 'No result source recorded'}</dd>
+            <dt>Result received</dt><dd>{lifecycle.result_received_at ? formatDateTime(lifecycle.result_received_at) : 'Not recorded'}</dd>
+            <dt>Result verification</dt><dd>{lifecycle.result_verification_state ? words(lifecycle.result_verification_state) : 'No result to verify'}</dd>
+            <dt>Verified</dt><dd>{lifecycle.result_verified_at ? formatDateTime(lifecycle.result_verified_at) : 'Not verified'}</dd>
+            <dt>Checked Claim revision</dt><dd>{lifecycle.result_verified_against_revision || 'Not checked'}</dd>
+            <dt>Result evidence</dt><dd>{lifecycle.result_evidence?.length ? lifecycle.result_evidence.map((item) => `${item.evidence_id} — ${words(item.status)} / ${words(item.file_status)}`).join('; ') : 'No evidence linked'}</dd>
             <dt>Failure</dt><dd>{task.failure_code ? words(task.failure_code) : 'None recorded'}</dd>
           </dl>
         </section>

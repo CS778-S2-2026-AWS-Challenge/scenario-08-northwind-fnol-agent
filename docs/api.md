@@ -1575,6 +1575,11 @@ The response contains `claim_id`, current `revision`, `items`, and
 `customer_next_step`. Evidence items deliberately omit storage keys, upload
 checksums, extraction state, and internal provenance.
 
+The `status_url` returned by upload completion is this Claim Evidence collection
+(`GET /api/v1/claims/{claim_id}/evidence`). It is the authoritative polling
+projection for the same Evidence record: clients reread it after `202` and do
+not manufacture `processing`, `ready`, `failed`, or retry state locally.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
@@ -1650,6 +1655,15 @@ capability expires MUST re-sign the same upload intent without creating another 
 record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
+
+An anonymous browser session may continue its conversation and read its own
+Claim, but it cannot create a durable Evidence record or receive an upload
+capability. File selection is a temporary browser action until the claimant
+signs in; the server returns `401 AUTHENTICATION_REQUIRED` before checking the
+Claim or Evidence identifier. After sign-in, the existing anonymous Claim is
+promoted through the login/resume boundary and the claimant starts the upload
+with a new authenticated intent. An abandoned anonymous file selection leaves
+no Evidence record or protected object to clean up.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/complete`
 
@@ -2025,10 +2039,24 @@ claimant-safe projection.
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
 contains stakeholder and service labels, request type, authority, consent, delivery and verification
-states, pending owner, status label/detail, result, limitation, next action, and attention flag. The
-Workbench renders those fields and MUST NOT reconstruct lifecycle status or next steps from raw task
-status strings. Raw task/request objects remain available for identity, timing, failure, and source
-traceability.
+states, pending owner, status label/detail, provider reference, returned-result summary and
+provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
+next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
+identity and is never populated into `result`. `result` is null until a formal `ExternalTaskResult`
+record exists; its `result_verification_state` remains `unverified`, `consistent`, `inconsistent`, or
+`review_required` exactly as recorded, and an unverified result is not Claim State or provider
+completion. `result_received_at` records ingestion time, while `result_verified_at` and
+`result_verified_against_revision` are null until the separate verification operation records a
+check. `result_evidence_ids` is empty when the returned result has no linked evidence;
+`result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
+staff without exposing storage keys or provider payloads.
+
+The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
+`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
+reconciliation even when a late result record exists; the Workbench does not infer completion from
+that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
+steps from raw task status strings. Raw task/request objects remain available for identity, timing,
+failure, and source traceability.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
@@ -2685,7 +2713,13 @@ Request:
 
 This service-to-service request requires integration credentials,
 `Idempotency-Key`, and `If-Match`. It moves the evidence file from `processing`
-to `ready` and writes registered extracted fields as `proposed`.
+to `ready` and writes registered extracted fields as `proposed`. The optional
+`outcome` is `ready`, `failed`, or `retry`; `failed` moves the existing file to
+the registered `failed` status without persisting a provider error payload, and
+`retry` moves that same Evidence record back to `processing`. Both outcomes
+use the same Claim revision and idempotency boundary. A failed or processing
+Evidence item remains attention-required and cannot satisfy a Claim evidence
+requirement; only `ready` Evidence is usable.
 
 Extraction may only fill a field the shared form does not hold yet. If any
 target field already exists — in any state, including `proposed`, `disputed`,

@@ -125,6 +125,15 @@ function messageText(message) {
   return message?.content?.type === 'text' ? message.content.text : ''
 }
 
+function evidenceFileStatusLabel(fileStatus, status) {
+  if (fileStatus === 'awaiting_upload') return 'Upload incomplete'
+  if (fileStatus === 'processing') return 'Processing'
+  if (fileStatus === 'failed') return 'Processing failed'
+  if (fileStatus === 'ready') return 'Ready'
+  if (fileStatus) return fileStatus
+  return status === 'received' ? 'Received' : status
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -189,6 +198,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
   const [evidenceItems, setEvidenceItems] = useState([])
+  const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
+  const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
@@ -203,6 +214,10 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const latestEvidenceRevision = useRef(0)
+  const latestEvidenceItems = useRef([])
+  const evidenceHasLocalMutation = useRef(false)
+  const evidenceClaimId = useRef(null)
   const hasStarted = claim !== null
 
   useEffect(() => {
@@ -317,6 +332,77 @@ function App() {
     ? externalServiceInteraction.error
     : null
 
+  function rememberClaimRevision(revision) {
+    const numericRevision = Number(revision || 0)
+    latestRevision.current = Math.max(latestRevision.current, numericRevision)
+    return numericRevision
+  }
+
+  function setClaimRevision(revision) {
+    const numericRevision = rememberClaimRevision(revision)
+    setClaim((current) => current
+      ? { ...current, revision: Math.max(Number(current.revision || 0), numericRevision) }
+      : current)
+  }
+
+  function attachmentForEvidence(evidence, current = {}) {
+    const fileStatus = evidence.file_status || evidence.status
+    const status = fileStatus === 'awaiting_upload'
+      ? 'failed'
+      : fileStatus === 'processing' || fileStatus === 'failed'
+        ? fileStatus
+        : 'uploaded'
+    const statusLabel = evidenceFileStatusLabel(fileStatus, evidence.status) || 'Uploaded'
+    const canCheckStatus = fileStatus === 'failed'
+      && current.retryFile
+      && current.retryAttempt
+    return {
+      ...current,
+      id: current.id || evidence.evidence_id,
+      evidenceId: evidence.evidence_id,
+      name: evidence.original_filename || evidence.kind,
+      status,
+      statusLabel,
+      ...(canCheckStatus
+        ? {
+          retry: () => handleFileSelected(current.retryFile, current.retryAttempt),
+          retryLabel: 'Check status',
+        }
+        : fileStatus === 'failed'
+          ? {}
+          : { retry: null, retryLabel: null }),
+    }
+  }
+
+  function syncEvidenceProjection(response) {
+    const responseRevision = Number(response.revision || 0)
+    const currentClaimRevision = Math.max(Number(claim?.revision || 0), latestRevision.current)
+    const minimumRevision = Math.max(latestEvidenceRevision.current, currentClaimRevision)
+    if (responseRevision < minimumRevision) return false
+    if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
+    latestEvidenceRevision.current = Math.max(latestEvidenceRevision.current, responseRevision)
+    const items = response.items || []
+    latestEvidenceItems.current = items
+    setEvidenceItems(items)
+    setClaimRevision(responseRevision)
+    setAttachments((current) => {
+      const currentByEvidenceId = new Map(
+        current.filter((item) => item.evidenceId).map((item) => [item.evidenceId, item]),
+      )
+      if (items.length === 0 && current.some((item) => item.status === 'uploading' || item.retry || item.retryFile)) {
+        return current
+      }
+      if (current.some((item) => item.status === 'uploading')) {
+        return current.map((item) => {
+          const evidence = items.find((candidate) => candidate.evidence_id === item.evidenceId)
+          return evidence ? attachmentForEvidence(evidence, item) : item
+        })
+      }
+      return items.map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
+    })
+    return true
+  }
+
   function setServiceConsentChecked(consentChecked) {
     setExternalServiceInteraction((current) => ({
       claimId: claim?.claim_id || null,
@@ -423,40 +509,96 @@ function App() {
 
   useEffect(() => {
     if (!claim?.claim_id) {
+      evidenceClaimId.current = null
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
       setEvidenceItems([])
       setAttachments([])
+      setEvidencePollingKey(0)
       return undefined
+    }
+    if (evidenceClaimId.current !== claim.claim_id) {
+      evidenceClaimId.current = claim.claim_id
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
     }
     let active = true
     getClaimEvidence(claim.claim_id)
       .then((response) => {
         if (active) {
-          setEvidenceItems(response.items || [])
-          setAttachments((current) => current.some((item) => item.status === 'uploading')
-            ? current
-            : (response.items || []).map((item) => ({
-              id: item.evidence_id,
-              evidenceId: item.evidence_id,
-              name: item.original_filename || item.kind,
-              status: item.file_status === 'awaiting_upload' ? 'failed' : 'uploaded',
-              statusLabel: item.file_status === 'awaiting_upload' ? 'Upload incomplete' : (item.file_status || 'Uploaded'),
-            })))
-          setClaim((current) => current ? { ...current, revision: response.revision } : current)
+          if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
+          if ((response.items || []).some((item) => item.file_status === 'processing')) {
+            setEvidencePollingKey((current) => current + 1)
+          }
         }
       })
       .catch(() => {})
     return () => { active = false }
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
 
-  async function handleFileSelected(file) {
+  useEffect(() => {
+    if (!claim?.claim_id || !evidencePollingKey) {
+      return undefined
+    }
+    let active = true
+    let timer
+    let delay = 1500
+    const maxDelay = 12000
+    const schedule = () => {
+      timer = globalThis.setTimeout(sync, delay)
+    }
+    async function sync() {
+      try {
+        const response = await getClaimEvidence(claim.claim_id)
+        if (!active) return
+        const applied = syncEvidenceProjection(response)
+        if (applied) setEvidenceSyncNotice('')
+        delay = 1500
+        if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
+      } catch {
+        if (!active) return
+        setEvidenceSyncNotice('We could not check the latest file status because the connection was interrupted. We will keep trying to reconnect.')
+        delay = Math.min(delay * 2, maxDelay)
+        schedule()
+      }
+    }
+    schedule()
+    return () => {
+      active = false
+      globalThis.clearTimeout(timer)
+    }
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claim?.claim_id, evidencePollingKey])
+
+  async function handleFileSelected(file, existingAttempt = null) {
     if (isBusy) return
+    if (!hasClaimantAccessToken()) {
+      setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
+      setStatus('error')
+      return
+    }
     setError('')
-    const localId = requestId('file')
-    setAttachments((current) => [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+    const attempt = existingAttempt || {
+      localId: requestId('file'),
+      claimKey: requestId('claim'),
+      uploadKey: requestId('evidence-upload'),
+      completeKey: requestId('evidence-complete'),
+    }
+    const localId = attempt.localId
+    setAttachments((current) => existingAttempt
+      ? current.map((item) => item.id === localId
+        ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
+        : item)
+      : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
     try {
       let activeClaim = claim
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType })
+        const created = await createClaim({ idempotencyKey: attempt.claimKey, incidentType: claimType })
         activeClaim = created.claim
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
@@ -465,30 +607,69 @@ function App() {
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
       }
+      if (existingAttempt) {
+        const authoritative = await getClaimEvidence(activeClaim.claim_id)
+        syncEvidenceProjection(authoritative)
+        setEvidenceSyncNotice('')
+        const observed = (authoritative.items || []).find(
+          (item) => item.evidence_id === attempt.evidenceId,
+        )
+        if (observed && observed.file_status !== 'awaiting_upload') {
+          if (observed.file_status === 'processing') {
+            setEvidencePollingKey((current) => current + 1)
+          }
+          setAttachments((current) => current.map((item) => item.id === localId
+            ? attachmentForEvidence(observed, {
+              ...item,
+              retry: observed.file_status === 'failed'
+                ? () => handleFileSelected(file, attempt)
+                : null,
+              retryLabel: observed.file_status === 'failed' ? 'Check status' : null,
+            })
+            : item))
+          setStatus('idle')
+          return
+        }
+      }
       const requested = await requestEvidenceUpload({
         claimId: activeClaim.claim_id,
         revision: activeClaim.revision,
         file,
         kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
+        idempotencyKey: attempt.uploadKey,
       })
-      setClaim((current) => current ? { ...current, revision: requested.revision } : current)
+      evidenceHasLocalMutation.current = true
+      latestEvidenceRevision.current = requested.revision
+      attempt.evidenceId = requested.evidence_id
+      setClaimRevision(requested.revision)
       await uploadEvidenceContent({ upload: requested.upload, file })
-      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+      const fileBytes = new Uint8Array(await file.arrayBuffer())
+      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', fileBytes)
       const checksum = `sha256:${Array.from(new Uint8Array(checksumBuffer), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
       const completed = await completeEvidenceUpload({
         claimId: activeClaim.claim_id,
         evidenceId: requested.evidence_id,
         revision: requested.revision,
         checksum,
+        idempotencyKey: attempt.completeKey,
       })
-      setClaim((current) => current ? { ...current, revision: completed.revision } : current)
+      latestEvidenceRevision.current = completed.revision
+      attempt.evidenceId = completed.evidence.evidence_id
+      latestEvidenceItems.current = [completed.evidence]
+      setEvidencePollingKey((current) => current + 1)
+      setClaimRevision(completed.revision)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'uploaded', statusLabel: 'Uploaded', evidenceId: completed.evidence.evidence_id }
+        ? attachmentForEvidence(completed.evidence, {
+          ...item,
+          retryFile: file,
+          retryAttempt: attempt,
+        })
         : item))
+      setStatus('idle')
     } catch (requestError) {
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file) }
+        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
         : item))
       showError(requestError)
     }
@@ -565,7 +746,7 @@ function App() {
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
-      setClaim((current) => ({ ...current, revision: turn.claim_revision }))
+      setClaimRevision(turn.claim_revision)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
@@ -672,7 +853,7 @@ function App() {
       setForm((current) => ({ ...current, ...response.confirmed_fields }))
       setContentsItems(response.confirmed_contents_items || contentsItems)
       setDynamicForm(response.dynamic_form || null)
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       pendingConfirmation.current = null
       setStatus('idle')
@@ -724,7 +905,7 @@ function App() {
       }
 
       setForm(updatedForm)
-      setClaim((current) => ({ ...current, revision }))
+      setClaimRevision(revision)
       setNextStep(updatedNextStep)
       setDynamicForm(updatedDynamicForm)
       setEditingField(null)
@@ -747,7 +928,7 @@ function App() {
         revision: claim.revision,
         idempotencyKey: pendingSupportRequest.current.idempotencyKey,
       })
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       setHandoff(response.handoff)
       pendingSupportRequest.current = null
@@ -1315,7 +1496,7 @@ function App() {
                     {evidenceItems.map((item) => (
                       <li key={item.evidence_id} className="uploaded-file-row">
                         <div><strong>{item.original_filename || item.kind}</strong><span>{item.media_type || 'File'} · {item.file_status || item.status}</span></div>
-                        <span className="file-status">{item.file_status === 'processing' ? 'Processing' : item.status === 'received' ? 'Received' : item.file_status}</span>
+                        <span className="file-status">{evidenceFileStatusLabel(item.file_status, item.status)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1500,6 +1681,13 @@ function App() {
                 status={status}
                 error={serviceError}
               />
+            )}
+
+            {evidenceSyncNotice && (
+              <p className="backend-status" role="status">
+                <span className="status-dot" />
+                <span>{evidenceSyncNotice}</span>
+              </p>
             )}
 
             <MessageComposer
