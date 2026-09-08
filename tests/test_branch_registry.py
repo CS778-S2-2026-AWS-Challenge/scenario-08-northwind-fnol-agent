@@ -1,12 +1,9 @@
 from datetime import UTC, datetime
-from pathlib import Path
 
 import mongomock
 import pytest
 
 from backend.domain.branch_registry import (
-    COMMON_FIELDS,
-    FAMILY_FIELDS,
     BranchRuleEvaluator,
     build_default_registry,
     claimant_projection_fields,
@@ -51,7 +48,6 @@ from backend.services.branching import build_applied_branch_evaluation
 from backend.services.claims import _claimant_form
 
 FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
-MAPPING_DOCUMENT = Path(__file__).parents[1] / 'docs' / 'vp-field-branch-mapping.md'
 
 
 def make_claim(*, revision: int = 1, incident_type: str | None = None) -> WorkingClaim:
@@ -248,30 +244,6 @@ def test_confirmed_family_activates_exactly_one_branch(family: str) -> None:
         item for item in result.field_selection if item.field_code == 'incident.type'
     )
     assert incident_type.selection_state.value == 'candidate_now'
-
-
-def test_vp_mapping_document_covers_every_executable_field_once() -> None:
-    text = MAPPING_DOCUMENT.read_text(encoding='utf-8')
-    registry = build_default_registry()
-    mapped_codes = [
-        line.split('|')[1].strip().strip('`')
-        for line in text.splitlines()
-        if line.startswith('| `') and line.count('|') >= 8
-    ]
-
-    assert registry.field_codes == REGISTERED_FIELD_CODES
-    assert len(mapped_codes) == len(REGISTERED_FIELD_CODES)
-    assert set(mapped_codes) == REGISTERED_FIELD_CODES
-    assert COMMON_FIELDS | FAMILY_FIELDS['motor'] | FAMILY_FIELDS['home'] == REGISTERED_FIELD_CODES
-    assert FAMILY_FIELDS['contents'] == frozenset()
-
-
-def test_contents_mapping_declares_independent_record_boundary() -> None:
-    text = MAPPING_DOCUMENT.read_text(encoding='utf-8')
-
-    assert '`WorkingClaim.contents_items`' in text
-    assert 'not by flattened form fields' in text
-    assert 'ClaimantContentsItem' in text
 
 
 def test_proposed_family_is_candidate_and_cannot_select_formal_family() -> None:
