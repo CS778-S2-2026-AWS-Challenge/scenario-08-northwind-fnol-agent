@@ -333,7 +333,7 @@ def test_feature_setting_disables_model_assistance_without_disabling_runtime_saf
     assert fallback.calls == 1
 
 
-def test_feature_setting_disables_knowledge_retrieval_before_provider_io() -> None:
+def test_disabled_knowledge_retrieval_returns_unavailable_without_retriever_io() -> None:
     configurations = ConfigurationRepository()
     releases = ReleaseSetRepository()
     _release(
@@ -364,7 +364,24 @@ def test_feature_setting_disables_knowledge_retrieval_before_provider_io() -> No
         created_at=FIXED_TIME,
         updated_at=FIXED_TIME,
     )
-    provider = _RecordingAgent('NO_RETRIEVAL')
+
+    class KnowledgeRequestingAgent(_RecordingAgent):
+        def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+            proposal = super().propose_turn(context)
+            if not context.tool_results:
+                return replace(
+                    proposal,
+                    required_tools=[
+                        {
+                            'tool': 'knowledge_search',
+                            'operation': 'search',
+                            'query': 'What is the approved next step?',
+                        }
+                    ],
+                )
+            return proposal
+
+    provider = KnowledgeRequestingAgent('NO_RETRIEVAL')
     grounded = KnowledgeGroundedAgent(provider, _UnexpectedRetriever())
 
     grounded.propose_turn(
@@ -379,9 +396,18 @@ def test_feature_setting_disables_knowledge_retrieval_before_provider_io() -> No
         )
     )
 
+    assert provider.calls == 2
     assert provider.last_context is not None
-    assert provider.last_context.knowledge_status == 'disabled'
+    assert provider.last_context.knowledge_status == 'unavailable'
     assert provider.last_context.knowledge_results == ()
+    assert provider.last_context.tool_results == (
+        {
+            'tool': 'knowledge_search',
+            'status': 'unavailable',
+            'source_refs': [],
+            'limitations': ['Knowledge retrieval is disabled by published configuration.'],
+        },
+    )
 
 
 def test_next_turn_uses_the_next_complete_release_without_mutating_the_prior_snapshot() -> None:

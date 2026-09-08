@@ -377,6 +377,29 @@ staff-only notes, credentials, provider internals, or another customer's data.
 - Errors are normalised by layer, retry class, state effect, safe message, and diagnostic
   reference. Provider error text cannot become a claimant response or an action rule.
 
+## Bounded context retrieval and re-plan
+
+One claimant turn may request at most one registered context lookup from knowledge, policy, or
+claim history. Runtime validates the tool name, operation, arguments, branch permission, identity,
+and scope before executing it. A successful lookup returns source-linked context to the model for
+exactly one additional proposal. A second context-tool request in that proposal is rejected before
+the Claim mutation.
+
+`no_evidence`, ambiguous, inapplicable, malformed, or unavailable context remains labelled. A
+failed lookup cannot introduce an inference-sourced Claim fact, make a field `required_now`, or
+make the Dynamic Form ready. A successful lookup may support a proposed fact only when the
+persisted assertion includes the retrieval record identifier. Retrieval remains evidence; the
+registered branch evaluator and Runtime retain requirement and business-state authority.
+
+## Question-effort boundary
+
+Each Claim conversation has a persisted question budget. Runtime counts Agent question turns,
+registered facts requested, repeated questions, and detailed question history. Counts carry across
+replacement sessions for the same Claim. When the budget is exhausted, Runtime preserves the
+Claim, stops the additional Agent question, sets `post_session_follow_up_required`, and returns a
+claimant-safe next step owned by a claims professional. Prompt wording and model behaviour cannot
+reset or exceed this boundary.
+
 ## Publication and Rollback
 
 The Control Plane policy lifecycle is:

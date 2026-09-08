@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Protocol
 
-from backend.domain.intake import (
-    CONTROLLED_INTAKE_FIELDS,
-    PRODUCT_FAMILY_INTAKE_FIELD,
-    infer_controlled_product_family,
-    next_controlled_intake_field,
-)
+from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
     AgentAction,
@@ -20,8 +15,10 @@ from backend.domain.models import (
     CustomerNextStep,
     FormSource,
     FormStatus,
+    MessageRecord,
     ModelDecisionProvenance,
     NeededFor,
+    ProposedContentsItem,
     ProposedFormChange,
     ResponsibleParty,
     StateChange,
@@ -154,6 +151,10 @@ LOSS_PATTERN = re.compile(
     r'([^.!?]*(?:damag(?:e|ed)|scratch(?:ed)?|dent(?:ed)?|broken|lost)[^.!?]*)',
     re.IGNORECASE,
 )
+OCCURRED_AT_PATTERN = re.compile(
+    r'\b(?:today|yesterday|this\s+(?:morning|afternoon|evening)|last\s+night|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b',
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +171,8 @@ class AgentTurnContext:
     knowledge_limitations: tuple[str, ...] = ()
     runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
+    provenance_messages: tuple[MessageRecord, ...] = ()
+    tool_results: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +187,8 @@ class AgentProposal:
     proposed_signals: list[dict[str, object]]
     required_tools: list[dict[str, object]]
     next_action_requirements: list[str]
+    tool_results: list[dict[str, object]] = field(default_factory=list)
+    contents_item_changes: list[ProposedContentsItem] = field(default_factory=list)
     handoff_priority: str | None = None
     controlled_rule_authorised: bool = False
     proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
@@ -261,6 +266,83 @@ def _initial_form_changes(message_text: str, incident_type: str | None) -> list[
                 confidence=0.85,
             )
         )
+    if _safety_is_explicitly_clear(message_text):
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.injury_or_danger',
+                value=False,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
+    if re.search(r'\b(?:another|other)\s+(?:car|vehicle|driver|party)\b', message_text, re.I):
+        changes.append(
+            ProposedFormChange(
+                field_code='parties.other_parties',
+                value=True,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.CONFIRMED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
+    if re.search(
+        r'\b(?:bumper|vehicle|car|panel)\b[^.!?]*(?:damag|dent|scratch|broken)',
+        message_text,
+        re.I,
+    ):
+        changes.append(
+            ProposedFormChange(
+                field_code='vehicle.damage_description',
+                value=loss.group(1).strip() if loss is not None else message_text,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=0.9,
+            )
+        )
+    if re.search(
+        r'\b(?:safe to drive|can be driven|vehicle is drivable|car is drivable)\b',
+        message_text,
+        re.I,
+    ):
+        changes.append(
+            ProposedFormChange(
+                field_code='vehicle.drivable',
+                value=True,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.CONFIRMED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
+    occurred_at = OCCURRED_AT_PATTERN.search(message_text)
+    if occurred_at is not None:
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.occurred_at',
+                value=occurred_at.group(0),
+                source=FormSource.CLAIMANT,
+                status=FormStatus.PROPOSED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
+    elif _contains_unnegated_signal(message_text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS) or (
+        _contains_unnegated_signal(message_text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS)
+    ):
+        changes.append(
+            ProposedFormChange(
+                field_code='incident.injury_or_danger',
+                value=True,
+                source=FormSource.CLAIMANT,
+                status=FormStatus.CONFIRMED,
+                needed_for=NeededFor.CURRENT_ACTION,
+                confidence=1.0,
+            )
+        )
     return changes
 
 
@@ -278,7 +360,8 @@ def _is_guided_rear_end_claim(claim: WorkingClaim, message_text: str) -> bool:
             and inferred_family.value == 'motor'
             and inferred_family.source is FormSource.INFERENCE
         )
-    return is_motor and any(pattern.search(candidate) for pattern in REAR_END_COLLISION_PATTERNS)
+    rear_end = any(pattern.search(candidate) for pattern in REAR_END_COLLISION_PATTERNS)
+    return is_motor and rear_end
 
 
 def _guided_initial_form_changes(message_text: str) -> list[ProposedFormChange]:
@@ -298,6 +381,54 @@ def _safety_is_explicitly_clear(message_text: str) -> bool:
     return injury_clear and (danger_clear or scene_clear)
 
 
+def _controlled_requirement_value(field_code: str, message_text: str) -> Any | None:
+    """Parse only explicit values needed by the deterministic fallback."""
+
+    text = message_text.strip()
+    lowered = text.casefold()
+    if not text:
+        return None
+    if field_code == 'claim.product_family':
+        return infer_controlled_product_family(text)
+    if field_code == 'incident.injury_or_danger':
+        if _safety_is_explicitly_clear(text):
+            return False
+        if _contains_unnegated_signal(text, INJURY_PATTERNS, INJURY_NEGATION_PATTERNS) or (
+            _contains_unnegated_signal(text, DANGER_PATTERNS, DANGER_NEGATION_PATTERNS)
+        ):
+            return True
+        return None
+    if field_code == 'parties.other_parties':
+        if re.search(r'\b(?:no|none|nobody|not)\b.*\b(?:other|another|party|vehicle)\b', lowered):
+            return False
+        if re.search(r'\b(?:other|another|second)\b.*\b(?:party|person|vehicle|car)\b', lowered):
+            return True
+        return None
+    if field_code == 'vehicle.drivable':
+        if re.search(r"\b(?:not drivable|cannot drive|can't drive|unsafe|undrivable)\b", lowered):
+            return False
+        if re.search(r'\b(?:drivable|can drive|can be driven|safe to drive)\b', lowered):
+            return True
+        return None
+    if field_code == 'property.ongoing_risk':
+        if re.search(r'\b(?:no|none|not|no longer)\b.*\b(?:risk|leak|fire|danger)\b', lowered):
+            return False
+        if re.search(r'\b(?:active|ongoing)\b.*\b(?:risk|leak|fire|flood|danger)\b', lowered):
+            return True
+        return None
+    if field_code == 'property.habitable':
+        if re.search(r'\b(?:uninhabitable|unsafe to live|cannot live|can\'t live)\b', lowered):
+            return False
+        if re.search(r'\b(?:habitable|safe to live|can live|can still live)\b', lowered):
+            return True
+        return None
+    if field_code == 'property.affected_areas':
+        return [text]
+    if field_code == 'contents.items':
+        return None
+    return text
+
+
 def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentProposal | None:
     claim = context.claim
     if not _is_guided_rear_end_claim(claim, message_text):
@@ -305,6 +436,27 @@ def _guided_proposal(context: AgentTurnContext, message_text: str) -> AgentPropo
 
     if 'incident.description' not in claim.form:
         changes = _guided_initial_form_changes(message_text)
+        if any(change.field_code == 'incident.injury_or_danger' for change in changes):
+            return AgentProposal(
+                action=AgentAction.CONFIRM,
+                reason_codes=['MATERIAL_FACTS_PROPOSED'],
+                customer_reason='The initial incident details need claimant confirmation.',
+                customer_response=(
+                    'I have captured the incident and safety details. '
+                    'Please check them before I continue.'
+                ),
+                customer_next_step=CustomerNextStep(
+                    status='confirmation_required',
+                    summary='Review and confirm the proposed incident information.',
+                    responsible_party=ResponsibleParty.CLAIMANT,
+                    required_items=[change.field_code for change in changes],
+                ),
+                form_changes=changes,
+                state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
+                proposed_signals=[],
+                required_tools=[],
+                next_action_requirements=[f'confirm:{change.field_code}' for change in changes],
+            )
         return AgentProposal(
             action=AgentAction.ASK,
             reason_codes=['SAFETY_STATUS_REQUIRED'],
@@ -442,7 +594,9 @@ def _confirmation_response(changes: list[ProposedFormChange]) -> str:
         'incident.location': 'where it happened',
         'loss.description': 'what was damaged or lost',
     }
-    understood = ', '.join(labels[change.field_code] for change in changes)
+    understood = ', '.join(
+        labels.get(change.field_code, change.field_code.replace('.', ' ')) for change in changes
+    )
     return (
         f'I have structured {understood} from your description. '
         'Please check the highlighted facts and correct anything that is not right.'
@@ -680,58 +834,68 @@ class ControlledAgent:
             guided = _guided_proposal(context, message_text)
             if guided is not None:
                 return guided
-        intake_field = next_controlled_intake_field(context.claim)
-        if context.branch_evaluation is not None:
-            allowed_codes = {
-                item.field_code
-                for item in context.branch_evaluation.field_selection
-                if item.selection_state.value not in {'inactive', 'system_owned'}
-            }
-            if intake_field is not None and intake_field.field_code not in allowed_codes:
-                intake_field = next(
-                    (
-                        item
-                        for item in (*CONTROLLED_INTAKE_FIELDS, PRODUCT_FAMILY_INTAKE_FIELD)
-                        if item.field_code in allowed_codes
-                        and (
-                            item.field_code not in context.claim.form
-                            or context.claim.form[item.field_code].status
-                            is not FormStatus.CONFIRMED
-                        )
-                    ),
-                    None,
-                )
+        intake_field = next_requirement_field(context.branch_evaluation)
         if context.message_text is not None and intake_field is not None:
-            changes = (
-                _initial_form_changes(message_text, context.claim.incident_type)
-                if not context.claim.form and intake_field.field_code == 'incident.description'
-                else [
-                    ProposedFormChange(
-                        field_code=intake_field.field_code,
-                        value=context.message_text,
-                        source=FormSource.CLAIMANT,
-                        status=FormStatus.PROPOSED,
-                        needed_for=NeededFor.CURRENT_ACTION,
-                        confidence=1.0,
-                    )
-                ]
+            if not context.claim.form and intake_field.field_code == 'incident.description':
+                changes = _initial_form_changes(message_text, context.claim.incident_type)
+            else:
+                value = _controlled_requirement_value(intake_field.field_code, message_text)
+                changes = (
+                    []
+                    if value is None
+                    else [
+                        ProposedFormChange(
+                            field_code=intake_field.field_code,
+                            value=value,
+                            source=FormSource.CLAIMANT,
+                            status=(
+                                FormStatus.CONFIRMED
+                                if isinstance(value, bool)
+                                else FormStatus.PROPOSED
+                            ),
+                            needed_for=NeededFor.CURRENT_ACTION,
+                            confidence=1.0,
+                        )
+                    ]
+                )
+            needs_confirmation = any(
+                change.status is not FormStatus.CONFIRMED for change in changes
             )
+            action = AgentAction.CONFIRM if needs_confirmation else AgentAction.ASK
             return AgentProposal(
-                action=AgentAction.CONFIRM,
-                reason_codes=['MATERIAL_FACTS_PROPOSED'],
+                action=action,
+                reason_codes=(
+                    ['MATERIAL_FACTS_PROPOSED'] if needs_confirmation else ['REQUIREMENT_RECORDED']
+                ),
                 customer_reason=intake_field.confirmation_prompt,
-                customer_response=_confirmation_response(changes),
+                customer_response=(
+                    _confirmation_response(changes) if needs_confirmation else intake_field.prompt
+                ),
                 customer_next_step=CustomerNextStep(
-                    status='confirmation_required',
-                    summary=intake_field.confirmation_prompt,
+                    status=(
+                        'confirmation_required' if needs_confirmation else 'more_information_needed'
+                    ),
+                    summary=(
+                        intake_field.confirmation_prompt
+                        if needs_confirmation
+                        else intake_field.prompt
+                    ),
                     responsible_party=ResponsibleParty.CLAIMANT,
-                    required_items=[change.field_code for change in changes],
+                    required_items=(
+                        [change.field_code for change in changes]
+                        if needs_confirmation
+                        else [intake_field.field_code]
+                    ),
                 ),
                 form_changes=changes,
-                state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
+                state_changes=[StateChange(path='claim_state.next_action', to=action.value)],
                 proposed_signals=[],
                 required_tools=[],
-                next_action_requirements=[f'confirm:{change.field_code}' for change in changes],
+                next_action_requirements=(
+                    [f'confirm:{change.field_code}' for change in changes]
+                    if needs_confirmation
+                    else [f'provide:{intake_field.field_code}']
+                ),
             )
 
         if context.message_text is not None and any(

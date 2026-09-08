@@ -333,6 +333,6 @@ def test_unrelated_claim_does_not_enter_the_rear_end_fixture_path(
         99,
     )
 
-    assert response['decision']['action'] == 'CONFIRM'
-    assert response['decision']['customer_next_step']['status'] == 'confirmation_required'
+    assert response['decision']['action'] == 'ASK'
+    assert response['decision']['customer_next_step']['status'] == 'more_information_needed'
     assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []

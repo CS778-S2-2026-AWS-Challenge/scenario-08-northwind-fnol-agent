@@ -47,6 +47,13 @@ class _ResumeOverlayRepository:
                     'unresolved_questions': self._resume.unresolved_questions,
                     'pending_items': self._resume.pending_items,
                     'prior_commitments': self._resume.prior_commitments,
+                    'question_budget': self._resume.question_budget,
+                    'question_turn_count': self._resume.question_turn_count,
+                    'requested_fact_count': self._resume.requested_fact_count,
+                    'repeated_question_count': self._resume.repeated_question_count,
+                    'post_session_follow_up_required': (
+                        self._resume.post_session_follow_up_required
+                    ),
                 }
             )
             if session.session_id == self._source_session_id
@@ -284,6 +291,12 @@ def start_session_with_recovery(
         unresolved_questions=_unresolved_questions(repository, claim, source),
         pending_items=_pending_items(repository, claim, source),
         prior_commitments=_prior_commitments(repository, claim, source),
+        question_budget=source.question_budget,
+        question_turn_count=source.question_turn_count,
+        requested_fact_count=source.requested_fact_count,
+        repeated_question_count=source.repeated_question_count,
+        remaining_question_budget=max(source.question_budget - source.question_turn_count, 0),
+        post_session_follow_up_required=source.post_session_follow_up_required,
         customer_next_step=claim.customer_next_step,
     )
     overlay = _ResumeOverlayRepository(repository, source.session_id, resume)

@@ -285,6 +285,14 @@ the append-only audit collection through a bounded, filterable projection.
   approved product contract explicitly changes this rule.
 - Resume preserves confirmed facts, evidence records, pending work, and prior
   commitments while using the latest authorised Claim State.
+- Session question accounting persists `question_budget`, `question_turn_count`,
+  `requested_fact_count`, `repeated_question_count`, `post_session_follow_up_required`, and an
+  append-only `question_history`. A new session for the same Claim carries these values forward;
+  it cannot reset the claimant-effort boundary.
+- Each question-history record retains its stable identity, trigger message, registered field
+  codes, purpose, repeat marker, and accepted time. Claimant projections expose counters and the
+  remaining budget but not the detailed history; the Workbench projection may expose it to
+  authorised staff.
 
 ## Staff Agent Session Invariants
 
@@ -374,6 +382,18 @@ the append-only audit collection through a bounded, filterable projection.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.
+- A structured form field retains an immutable assertion list plus one
+  `current_assertion_id`. Assertions preserve reported wording, normalized value, source
+  references, relation, status, temporal precision, optional reason code, and creation time.
+  Equivalent repetition and compatible refinement retain history without creating a false
+  conflict; explicit correction supersedes the former current assertion; a material conflict
+  remains disputed until claimant clarification or authorised staff review.
+- `WorkingClaim.contents_items` uses the same history-preserving rule through immutable item
+  assertions and stable item IDs. Correcting an item replaces its current projection without
+  deleting the previous assertion or creating a duplicate item.
+- Agent decisions persist validated context-tool results and any discrepancy candidates used by
+  Runtime review. A discrepancy candidate is internal evidence of conflicting sources only; it
+  does not set `fraud_signal`, make a fraud conclusion, or enter claimant projections.
 
 ## Handoff and Staff-work Invariants
 

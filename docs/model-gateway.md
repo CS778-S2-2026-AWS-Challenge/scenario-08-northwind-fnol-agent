@@ -32,28 +32,27 @@ Every adapter maps provider termination data to `complete`, `incomplete`, `refus
 refused, filtered, cancelled, and unrecognised results are discarded before proposal
 validation or persistence, even when their partial content happens to match the schema.
 
-The model receives an explicit minimum context projection rather than the durable
-`WorkingClaim`. The projection contains the channel, locale, incident type, customer-safe
-workflow state, evidence counts, the current customer next step, the current claimant text,
-and only current-action form values from this allow-list: incident type, occurrence time,
-description, injury or danger, cause, loss description, vehicle damage, vehicle drivability,
-and affected property areas. A field marked for a later action is not sent even when its code
-is allow-listed. Policy numbers, contact preferences, incident and property addresses, other
-parties, police references, emergency-service records, vehicle registrations, and every
-unregistered field remain outside routine model context.
+The model receives an explicit bounded context projection rather than the durable
+`WorkingClaim`. The projection contains channel, locale, selected family, claimant-safe workflow
+state, evidence counts, current next step, current claimant text, typed contents items, and only
+current-action fields permitted by the latest Branch Evaluation. Inactive, system-owned,
+later-action, hidden, and unregistered fields remain outside routine model context. When no Branch
+Evaluation exists, a compatibility allow-list restricts the context to approved intake fields.
 
-The projection also excludes Claim, Customer, Session, Message, and Evidence identifiers;
-source references and actor identities; internal fraud, coverage, and severity signals;
-provider fingerprints; routes; timestamps; and external Claim or assessor results.
+The projection also excludes Claim, Customer, Session, and Evidence resource identities; actor
+identities; internal fraud, coverage, and severity signals; provider fingerprints; routes;
+timestamps; and external Claim or assessor results. Bounded source references for selected facts
+may be included so the model can distinguish supported facts and corrections; Runtime still owns
+source validation and role visibility.
 For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
 model that the field already exists without disclosing its value. This supports non-repetition
 without widening the routine model-data projection.
 
-The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
-but it cannot set fact provenance or confirmation state. The server converts every accepted
-model form suggestion to `source: inference` and `status: proposed`. Claimant, staff, policy,
-or document provenance and confirmed state require their existing trusted server-side paths.
-The resulting field actor is `model_gateway`, not `controlled_agent`.
+The model-facing proposal schema can suggest a registered field value, purpose, confidence,
+precision, relation, and the claimant wording that supports it. Runtime verifies whether that
+wording directly supports the normalized value. A supported explicit claimant fact is recorded
+with claimant provenance; a model interpretation remains `source: inference` and `status:
+proposed`. Policy, history, document, and staff provenance require their trusted server paths.
 
 The model-facing `proposed_signals` collection has a maximum length of zero. Any response that
 attempts to create an internal signal is malformed and the entire turn is rejected before a
@@ -72,11 +71,13 @@ identifier, and provider request identifier when supplied. These references are 
 are absent from claimant messages and decision projections. Token usage persistence remains a
 current limitation.
 
-The model-facing schema does not contain the server-only `controlled_rule_authorised`
-marker, and rejects a response that tries to provide it. Because the current Agent request
-does not expose an approved tool manifest, provider tool calls and any model-proposed
-`required_tools` entry are rejected before orchestration. This prevents a structured model
-response from invoking a tool path that deterministic server policy has not exposed.
+The model-facing schema does not contain the server-only `controlled_rule_authorised` marker and
+rejects a response that tries to provide it. Structured `required_tools` proposals are permitted
+only for tool names and operations exposed by the Branch Evaluation and Runtime policy. Runtime
+validates arguments and executes at most one knowledge, policy, or claim-history context lookup,
+then permits exactly one model re-plan with the typed result. Provider-native tool-call side
+channels remain unsupported; a second context lookup or an unregistered operation rejects the
+turn before Claim mutation.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -156,12 +157,13 @@ reason, usage, configured model identity, and AWS request identity into `ModelRe
 authentication, rate-limit, provider, timeout, and malformed-output failures use the same
 provider-neutral errors as other adapters.
 
-The executable claimant prompt is `northwind-fnol-motor-claimant-v4`, stored under
-`backend/prompts/`. It defines the bounded Motor presentation behaviour. The Runtime injects the
-current minimum Claim projection, bounded knowledge citations, retrieval status, and response
-schema; the adapter does not own FNOL behaviour. Prompt v1 through v3 remain immutable historical
-artifacts. Changing executable prompt content requires another prompt identifier and regression
-evidence.
+The executable claimant prompt is `northwind-fnol-claimant-v5`, stored under
+`backend/prompts/`. It defines the bounded motor, home, and contents VP behaviour, natural-language
+correction, current-action questioning, context lookup, and handoff proposals. Runtime injects the
+Branch Evaluation, minimum Claim projection, bounded knowledge citations, typed tool results, and
+response schema; the adapter does not own FNOL authority. Earlier prompt versions remain immutable
+historical artifacts. Changing executable prompt content requires another prompt identifier and
+regression evidence.
 
 The repository includes configuration and transport tests, but a deployment is live only after an
 authorised model invocation succeeds in its selected AWS account and region. Model listing or
@@ -221,9 +223,9 @@ idempotency records unchanged.
   Converse; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
-- The gateway normalises tool calls, but the current `GatewayAgent` requests only a
-  structured `AgentProposal`. Existing server-side orchestration remains responsible
-  for any authorised tool execution.
+- The gateway normalises provider tool calls but the claimant Runtime accepts tool intent only
+  through structured `AgentProposal.required_tools`. The server validates and executes the
+  registered bounded context operations and owns the single re-plan limit.
 - Provider retries, fallback selection, circuit breaking, usage persistence, and model
   evaluation thresholds are not yet implemented. A configured runtime never substitutes
   a fixture or another provider silently.
@@ -243,15 +245,16 @@ does not yet implement the complete target Agent Runtime contract:
 - the current `ModelResponse` normalises transport output; the target Runtime additionally
   distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
   and final `TurnResult`;
-- the current `GatewayAgent` produces the legacy eight-action `AgentProposal`; the target
+- the current `GatewayAgent` produces the compatibility eight-action `AgentProposal`; the target
   action model separates conversation moves, Claim commands, human actions, external
   coordination, and one Runtime control directive;
 - the current configuration declares endpoint capabilities; the target Model Profile
   Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
   and qualified fallback groups; and
-- the current Gateway rejects tool calls from Agent turns; future tool use requires a
-  published Tool Registry, per-turn allow-list, server authority checks, typed results,
-  idempotency, and trajectory tests before execution is enabled.
+- the current Runtime executes only the registered knowledge, policy, and claim-history context
+  operations with a per-turn allow-list and one re-plan; additional action tools still require
+  published Tool Registry entries, authority checks, typed results, idempotency, and trajectory
+  tests before execution.
 
 These are incremental extensions, not reasons to replace the implemented provider-neutral
 port. Current compatibility types remain supported until the versioned API, persistence,

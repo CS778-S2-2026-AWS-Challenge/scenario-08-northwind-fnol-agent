@@ -1300,6 +1300,18 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "AssertionRelation": {
+        "enum": [
+          "initial",
+          "equivalent",
+          "refinement",
+          "correction",
+          "material_conflict",
+          "irrelevant"
+        ],
+        "title": "AssertionRelation",
+        "type": "string"
+      },
       "AssessorLocation": {
         "additionalProperties": false,
         "properties": {
@@ -2318,6 +2330,9 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "$ref": "#/components/schemas/FactResolutionState"
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -2346,6 +2361,7 @@
           "source",
           "status",
           "needed_for",
+          "resolution_state",
           "updated_at"
         ],
         "title": "ClaimantContentsItem",
@@ -3140,6 +3156,13 @@
         "additionalProperties": false,
         "description": "One source-aware contents item; Evidence associations remain separate records.",
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "category": {
             "maxLength": 100,
             "minLength": 1,
@@ -3158,6 +3181,18 @@
               }
             ],
             "title": "Confidence"
+          },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
           },
           "description": {
             "maxLength": 500,
@@ -3196,6 +3231,16 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -3231,6 +3276,93 @@
           "updated_by"
         ],
         "title": "ContentsItem",
+        "type": "object"
+      },
+      "ContentsItemAssertion": {
+        "additionalProperties": false,
+        "properties": {
+          "assertion_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assertion Id",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loss_type": {
+            "$ref": "#/components/schemas/ContentsLossType"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ContentsOwnership"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/AssertionRelation",
+            "default": "initial"
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "description",
+          "category",
+          "loss_type",
+          "ownership",
+          "status",
+          "created_at"
+        ],
+        "title": "ContentsItemAssertion",
         "type": "object"
       },
       "ContentsLossType": {
@@ -3970,6 +4102,9 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "requirements": {
+            "$ref": "#/components/schemas/RequirementResolution"
           },
           "selected_family": {
             "anyOf": [
@@ -5269,6 +5404,98 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "FactAssertion": {
+        "additionalProperties": false,
+        "description": "One immutable source-linked assertion about a structured Claim fact.",
+        "properties": {
+          "assertion_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assertion Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "normalized_value": {
+            "title": "Normalized Value"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/AssertionRelation",
+            "default": "initial"
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus",
+            "default": "proposed"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "normalized_value",
+          "created_at"
+        ],
+        "title": "FactAssertion",
+        "type": "object"
+      },
+      "FactPrecision": {
+        "enum": [
+          "exact",
+          "approximate",
+          "range",
+          "partial",
+          "unknown"
+        ],
+        "title": "FactPrecision",
+        "type": "string"
+      },
+      "FactResolutionState": {
+        "enum": [
+          "resolved",
+          "needs_confirmation",
+          "clarification_required",
+          "unavailable",
+          "superseded"
+        ],
+        "title": "FactResolutionState",
+        "type": "string"
+      },
       "FieldSelectionResult": {
         "additionalProperties": false,
         "description": "Selection state kept separate from a field's stored value state.",
@@ -5363,6 +5590,13 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "confirmed_contents_items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Confirmed Contents Items",
+            "type": "array"
+          },
           "confirmed_fields": {
             "additionalProperties": {
               "$ref": "#/components/schemas/StructuredFormField-Output"
@@ -5377,6 +5611,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
               },
               {
                 "type": "null"
@@ -5426,6 +5670,16 @@
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -5466,7 +5720,9 @@
           "confirmed",
           "disputed",
           "missing",
-          "pending_generation"
+          "pending_generation",
+          "unavailable",
+          "superseded"
         ],
         "title": "FormStatus",
         "type": "string"
@@ -6874,6 +7130,13 @@
           "claimant_message": {
             "$ref": "#/components/schemas/ClaimantMessage"
           },
+          "contents_item_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Contents Item Changes",
+            "type": "array"
+          },
           "decision": {
             "anyOf": [
               {
@@ -7751,6 +8014,54 @@
         "title": "ProfilePatchRequest",
         "type": "object"
       },
+      "QuestionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "asked_at": {
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "field_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Field Codes",
+            "type": "array"
+          },
+          "purpose": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "question_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Question Id",
+            "type": "string"
+          },
+          "repeated": {
+            "default": false,
+            "title": "Repeated",
+            "type": "boolean"
+          },
+          "trigger_message_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Trigger Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "trigger_message_id",
+          "purpose",
+          "asked_at"
+        ],
+        "title": "QuestionRecord",
+        "type": "object"
+      },
       "RateLimitMetrics": {
         "additionalProperties": false,
         "properties": {
@@ -8196,6 +8507,63 @@
         "title": "RequeueClaimRequest",
         "type": "object"
       },
+      "RequirementResolution": {
+        "additionalProperties": false,
+        "description": "Deterministic information needed for the current safe action.",
+        "properties": {
+          "current_action_satisfied": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Satisfied",
+            "type": "integer"
+          },
+          "current_action_total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Total",
+            "type": "integer"
+          },
+          "missing_required_now": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Required Now",
+            "type": "array"
+          },
+          "next_required_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Required Item"
+          },
+          "pending_later": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Later",
+            "type": "array"
+          },
+          "ready": {
+            "default": false,
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "satisfied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Satisfied",
+            "type": "array"
+          }
+        },
+        "title": "RequirementResolution",
+        "type": "object"
+      },
       "ResolveHandoffRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8252,12 +8620,47 @@
             "title": "Pending Items",
             "type": "array"
           },
+          "post_session_follow_up_required": {
+            "default": false,
+            "title": "Post Session Follow Up Required",
+            "type": "boolean"
+          },
           "prior_commitments": {
             "items": {
               "type": "string"
             },
             "title": "Prior Commitments",
             "type": "array"
+          },
+          "question_budget": {
+            "default": 9,
+            "minimum": 1.0,
+            "title": "Question Budget",
+            "type": "integer"
+          },
+          "question_turn_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Question Turn Count",
+            "type": "integer"
+          },
+          "remaining_question_budget": {
+            "default": 9,
+            "minimum": 0.0,
+            "title": "Remaining Question Budget",
+            "type": "integer"
+          },
+          "repeated_question_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Repeated Question Count",
+            "type": "integer"
+          },
+          "requested_fact_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Requested Fact Count",
+            "type": "integer"
           },
           "summary": {
             "anyOf": [
@@ -9292,6 +9695,13 @@
       "StructuredFormField-Input": {
         "additionalProperties": false,
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/FactAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -9305,8 +9715,34 @@
             ],
             "title": "Confidence"
           },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
+          },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/FormSource"
@@ -9347,6 +9783,13 @@
       "StructuredFormField-Output": {
         "additionalProperties": false,
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/FactAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -9360,8 +9803,34 @@
             ],
             "title": "Confidence"
           },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
+          },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/FormSource"
@@ -11902,12 +12371,54 @@
             "title": "Pending Items",
             "type": "array"
           },
+          "post_session_follow_up_required": {
+            "default": false,
+            "title": "Post Session Follow Up Required",
+            "type": "boolean"
+          },
           "prior_commitments": {
             "items": {
               "type": "string"
             },
             "title": "Prior Commitments",
             "type": "array"
+          },
+          "question_budget": {
+            "default": 9,
+            "minimum": 1.0,
+            "title": "Question Budget",
+            "type": "integer"
+          },
+          "question_history": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionRecord"
+            },
+            "title": "Question History",
+            "type": "array"
+          },
+          "question_turn_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Question Turn Count",
+            "type": "integer"
+          },
+          "remaining_question_budget": {
+            "default": 9,
+            "minimum": 0.0,
+            "title": "Remaining Question Budget",
+            "type": "integer"
+          },
+          "repeated_question_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Repeated Question Count",
+            "type": "integer"
+          },
+          "requested_fact_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Requested Fact Count",
+            "type": "integer"
           },
           "session_id": {
             "title": "Session Id",

@@ -3,15 +3,20 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS, validate_registered_field_value
+from backend.domain.branch_registry import (
+    CLAIMANT_HIDDEN_FIELDS,
+    BranchRuleEvaluator,
+    validate_registered_field_value,
+)
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
-from backend.domain.intake import next_controlled_intake_step
+from backend.domain.intake import next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
     AgentAction,
+    AssertionRelation,
     ClaimantClaim,
     ClaimantContentsItem,
     ClaimantHandoff,
@@ -30,6 +35,7 @@ from backend.domain.models import (
     FormStatus,
     NeededFor,
     PageInfo,
+    ProposedFormChange,
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
@@ -52,6 +58,11 @@ from backend.services.branching import (
 )
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
+from backend.services.fact_resolution import (
+    confirm_contents_item,
+    confirm_form_field,
+    resolve_form_change,
+)
 from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
@@ -97,11 +108,7 @@ def _apply_product_family_transition(
     """
 
     changed_family = changed_fields.get('claim.product_family')
-    if (
-        changed_family is None
-        or changed_family.status is not FormStatus.CONFIRMED
-        or not isinstance(changed_family.value, str)
-    ):
+    if changed_family is None or not isinstance(changed_family.value, str):
         return claim.incident_type
     target_family = changed_family.value.strip().lower()
     if (
@@ -119,6 +126,8 @@ def _apply_product_family_transition(
                 )
             ],
         )
+    if changed_family.status is not FormStatus.CONFIRMED:
+        return claim.incident_type
     return target_family
 
 
@@ -182,6 +191,7 @@ def _claimant_contents_items(
                 source_refs=visible_refs,
                 status=item.status,
                 needed_for=item.needed_for,
+                resolution_state=item.resolution_state,
                 updated_at=item.updated_at,
             )
         )
@@ -245,6 +255,15 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
             unresolved_questions=session.unresolved_questions,
             pending_items=session.pending_items,
             prior_commitments=session.prior_commitments,
+            question_budget=session.question_budget,
+            question_turn_count=session.question_turn_count,
+            requested_fact_count=session.requested_fact_count,
+            repeated_question_count=session.repeated_question_count,
+            remaining_question_budget=max(
+                session.question_budget - session.question_turn_count,
+                0,
+            ),
+            post_session_follow_up_required=session.post_session_follow_up_required,
             customer_next_step=next_step,
         ),
         started_at=session.started_at,
@@ -481,6 +500,24 @@ def start_session(
             prior_commitments=(
                 list(resume_source.prior_commitments) if resume_source is not None else []
             ),
+            question_budget=resume_source.question_budget if resume_source is not None else 9,
+            question_turn_count=(
+                resume_source.question_turn_count if resume_source is not None else 0
+            ),
+            requested_fact_count=(
+                resume_source.requested_fact_count if resume_source is not None else 0
+            ),
+            repeated_question_count=(
+                resume_source.repeated_question_count if resume_source is not None else 0
+            ),
+            post_session_follow_up_required=(
+                resume_source.post_session_follow_up_required
+                if resume_source is not None
+                else False
+            ),
+            question_history=(
+                list(resume_source.question_history) if resume_source is not None else []
+            ),
             context_revision=claim.revision,
             started_at=timestamp,
             last_active_at=timestamp,
@@ -616,23 +653,50 @@ def update_form(
                     )
                 ],
             )
-        updated_fields[update.field_code] = StructuredFormField(
-            value=update.value,
-            source=FormSource.CLAIMANT,
-            source_refs=[
-                f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:{update.field_code}'
-            ],
-            status=update.status,
-            needed_for=NeededFor.CURRENT_ACTION,
-            updated_at=timestamp,
+        source_ref = (
+            f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:{update.field_code}'
+        )
+        updated_fields[update.field_code] = resolve_form_change(
+            field_code=update.field_code,
+            existing=existing,
+            proposal=ProposedFormChange(
+                field_code=update.field_code,
+                value=update.value,
+                source=FormSource.CLAIMANT,
+                status=update.status,
+                needed_for=NeededFor.CURRENT_ACTION,
+                relation=(
+                    AssertionRelation.CORRECTION if update.correction_reason is not None else None
+                ),
+                reported_text=update.correction_reason,
+            ),
+            source_ref=source_ref,
+            message_text=update.correction_reason,
+            timestamp=timestamp,
+            accepted_status=update.status,
             updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
+            explicit_correction=update.correction_reason is not None,
         )
 
     incident_type = _apply_product_family_transition(claim, updated_fields)
-    updated_claim = claim.model_copy(
+    projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **updated_fields},
             'incident_type': incident_type,
+        }
+    )
+    next_step = next_requirement_step(
+        BranchRuleEvaluator()
+        .evaluate(
+            projected_claim,
+            current_action=claim.claim_state.next_action,
+            recomputation_reason='form_update_preview',
+        )
+        .requirements
+    )
+    updated_claim = projected_claim.model_copy(
+        update={
+            'customer_next_step': next_step,
             'revision': claim.revision + 1,
             'updated_at': timestamp,
         }
@@ -660,7 +724,8 @@ def update_form(
         claim_id=claim_id,
         revision=updated_claim.revision,
         updated_fields=updated_fields,
-        customer_next_step=updated_claim.customer_next_step,
+        customer_next_step=next_step,
+        dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
 
 
@@ -708,8 +773,17 @@ def confirm_form_fields(
     unavailable_codes = [
         field_code
         for field_code in payload.field_codes
-        if field_code not in claim.form
-        or claim.form[field_code].status not in {FormStatus.PROPOSED, FormStatus.CONFIRMED}
+        if (
+            field_code == 'contents.items'
+            and not any(item.status is FormStatus.PROPOSED for item in claim.contents_items)
+        )
+        or (
+            field_code != 'contents.items'
+            and (
+                field_code not in claim.form
+                or claim.form[field_code].status not in {FormStatus.PROPOSED, FormStatus.CONFIRMED}
+            )
+        )
     ]
     if duplicate_codes or unavailable_codes:
         details = [
@@ -729,30 +803,52 @@ def confirm_form_fields(
 
     timestamp = now_utc()
     confirmed_fields = {
-        field_code: claim.form[field_code].model_copy(
-            update={
-                'status': FormStatus.CONFIRMED,
-                'confidence': 1.0,
-                'updated_at': timestamp,
-                'updated_by': ActorReference(
-                    actor_type=ActorType.CLAIMANT,
-                    actor_id=principal.subject,
-                ),
-            }
+        field_code: confirm_form_field(
+            claim.form[field_code],
+            timestamp=timestamp,
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT,
+                actor_id=principal.subject,
+            ),
         )
         for field_code in payload.field_codes
+        if field_code != 'contents.items'
     }
+    confirmed_contents_items = [
+        confirm_contents_item(
+            item,
+            timestamp=timestamp,
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT,
+                actor_id=principal.subject,
+            ),
+        )
+        if item.status is FormStatus.PROPOSED and 'contents.items' in payload.field_codes
+        else item
+        for item in claim.contents_items
+    ]
     incident_type = _apply_product_family_transition(claim, confirmed_fields)
     projected_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
+            'contents_items': confirmed_contents_items,
             'incident_type': incident_type,
         }
     )
-    next_step = next_controlled_intake_step(projected_claim)
+    resolved_requirements = (
+        BranchRuleEvaluator()
+        .evaluate(
+            projected_claim,
+            current_action=AgentAction.CONFIRM,
+            recomputation_reason='form_confirmation_preview',
+        )
+        .requirements
+    )
+    next_step = next_requirement_step(resolved_requirements)
     updated_claim = claim.model_copy(
         update={
             'form': {**claim.form, **confirmed_fields},
+            'contents_items': confirmed_contents_items,
             'incident_type': incident_type,
             'claim_state': claim.claim_state.model_copy(update={'next_action': AgentAction.ASK}),
             'customer_next_step': next_step,
@@ -784,7 +880,9 @@ def confirm_form_fields(
         claim_id=claim_id,
         revision=updated_claim.revision,
         confirmed_fields=confirmed_fields,
+        confirmed_contents_items=_claimant_contents_items(repository, updated_claim),
         customer_next_step=next_step,
+        dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
     repository.save_idempotency(
         IdempotencyRecord(

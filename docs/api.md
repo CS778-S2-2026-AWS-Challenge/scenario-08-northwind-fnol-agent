@@ -441,7 +441,7 @@ PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation
 publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
 environment-variable name match the deployment-owned startup settings; and purpose, privacy
 class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v4`. A
+contract. The current executable prompt identifier is `northwind-fnol-claimant-v5`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -655,11 +655,22 @@ The canonical backend record has these fields. API projections omit fields the c
 | `pending_items` | array | Yes | Evidence or actions still outstanding; initially empty |
 | `prior_commitments` | array | Yes | Customer-visible commitments and promised next steps; initially empty |
 | `context_revision` | integer | Yes | Claim revision from which the summary was produced |
+| `question_budget` | integer | Yes | Maximum Agent question turns retained across resumed sessions; defaults to 9 |
+| `question_turn_count` | integer | Yes | Accepted Agent turns that asked for a registered fact |
+| `requested_fact_count` | integer | Yes | Total registered facts requested by recorded Agent questions |
+| `repeated_question_count` | integer | Yes | Questions whose complete registered fact set had already been requested |
+| `post_session_follow_up_required` | boolean | Yes | True when the bounded question budget is exhausted before the current requirements are satisfied |
+| `question_history` | object array | Staff only | Stable question identity, trigger message, registered field codes, purpose, repeat marker, and time |
 | `started_at` | timestamp | Yes | Session creation time |
 | `last_active_at` | timestamp | Yes | Last accepted claimant or agent message time |
 | `closed_at` | timestamp | No | Present only when closed |
 
-Complete messages remain in durable storage. `summary`, `unresolved_questions`, and selected recent message references form a bounded resume package; they do not replace the formal claim record.
+Complete messages remain in durable storage. `summary`, `unresolved_questions`, question counters,
+and selected recent message references form a bounded resume package; they do not replace the
+formal claim record. Claimant session responses expose the counters and remaining budget but omit
+the internal `question_history`. The authorised Workbench session projection includes the history
+for effort and repetition review. Starting a new session for the same Claim carries the counters
+and history forward so a restart cannot reset the claimant-effort boundary.
 
 #### Session Lifecycle
 
@@ -755,9 +766,13 @@ The form is a map keyed by a registered field code. Every entry uses the same en
 | `value` | JSON value | Typed according to the field registry; may be `null` only for missing or pending fields |
 | `source` | enum | `claimant`, `image`, `document`, `policy`, `claim_history`, `inference`, `staff` |
 | `source_refs` | string array | IDs of messages, evidence, policy citations, history records, or staff actions |
-| `status` | enum | `proposed`, `confirmed`, `disputed`, `missing`, `pending_generation` |
+| `status` | enum | `proposed`, `confirmed`, `disputed`, `missing`, `pending_generation`, `unavailable`, `superseded` |
 | `needed_for` | enum | `current_action`, `later_action` |
 | `confidence` | number | Optional `0.0` to `1.0`; never a substitute for confirmation |
+| `resolution_state` | enum | `resolved`, `needs_confirmation`, `clarification_required`, `unavailable`, or `superseded` |
+| `precision` | enum | `exact`, `approximate`, `range`, `partial`, or `unknown`; temporal values preserve claimant precision |
+| `current_assertion_id` | string/null | Current assertion selected from immutable assertion history |
+| `assertions` | object array | Source-linked assertion history; repetition, refinement, correction, conflict, and irrelevant input remain distinguishable |
 | `updated_at` | timestamp | Server generated |
 | `updated_by` | actor reference | Server derived from the authenticated actor |
 
@@ -812,9 +827,22 @@ internal references are omitted. Workbench projections retain the full authorise
 | `status` | enum | Existing `FormStatus`; `proposed` is used for inference and `disputed` for conflicts |
 | `needed_for` | enum | `current_action` or `later_action` |
 | `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
+| `resolution_state` | enum | Same resolution states as structured form fields |
+| `current_assertion_id` | string/null | Current item assertion selected from immutable item history |
+| `assertions` | object array | Immutable item assertion history with relation, status, and source references |
 | `updated_at` / `updated_by` | timestamp / actor reference | Server-maintained provenance |
 
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
+
+Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
+`missing_required_now`, `pending_later`, `next_required_item`, `ready`,
+`current_action_total`, and `current_action_satisfied`. The backend recalculates this projection
+from authoritative Claim State, the selected registered branch, and the current action. Clients
+must not calculate readiness or choose required fields locally.
+
+Each field assertion records a stable identifier, the reported wording when available, normalized
+value, source references, relation, status, precision, optional reason code, and creation time. A
+later claimant statement is resolved against existing assertions rather than silently discarded.
 
 ### Evidence
 

@@ -79,7 +79,7 @@ sequence of unrelated `save_*` calls.
 | --- | --- | --- |
 | Resume/start claimant session | claim + new/updated session + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; this is the only mutation family allowed to change `active_session_id` |
 | Message-only claimant continuation | claim + session + message + idempotency | claim `N -> N+1`; session context updated to the resulting claim revision; stored `active_session_id` is preserved |
-| Validated Agent turn | claim + session + claimant message + Agent message + decision + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision links agree; stored `active_session_id` is preserved |
+| Validated Agent turn | claim + session question accounting + claimant message + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision/evaluation links agree; stored `active_session_id` is preserved; failed retrieval or validation writes none of the bundle |
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary; stored `active_session_id` is preserved |
 | Handoff mutation | claim + handoff + idempotency | claim `N -> N+1`; handoff identity and idempotency handoff reference agree; stored `active_session_id` is preserved |
 | Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency | claim `N -> N+1`; all supplied records belong to the claim; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor; stored `active_session_id` is preserved |
@@ -145,6 +145,10 @@ valid against current Claim State.
   cannot roll the claim back;
 - an Agent decision links to the claimant message that triggered it and records the
   resulting revision;
+- the applied Branch Evaluation names the same resulting revision, while form and contents
+  assertion histories retain the source message or validated retrieval reference;
+- question counters and history are part of the session in the same Agent-turn mutation and do
+  not advance when the Claim, messages, or decision fail to commit;
 - a staff message is interaction-scoped: it uses the active session, retains
   `ActorType.STAFF`, and binds its session/message identities in the same staff mutation
   that advances the claim revision.
