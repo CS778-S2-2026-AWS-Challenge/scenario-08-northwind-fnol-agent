@@ -851,7 +851,6 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
         handoff: {
           handoff_id: 'hnd_test',
           status: 'queued',
-          priority: 'standard',
           support_need: 'human_requested',
           summary: 'A Northwind support request has been queued with the details already provided.',
           created_at: '2026-08-12T00:02:00Z',
@@ -896,7 +895,6 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
         handoff: {
           handoff_id: 'hnd_test',
           status: 'queued',
-          priority: 'standard',
           support_need: 'human_requested',
           summary: 'A Northwind support request has been queued with the details already provided.',
           created_at: '2026-08-12T00:02:00Z',
@@ -946,7 +944,6 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
         handoff: {
           handoff_id: 'hnd_test',
           status: 'queued',
-          priority: 'standard',
           support_need: 'human_requested',
           summary: 'A Northwind support request has been queued.',
           created_at: '2026-08-12T00:02:00Z',
@@ -962,7 +959,6 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
         handoff: {
           handoff_id: 'hnd_test',
           status: 'in_progress',
-          priority: 'standard',
           support_need: 'human_requested',
           summary: 'A Northwind support request has been queued.',
           created_at: '2026-08-12T00:02:00Z',
@@ -1003,7 +999,7 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
     fetch.mockImplementationOnce(() =>
       jsonResponse({
         handoff: {
-          handoff_id: 'hnd_test', status: 'queued', priority: 'standard',
+          handoff_id: 'hnd_test', status: 'queued',
           support_need: 'human_requested', summary: 'Support is queued.',
           created_at: '2026-08-12T00:02:00Z',
         },
@@ -1016,7 +1012,7 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
         ...createdClaim().claim,
         revision: 5,
         handoff: {
-          handoff_id: 'hnd_test', status: 'in_progress', priority: 'standard',
+          handoff_id: 'hnd_test', status: 'in_progress',
           support_need: 'human_requested', summary: 'Support is in progress.',
           created_at: '2026-08-12T00:02:00Z',
         },
@@ -1555,7 +1551,6 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
       handoff: {
         handoff_id: 'hnd_urgent',
         status: 'queued',
-        priority: 'urgent',
         support_need: 'urgent',
         summary: 'Contact local emergency services yourself if immediate help is needed.',
         created_at: '2026-08-12T00:02:00Z',
@@ -1683,6 +1678,85 @@ describe('adaptive claimant entry', () => {
     expect(headers['X-Northwind-Anonymous-Session']).toMatch(/^[0-9a-f-]{36}$/i)
   })
 
+  it('renders non-urgent human support from the claimant support need', async () => {
+    const turn = {
+      ...firstTurn(),
+      form_changes: [],
+      decision: {
+        ...firstTurn().decision,
+        action: 'HANDOFF',
+        customer_next_step: {
+          ...nextStep,
+          status: 'human_support_queued',
+          summary: 'A Northwind support request has been queued.',
+          responsible_party: 'northwind',
+        },
+      },
+      handoff: {
+        handoff_id: 'hnd_standard',
+        status: 'queued',
+        support_need: 'human_requested',
+        summary: 'A Northwind support request has been queued.',
+        created_at: '2026-08-12T00:02:00Z',
+      },
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(turn))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'I want help from a person.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByText('Your support request is queued')).toBeVisible()
+    expect(screen.getByText('Human support')).toBeVisible()
+    expect(screen.queryByText('Urgent support')).not.toBeInTheDocument()
+    expect(screen.queryByText('Normal intake has paused')).not.toBeInTheDocument()
+  })
+
+  it('renders urgent support from the claimant support need without claiming emergency contact', async () => {
+    const safetySummary = 'Contact local emergency services yourself if immediate help is needed.'
+    const turn = {
+      ...firstTurn(),
+      form_changes: [],
+      decision: {
+        ...firstTurn().decision,
+        action: 'URGENT_HANDOFF',
+        customer_next_step: {
+          ...nextStep,
+          status: 'urgent_support_queued',
+          summary: safetySummary,
+          responsible_party: 'northwind',
+        },
+      },
+      agent_message: {
+        ...firstTurn().agent_message,
+        content: { type: 'text', text: safetySummary },
+      },
+      handoff: {
+        handoff_id: 'hnd_urgent',
+        status: 'queued',
+        support_need: 'urgent',
+        summary: safetySummary,
+        created_at: '2026-08-12T00:02:00Z',
+      },
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(turn))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'A passenger is injured.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(await screen.findByText('Normal intake has paused')).toBeVisible()
+    expect(screen.getByText('Urgent support')).toBeVisible()
+    expect(screen.getAllByText(safetySummary).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/we contacted emergency services/i)).not.toBeInTheDocument()
+  })
+
   it('reloads the safe claim projection and staff message after a live update', async () => {
     let publishUpdate
     realtime.streamClaimUpdates.mockImplementation(({ signal, onEvent }) => {
@@ -1719,7 +1793,6 @@ describe('adaptive claimant entry', () => {
       handoff: {
         handoff_id: 'hnd_live',
         status: 'in_progress',
-        priority: 'standard',
         support_need: 'human_requested',
         summary: 'A claims professional is helping with this report.',
         created_at: '2026-08-12T00:02:00Z',

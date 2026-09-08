@@ -1023,6 +1023,8 @@ function App() {
     finally { setAuthStatus('idle') }
   }
 
+  const isUrgentSupport = handoff?.support_need === 'urgent'
+
   return (
     <div className={`customer-app ${!hasStarted && page === 'home' ? 'entry-shell' : ''}`}>
       <header className={`product-header ${hasStarted && !['login', 'register'].includes(page) ? 'is-intake-header' : ''}`}>
@@ -1367,15 +1369,15 @@ function App() {
 
             {handoff && ['queued', 'accepted'].includes(handoff.status) && (
               <section
-                className={`transfer-state ${handoff.priority === 'urgent' ? 'is-urgent' : ''}`}
+                className={`transfer-state ${isUrgentSupport ? 'is-urgent' : ''}`}
                 aria-live="assertive"
                 aria-labelledby="transfer-title"
               >
                 <p className="transfer-label">
-                  {handoff.priority === 'urgent' ? 'Urgent support' : 'Human support'}
+                  {isUrgentSupport ? 'Urgent support' : 'Human support'}
                 </p>
                 <h2 id="transfer-title">
-                  {handoff.priority === 'urgent'
+                  {isUrgentSupport
                     ? 'Normal intake has paused'
                     : handoff.status === 'queued'
                       ? 'Your support request is queued'

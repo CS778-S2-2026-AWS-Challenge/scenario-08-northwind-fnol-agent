@@ -183,7 +183,7 @@ def _message_turn_response(
         ],
         decision=_claimant_decision(decision),
         handoff=(
-            claimant_handoff(handoff).model_dump(mode='json')
+            claimant_handoff(handoff)
             if handoff is not None
             and handoff.type is not HandoffType.PROFESSIONAL_REVIEW
             and handoff.support_need is not None
