@@ -305,7 +305,7 @@
         "pending_items": [],
         "conflicts": ["incident.cause"],
         "low_confidence_items": ["incident.cause"],
-        "policy_citation_refs": ["POL-MVP-HOME-2048: gradual damage exclusion"],
+        "policy_citation_refs": ["ret_fixture_at02_policy"],
         "history_evidence_refs": ["ret_fixture_at02_history"],
         "source_refs": [
           "msg_at02_claimant_1",
