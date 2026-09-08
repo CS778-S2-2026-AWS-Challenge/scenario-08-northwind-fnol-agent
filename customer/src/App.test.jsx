@@ -1627,7 +1627,11 @@ describe('adaptive claimant entry', () => {
         counts.evidenceReads += 1
         const result = onEvidenceRead(counts.evidenceReads)
         if (result instanceof Error) return Promise.reject(result)
+        if (result && typeof result.then === 'function') return result.then(jsonResponse)
         return jsonResponse(result)
+      }
+      if (url.endsWith('/sessions/ses_test/messages') && method === 'POST') {
+        return jsonResponse({ ...firstTurn(), claim_revision: 5 })
       }
       if (url.endsWith('/evidence/uploads') && method === 'POST') {
         return jsonResponse({
@@ -1697,6 +1701,36 @@ describe('adaptive claimant entry', () => {
       { timeout: 4000 },
     )
     await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0), { timeout: 5000 })
+  }, 10000)
+
+  it('does not let a delayed evidence poll roll the whole claim revision backwards', async () => {
+    let releaseDelayedPoll
+    let delayedPollStarted = false
+    installAuthenticatedEvidenceApi({
+      completion: 'accepted',
+      onEvidenceRead: (read) => {
+        if (read === 1) return { items: [], revision: 1 }
+        if (read === 2) return { items: [evidenceRecord('processing')], revision: 4 }
+        delayedPollStarted = true
+        return new Promise((resolve) => {
+          releaseDelayedPoll = () => resolve({ items: [evidenceRecord('processing')], revision: 4 })
+        })
+      },
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    await waitFor(() => expect(delayedPollStarted).toBe(true), { timeout: 5000 })
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The car was moved after the incident.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(fetch.mock.calls.some(([url, options = {}]) =>
+      url.endsWith('/sessions/ses_test/messages') && options.method === 'POST')).toBe(true))
+    expect(screen.getByText('Revision 5')).toBeVisible()
+
+    releaseDelayedPoll()
+    await waitFor(() => expect(screen.getByText('Revision 5')).toBeVisible())
+    expect(screen.getAllByText('Processing').length).toBeGreaterThan(0)
   }, 10000)
 
   it('presents processing failure with a status-check recovery action', async () => {

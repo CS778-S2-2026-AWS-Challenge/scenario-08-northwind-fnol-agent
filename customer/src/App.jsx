@@ -332,6 +332,19 @@ function App() {
     ? externalServiceInteraction.error
     : null
 
+  function rememberClaimRevision(revision) {
+    const numericRevision = Number(revision || 0)
+    latestRevision.current = Math.max(latestRevision.current, numericRevision)
+    return numericRevision
+  }
+
+  function setClaimRevision(revision) {
+    const numericRevision = rememberClaimRevision(revision)
+    setClaim((current) => current
+      ? { ...current, revision: Math.max(Number(current.revision || 0), numericRevision) }
+      : current)
+  }
+
   function attachmentForEvidence(evidence, current = {}) {
     const fileStatus = evidence.file_status || evidence.status
     const status = fileStatus === 'awaiting_upload'
@@ -363,13 +376,15 @@ function App() {
 
   function syncEvidenceProjection(response) {
     const responseRevision = Number(response.revision || 0)
-    if (responseRevision && responseRevision < latestEvidenceRevision.current) return false
+    const currentClaimRevision = Math.max(Number(claim?.revision || 0), latestRevision.current)
+    const minimumRevision = Math.max(latestEvidenceRevision.current, currentClaimRevision)
+    if (responseRevision < minimumRevision) return false
     if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
     latestEvidenceRevision.current = Math.max(latestEvidenceRevision.current, responseRevision)
     const items = response.items || []
     latestEvidenceItems.current = items
     setEvidenceItems(items)
-    setClaim((current) => current ? { ...current, revision: response.revision } : current)
+    setClaimRevision(responseRevision)
     setAttachments((current) => {
       const currentByEvidenceId = new Map(
         current.filter((item) => item.evidenceId).map((item) => [item.evidenceId, item]),
@@ -626,7 +641,7 @@ function App() {
       evidenceHasLocalMutation.current = true
       latestEvidenceRevision.current = requested.revision
       attempt.evidenceId = requested.evidence_id
-      setClaim((current) => current ? { ...current, revision: requested.revision } : current)
+      setClaimRevision(requested.revision)
       await uploadEvidenceContent({ upload: requested.upload, file })
       const fileBytes = new Uint8Array(await file.arrayBuffer())
       const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', fileBytes)
@@ -642,7 +657,7 @@ function App() {
       attempt.evidenceId = completed.evidence.evidence_id
       latestEvidenceItems.current = [completed.evidence]
       setEvidencePollingKey((current) => current + 1)
-      setClaim((current) => current ? { ...current, revision: completed.revision } : current)
+      setClaimRevision(completed.revision)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
         ? attachmentForEvidence(completed.evidence, {
@@ -731,7 +746,7 @@ function App() {
       setForm((current) => mergeFields(current, turn.form_changes))
       setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
-      setClaim((current) => ({ ...current, revision: turn.claim_revision }))
+      setClaimRevision(turn.claim_revision)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
@@ -838,7 +853,7 @@ function App() {
       setForm((current) => ({ ...current, ...response.confirmed_fields }))
       setContentsItems(response.confirmed_contents_items || contentsItems)
       setDynamicForm(response.dynamic_form || null)
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       pendingConfirmation.current = null
       setStatus('idle')
@@ -890,7 +905,7 @@ function App() {
       }
 
       setForm(updatedForm)
-      setClaim((current) => ({ ...current, revision }))
+      setClaimRevision(revision)
       setNextStep(updatedNextStep)
       setDynamicForm(updatedDynamicForm)
       setEditingField(null)
@@ -913,7 +928,7 @@ function App() {
         revision: claim.revision,
         idempotencyKey: pendingSupportRequest.current.idempotencyKey,
       })
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       setHandoff(response.handoff)
       pendingSupportRequest.current = null
