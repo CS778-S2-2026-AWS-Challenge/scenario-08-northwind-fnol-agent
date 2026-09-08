@@ -685,11 +685,10 @@ class HandoffRecord(ContractModel):
 
 
 class ClaimantHandoff(ContractModel):
-    """Customer-safe projection; staff routing reasons and packet details are excluded."""
+    """Customer-safe projection; internal routing and packet details are excluded."""
 
     handoff_id: str
     status: HandoffStatus
-    priority: HandoffPriority
     support_need: SupportNeed
     summary: str
     created_at: datetime
@@ -1307,7 +1306,7 @@ class MessageTurnResponse(ContractModel):
     agent_message: ClaimantMessage | None = None
     form_changes: list[FormChange]
     decision: ClaimantDecision | None = None
-    handoff: dict[str, Any] | None = None
+    handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
 
 

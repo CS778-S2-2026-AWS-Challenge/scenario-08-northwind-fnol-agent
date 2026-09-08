@@ -972,8 +972,24 @@ Priority is `standard`, `high`, `urgent`, or `immediate`. Queue is a configured 
 
 The staff-only packet carries the evidence list with its source, lifecycle and file state,
 visibility, related fields, and purpose. It does not copy storage keys, checksums, or extraction
-provenance. Claimant handoff responses exclude the complete packet, and claimant evidence
-projections continue to exclude `internal_only` items.
+provenance.
+
+Claimant routes use this customer-safe handoff projection:
+
+```json
+{
+  "handoff_id": "hnd_01J4Y7XG2C",
+  "status": "queued",
+  "support_need": "human_requested",
+  "summary": "A Northwind support request has been queued with the details already provided.",
+  "created_at": "2026-08-10T03:48:00Z"
+}
+```
+
+This projection appears in support-request responses, Agent-turn responses, and claim-read
+responses when a claimant-created handoff is active. It excludes the internal `priority`, queue,
+routing reasons, assignment, and complete packet. Claimant evidence projections continue to
+exclude `internal_only` items.
 
 ### Staff Action
 
@@ -1122,6 +1138,7 @@ Response `200`:
   "external_service_action": null,
   "dynamic_form": null,
   "customer_next_step": {},
+  "handoff": null,
   "created_at": "2026-08-10T03:40:00Z",
   "updated_at": "2026-08-10T03:50:00Z"
 }
@@ -1145,6 +1162,10 @@ Claim revision, and its `claim_revision` matches the returned Claim revision. An
 update can therefore carry the last applicable field selection forward without asking the browser
 to infer whether it is still valid. The field is `null` only when the Claim has no applied branch
 evaluation. Inactive and system-owned fields remain outside this projection.
+
+`handoff` is `null` when no claimant-created handoff is active. Otherwise it contains the
+claimant-safe handoff projection defined above and never contains internal `priority` or routing
+fields.
 
 ### `POST /api/v1/claims/{claim_id}/sessions`
 
@@ -1682,7 +1703,10 @@ Request:
 }
 ```
 
-`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response `201` returns the customer-safe handoff projection, next step, and delivery state.
+`support_need` is `human_requested`, `accessibility_required`, `distress`, or `urgent`. Response
+`201` returns the customer-safe handoff projection, next step, and delivery state. The handoff
+contains `handoff_id`, `status`, `support_need`, `summary`, and `created_at`; it does not contain
+the internal routing `priority`.
 
 `delivery.state` reports whether the staff queue system was notified:
 
