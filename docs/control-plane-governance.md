@@ -2,8 +2,8 @@
 
 This document defines the current engineering contract for Northwind's Control Plane. It
 separates claim operations from system administration, knowledge management, and audit, and
-defines the terms and transitions that a later Admin API must implement. It does not define
-HTTP routes, storage tables, or provider-specific integrations.
+defines the terms and transitions consumed by the authenticated Admin API. HTTP routes and
+storage fields are specified in `docs/api.md` and `docs/persistence-schema.md`.
 
 ## Scope and authority
 
@@ -14,8 +14,7 @@ existing authority checks.
 
 The product requirements in `SPEC/05-workbench-and-handoff.md` and
 `SPEC/06-safety-and-governance.md` remain authoritative for product behaviour and safety. This
-document makes their administration boundary executable for the later Admin API described by
-Issue #209.
+document makes their administration boundary executable for the Admin API and Admin Console.
 
 ## Separate responsibilities
 
@@ -136,22 +135,20 @@ different data profiles. If a provider or connection check fails, the configurat
 unpublished and the failure is exposed as an operational result rather than silently selecting
 another profile.
 
-## Bounded implementation slices and Admin API boundary
+## Implemented Control Plane boundary
 
-Issue #209 is the broader Control Plane/Admin backlog. Sprint 2 implementation slice #258 is
-the first bounded consumer: it may expose configuration read, draft revision, validation
-status, publication metadata, and audit metadata using this lifecycle, but it does not close
-the parent issue. Later slices such as #372 and #391 add further consumers and recording
-capabilities. They must not redefine these terms or claim the full #209 acceptance alone.
+The authenticated `/internal/v1/admin` API now implements versioned configuration, release-set,
+account, integration, operation, evaluation, knowledge, Agent-rule, access-policy, and audit
+projections. Exact HTTP schemas and persistence fields are maintained in `docs/api.md` and
+`docs/persistence-schema.md`; this document remains the authority boundary and lifecycle source.
+Model calls add bounded operation records, and the Operations projection calculates reported token
+usage, configured cost estimates, rate-limit state, and alerts from persisted records plus the
+active published operational configuration. These observations do not grant Claim or model-runtime
+authority.
 
-Exact HTTP schemas, persistence fields, approval-role assignments, and revision/error semantics
-remain implementation responsibilities of #258 and subsequent Admin API issues. This document
-provides the lifecycle and authority boundary, not a complete wire or storage schema.
+## Boundary with Claim State and Admin API
 
-## Boundary with Claim State and later Admin API work
-
-The later Admin API in Issue #209 should expose these stable concepts without creating a second
-Claim State API:
+The Admin API exposes these stable concepts without creating a second Claim State API:
 
 - configuration domain and item identifier;
 - immutable revision and lifecycle state;
@@ -166,8 +163,12 @@ through Control Plane routes. Claim-operation APIs remain the only path for thos
 continue to enforce claim ownership, revision, visibility, idempotency, and professional
 authority rules.
 
-## Non-goals for this contract
+## Explicit implementation gaps
 
-This document does not implement an Admin API, persistence schema, database migration, Admin
-Console, provider connection, secret manager, or runtime policy cache. Those components must
-consume this vocabulary and preserve the transitions when they are implemented.
+The current implementation still has bounded gaps: published access policies can restrict but not
+grant identity scopes; complete target Agent turn/tool trajectory records remain separate future
+runtime work; provider connection, secret-manager, and cloud data-profile adapters remain
+deployment-specific; and large-volume audit search does not yet use cursor-native provider
+queries. These are implementation gaps, not alternate lifecycle definitions. Any future
+implementation must preserve the authority boundaries and update the API, persistence, and status
+documents together.

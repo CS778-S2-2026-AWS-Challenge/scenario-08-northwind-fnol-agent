@@ -1,3 +1,5 @@
+import json
+
 from backend.domain.knowledge import (
     KnowledgeChunk,
     KnowledgeDocumentStore,
@@ -11,6 +13,7 @@ class FixtureKnowledgeDocumentStore(KnowledgeDocumentStore):
 
     def __init__(self, chunks: tuple[KnowledgeChunk, ...] = ()) -> None:
         self._chunks = {chunk.chunk_id: chunk for chunk in chunks}
+        self._objects: dict[str, bytes] = {}
 
     def connection_status(self) -> str:
         return 'using_fixture'
@@ -20,6 +23,26 @@ class FixtureKnowledgeDocumentStore(KnowledgeDocumentStore):
 
     def chunks(self) -> tuple[KnowledgeChunk, ...]:
         return tuple(self._chunks.values())
+
+    def read(self, key: str) -> bytes | None:
+        return self._objects.get(key)
+
+    def write(
+        self,
+        key: str,
+        data: bytes,
+        *,
+        content_type: str,
+        metadata: dict[str, str],
+    ) -> None:
+        del content_type, metadata
+        self._objects[key] = data
+        if key.endswith('/chunks.jsonl'):
+            from backend.adapters.knowledge_retrieval import _chunk
+
+            for line in data.splitlines():
+                chunk = _chunk(json.loads(line))
+                self._chunks[chunk.chunk_id] = chunk
 
 
 def _applicable(chunk: KnowledgeChunk, request: KnowledgeSearch) -> bool:

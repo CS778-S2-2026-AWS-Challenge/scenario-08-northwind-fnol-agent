@@ -11,6 +11,8 @@
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
+  --line-height-body: 1.5;
+  --line-height-heading: 1.2;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -86,4 +88,7 @@
   --density-workbench-agent-width: 400px;
   --density-workbench-agent-height: 600px;
   --density-workbench-record-label-width: 160px;
+  --density-workbench-list-max-height: 70vh;
+  --measure-reading: 75ch;
+  --viewport-min-width: 320px;
 }

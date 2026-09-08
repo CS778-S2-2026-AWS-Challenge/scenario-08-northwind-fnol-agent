@@ -3,7 +3,7 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import validate_registered_field_value
+from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS, validate_registered_field_value
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -13,6 +13,7 @@ from backend.domain.models import (
     ActorType,
     AgentAction,
     ClaimantClaim,
+    ClaimantContentsItem,
     ClaimantHandoff,
     ClaimantSession,
     ClaimListItem,
@@ -138,15 +139,51 @@ def _claimant_form(
         record.retrieval_id
         for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
     }
-    if not internal_refs:
-        return claim.form
     projected: dict[str, StructuredFormField] = {}
     for field_code, fact in claim.form.items():
+        if field_code in CLAIMANT_HIDDEN_FIELDS:
+            continue
         visible_refs = [ref for ref in fact.source_refs if ref not in internal_refs]
         projected[field_code] = (
             fact
             if len(visible_refs) == len(fact.source_refs)
             else fact.model_copy(update={'source_refs': visible_refs})
+        )
+    return projected
+
+
+def _claimant_contents_items(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> list[ClaimantContentsItem]:
+    """Project contents items without internal assessment metadata."""
+
+    internal_refs = {
+        record.retrieval_id
+        for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
+    }
+    projected: list[ClaimantContentsItem] = []
+    for item in claim.contents_items:
+        visible_refs = [
+            ref
+            for ref in item.source_refs
+            if ref not in internal_refs and (ref.startswith('msg_') or ref.startswith('evd_'))
+        ]
+        projected.append(
+            ClaimantContentsItem(
+                item_id=item.item_id,
+                description=item.description,
+                category=item.category,
+                quantity=item.quantity,
+                loss_type=item.loss_type,
+                ownership=item.ownership,
+                estimated_value=item.estimated_value,
+                source=item.source,
+                source_refs=visible_refs,
+                status=item.status,
+                needed_for=item.needed_for,
+                updated_at=item.updated_at,
+            )
         )
     return projected
 
@@ -172,6 +209,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         incident_type=claim.incident_type,
         workflow_state=claim.claim_state.workflow_state,
         form=_claimant_form(repository, claim),
+        contents_items=_claimant_contents_items(repository, claim),
         evidence_summary=evidence_summary_for(claimant_evidence),
         external_claim=claim.external_claim,
         external_service_action=claimant_assessor_action(repository, claim),

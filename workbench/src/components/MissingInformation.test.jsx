@@ -10,6 +10,7 @@ describe('MissingInformation', () => {
       kind: 'field',
       code: `missing.${index + 1}`,
       label: `Missing item ${index + 1}`,
+      status: index === 7 ? 'unavailable' : 'missing',
       attention: index === 0 ? 'required_now' : 'needed_next',
       responsible_party: index === 7 ? 'external_party' : 'claimant',
       source_refs: [`msg_${index + 1}`],
@@ -19,13 +20,15 @@ describe('MissingInformation', () => {
 
     expect(screen.getAllByText('Missing item 6')[0]).toBeVisible()
     expect(screen.queryByText('Missing item 7')).not.toBeVisible()
-    const disclosure = screen.getByText('Show all missing information')
+    const disclosure = screen.getByText('Show all gaps')
     disclosure.focus()
     await user.keyboard('{Enter}')
 
     expect(screen.getAllByText('Missing item 8').at(-1)).toBeVisible()
+    await user.click(screen.getAllByText('Traceability').at(-1))
     expect(screen.getByText('msg_8')).toBeVisible()
     expect(screen.getByText(/claim create/i)).toBeVisible()
     expect(screen.getAllByText(/external party/i).at(-1)).toBeVisible()
+    expect(screen.getAllByText(/unavailable.*needed next.*external party/i).at(-1)).toBeVisible()
   })
 })

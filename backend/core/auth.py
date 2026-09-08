@@ -7,6 +7,8 @@ from fastapi import Header, Request
 
 from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
+from backend.domain.configuration import AccessPolicyConfiguration
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,12 +186,55 @@ def _verify_principal(
         credential_label=credential_label,
     )
     actor_mismatch = principal.actor_type != required_actor
-    scope_mismatch = not required_scopes.issubset(principal.scopes)
+    effective_scopes = _effective_scopes(request, principal)
+    scope_mismatch = not required_scopes.issubset(effective_scopes)
     if actor_mismatch or scope_mismatch:
         denied_message = f'Access denied for the {credential_label} boundary.'
         raise _access_denied(denied_message)
 
     return principal
+
+
+def _effective_scopes(request: Request, principal: Principal) -> frozenset[str]:
+    """Apply published access-policy restrictions without granting new authority.
+
+    Args:
+        request: Request carrying the composed configuration repository.
+        principal: Authenticated principal whose static scopes are being checked.
+
+    Returns:
+        The principal's static scopes intersected with any published policy for its actor type.
+
+    Raises:
+        ApiError: If a published access policy is malformed or unavailable.
+    """
+    repository = getattr(request.app.state, 'configuration_repository', None)
+    if repository is None:
+        return principal.scopes
+    resolver = getattr(request.app.state, 'runtime_configuration_resolver', None)
+    if resolver is None:
+        policies = repository.list_configurations('access')
+    else:
+        try:
+            snapshot = resolver.snapshot()
+        except RuntimeConfigurationResolutionError as error:
+            raise _access_denied('The active access policy is unavailable.') from error
+        selected = (
+            snapshot.configurations.get('access') if snapshot.release_set_id is not None else None
+        )
+        policies = [selected] if selected is not None else repository.list_configurations('access')
+    matching: list[AccessPolicyConfiguration] = []
+    for record in policies:
+        try:
+            policy = AccessPolicyConfiguration.model_validate(record.values)
+        except ValueError as error:
+            raise _access_denied('The configured access policy is invalid.') from error
+        if policy.actor_type == principal.actor_type:
+            matching.append(policy)
+    if not matching:
+        return principal.scopes
+    allowed = frozenset(scope for policy in matching if policy.active for scope in policy.scopes)
+    return principal.scopes.intersection(allowed)
 
 
 def require_claimant(

@@ -1,4 +1,6 @@
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 import mongomock
 import pytest
@@ -19,6 +21,9 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationStatus,
     Channel,
+    ContentsItem,
+    ContentsLossType,
+    ContentsOwnership,
     Coverage,
     CustomerNextStep,
     CustomerSupport,
@@ -42,6 +47,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
 )
 from backend.services.branching import build_applied_branch_evaluation
+from backend.services.claims import _claimant_form
 
 FIXED_TIME = datetime(2026, 9, 2, 8, 0, tzinfo=UTC)
 
@@ -75,6 +81,121 @@ def field(value: object, status: FormStatus = FormStatus.CONFIRMED) -> Structure
         updated_at=FIXED_TIME,
         updated_by={'actor_type': 'claimant', 'actor_id': 'cus_branch'},
     )
+
+
+def contents_item(item_id: str = 'item_1') -> ContentsItem:
+    return ContentsItem(
+        item_id=item_id,
+        description='Synthetic laptop',
+        category='electronics',
+        loss_type=ContentsLossType.DAMAGED,
+        ownership=ContentsOwnership.OWNED,
+        estimated_value={'amount': 1200.0, 'currency': 'NZD'},
+        source=FormSource.CLAIMANT,
+        source_refs=['msg_source'],
+        status=FormStatus.PROPOSED,
+        needed_for='later_action',
+        confidence=0.8,
+        updated_at=FIXED_TIME,
+        updated_by={'actor_type': 'claimant', 'actor_id': 'cus_branch'},
+    )
+
+
+def test_registry_includes_minimum_home_fields_and_contents_is_a_separate_record() -> None:
+    registry = build_default_registry()
+
+    assert registry.field_registry_version == '5'
+    assert registry.field_by_code['property.ongoing_risk'].value_type == 'enum'
+    assert registry.field_by_code['property.habitable'].value_type == 'boolean'
+    assert registry.branch_by_id['family.home'].fields >= {
+        'property.ongoing_risk',
+        'property.habitable',
+    }
+    assert registry.branch_by_id['family.contents'].fields == registry.branch_by_id[
+        'family.motor'
+    ].fields - {
+        'authorities.police_report_reference',
+        'authorities.emergency_services_notified',
+        'vehicle.registration',
+        'vehicle.damage_description',
+        'vehicle.drivable',
+    }
+
+
+def test_working_claim_rejects_duplicate_contents_item_ids() -> None:
+    with pytest.raises(ValueError, match='Contents item identifiers'):
+        WorkingClaim.model_validate(
+            make_claim().model_dump() | {'contents_items': [contents_item(), contents_item()]}
+        )
+
+
+def test_claimant_form_hides_system_owned_client_number() -> None:
+    claim = make_claim().model_copy(
+        update={
+            'form': {
+                'claimant.client_number': field('internal-123'),
+                'incident.description': field('A synthetic loss.'),
+            }
+        }
+    )
+
+    projected = _claimant_form(FixtureRepository(), claim)
+
+    assert 'claimant.client_number' not in projected
+    assert 'incident.description' in projected
+
+
+def test_claimant_contents_projection_hides_internal_assessment_metadata() -> None:
+    from backend.services.claims import _claimant_contents_items
+
+    claim = make_claim().model_copy(update={'contents_items': [contents_item()]})
+    projected = _claimant_contents_items(FixtureRepository(), claim)
+
+    assert projected[0].item_id == 'item_1'
+    assert projected[0].source_refs == ['msg_source']
+    assert not hasattr(projected[0], 'confidence')
+    assert not hasattr(projected[0], 'updated_by')
+
+
+def test_claimant_contents_projection_drops_non_public_source_references() -> None:
+    from backend.services.claims import _claimant_contents_items
+
+    item = contents_item().model_copy(
+        update={'source_refs': ['msg_public', 'staff_action_1', 'ret_policy_1', 'field:secret']}
+    )
+    claim = make_claim().model_copy(update={'contents_items': [item]})
+
+    projected = _claimant_contents_items(FixtureRepository(), claim)
+
+    assert projected[0].source_refs == ['msg_public']
+
+
+def test_contents_items_round_trip_through_fixture_and_mongo_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = make_claim().model_copy(update={'contents_items': [contents_item()]})
+    session = SessionRecord(
+        session_id='ses_branch',
+        claim_id=claim.claim_id,
+        customer_id=claim.customer_id,
+        started_at=FIXED_TIME,
+        last_active_at=FIXED_TIME,
+    )
+    fixture_repository = FixtureRepository()
+    mongo_repository = MongoDBRepository(mongomock.MongoClient(), 'contents_round_trip')
+    # mongomock intentionally has no session/transaction implementation.  Keep
+    # the repository's normal create_claim path and execute its atomic callback
+    # without a session so this test still verifies Mongo document mapping and
+    # model round-trip rather than silently dropping the persistence contract.
+    monkeypatch.setattr(mongo_repository, '_atomic', lambda operation: operation(None))
+    for repository in (fixture_repository, mongo_repository):
+        repository.create_claim(claim, session)
+        restored = repository.get_claim(claim.claim_id, claim.customer_id)
+        assert restored is not None
+        assert restored.revision == claim.revision
+        assert restored.contents_items == claim.contents_items
+        assert restored.contents_items[0].estimated_value is not None
+        assert restored.contents_items[0].estimated_value.currency == 'NZD'
 
 
 def evaluation_record(
@@ -264,6 +385,22 @@ def test_runtime_registry_excludes_design_only_and_separate_record_codes() -> No
     assert 'contents.items' not in registry.field_codes
     assert 'other_party.contact' not in registry.field_codes
     assert 'motor.evidence_refs' not in registry.field_codes
+
+
+def test_vp_mapping_covers_registry_once_and_preserves_contents_boundary() -> None:
+    mapping_path = Path(__file__).parents[1] / 'docs' / 'vp-field-branch-mapping.md'
+    mapping = mapping_path.read_text(encoding='utf-8')
+    mapped_codes = re.findall(r'^\| `([^`]+)` \|', mapping, flags=re.MULTILINE)
+
+    assert len(mapped_codes) == len(set(mapped_codes)) == len(REGISTERED_FIELD_CODES)
+    assert set(mapped_codes) == set(REGISTERED_FIELD_CODES)
+    assert '| `contents` |' not in mapping
+    assert (
+        'The `contents` family activates the independent `WorkingClaim.contents_items` list'
+        in mapping
+    )
+    assert 'Contents-specific repeated facts are represented by the independent' in mapping
+    assert 'WorkingClaim.contents_items` record' in mapping
 
 
 def test_branch_results_retain_rule_and_source_coordinates() -> None:

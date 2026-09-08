@@ -22,6 +22,11 @@ STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 DEVELOPER_SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
 
 
+class _HeadBucketClient:
+    def head_bucket(self, **_kwargs: object) -> None:
+        return None
+
+
 def _populate_demo(
     client: TestClient,
     claims_adapter: MockClaimsServiceAdapter,
@@ -198,7 +203,7 @@ def test_reset_fails_closed_for_minio_without_clearing_repository() -> None:
             secret_access_key='synthetic-secret',
             bucket='northwind-evidence',
         ),
-        client=object(),
+        client=_HeadBucketClient(),
     )
     app = create_app(DEVELOPER_SETTINGS, repository=repository, evidence_storage=storage)
 

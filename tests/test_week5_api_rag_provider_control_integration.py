@@ -200,6 +200,19 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         )
         assert validated.status_code == 200, validated.text
         assert validated.json()['state'] == 'awaiting_approval'
+        approval = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/approval',
+            headers={
+                'Authorization': 'Bearer synthetic-release-approver',
+                'Idempotency-Key': 'control-plane-model-approval',
+                'If-Match': '2',
+            },
+            json={
+                'decision': 'approved',
+                'reason': 'The controlled integration evidence is acceptable.',
+            },
+        )
+        assert approval.status_code == 200, approval.text
         published = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/publish',
             headers={

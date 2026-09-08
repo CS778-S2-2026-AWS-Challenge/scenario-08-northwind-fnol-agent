@@ -9,6 +9,11 @@ export function canSubmitProjectedAction(action) {
   return ['available', 'confirmation_required'].includes(action?.availability)
 }
 
+export function findPrimaryProjectedAction(actions = [], actionCode, targetRef) {
+  const action = findProjectedAction(actions, actionCode, targetRef)
+  return canSubmitProjectedAction(action) ? action : undefined
+}
+
 export function isProjectedInputRequired(input, values) {
   return input.required || (
     input.required_when

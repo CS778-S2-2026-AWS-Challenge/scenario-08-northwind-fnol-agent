@@ -56,6 +56,20 @@ def test_shared_test_fixture_change_runs_the_complete_suite() -> None:
     assert selection.tests == ('tests',)
 
 
+def test_branch_registry_contract_test_runs_the_focused_suite() -> None:
+    selection = select_tests(['tests/test_branch_registry.py'])
+
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_branch_registry.py',)
+
+
+def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
+    selection = select_tests(['docs/vp-field-branch-mapping.md'])
+
+    assert selection.mode == 'scoped'
+    assert selection.tests == ('tests/test_branch_registry.py',)
+
+
 def test_ci_selector_change_runs_the_complete_suite() -> None:
     selection = select_tests(['scripts/select_backend_tests.py'])
 

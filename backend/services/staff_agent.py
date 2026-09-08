@@ -2,6 +2,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, Protocol
 
 from backend.core.auth import Principal
@@ -38,6 +39,7 @@ from backend.domain.staff_agent import (
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID, load_staff_assistant_prompt
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.support import now_utc
 
 
@@ -70,9 +72,14 @@ class StaffAgentTurnProvider(Protocol):
 
 
 class GatewayStaffAgent:
-    def __init__(self, gateway: ModelGateway) -> None:
+    def __init__(
+        self,
+        gateway: ModelGateway,
+        operations: ModelOperationsRecorder | None = None,
+    ) -> None:
         self._gateway = gateway
         self._instruction = load_staff_assistant_prompt()
+        self._operations = operations
 
     def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
         request = ModelRequest(
@@ -105,25 +112,44 @@ class GatewayStaffAgent:
             ],
             response_schema=StaffAgentModelOutput.model_json_schema(),
         )
-        response = self._gateway.complete(request)
-        if response.completion_status is ModelCompletionStatus.INCOMPLETE:
-            raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
-        if response.completion_status is ModelCompletionStatus.REFUSED:
-            raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
-        if (
-            response.completion_status is not ModelCompletionStatus.COMPLETE
-            or response.structured_output is None
-        ):
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        started_at = perf_counter()
+        response = None
         try:
-            output = StaffAgentModelOutput.model_validate(response.structured_output)
-        except ValueError:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-        return StaffAgentProviderResult(
-            output=output,
-            provider_model=response.provider_model,
-            provider_request_id=response.provider_request_id,
-        )
+            response = self._gateway.complete(request)
+            if response.completion_status is ModelCompletionStatus.INCOMPLETE:
+                raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
+            if response.completion_status is ModelCompletionStatus.REFUSED:
+                raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
+            if (
+                response.completion_status is not ModelCompletionStatus.COMPLETE
+                or response.structured_output is None
+            ):
+                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+            try:
+                output = StaffAgentModelOutput.model_validate(response.structured_output)
+            except ValueError:
+                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            result = StaffAgentProviderResult(
+                output=output,
+                provider_model=response.provider_model,
+                provider_request_id=response.provider_request_id,
+            )
+        except ModelGatewayError as error:
+            if self._operations is not None:
+                self._operations.failed(
+                    request.purpose,
+                    error,
+                    (perf_counter() - started_at) * 1000,
+                    response,
+                )
+            raise
+        if self._operations is not None:
+            self._operations.succeeded(
+                request.purpose,
+                response,
+                (perf_counter() - started_at) * 1000,
+            )
+        return result
 
 
 def _require_staff(principal: Principal) -> None:

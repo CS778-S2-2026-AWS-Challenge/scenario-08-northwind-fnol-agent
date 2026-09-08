@@ -48,6 +48,13 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     assert action['assigned_to'] == 'stf_demo'
     assert created.json()['revision'] == 2
     detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    work_item_source = next(
+        item
+        for item in detail.json()['source_summary']['items']
+        if item['kind'] == 'work_item' and item['record_ref'] == action['action_id']
+    )
+    assert work_item_source['status'] == 'open'
+    assert work_item_source['context'] == action['requested_outcome']
     update_action = next(
         item
         for item in detail.json()['allowed_actions']

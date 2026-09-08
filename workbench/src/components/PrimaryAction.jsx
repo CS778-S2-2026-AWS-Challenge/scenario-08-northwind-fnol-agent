@@ -13,9 +13,9 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
     <section className="primary-action" aria-labelledby="primary-action-title">
       <div className="primary-action__icon"><ShieldCheck size={22} /></div>
       <div className="primary-action__copy">
-        <p className="eyebrow">Current action</p>
-        <h2 id="primary-action-title">{action?.label || 'Review the Claim summary'}</h2>
-        <p>{action?.purpose || 'No controlled action currently requires staff input.'}</p>
+        <p className="eyebrow">Staff next action</p>
+        <h2 id="primary-action-title">{action?.label || 'No staff action is currently authorised'}</h2>
+        <p>{action?.purpose || 'Continue reviewing the projected context. No controlled staff action is available for this Claim.'}</p>
         {action?.availability === 'blocked' && <p className="record-note record-note--blocked"><strong>Blocked</strong>{action.blocked_reason || 'This action is not available for the current Claim state.'}</p>}
         {action && <ActionDetails action={action} />}
       </div>

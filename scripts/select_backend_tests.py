@@ -60,6 +60,8 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
     for raw_path in paths:
         path = PurePosixPath(raw_path.replace('\\', '/'))
         path_text = path.as_posix()
+        if path_text == 'docs/vp-field-branch-mapping.md':
+            selected.add('tests/test_branch_registry.py')
         if path_text in {'backend/requirements-dev.txt', 'pyproject.toml'}:
             shared_change = True
         if path_text.startswith(('backend/domain/', 'backend/repositories/protocols.py')):
