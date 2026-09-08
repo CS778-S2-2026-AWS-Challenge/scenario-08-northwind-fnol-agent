@@ -54,7 +54,7 @@ The following table separates implemented data from gaps that a later card must 
 | Session | Claim/customer ownership, active/closed state, resume summary, unresolved work, commitments, and context revision | `claim_id` is mandatory and no interaction-intent field represents a non-claim session | #596 and #629 |
 | Message | Claim/session linkage, client idempotency key, actor class, explicit visibility, evidence links, reply linkage, and timestamp | The durable record has an actor class but no actor identifier | #625 |
 | Evidence | Claim ownership, lifecycle, file metadata, source, related fields, provenance, waiting responsibility, timing, and context | No direct session link; record visibility is derived from source; object key and checksum remain generic provenance members | #602, #603, and #604 |
-| Dynamic fields | Registry version `4` with 20 codes; source, status, current/later need, confidence, actor, and source references | Home has two family fields and contents has none; design candidates are not executable | #584 and #585 |
+| Dynamic fields | Registry version `5` with 22 codes; source, status, current/later need, confidence, actor, and source references; three-family mapping is documented in [VP Field and Branch Mapping](../vp-field-branch-mapping.md) | Candidate fields beyond the executable subset remain explicitly unregistered; contents uses the independent `ContentsItem` record | #584 and #585 |
 | Seed graph | Nine loadable Claim scenarios and deterministic fixture identities | All scenarios belong to `cus_demo`; eight are motor and one uses legacy `property`; no exact home/contents trio or online-staff data exists | #583 |
 
 ## Implemented record inventory
@@ -131,7 +131,7 @@ reusable basis for #585; scenario data must not flatten a fact to an un-sourced 
 
 ### Registered Dynamic Form fields
 
-The executable Field Registry is version `4` and contains 20 codes. The branch evaluator requires
+The executable Field Registry is version `5` and contains 22 codes. The branch evaluator requires
 an exact matching value contract for every code, so adding a name to only one collection is not a
 valid field implementation.
 
@@ -139,8 +139,8 @@ valid field implementation.
 | --- | --- | --- |
 | Common | `policy.policy_number`, `claimant.client_number`, `claimant.role`, `claimant.contact_preference`, `claim.product_family`, `incident.type`, `incident.occurred_at`, `incident.location`, `incident.description`, `incident.injury_or_danger`, `incident.cause`, `loss.description`, `parties.other_parties` | Reusable, subject to branch selection and role visibility. |
 | Motor | `authorities.police_report_reference`, `authorities.emergency_services_notified`, `vehicle.registration`, `vehicle.damage_description`, `vehicle.drivable` | Reusable bounded motor subset. |
-| Home | `property.address`, `property.affected_areas` | Reusable but too thin for a representative home journey without a #584 gap decision. |
-| Contents | None | A contents family can be classified, but no contents-specific fact is executable. |
+| Home | `property.address`, `property.affected_areas`, `property.ongoing_risk`, `property.habitable` | Minimum executable home subset; broader home catalogue candidates remain unregistered. |
+| Contents | Independent `WorkingClaim.contents_items` record; no flattened family fields | Item-level fields are executable through the typed record and role-safe projections; item-to-Evidence association remains a later boundary. |
 
 `claimant.client_number` is system-owned and marked claimant-hidden in the Branch Registry.
 `claim.product_family` accepts `motor`, `home`, or `contents`. The separate `incident.type`
@@ -224,7 +224,7 @@ The following projections are implemented and reusable:
 | Data | Claimant projection | Staff/internal projection | Constraint |
 | --- | --- | --- | --- |
 | Claimant profile | Own profile and preferences | No general Workbench profile join is implemented | Password and token hashes never leave identity repositories. |
-| Claim form | Raw form projection removes internal retrieval identifiers from `source_refs`; Dynamic Form projection filters claimant-hidden fields | Full authorised form and provenance | The raw form projection does not filter `claimant.client_number` by field code. |
+| Claim form | Raw form projection removes claimant-hidden fields and non-public provenance; Dynamic Form projection uses the same registry visibility boundary | Full authorised form and provenance | Claimant and staff projections remain separate contracts. |
 | Claim State | Claimant-safe workflow and next-step subset | Workbench state, priority, tags, gaps, ownership, and actions | Fraud/review internals do not enter claimant responses. |
 | Messages | `claimant_visible` and `shared` | Authorised staff history including permitted internal content | `internal_only` messages are filtered before claimant pagination. |
 | Evidence | Claimant-sourced records | Authorised full Claim Evidence | Visibility is derived from source, not stored independently. |
@@ -274,17 +274,16 @@ card beyond its stated acceptance boundary.
 | `DATA-01` | Normal-mode identities and seeded Claims do not share an intentionally seeded identifier graph. | A real login cannot reliably read the demonstration Claim. | #583 |
 | `DATA-02` | No online-staff, availability, capacity, or last-seen record exists. | #583 cannot honestly seed an online pool, and Claim distribution would infer availability from account enablement. | #583 records the limitation; #617 owns the pool and Claim action. |
 | `DATA-03` | No representative exact `home` or `contents` initial Claim exists. | The three-path Validation Prototype is not reproducible. | #583, after #584 and #585 provide stable field inputs. |
-| `DATA-04` | Home has only two registered family fields; contents has none. | Seed data can classify a family but cannot demonstrate credible family-specific intake. | #584 maps the minimum gaps; #585 supplies accepted scenario values and projections. |
-| `DATA-05` | The field design document reports 19 registry codes in its gap table, while executable Registry version `4` contains 20. | A consumer may plan from stale counts or miss `claimant.client_number`. | #584 must re-derive the mapping from executable code rather than copy the count. |
+| `DATA-04` | Broader home and contents catalogue candidates remain outside the executable subset. | Seed data must use only the minimum home fields and the independent contents record. | #584 maps the minimum boundary; #585 supplies accepted scenario values and projections; later cards own additional candidates. |
+| `DATA-05` | The executable Registry is version `5` with 22 codes; the field design catalogue contains additional non-executable candidates. | A consumer may plan from the catalogue without checking executable contracts. | #584 re-derives the mapping from executable code and records the boundary in [VP Field and Branch Mapping](../vp-field-branch-mapping.md). |
 | `DATA-06` | `WorkingClaim` does not retain the Field Registry version used for its form. | Historical decisions cannot identify the exact field snapshot from Claim data alone. | #584 identifies the required version boundary; #596 consumes versioned Claim Context. |
 | `DATA-07` | `incident_type`, `claim.product_family`, and legacy `property` coexist. | New data may create family conflicts or perpetuate the obsolete alias. | #584 defines the three-path mapping; #585 uses canonical values. |
 | `DATA-08` | Sessions require a Claim and do not record interaction intent. | Pre-Claim or non-claim conversations cannot use the same durable session shape. | #596 defines Agent context scope; #629 owns incomplete-Claim recovery persistence. |
 | `DATA-09` | Messages record actor class but not actor identity. | A transcript alone cannot attribute a staff or system message to one actor. | #625 |
 | `DATA-10` | Evidence has no direct session link and uses source-derived visibility. | Upload/session attribution and exceptional visibility cannot be represented explicitly. | #602 defines material links; #603 owns upload Claim/session association; #604 owns Agent-visible status. |
 | `DATA-11` | Evidence storage and extraction provenance is an untyped mapping. | Seed data could invent incompatible keys or imply stronger provenance than the API enforces. | #602 and #603 must reuse implemented Evidence service output. |
-| `DATA-12` | No typed `ContentsItem` or immutable item-to-Evidence mapping exists. | Flattening multiple contents items into `WorkingClaim.form` would create a private schema. | #584 records the selected boundary; #585 must not fabricate the missing record; #602 owns material associations. |
+| `DATA-12` | Typed `ContentsItem` now exists, while immutable item-to-Evidence mapping remains unimplemented. | Flattening multiple contents items into `WorkingClaim.form` would create a private schema. | #584 records the selected boundary; #585 must use the record; #602 owns material associations. |
 | `DATA-13` | Claim assignment references staff but no cross-store identity or availability check exists. | A seed can point to a nonexistent or unavailable staff member. | #583 seeds coherent identifiers; #617 owns availability and Claim responsibility. |
-| `DATA-14` | The Branch Registry marks `claimant.client_number` claimant-hidden, but the raw claimant form projection does not filter hidden field codes. | Seeding the system-owned field into `WorkingClaim.form` could expose it through the claimant Claim API even though Dynamic Form hides it. | #583 must not seed it into claimant form until #585 closes the claimant/Workbench projection boundary. |
 
 ## Input boundary for #583
 
