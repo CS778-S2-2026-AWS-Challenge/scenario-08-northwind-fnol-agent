@@ -27,9 +27,20 @@ issue #601 requires of its failure boundary.
 the conditions, and what each of the three paths must demonstrate. It deliberately fixes no
 filename, format, or layout — those are decided here.
 
-The conditions that describe an absence — missing, pending, and unavailable — have **no asset by
-design**. A material that has not arrived is demonstrated by its absence and its recorded state, not
-by a placeholder file. That is why the asset count is smaller than the number of catalogue cells.
+**Missing and pending have no asset by design.** A material that has not been offered, or whose
+wait is on someone identifiable, is demonstrated by its absence and its recorded state, not by a
+placeholder file. Nothing came back, so there is nothing to produce.
+
+**Unavailable is not the same kind of absence, and does have an asset.** Section 7 requires it to
+state why, and says it "must not silently degrade into a claim of unavailability where none was
+established". Establishing it produces a record: the issuer or assessor answering that they cannot
+supply, and for what reason. That answer is a real material, so `motor` carries an assessment that
+cannot be provided and `contents` carries an official report that cannot be issued, each stating its
+reason. Section 5.2 marks both cells `R`, and a marked condition must be reachable rather than
+merely describable.
+
+That is why the asset count is smaller than the number of catalogue cells but larger than the number
+of present conditions.
 
 ## Layout and naming
 
@@ -70,8 +81,10 @@ It deliberately carries **no Claim, Evidence, or storage reference**. Associatin
 claim record, a source, and a processing status is issue #602.
 
 `generate_materials.py` writes it, and `--check` fails if any material omits a required attribute,
-if the manifest has drifted from the tables, or if a material demonstrates a condition it does not
-record itself as able to occupy.
+if the manifest has drifted from the tables, if a material demonstrates a condition it does not
+record itself as able to occupy, or if any cell section 5.2 marks `R` is not reached. That last
+check reads `REQUIRED_COVERAGE`, which is section 5.2 transcribed as a table so an unreached cell is
+a failure rather than something a reader has to notice.
 
 ## Byte exactness
 

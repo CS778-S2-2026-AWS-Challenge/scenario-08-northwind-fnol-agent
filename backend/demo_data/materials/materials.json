@@ -476,6 +476,95 @@
       }
     },
     {
+      "path": "motor/motor-assessment-unavailable-notice.pdf",
+      "claim_path": "motor",
+      "material_class": "Assessment or estimate",
+      "demonstrates_condition": "unavailable",
+      "media_type": "application/pdf",
+      "title": "Assessment cannot be provided",
+      "described_as": [
+        "Assessor reference: SIMULATED",
+        "The vehicle was not accessible at the recorded location within the window",
+        "Sought and cannot currently be obtained; the reason is recorded, not inferred"
+      ],
+      "simulated": true,
+      "attributes": {
+        "purpose": "Establishes that the assessment was sought and cannot be obtained, so staff act on a recorded reason rather than on an assumption that the wait continues.",
+        "applicable_paths_and_trigger": {
+          "paths": [
+            "motor"
+          ],
+          "trigger": "When an authorised assessment request comes back unfulfilled rather than late."
+        },
+        "source_and_stakeholder": {
+          "provided_by": "external_party",
+          "detail": "The output of a third-party service request authorised by Northwind and by the claimant.",
+          "stakeholder": {
+            "unresolved": "Which stakeholder issues this assessment, and what access exists",
+            "blocked_on": "P3"
+          }
+        },
+        "conditions_it_can_occupy": {
+          "pending": {
+            "means_for_this_material": "The request is out and the wait is on the assessor.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "unavailable": {
+            "means_for_this_material": "The assessor has answered that no assessment can be produced, and the reason is on the record.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          }
+        },
+        "media_and_quality_requirements": {
+          "usable": "The assessor reference and the stated reason the assessment cannot be produced are both legible.",
+          "insufficient": "A refusal with no reason, which cannot be distinguished from a request that was never answered."
+        },
+        "provenance_and_verification": {
+          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+        },
+        "consent_and_visibility": {
+          "disclosure_requires_consent": true,
+          "claimant_sees": "That an assessment was requested, its condition, and the next step.",
+          "staff_sees": "The assessment, its provenance, whether it has been checked, and the authorisation that permitted the disclosure.",
+          "copy_and_scope": {
+            "unresolved": "What consent copy and disclosure scope this class requires",
+            "blocked_on": "P5"
+          }
+        },
+        "linkage": {
+          "attaches_to": "Attaches to the vehicle damage assessment request it answers, and leaves the claim fact it would have supported unsettled.",
+          "registered_field": {
+            "unresolved": "Which registered field this material class links to",
+            "blocked_on": "P2"
+          }
+        },
+        "behaviour_when_not_usable": {
+          "pending": {
+            "claimant": "Who is being waited on, and that the claim is preserved meanwhile.",
+            "staff": "The request, its condition, and the responsible party. Waiting without an owner is not a displayable state."
+          },
+          "unavailable": {
+            "claimant": "That it cannot currently be obtained, and why.",
+            "staff": "The established reason. Unavailability is never inferred where none was established."
+          }
+        },
+        "retention": {
+          "sensitivity": "elevated",
+          "rule": {
+            "unresolved": "The retention rule for classes marked Elevated in section 2",
+            "blocked_on": "privacy review"
+          }
+        }
+      }
+    },
+    {
       "path": "motor/motor-assessment-v1.pdf",
       "claim_path": "motor",
       "material_class": "Assessment or estimate",
@@ -1477,6 +1566,92 @@
           "received": {
             "claimant": "That it arrived, and what it now unblocks.",
             "staff": "The material, its provenance, and whether it has been checked."
+          }
+        },
+        "retention": {
+          "sensitivity": "standard",
+          "rule": "Follows the claim it belongs to."
+        }
+      }
+    },
+    {
+      "path": "contents/contents-authority-unavailable-notice.pdf",
+      "claim_path": "contents",
+      "material_class": "Authority or official report",
+      "demonstrates_condition": "unavailable",
+      "media_type": "application/pdf",
+      "title": "Official report cannot be issued",
+      "described_as": [
+        "Event reference: SIMULATED",
+        "No report is held against the reference supplied",
+        "Sought and cannot currently be obtained; the reason is recorded, not inferred"
+      ],
+      "simulated": true,
+      "attributes": {
+        "purpose": "Establishes that the official report was sought and cannot be issued, so the claim can proceed on what is known rather than waiting indefinitely.",
+        "applicable_paths_and_trigger": {
+          "paths": [
+            "contents"
+          ],
+          "trigger": "When an authority request comes back unfulfilled rather than late."
+        },
+        "source_and_stakeholder": {
+          "provided_by": "external_party",
+          "detail": "Issued by a body outside Northwind and outside the claimant, and arriving on the issuer timetable.",
+          "stakeholder": {
+            "unresolved": "Which stakeholder issues this report, and what access exists",
+            "blocked_on": "P3"
+          }
+        },
+        "conditions_it_can_occupy": {
+          "pending": {
+            "means_for_this_material": "The request is out and the wait is on the issuing authority.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "unavailable": {
+            "means_for_this_material": "The authority has answered that no report is held, and the reason is on the record.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          }
+        },
+        "media_and_quality_requirements": {
+          "usable": "The event reference and the stated reason no report can be issued are both legible.",
+          "insufficient": "A refusal with no reason, which cannot be distinguished from a request that was never answered."
+        },
+        "provenance_and_verification": {
+          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+        },
+        "consent_and_visibility": {
+          "disclosure_requires_consent": true,
+          "claimant_sees": "That it is awaited or has arrived, and who is being waited on.",
+          "staff_sees": "The report, its issuer, and the authorisation that permitted the request.",
+          "copy_and_scope": {
+            "unresolved": "What consent copy and disclosure scope this class requires",
+            "blocked_on": "P5"
+          }
+        },
+        "linkage": {
+          "attaches_to": "Attaches to the authority request it answers, and leaves the claim fact it would have supported unsettled.",
+          "registered_field": {
+            "unresolved": "Which registered field this material class links to",
+            "blocked_on": "P2"
+          }
+        },
+        "behaviour_when_not_usable": {
+          "pending": {
+            "claimant": "Who is being waited on, and that the claim is preserved meanwhile.",
+            "staff": "The request, its condition, and the responsible party. Waiting without an owner is not a displayable state."
+          },
+          "unavailable": {
+            "claimant": "That it cannot currently be obtained, and why.",
+            "staff": "The established reason. Unavailability is never inferred where none was established."
           }
         },
         "retention": {

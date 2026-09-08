@@ -294,6 +294,38 @@ ASSET_DETAIL: dict[str, dict[str, object]] = {
         'linkage': 'Supports the claim facts "incident description" and "incident location", and '
         'attaches to the authority request that sought it.',
     },
+    'motor/motor-assessment-unavailable-notice.pdf': {
+        'purpose': 'Establishes that the assessment was sought and cannot be obtained, so staff '
+        'act on a recorded reason rather than on an assumption that the wait continues.',
+        'trigger': 'When an authorised assessment request comes back unfulfilled rather than late.',
+        'conditions': {
+            'pending': 'The request is out and the wait is on the assessor.',
+            'unavailable': 'The assessor has answered that no assessment can be produced, and the '
+            'reason is on the record.',
+        },
+        'media_usable': 'The assessor reference and the stated reason the assessment cannot be '
+        'produced are both legible.',
+        'media_insufficient': 'A refusal with no reason, which cannot be distinguished from a '
+        'request that was never answered.',
+        'linkage': 'Attaches to the vehicle damage assessment request it answers, and leaves the '
+        'claim fact it would have supported unsettled.',
+    },
+    'contents/contents-authority-unavailable-notice.pdf': {
+        'purpose': 'Establishes that the official report was sought and cannot be issued, so the '
+        'claim can proceed on what is known rather than waiting indefinitely.',
+        'trigger': 'When an authority request comes back unfulfilled rather than late.',
+        'conditions': {
+            'pending': 'The request is out and the wait is on the issuing authority.',
+            'unavailable': 'The authority has answered that no report is held, and the reason is '
+            'on the record.',
+        },
+        'media_usable': 'The event reference and the stated reason no report can be issued are '
+        'both legible.',
+        'media_insufficient': 'A refusal with no reason, which cannot be distinguished from a '
+        'request that was never answered.',
+        'linkage': 'Attaches to the authority request it answers, and leaves the claim fact it '
+        'would have supported unsettled.',
+    },
     'motor/motor-assessment-v1.pdf': {
         'purpose': 'The input to any cost conversation, and the output of a third-party service '
         'request. It is not a decision.',
@@ -584,6 +616,19 @@ ASSETS: tuple[Asset, ...] = (
         'document',
     ),
     Asset(
+        'motor/motor-assessment-unavailable-notice.pdf',
+        'motor',
+        'Assessment or estimate',
+        'unavailable',
+        'Assessment cannot be provided',
+        (
+            'Assessor reference: SIMULATED',
+            'The vehicle was not accessible at the recorded location within the window',
+            'Sought and cannot currently be obtained; the reason is recorded, not inferred',
+        ),
+        'document',
+    ),
+    Asset(
         'motor/motor-assessment-v1.pdf',
         'motor',
         'Assessment or estimate',
@@ -725,6 +770,19 @@ ASSETS: tuple[Asset, ...] = (
             'Event reference: SIMULATED',
             'Records the reported theft of the item claimed for',
             'Issued outside Northwind and outside the claimant, on the issuer timetable',
+        ),
+        'document',
+    ),
+    Asset(
+        'contents/contents-authority-unavailable-notice.pdf',
+        'contents',
+        'Authority or official report',
+        'unavailable',
+        'Official report cannot be issued',
+        (
+            'Event reference: SIMULATED',
+            'No report is held against the reference supplied',
+            'Sought and cannot currently be obtained; the reason is recorded, not inferred',
         ),
         'document',
     ),
@@ -909,6 +967,84 @@ def _pdf_bytes(asset: Asset) -> bytes:
         f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
     )
     return bytes(out)
+
+
+# Section 5.2 of the catalogue, as a table rather than as prose, so a missing cell is a
+# check failure rather than something a reader has to notice. `R` there means the
+# condition must be *reachable* in that path's demonstration, not merely describable.
+#
+# Two kinds of cell, and the difference is not a convenience. Missing and Pending are
+# reached by absence: nothing has been offered, or the wait is on someone, and there is
+# no artefact because nothing came back. Unavailable is different — section 7 says it
+# "must state why, and must not silently degrade into a claim of unavailability where
+# none was established". Establishing it produces a record: the issuer or assessor
+# answering that they cannot supply, and for what reason. That answer is a real material,
+# so Unavailable is reached by an artefact like every present condition.
+REACHED_BY_ABSENCE = frozenset({'missing', 'pending'})
+
+REQUIRED_COVERAGE: tuple[tuple[str, str, str], ...] = (
+    # condition, claim path, material class ('*' means any class on that path)
+    ('missing', 'motor', '*'),
+    ('missing', 'home', '*'),
+    ('missing', 'contents', '*'),
+    ('pending', 'motor', 'Authority or official report'),
+    ('pending', 'home', 'Assessment or estimate'),
+    ('pending', 'contents', 'Authority or official report'),
+    ('unavailable', 'motor', 'Assessment or estimate'),
+    ('unavailable', 'contents', 'Authority or official report'),
+    ('received', 'motor', 'Incident evidence'),
+    ('received', 'home', 'Incident evidence'),
+    ('received', 'contents', 'Incident evidence'),
+    ('received', 'contents', 'Identity and ownership evidence'),
+    ('invalid', 'motor', 'Incident evidence'),
+    ('invalid', 'home', '*'),
+    ('invalid', 'contents', 'Identity and ownership evidence'),
+    ('superseded', 'motor', 'Assessment or estimate'),
+    ('expired', 'contents', 'Identity and ownership evidence'),
+    ('disputed', 'motor', 'Incident evidence'),
+    ('disputed', 'contents', 'Identity and ownership evidence'),
+)
+
+
+def coverage_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report every section 5.2 cell the produced set does not reach.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per unreached cell, empty when the matrix is satisfied.
+    """
+
+    demonstrated: set[tuple[str, str, str]] = set()
+    occupiable: set[tuple[str, str, str]] = set()
+    for material in materials:
+        path = str(material['claim_path'])
+        material_class = str(material['material_class'])
+        demonstrated.add((str(material['demonstrates_condition']), path, material_class))
+        attributes = material.get('attributes')
+        conditions = (
+            attributes.get('conditions_it_can_occupy', {}) if isinstance(attributes, dict) else {}
+        )
+        for condition in conditions:
+            occupiable.add((str(condition), path, material_class))
+
+    failures: list[str] = []
+    for condition, path, material_class in REQUIRED_COVERAGE:
+        reached = occupiable if condition in REACHED_BY_ABSENCE else demonstrated
+        if material_class == '*':
+            satisfied = any(cell[0] == condition and cell[1] == path for cell in reached)
+            where = 'any class'
+        else:
+            satisfied = (condition, path, material_class) in reached
+            where = material_class
+        if not satisfied:
+            how = 'recorded as occupiable' if condition in REACHED_BY_ABSENCE else 'demonstrated'
+            failures.append(
+                f'catalogue section 5.2: {path} does not reach {condition} on {where}; '
+                f'no material {how} it'
+            )
+    return failures
 
 
 REQUIRED_ATTRIBUTES = (
@@ -1174,6 +1310,8 @@ def check_all() -> tuple[list[str], list[str]]:
                 f'{material.get("path")}: names conditions the catalogue does not define: '
                 f'{", ".join(unknown)}'
             )
+
+    failures.extend(coverage_failures(stored.get('materials', [])))
     return reports, failures
 
 
@@ -1183,7 +1321,8 @@ def main() -> int:
         '--check',
         action='store_true',
         help='verify each asset opens, is the declared type, states its simulated origin, '
-        'and answers every attribute the catalogue requires',
+        'answers every attribute the catalogue requires, and reaches every condition '
+        'the catalogue requires of its path',
     )
     args = parser.parse_args()
 
@@ -1204,7 +1343,8 @@ def main() -> int:
     print(
         f'{len(reports)} assets verified: each opens, is the declared media type, states its '
         f'simulated origin, and answers all {len(REQUIRED_ATTRIBUTES)} required attributes; '
-        'the manifest matches the asset table'
+        f'the manifest matches the asset table; all {len(REQUIRED_COVERAGE)} conditions '
+        'section 5.2 requires are reached'
     )
     return 0
 
