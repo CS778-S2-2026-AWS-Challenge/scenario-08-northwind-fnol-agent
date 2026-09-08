@@ -1595,6 +1595,55 @@ def test_staff_logout_rejects_a_session_that_is_already_inactive(
     assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
 
 
+def test_staff_logout_removes_authenticated_staff_from_online_pool(
+    app: FastAPI,
+    client: TestClient,
+) -> None:
+    staff_id, headers = _provision_staff(
+        app, client, email='logout-presence@example.test', display_name='Logout Presence'
+    )
+    assert any(
+        item['staff_id'] == staff_id
+        for item in client.get('/api/v1/workbench/staff/online', headers=headers).json()
+    )
+
+    response = client.delete('/api/v1/staff/auth/session', headers=headers)
+
+    assert response.status_code == 204
+    assert client.get('/api/v1/workbench/staff/online', headers=headers).status_code == 401
+    presence = app.state.claim_repository.get_staff_presence(staff_id)
+    assert presence is not None
+    assert presence.online is False
+    assert presence.available is False
+
+
+def test_staff_login_revokes_session_when_presence_cannot_be_established(
+    app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email = 'presence-failure@example.test'
+    password = 'workbench-test-password'
+    account = app.state.staff_identity_repository.provision_account(
+        email, password, 'Presence Failure', ('claims_professional',)
+    )
+
+    def fail_presence(*args: object, **kwargs: object) -> None:
+        raise RuntimeError('presence store unavailable')
+
+    monkeypatch.setattr('backend.api.staff_identity.mark_staff_online', fail_presence)
+    response = client.post(
+        '/api/v1/staff/auth/sessions',
+        json={'email': email, 'password': password},
+    )
+
+    assert response.status_code == 503
+    assert response.json()['error']['code'] == 'STAFF_PRESENCE_UNAVAILABLE'
+    sessions = app.state.staff_identity_repository.list_sessions(account.staff_id)
+    assert len(sessions) == 1
+    assert sessions[0].revoked_at is not None
+
+
 def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
     client: TestClient,
     auth_headers: dict[str, str],

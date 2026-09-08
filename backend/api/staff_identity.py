@@ -8,6 +8,7 @@ from backend.domain.staff_identity import (
     AuthenticatedStaffSession,
     CurrentStaffSession,
     StaffLoginRequest,
+    StaffPresenceUpdate,
     StaffProfileProjection,
 )
 from backend.repositories.protocols import PersistenceRepository
@@ -18,7 +19,7 @@ from backend.services.staff_identity import (
     staff_profile_projection,
     staff_session_projection,
 )
-from backend.services.staff_presence import mark_staff_online
+from backend.services.staff_presence import mark_staff_online, update_presence
 
 router = APIRouter(prefix='/api/v1/staff', tags=['staff identity'])
 
@@ -36,15 +37,25 @@ def create_staff_auth_session(
     request: Request,
     payload: StaffLoginRequest,
 ) -> AuthenticatedStaffSession:
+    identity_repository = repository_for(request)
     result = login_staff(
-        repository_for(request),
+        identity_repository,
         payload,
         request.app.state.settings.staff_session_ttl_minutes,
         development_identity=request.app.state.settings.developer_mode,
     )
-    mark_staff_online(
-        cast(PersistenceRepository, request.app.state.claim_repository), result.staff_id
-    )
+    try:
+        mark_staff_online(
+            cast(PersistenceRepository, request.app.state.claim_repository), result.staff_id
+        )
+    except Exception as error:
+        identity_repository.revoke_session(hash_staff_access_token(result.access_token))
+        raise ApiError(
+            status_code=503,
+            code='STAFF_PRESENCE_UNAVAILABLE',
+            message='Staff presence could not be established; the session was not created.',
+            retryable=True,
+        ) from error
     return result
 
 
@@ -59,9 +70,14 @@ def read_staff_auth_session(
 def delete_staff_auth_session(
     request: Request,
     authorization: str | None = Header(default=None),
-    _: Principal = Depends(require_staff),
+    principal: Principal = Depends(require_staff),
 ) -> Response:
     token = (authorization or '').removeprefix('Bearer ').strip()
+    update_presence(
+        cast(PersistenceRepository, request.app.state.claim_repository),
+        principal,
+        StaffPresenceUpdate(online=False, available=False, lease_seconds=15),
+    )
     if not repository_for(request).revoke_session(hash_staff_access_token(token)):
         raise ApiError(
             status_code=401,
