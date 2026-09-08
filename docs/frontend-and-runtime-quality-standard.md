@@ -413,7 +413,370 @@ route guard
 - Listen 位于每条 Agent 回复右下角，不与 attach 紧贴；
 - 未登录也允许发送文字和合法请求；
 - 文件持久化需要认证，但匿名上传可以在当前 session 中处理并明确生命周期；
-- 语音权限、录音、转写…8 tokens truncated…_access` 自己推导某个具体动作是否允许；
+- 语音权限、录音、转写、取消和失败状态必须可见；
+- 无障碍开启后可默认朗读 Agent 回复，但必须遵守浏览器自动播放限制；
+- 未实现能力不能用一个看似可点的 disabled 占位符冒充。
+
+### 4.4 第三方服务卡片
+
+第三方服务卡片显示在相关 Agent 回复下方，采用渐进式披露，不用覆盖式弹窗。至少包含：
+
+- 服务名称和提供方；
+- 请求目的；
+- 将共享的数据；
+- consent 状态；
+- 请求类型；
+- 当前状态；
+- pending owner；
+- provider/operation reference；
+- 结果和验证状态；
+- 限制条件；
+- 失败、结果未知和安全重试路径。
+
+claimant 看到客户安全投影；staff 看到更完整的 operational projection；两者都不能直接看到 raw adapter payload。
+
+### 4.5 Claimant 主路径的实现契约
+
+主路径应当保持在同一个对话工作区内，辅助页面只在用户明确选择时切换主区内容：
+
+```text
+/ → anonymous session (optional)
+  → natural-language message
+  → Agent turn
+  → fields / branch / retrieval / action proposal
+  → claimant-safe projection
+  → confirmation or next question
+  → handoff / external coordination / completion
+```
+
+必须实现的行为细节：
+
+- `New chat` 在当前 session 有内容时创建新 session；只有当前 session 为空时才复用当前工作区；
+- `Conversation history` 打开已有 session，不再额外制造“Continue/Resume”主动作；
+- 未登录发送消息时创建匿名 session，不能因为缺少 bearer token 而阻止合法请求；
+- 登录/注册成功后，若存在匿名 session，则幂等绑定并回到原 Claim workspace；绑定失败必须保留当前对话并给出可恢复错误；
+- `Profile`、privacy、claim history、uploaded files 作为主区 utility view，不以模态弹窗遮挡对话，也不把登录成功后的默认落点设为 Profile；
+- 右侧 `What we have so far` 收起时隐藏整个栏并扩展对话区，必须保留明确的 reopen 控件；
+- composer 的文本、附件、voice、Claim type 和 model adapter 是同一 surface 内的协同控件；
+- Claim type select 是非必选提示，branch 经后端确认后锁定；前端不能自行判断 branch；
+- Agent 回复的 `Listen` 是消息级辅助动作，未登录也不应无理由禁用；
+- How it works 由 Agent 在当前对话中解释并提供 `See more →` 链接；未登录时才允许直接进入教学 route；
+- handoff 后显示状态卡片、已保存信息和下一步，不泄漏 audience、delivery、retry reason 等内部字段。
+
+### 4.6 Claimant 安全与可访问性要求
+
+- 任何用户可见字段都要有来源和状态语义的安全投影；内部置信度、检索 ID、原始 provider payload 和 staff-only note 不得进入 claimant UI；
+- 文件、语音和无障碍能力必须有权限、浏览器能力和失败状态的明确反馈；
+- 语音输入必须能开始、暂停、取消、转写、重试，且不阻塞文本输入；
+- 无障碍朗读遵守浏览器 autoplay 限制，不能把“开启无障碍”误写成必然播放；
+- 所有可交互元素支持键盘 focus、触控和可读的 accessible name；
+- 移动端不使用依赖 hover、悬浮遮挡或精细拖拽才能完成的关键操作。
+
+---
+
+## 5. Staff Workbench 交互标准
+
+### 5.1 队列
+
+队列由后端投影表达：
+
+- Claim 标识和 claimant 摘要；
+- lifecycle/workflow state；
+- 当前责任方和待处理动作；
+- priority level、rank、due time 和 overdue；
+- 缺失信息摘要及其 attention level；
+- risk signal/tag；
+- 最后 claimant activity 和 unread；
+- 外部等待摘要；
+- Incomplete 标记。
+
+前端可以对后端字段筛选或改变显示排序，但不能新建业务启发式。禁止：
+
+- 看到 fraud tag 就自动置顶；
+- 缺失字段越多就自行认为越紧急；
+- 看到 provider 名称就当成责任方；
+- 把最新更新时间直接当成业务优先级。
+
+### 5.2 Claim tabs 和 Claim conversations
+
+- 同一 Claim 在 Workbench 中默认只打开一个 tab；重复打开时切换已有 tab；
+- 每个 tab 保存 section、草稿、展开状态和待确认动作；
+- 关闭当前 tab 后切换到相邻 tab；
+- 刷新后恢复全部 tabs；
+- 服务端 revision 变化时明确提示，不静默覆盖草稿；
+- `Claim conversations` 管理 claimant/staff 业务 sessions；
+- 从 conversation session 进入时必须跳到对应 Claim tab 的 Conversation 区域；
+- Workbench Agent session 独立存在，由 Claim conversations 管理，但不属于某个 Claim；
+- Staff Agent 选择 Claim scope 必须由员工显式附加，可一次附加多个 Claim；
+- Claim 操作界面和 claimant conversation 不能变成两个脱离上下文的页面。
+
+### 5.3 Claim 详情层级
+
+详情顺序必须是：
+
+1. 工作摘要：身份、状态、责任、事实、缺失、风险和主下一步；
+2. 当前可操作内容：一个主动作、所需输入、影响、确认和结果；
+3. 参考资料：字段快照、证据、RAG、policy、history、对话、第三方记录和审计。
+
+所有动作不应在第一屏平铺。次要动作应按责任、协作、资料和审计分组，并在需要时展开。
+
+### 5.4 Staff Agent
+
+Staff Agent 是 Workbench 级的全局能力：
+
+- 桌面端可以是可拖拽、可重新定位的悬浮气泡；
+- 切换 Claim 或队列不会重置 session；
+- 移动端不使用会遮挡内容的桌宠形态；
+- 可以查询授权范围内的全部 Claim、用户资料、Claim Context、session、消息、证据、RAG、policy、history 和第三方记录；
+- 输出必须区分 source-linked fact、limitation、recommendation、draft、pending action 和 executed result；
+- Staff 可以用自然语言提问，不需要学习固定命令；
+- Agent 草稿不能直接变成业务动作；
+- 发送客户消息、修改 Claim、改变责任、执行第三方请求等高影响动作必须经过 Runtime action contract、权限和确认。
+
+### 5.5 Workbench 的任务闭环
+
+Workbench 不是把 claimant 的页面换成更密的表格。每次打开 Claim 都必须形成一个可执行闭环：
+
+```text
+queue projection
+  → claim tab
+    → work summary
+      → missing / conflict / risk signals
+        → responsible owner
+          → one primary action
+            → confirmation / execution
+              → new projection + revision + audit
+```
+
+前端应按后端投影展示以下层次，而不是自行组合业务结论：
+
+1. 工作摘要：Claim 状态、责任方、优先级、截止时间和 claimant 最近活动；
+2. 需要注意：缺失信息按 attention level、风险 signal/tag、外部等待和冲突事实分组；
+3. 下一步：后端指定的 primary action，以及它需要的输入、权限、确认和预期影响；
+4. 参考资料：Evidence、RAG、policy、history、第三方记录和审计，采用摘要→展开完整记录的渐进式披露。
+
+`Incomplete` 是“用户中途放弃、未给出明确推进动作或暂时无法完成”的真实 Claim，不是垃圾箱。它应出现在低优先级队列中，保持可见并支持后续跟进、放弃或按 retention 规则删除。
+
+### 5.6 Claim 并发、tab 与协作边界
+
+- 默认同一 Claim 只允许一个本地 tab；重复打开应聚焦已有 tab，避免同一浏览器内出现两个互相覆盖的草稿；
+- 若业务确实需要多视图，必须以同一 Claim id、共享 revision 和明确的 view purpose 区分，不能复制出两个独立业务状态；
+- 员工接手 Claim 后，其他员工进入应看到当前 owner 和 revision，并通过 cowork/transfer 等受控动作申请协作或移交；
+- 前端不决定“自动指派”还是“主动领取”，只呈现后端给出的 ownership 状态和可用动作；
+- 多 tab 的上限由运行时资源决定，关闭 tab 后切换到相邻 tab；刷新恢复 tab、section、草稿、展开状态和待确认动作；
+- revision 冲突必须显式通知并提供重新加载、保留草稿或请求协作的路径，禁止静默覆盖。
+
+---
+
+## 6. 共享 Token 规范
+
+### 6.1 Token 实现要求
+
+Claimant 与 Staff 必须共享单一 token 来源，例如：
+
+```text
+frontend/shared/design-tokens.css
+frontend/shared/design-tokens.js
+```
+
+页面和组件不得继续各自维护颜色、字号、间距、圆角、边框和阴影。新组件禁止散落裸值；旧页面迁移期间，新增值也不能继续扩大旧体系。
+
+### 6.2 颜色 token
+
+以下为当前暖色产品色板：
+
+| Token | 值 | 语义 |
+|---|---|---|
+| `--color-page` | `#F7F4EF` | 页面主底色，燕麦白 |
+| `--color-surface` | `#FFFDF9` | 输入框、主要内容表面 |
+| `--color-sidebar` | `#EAE6DE` | 导航、history、低强调区域 |
+| `--color-panel` | `#E0DCD3` | Details、信息面板 |
+| `--color-divider` | `#C8C4BB` | 区域分界与组件边框 |
+| `--color-text-primary` | `#1A1814` | 标题、主要内容、字段值 |
+| `--color-text-secondary` | `#3D3A35` | 正文、Agent 消息 |
+| `--color-text-muted` | `#8C8880` | 标签、辅助文字 |
+| `--color-text-faint` | `#B0ACA4` | 时间戳、低优先级 metadata |
+| `--color-accent` | `#7A9E8E` | Agent 标识、主操作、focus |
+| `--color-accent-strong` | `#5F7F72` | accent hover、强调文字 |
+| `--color-accent-soft` | `#E7EFEA` | 新增字段、确认背景 |
+| `--color-accent-light` | `#B9CEC4` | accent 边框、new badge |
+| `--color-danger` | `#B83228` | 错误、阻止性问题、明确风险 |
+| `--color-danger-soft` | `#F7E9E6` | 错误背景 |
+| `--color-warning` | `#A3682F` | 需要注意但不代表失败 |
+| `--color-warning-soft` | `#F4EBDD` | warning 背景 |
+| `--color-overlay` | `rgba(26,24,20,.35)` | 必要 overlay 遮罩 |
+| `--color-on-accent` | `#FFFDF9` | accent 控件上的文字 |
+
+旧的白绿色体系，例如 `#2C806A`、`#246F5C`、`#EDF8F3`，全部视为废弃值。不得用后置 CSS 继续保留，也不得通过新组件间接引用。
+
+实现仓库 token 时遵守治理 skill 的色彩表达规则；如果 token 源要求 HSL，应将上述已确认值转换为固定 HSL 变量，但不得改变其语义色相和产品含义。
+
+### 6.3 字号与字重
+
+| Token | 值 | 用途 |
+|---|---:|---|
+| `--font-size-caption` | `14px` | 时间戳、低优先级 metadata |
+| `--font-size-body` | `16px` | claimant 正文、字段值、用户消息 |
+| `--font-size-message` | `18px` | Agent 主消息、重要状态 |
+| `--font-size-control` | `16px` | input、select、主要控件 |
+| `--font-size-section` | `20px` | section/panel 标题 |
+| `--font-size-page` | `24px` | 页面标题 |
+| `--font-size-hero` | `28px` | 只有有信息价值时使用的入口标题 |
+
+| Token | 值 | 用途 |
+|---|---:|---|
+| `--font-weight-regular` | `400` | 正文、消息、字段值 |
+| `--font-weight-medium` | `500` | 导航、label、辅助可交互文字 |
+| `--font-weight-semibold` | `600` | brand、标题、primary action |
+| `--font-weight-bold` | `700` | 强状态和明确警示 |
+
+Claimant 正文和主要状态不小于 16px；Workbench 允许 14px metadata，但风险、缺失信息、下一步和主要动作不得缩到不可读。
+
+### 6.4 间距、圆角、边框和阴影
+
+间距 token：
+
+```text
+4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64px
+```
+
+圆角 token：
+
+| Token | 值 | 用途 |
+|---|---:|---|
+| `--radius-sm` | `4px` | 工具按钮、select、badge |
+| `--radius-md` | `6px` | action button、字段控件 |
+| `--radius-lg` | `8px` | input shell、消息气泡 |
+| `--radius-xl` | `10px` | history item、普通卡片 |
+| `--radius-round` | `999px` | 头像和少量 status chip |
+
+边框和阴影必须表达层级，不为每张卡片单独创造视觉效果：
+
+```text
+region: 2px divider
+component: 1px divider
+focus: 1px accent
+action: 1px accent-light
+danger: 1px danger
+shadow-none: none
+shadow-subtle: 0 1px 3px rgba(26,24,20,.08)
+shadow-popover: 0 8px 24px rgba(26,24,20,.14)
+shadow-modal: 0 16px 40px rgba(26,24,20,.18)
+```
+
+Workbench density 需要单独定义，例如列表行高、section 内间距和 metadata 间距；允许更密，但不能用密度替代信息层级。
+
+### 6.5 状态语义
+
+状态不能只依赖颜色，必须同时表达：
+
+```text
+状态文字 + 图标/符号 + 语义颜色 + 可执行的下一步
+```
+
+必须区分：
+
+- confirmed、proposed、pending、incomplete、new；
+- handoff queued/accepted/in_progress/resolved；
+- unavailable、error、retryable failure、terminal failure、unknown outcome；
+- risk signal 与 confirmed business decision；
+- fixture、configured service、verified result。
+
+### 6.6 按钮层级
+
+- Primary：当前唯一主动作；
+- Secondary：相关但不改变主路径的动作；
+- Quiet/Link：辅助导航、低风险操作；
+- Destructive：删除、放弃、撤销等不可逆动作，需要明确说明和确认。
+
+不得把所有动作都设计成同等视觉重量的按钮。
+
+---
+
+## 7. 后端与运行时质量要求
+
+### 7.1 模型、Agent 和 Runtime 边界
+
+模型负责：
+
+- 理解用户或员工表达；
+- 提取、纠正和解释事实；
+- 提出 branch、字段、工具和动作建议；
+- 调用 RAG、policy、history、数据库和证据工具的请求建议；
+- 生成 claimant-safe 或 staff 草稿；
+- 说明限制和不确定性。
+
+Runtime 负责：
+
+- 验证身份、角色、Claim scope 和当前 revision；
+- 检查 Registry、权限、状态转换、字段可见性和 action contract；
+- 决定建议是否可以执行；
+- 执行工具、写入数据库、更新 Claim State、创建 WorkItem 和发送消息；
+- 处理幂等、并发、重试、未知结果和补偿；
+- 保存 proposal、approved plan、实际结果和审计记录；
+- 生成 claimant、staff、admin 和 audit projection。
+
+模型输出合法 JSON 不等于业务动作已经被批准。Prompt 也不能单独授权任何状态变化、数据访问或外部副作用。
+
+Agent turn 的内部工作应能被实现和测试拆开描述：
+
+```text
+read conversation + claimant/staff context
+  → identify facts, uncertainty and intent
+  → select registered branch and fields
+  → propose RAG / policy / history / database / evidence lookup
+  → interpret returned sources and limitations
+  → propose claimant-safe or staff-safe response
+  → propose a registered action or ask for confirmation
+```
+
+Model Gateway 负责模型配置、adapter 选择、超时和统一响应；当前接入的 GPT-5.4-mini 只是一个已配置的 model profile，不代表前端可以硬编码模型名称或绕过 Gateway。Adapter 负责把外部模型、检索和服务响应归一化为内部契约；Runtime 负责判断这些建议是否能进入真实状态。每一步都应保留 correlation id、source refs 和 revision，便于解释“Agent 为什么这样建议”以及“为什么动作没有执行”。
+
+### 7.2 Projection 质量
+
+后端必须提供清晰的角色投影：
+
+- claimant projection：只包含客户可见内容；
+- staff projection：包含员工处理所需的 operational context；
+- admin/control-plane projection：包含配置、验证、发布和审计信息；
+- audit projection：包含动作、actor、时间、revision、来源和结果。
+
+不能把完整 `WorkingClaim` 发送给前端，再让客户端自行过滤。投影必须通过 allow-list 或明确的角色 schema 组装。
+
+每个 projection 至少明确：
+
+- identity、state、revision；
+- responsible party 和 assignee；
+- priority、rank、due time 和 reason；
+- missing information 及 attention level；
+- tags 与 risk signals；
+- source、source refs、timestamp、confidence；
+- allowed actions；
+- unavailable/limitation；
+- claimant-safe next step 或 staff next work item。
+
+### 7.3 Allowed action 质量
+
+`allowed_actions` 是 Runtime 在当前身份、Claim 状态和 revision 下给出的动作合同，不是前端的建议列表。每个动作至少需要：
+
+- action code；
+- target reference；
+- label 和 purpose；
+- availability：available、confirmation_required 或 blocked；
+- blocked reason；
+- required input schema；
+- confirmation level；
+- expected effects；
+- source refs；
+- based-on revision；
+- 失败和结果未知的处理。
+
+前端必须：
+
+- 使用后端的 `primary_action_code` 找到唯一主动作；
+- 不按数组顺序猜主动作；
+- 不把 `confirmation_required` 当作无需确认的 available；
+- 不根据 `current_staff_access` 自己推导某个具体动作是否允许；
 - 不显示明知当前 projection 未授权的 mutation 控件。
 
 后端必须再次验证所有动作，不能信任前端传来的 action code、role、target 或 revision。
