@@ -137,9 +137,11 @@ staff principal may receive `operations:read` without receiving administrator
 configuration authority. An administrator does not automatically receive claimant or
 unrestricted production Claim State editing authority.
 
-The Admin API is not yet implemented. `admin:read` and `admin:write` define the identity
-boundary that #209/#247/#258 must preserve when Admin routes are added; their presence
-here does not make an Admin route current or production-ready.
+The Admin API is available under the separate `/internal/v1/admin` boundary. Its account
+management routes use the same administrator scopes and identity repository boundary; they do
+not expose password hashes, session tokens, or Claim State. Account deactivation prevents new
+sessions through the adapter, while existing sessions retain their normal expiry/revocation
+semantics.
 
 ### Base scope is not operation authority
 

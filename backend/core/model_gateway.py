@@ -4,7 +4,7 @@ from backend.adapters.model_gateway import (
     default_model_gateway_registry,
 )
 from backend.core.config import Settings
-from backend.domain.configuration import ModelRuntimeConfiguration
+from backend.domain.configuration import ConfigurationRecord, ModelRuntimeConfiguration
 from backend.domain.model_gateway import (
     CLAIMANT_AGENT_PRIVACY_CLASS,
     CLAIMANT_AGENT_PURPOSE,
@@ -19,6 +19,12 @@ from backend.domain.model_gateway import (
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID
 from backend.repositories.configuration import ConfigurationRepository
+from backend.repositories.release_set import ReleaseSetRepository
+from backend.services.runtime_configuration import (
+    RuntimeConfigurationResolutionError,
+    RuntimeConfigurationResolver,
+    RuntimeConfigurationSnapshot,
+)
 
 
 def _model_gateway_config_from_runtime(
@@ -111,34 +117,91 @@ def build_scoped_model_gateway(
     prompt_version: str,
     profile_suffix: str,
     registry: ModelGatewayRegistry | None = None,
+    runtime_configuration: ModelRuntimeConfiguration | None = None,
 ) -> ModelGateway:
-    """Build an explicit purpose profile over the configured provider connection."""
+    """Build an explicit purpose profile over the configured provider connection.
+
+    Args:
+        settings: Bootstrap settings used when no published model configuration exists.
+        purpose: Consumer purpose enforced by the resulting model profile.
+        privacy_class: Data boundary enforced by the resulting model profile.
+        prompt_version: Prompt contract enforced by the resulting model profile.
+        profile_suffix: Stable suffix distinguishing this consumer profile.
+        registry: Optional model protocol registry.
+        runtime_configuration: Published provider-neutral model configuration selected
+            by the active Release Set, when available.
+
+    Returns:
+        A provider-neutral gateway with the requested consumer boundary.
+
+    Raises:
+        ModelGatewayError: If the selected configuration cannot build a gateway.
+    """
 
     resolved_registry = registry or default_model_gateway_registry()
     capabilities = ModelCapabilities(
-        structured_output=settings.model_supports_structured_output,
-        tools=settings.model_supports_tools,
+        structured_output=(
+            runtime_configuration.structured_output
+            if runtime_configuration is not None
+            else settings.model_supports_structured_output
+        ),
+        tools=(
+            runtime_configuration.tools
+            if runtime_configuration is not None
+            else settings.model_supports_tools
+        ),
+    )
+    profile_id = (
+        runtime_configuration.profile_id if runtime_configuration else settings.model_profile_id
     )
     profile = ModelProfile(
-        profile_id=f'{settings.model_profile_id}-{profile_suffix}',
-        protocol=settings.model_protocol_adapter,
-        provider=settings.model_provider,
-        model_identifier=settings.model_identifier,
-        credential_reference=settings.model_api_key_env,
+        profile_id=f'{profile_id}-{profile_suffix}',
+        protocol=(
+            runtime_configuration.protocol
+            if runtime_configuration is not None
+            else settings.model_protocol_adapter
+        ),
+        provider=(
+            runtime_configuration.provider
+            if runtime_configuration is not None
+            else settings.model_provider
+        ),
+        model_identifier=(
+            runtime_configuration.model_identifier
+            if runtime_configuration is not None
+            else settings.model_identifier
+        ),
+        credential_reference=(
+            runtime_configuration.credential_environment_variable
+            if runtime_configuration is not None
+            else settings.model_api_key_env
+        ),
         purpose=purpose,
         privacy_class=privacy_class,
         capabilities=capabilities,
-        timeout_seconds=settings.model_timeout_seconds,
+        timeout_seconds=(
+            runtime_configuration.timeout_seconds
+            if runtime_configuration is not None
+            else settings.model_timeout_seconds
+        ),
         prompt_version=prompt_version,
-        evaluation_status=ModelProfileStatus(settings.model_evaluation_status),
+        evaluation_status=ModelProfileStatus(
+            runtime_configuration.evaluation_status
+            if runtime_configuration is not None
+            else settings.model_evaluation_status
+        ),
     )
     return resolved_registry.create(
-        settings.model_protocol_adapter,
+        profile.protocol,
         ModelGatewayConfig(
-            base_url=settings.model_base_url,
-            model=settings.model_identifier,
-            credential_environment_variable=settings.model_api_key_env,
-            timeout_seconds=settings.model_timeout_seconds,
+            base_url=(
+                runtime_configuration.base_url
+                if runtime_configuration is not None
+                else settings.model_base_url
+            ),
+            model=profile.model_identifier,
+            credential_environment_variable=profile.credential_reference,
+            timeout_seconds=profile.timeout_seconds,
             capabilities=capabilities,
             profile=profile,
         ),
@@ -158,21 +221,75 @@ class ConfigurationBackedModelGateway:
         settings: Settings,
         configuration_repository: ConfigurationRepository,
         registry: ModelGatewayRegistry | None = None,
+        *,
+        release_set_repository: ReleaseSetRepository | None = None,
+        runtime_configuration_resolver: RuntimeConfigurationResolver | None = None,
     ) -> None:
         self._settings = settings
         self._configuration_repository = configuration_repository
+        self._release_set_repository = release_set_repository
         self._registry = registry
+        self._runtime_configuration_resolver = runtime_configuration_resolver
+
+    def _active_model_configuration(self) -> tuple[ModelRuntimeConfiguration | None, bool]:
+        """Resolve the model and whether a published Release Set is authoritative."""
+        try:
+            if self._runtime_configuration_resolver is not None:
+                snapshot = self._runtime_configuration_resolver.snapshot()
+                configuration = (
+                    snapshot.get('model')
+                    if snapshot.release_set_id is not None
+                    else self._configuration_repository.active('model')
+                )
+                authoritative = snapshot.release_set_id is not None
+            else:
+                configuration = self._legacy_model_configuration()
+                authoritative = False
+        except RuntimeConfigurationResolutionError:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+        if configuration is None:
+            return None, authoritative
+        try:
+            return ModelRuntimeConfiguration.model_validate(configuration.values), authoritative
+        except ValueError as error:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
+
+    def _legacy_model_configuration(self) -> ConfigurationRecord | None:
+        """Resolve the pre-Release-Set model path for injected fixture callers."""
+        configuration = None
+        if self._release_set_repository is not None:
+            release = self._release_set_repository.active(
+                self._settings.environment,
+                self._settings.data_runtime_profile.value,
+            )
+            if release is not None:
+                reference = release.configuration_refs.get('model')
+                if reference is None:
+                    raise RuntimeConfigurationResolutionError(
+                        f"Active release set {release.release_set_id!r} omits 'model'."
+                    )
+                configuration = self._configuration_repository.get(
+                    reference.configuration_id,
+                    reference.revision,
+                )
+                if (
+                    configuration is None
+                    or configuration.domain != 'model'
+                    or configuration.state.value != 'published'
+                ):
+                    raise RuntimeConfigurationResolutionError(
+                        f"Active release set {release.release_set_id!r} has an invalid 'model'."
+                    )
+        return configuration or self._configuration_repository.active('model')
 
     @property
     def capabilities(self) -> ModelCapabilities:
-        active = self._configuration_repository.active('model')
-        if active is None:
+        configuration, authoritative = self._active_model_configuration()
+        if configuration is None:
             return build_model_gateway(self._settings, self._registry).capabilities
-        try:
-            configuration = ModelRuntimeConfiguration.model_validate(active.values)
-        except ValueError as error:
-            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
-        if not _runtime_configuration_matches_settings(configuration, self._settings):
+        if not authoritative and not _runtime_configuration_matches_settings(
+            configuration, self._settings
+        ):
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
         return ModelCapabilities(
             structured_output=configuration.structured_output,
@@ -180,19 +297,53 @@ class ConfigurationBackedModelGateway:
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        active = self._configuration_repository.active('model')
-        if active is None:
+        configuration, authoritative = self._active_model_configuration()
+        if configuration is None:
             gateway = build_model_gateway(self._settings, self._registry)
         else:
-            try:
-                configuration = ModelRuntimeConfiguration.model_validate(active.values)
-            except ValueError as error:
-                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
-            if not _runtime_configuration_matches_settings(configuration, self._settings):
+            if not authoritative and not _runtime_configuration_matches_settings(
+                configuration, self._settings
+            ):
                 raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
             registry = self._registry or default_model_gateway_registry()
             gateway = registry.create(
                 configuration.protocol,
                 _model_gateway_config_from_runtime(configuration),
             )
+        return gateway.complete(request)
+
+    def complete_for_snapshot(
+        self,
+        request: ModelRequest,
+        snapshot: RuntimeConfigurationSnapshot,
+    ) -> ModelResponse:
+        """Complete a request with the model selected by the turn's existing snapshot.
+
+        Args:
+            request: Provider-neutral request for the current Agent turn.
+            snapshot: Single Release Set snapshot already selected for that turn.
+
+        Returns:
+            The normalized provider response.
+
+        Raises:
+            ModelGatewayError: If the snapshot omits or contains an invalid model.
+        """
+
+        if snapshot.release_set_id is None:
+            return self.complete(request)
+        try:
+            record = snapshot.get('model')
+            if record is None:
+                raise RuntimeConfigurationResolutionError(
+                    'The active Release Set does not select a model.'
+                )
+            configuration = ModelRuntimeConfiguration.model_validate(record.values)
+        except (RuntimeConfigurationResolutionError, ValueError) as error:
+            raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
+        registry = self._registry or default_model_gateway_registry()
+        gateway = registry.create(
+            configuration.protocol,
+            _model_gateway_config_from_runtime(configuration),
+        )
         return gateway.complete(request)

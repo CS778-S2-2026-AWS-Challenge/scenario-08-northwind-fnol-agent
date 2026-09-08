@@ -1,7 +1,11 @@
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from backend.domain.admin_actions import AdminActionProjection
+from backend.domain.ids import new_id
+from backend.domain.models import PageInfo
 
 
 @dataclass(slots=True)
@@ -12,6 +16,8 @@ class StaffAccountRecord:
     display_name: str
     roles: tuple[str, ...] = ('claims_professional',)
     active: bool = True
+    revision: int = 1
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(slots=True)
@@ -20,7 +26,10 @@ class StaffAuthSessionRecord:
     staff_id: str
     created_at: datetime
     expires_at: datetime
+    session_id: str = field(default_factory=lambda: new_id('ias'))
     revoked_at: datetime | None = None
+    revision: int = 1
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class StaffLoginRequest(BaseModel):
@@ -50,3 +59,36 @@ class StaffProfileProjection(BaseModel):
     email: str
     roles: list[str]
     development_identity: bool = False
+
+
+class AdminStaffAccountProjection(BaseModel):
+    staff_id: str
+    email: str
+    display_name: str
+    roles: list[str]
+    active: bool
+    revision: int = Field(ge=1)
+    updated_at: datetime
+    allowed_actions: list[AdminActionProjection] = Field(default_factory=list)
+
+
+class AdminStaffAccountPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    roles: list[str] | None = Field(default=None, min_length=1, max_length=20)
+    active: bool | None = None
+
+
+class AdminStaffAccountCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    email: str = Field(min_length=3, max_length=254)
+    initial_password: str = Field(min_length=8, max_length=256)
+    display_name: str = Field(min_length=1, max_length=120)
+    roles: list[str] = Field(min_length=1, max_length=20)
+
+
+class AdminStaffAccountPage(BaseModel):
+    items: list[AdminStaffAccountProjection]
+    page: PageInfo

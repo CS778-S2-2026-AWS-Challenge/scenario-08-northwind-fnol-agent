@@ -455,6 +455,45 @@ class MongoDBRepository:
                 events.append(event)
         return sorted(events, key=lambda event: (event.created_at, event.event_id))
 
+    def list_audit_events_admin(
+        self,
+        *,
+        event_type: str | None = None,
+        subject_type: str | None = None,
+        actor_id: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        if start_at is not None and end_at is not None:
+            try:
+                invalid_range = start_at > end_at
+            except TypeError as error:
+                raise ValueError(
+                    'Audit event time bounds must use comparable timestamps.'
+                ) from error
+            if invalid_range:
+                raise ValueError('Audit event start_at must not be after end_at.')
+        query: dict[str, Any] = {'record_type': 'audit_event'}
+        if event_type is not None:
+            query['event_type'] = event_type
+        if subject_type is not None:
+            query['subject.subject_type'] = subject_type
+        if actor_id is not None:
+            query['actor.actor_id'] = actor_id
+        time_range: dict[str, str] = {}
+        if start_at is not None:
+            time_range['$gte'] = self._audit_timestamp(start_at)
+        if end_at is not None:
+            time_range['$lte'] = self._audit_timestamp(end_at)
+        if time_range:
+            query['created_at'] = time_range
+        events: list[AuditEventEnvelope] = []
+        for document in self._collection.find(query).sort([('created_at', 1), ('_id', 1)]):
+            event = self._model_from_document(document, AuditEventEnvelope)
+            if event is not None:
+                events.append(event)
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
+
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         if (
             session.claim_id != claim.claim_id

@@ -28,11 +28,11 @@ compatibility migration is not yet implemented. A first provider-neutral Model G
 minimal `ModelRequest` and `ModelResponse`, an OpenAI-compatible adapter, structured
 proposal validation, bounded context projection, server-rendered claimant responses, and
 normalised failure mapping. It does not yet implement the complete Instruction Compiler,
-Model Profile Registry, namespaced action schemas, tool execution, qualified fallback,
-usage persistence, or trajectory records defined here. The repository also does not yet
-have a dynamically loaded policy bundle, Control Plane publication flow, or persisted
-runtime policy version. Those capabilities must not be claimed until their
-implementation, API, storage, audit, and tests change together.
+namespaced execution plans, tool execution, qualified fallback, usage persistence, or complete
+trajectory records defined here. The Control Plane does publish four independently versioned
+Agent configuration components and one Release Set pins the exact revisions used by a turn. This
+is the implemented policy-loading boundary, not evidence that the target `TurnPlan`,
+`ExecutionPlan`, or `TurnResult` migration is complete.
 The current field registry contains 18 allowed field codes, while controlled intake
 actively sequences only incident description, incident location, loss description, and
 incident type. It does not yet implement policy-driven dynamic branches.
@@ -70,7 +70,42 @@ No lower layer may weaken a higher layer. A prompt, model response, retrieved do
 tool result, or claim-specific preference cannot override safety, access, or decision
 authority.
 
-## Policy Bundle
+## Published runtime policy
+
+The implemented Release Set policy boundary selects four closed configuration components:
+
+| Domain | Runtime meaning | Required fields |
+| --- | --- | --- |
+| `agent_instruction` | Claimant system instruction compiled into the model request. | `prompt_version`, `purpose`, `system_prompt` |
+| `agent_tool_policy` | Restriction over server-registered action and tool capabilities. | `policy_version`, `allowed_action_codes`, `allowed_tool_names` |
+| `agent_rule` | Controlled overlays for registered branch rules. | `rules_version`, `disabled_rule_ids`, `observation_rule_ids` |
+| `feature` | Switches for non-safety model assistance and knowledge retrieval. | `feature_version`, `model_assisted_turns`, `knowledge_retrieval` |
+
+One message turn resolves these components, the selected model, and selected knowledge from one
+immutable Runtime Snapshot. The same snapshot supplies the instruction, branch evaluator,
+knowledge selection, model transport, action/tool restrictions, and persisted provenance. A new
+publication affects the next turn and cannot mutate the snapshot already selected for an active
+turn.
+
+The configuration layer may restrict capabilities but cannot invent them. Action codes, tool
+names, and branch rule IDs must already exist in their server Registries. The policy must retain
+the urgent interruption, human handoff, safe-failure, claimant limitation, and handoff-store
+baseline. Claim-family, urgent, professional-review, and human-support branch rules cannot be
+disabled or reduced to observation. Feature switches may choose deterministic handling or disable
+retrieval, but cannot disable these safety and authority checks.
+
+If the active Release Set omits or invalidates any required Agent component, the message boundary
+returns `AGENT_RUNTIME_CONFIGURATION_UNAVAILABLE` before the turn changes Claim State. If a model
+or deterministic proposal exceeds the selected policy, the boundary returns
+`AGENT_ACTION_NOT_PERMITTED` or `AGENT_TOOL_NOT_PERMITTED`, also before mutation. The explicit
+no-Release-Set developer/bootstrap profile retains the pre-existing deterministic fallback; it is
+not an implicit fallback from an incomplete active Release Set.
+
+Each persisted Agent decision records the Release Set, environment/runtime profile, exact
+configuration IDs and revisions, and exact knowledge IDs, revisions, and versions used by the
+turn. It stores coordinates, not copied prompts, configuration values, or secrets.
+
+## Target policy bundle
 
 A future machine-readable policy bundle must identify at least:
 
@@ -90,8 +125,9 @@ Individual rules need a stable rule ID, scope, condition, required or prohibited
 enforcement class, claimant-response requirement, evidence source, and lifecycle state.
 Published policy versions are immutable. Editing a published version creates a new draft.
 
-This section defines the required contract for future implementation. It does not claim
-that these records are currently exposed by an Admin API or persisted by the prototype.
+This section defines the larger target contract. The implemented four-component policy above is
+exposed by the Admin API and persisted through the Control Plane repository, but it does not yet
+cover every Registry, evaluation, context, and execution-plan field in this target bundle.
 
 ## Turn Policy
 
@@ -121,9 +157,9 @@ For each Agent turn, orchestration must:
 12. persist the policy and Registry versions, proposals, authority results, actual state
     effects, source references, limitations, usage, latency, and role-safe response.
 
-The current implementation performs only part of this sequence. Until policy loading is
-implemented, static action definitions and deterministic validation remain the enforceable
-runtime boundary.
+The current implementation performs only part of this sequence. Published policy loading now
+restricts instructions, tools/actions, controlled branch rules, and non-safety features, while
+static Registries and deterministic validation remain the enforceable authority boundary.
 
 ## Interaction Rules
 
@@ -362,7 +398,8 @@ draft -> validate -> approve when required -> publish -> observe -> supersede or
 
 ## Audit and Evaluation
 
-Once runtime policy loading is implemented, each turn must retain the active policy and
+Each turn now retains the active Release Set and exact configuration and knowledge coordinates.
+The complete target trajectory must additionally retain the active policy and
 Registry versions, `TurnPlan`, `AgentProposal`, approved and rejected action envelopes,
 `ExecutionPlan`, requested and executed tools, authority results, `TurnResult`, state
 effects, response, model-profile identity, usage, latency, limitations, and time. Logs

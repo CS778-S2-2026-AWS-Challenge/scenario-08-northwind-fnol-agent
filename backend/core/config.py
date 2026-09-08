@@ -74,6 +74,7 @@ class Settings:
     staff_session_ttl_minutes: int = 480
     identity_db_path: str = '.northwind-identity.sqlite3'
     staff_identity_db_path: str = '.northwind-staff-identity.sqlite3'
+    control_plane_db_path: str = '.northwind-control-plane.sqlite3'
     staff_bootstrap_email: str = ''
     staff_bootstrap_password: str = ''
     staff_bootstrap_display_name: str = 'Northwind Claims Professional'
@@ -236,6 +237,10 @@ class Settings:
             staff_identity_db_path=os.getenv(
                 'NORTHWIND_STAFF_IDENTITY_DB_PATH',
                 '.northwind-staff-identity.sqlite3',
+            ).strip(),
+            control_plane_db_path=os.getenv(
+                'NORTHWIND_CONTROL_PLANE_DB_PATH',
+                '.northwind-control-plane.sqlite3',
             ).strip(),
             staff_bootstrap_email=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_EMAIL', '').strip().lower(),
             staff_bootstrap_password=os.getenv('NORTHWIND_STAFF_BOOTSTRAP_PASSWORD', ''),

@@ -3,9 +3,14 @@ import json
 import re
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from binascii import Error as Base64Error
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import TypeVar
 
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.models import PageInfo
+
+PageItemT = TypeVar('PageItemT')
 
 IF_MATCH_PATTERN = re.compile(r'^"?(\d+)"?$')
 
@@ -44,6 +49,18 @@ def decode_cursor(cursor: str | None) -> int:
             details=[ErrorDetail(field='cursor', reason='Use a cursor returned by this API.')],
         )
     return offset
+
+
+def paginate(
+    items: Sequence[PageItemT], limit: int, cursor: str | None
+) -> tuple[list[PageItemT], PageInfo]:
+    """Apply the repository's opaque offset cursor contract to an in-memory result set."""
+    offset = decode_cursor(cursor)
+    bounded_limit = min(max(limit, 1), 100)
+    selected = list(items)[offset : offset + bounded_limit]
+    next_offset = offset + len(selected)
+    next_cursor = encode_cursor(next_offset) if next_offset < len(items) else None
+    return selected, PageInfo(next_cursor=next_cursor)
 
 
 def require_idempotency_key(key: str | None) -> str:

@@ -2,7 +2,13 @@ from collections.abc import Sequence
 
 from backend.core.errors import ApiError
 from backend.domain.configuration import (
+    REGISTERED_INTEGRATION_CAPABILITIES,
+    REGISTERED_INTEGRATION_IDS,
+    AccessPolicyConfiguration,
+    ApprovalDecision,
+    ApprovalRequest,
     AuditEvent,
+    ConfigurationApprovalRecord,
     ConfigurationCreate,
     ConfigurationImpact,
     ConfigurationPatch,
@@ -10,14 +16,20 @@ from backend.domain.configuration import (
     ConfigurationState,
     DataProfileConfiguration,
     DataRuntimeProfileValue,
+    IntegrationConfiguration,
     ModelRuntimeBinding,
     ModelRuntimeConfiguration,
     ObjectStorageAdapterValue,
+    OperationalConfiguration,
     TransitionRequest,
     ValidationRequest,
     now_utc,
 )
 from backend.repositories.configuration import ConfigurationRepository
+from backend.services.runtime_agent_policy import (
+    AGENT_CONFIGURATION_DOMAINS,
+    parse_agent_configuration,
+)
 
 _PROFILE_OBJECT_STORAGE_COMPATIBILITY = {
     DataRuntimeProfileValue.FIXTURE: {
@@ -82,6 +94,9 @@ def create(
             'Model configurations must declare high impact.',
         )
     _validate_configuration_values(record.domain, record.values, for_validation=False)
+    record = record.model_copy(
+        update={'configuration_key': _configuration_key(record.domain, record.values)}
+    )
     saved = repo.create(record)
     _audit(
         repo,
@@ -153,6 +168,7 @@ def patch(
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
+            'configuration_key': _configuration_key(current.domain, values),
             'values': values,
             'secret_references': secret_references,
             'reason': payload.reason,
@@ -219,7 +235,11 @@ def validate(
             'VALIDATION_FAILED',
             'One or more required validation scenarios failed.',
         )
-    previous = repo.active(current.domain) if current.impact is ConfigurationImpact.NORMAL else None
+    previous = (
+        repo.active(current.domain, current.configuration_key)
+        if current.impact is ConfigurationImpact.NORMAL
+        else None
+    )
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -334,6 +354,23 @@ def publish(
             'CONFIGURATION_APPROVER_CONFLICT',
             'A high-impact configuration requires an independent approver.',
         )
+    if current.impact is ConfigurationImpact.HIGH and not any(
+        item.decision is ApprovalDecision.APPROVED and item.reviewer != current.author
+        for item in repo.approvals(current.configuration_id, current.revision)
+    ):
+        _audit(
+            repo,
+            current,
+            actor,
+            'publish',
+            'A high-impact configuration requires a recorded independent approval.',
+            'rejected',
+        )
+        raise _error(
+            403,
+            'CONFIGURATION_APPROVAL_REQUIRED',
+            'A recorded independent approval is required before publication.',
+        )
     updated = current.model_copy(
         update={
             'revision': current.revision + 1,
@@ -342,7 +379,7 @@ def publish(
             'updated_at': now_utc(),
         }
     )
-    previous = repo.active(current.domain)
+    previous = repo.active(current.domain, current.configuration_key)
     if previous is not None:
         updated = updated.model_copy(update={'previous_version': previous.configuration_id})
         superseded = previous.model_copy(
@@ -397,6 +434,121 @@ def publish(
             changed_fields=('effective_time', 'state'),
         )
     return saved
+
+
+def approve(
+    repo: ConfigurationRepository,
+    configuration_id: str,
+    payload: ApprovalRequest,
+    actor: str,
+    expected_revision: int,
+) -> ConfigurationApprovalRecord:
+    """Record one independent review decision for an awaiting configuration revision.
+
+    Args:
+        repo: Provider-neutral configuration repository.
+        configuration_id: Configuration being reviewed.
+        payload: Approval decision and reviewer rationale.
+        actor: Authenticated reviewer identity.
+        expected_revision: Revision the reviewer inspected.
+
+    Returns:
+        The immutable approval record.
+
+    Raises:
+        ApiError: If the revision, state, reviewer independence, or approval uniqueness is invalid.
+    """
+    current = read(repo, configuration_id)
+    if current.revision != expected_revision:
+        _audit(repo, current, actor, 'approve', 'The configuration revision is stale.', 'rejected')
+        raise _error(409, 'REVISION_CONFLICT', 'The configuration revision is stale.')
+    if current.state is not ConfigurationState.AWAITING_APPROVAL:
+        _audit(
+            repo,
+            current,
+            actor,
+            'approve',
+            'Only an awaiting-approval configuration can be reviewed.',
+            'rejected',
+        )
+        raise _error(
+            400,
+            'INVALID_CONFIGURATION_TRANSITION',
+            'Only an awaiting-approval configuration can be reviewed.',
+        )
+    if current.author == actor:
+        _audit(
+            repo,
+            current,
+            actor,
+            'approve',
+            'The configuration author cannot provide the independent review.',
+            'rejected',
+        )
+        raise _error(
+            403,
+            'CONFIGURATION_APPROVER_CONFLICT',
+            'The configuration author cannot provide the independent review.',
+        )
+    approval = ConfigurationApprovalRecord(
+        approval_id=repo.new_approval_id(),
+        configuration_id=current.configuration_id,
+        configuration_revision=current.revision,
+        reviewer=actor,
+        decision=payload.decision,
+        reason=payload.reason,
+        created_at=now_utc(),
+    )
+    updated: ConfigurationRecord | None = None
+    events = [
+        AuditEvent(
+            event_id=repo.new_event_id(),
+            configuration_id=current.configuration_id,
+            revision=current.revision,
+            previous_revision=current.revision,
+            actor=actor,
+            action='approve',
+            reason=payload.reason,
+            outcome=payload.decision.value,
+            changed_fields=[],
+            created_at=now_utc(),
+        )
+    ]
+    if payload.decision is ApprovalDecision.REJECTED:
+        updated = current.model_copy(
+            update={
+                'revision': current.revision + 1,
+                'state': ConfigurationState.DRAFT,
+                'validation_evidence': None,
+                'reason': payload.reason,
+                'updated_at': now_utc(),
+            }
+        )
+        events.append(
+            AuditEvent(
+                event_id=repo.new_event_id(),
+                configuration_id=current.configuration_id,
+                revision=updated.revision,
+                previous_revision=current.revision,
+                actor=actor,
+                action='return_to_draft',
+                reason=payload.reason,
+                outcome='succeeded',
+                changed_fields=['state', 'validation_evidence', 'reason'],
+                created_at=now_utc(),
+            )
+        )
+    try:
+        repo.save_approval_transition(approval, updated, current.revision, events)
+    except ValueError as exc:
+        if str(exc) == 'approval_exists':
+            raise _error(
+                409,
+                'APPROVAL_ALREADY_RECORDED',
+                'An approval decision is already recorded for this revision.',
+            ) from exc
+        raise
+    return approval
 
 
 def withdraw(
@@ -480,10 +632,16 @@ def rollback(
         _audit(repo, current, actor, 'rollback', 'A rollback target is required.', 'rejected')
         raise _error(400, 'ROLLBACK_TARGET_REQUIRED', 'A rollback target is required.')
     target = read(repo, target_id)
-    if target.validation_evidence is None or target.state not in {
-        ConfigurationState.SUPERSEDED,
-        ConfigurationState.PUBLISHED,
-    }:
+    if (
+        target.domain != current.domain
+        or target.configuration_key != current.configuration_key
+        or target.validation_evidence is None
+        or target.state
+        not in {
+            ConfigurationState.SUPERSEDED,
+            ConfigurationState.PUBLISHED,
+        }
+    ):
         _audit(repo, current, actor, 'rollback', 'The rollback target is not approved.', 'rejected')
         raise _error(
             400,
@@ -575,6 +733,14 @@ def _validate_secret_references(references: dict[str, str]) -> None:
         )
 
 
+def _configuration_key(domain: str, values: dict[str, object]) -> str:
+    if domain == 'integration':
+        service_id = values.get('service_id')
+        if isinstance(service_id, str) and service_id:
+            return service_id
+    return 'default'
+
+
 def _validate_configuration_values(
     domain: str,
     values: dict[str, object],
@@ -583,6 +749,16 @@ def _validate_configuration_values(
     model_runtime_binding: ModelRuntimeBinding | None = None,
 ) -> None:
     """Validate the structured provider configuration consumed by the runtime boundary."""
+    if domain in AGENT_CONFIGURATION_DOMAINS:
+        try:
+            parse_agent_configuration(domain, values)
+        except ValueError as error:
+            raise _error(
+                422,
+                'AGENT_CONFIGURATION_INVALID',
+                f'{domain} requires a complete registered Agent runtime configuration.',
+            ) from error
+        return
     if domain == 'model':
         try:
             configuration = ModelRuntimeConfiguration.model_validate(values)
@@ -614,7 +790,50 @@ def _validate_configuration_values(
                 'be published.',
             )
         return
+    if domain == 'access':
+        try:
+            AccessPolicyConfiguration.model_validate(values)
+        except ValueError as error:
+            raise _error(
+                422,
+                'ACCESS_POLICY_INVALID',
+                'access requires a role, actor type, and at least one scope.',
+            ) from error
+        return
+    if domain == 'operational':
+        try:
+            OperationalConfiguration.model_validate(values)
+        except ValueError as error:
+            raise _error(
+                422,
+                'OPERATIONAL_CONFIGURATION_INVALID',
+                'operational requires model costs, a rate-limit window, and alert thresholds.',
+            ) from error
+        return
     if domain != 'data_profile':
+        if domain != 'integration':
+            return
+        try:
+            integration = IntegrationConfiguration.model_validate(values)
+        except ValueError as error:
+            raise _error(
+                422,
+                'INTEGRATION_CONFIGURATION_INVALID',
+                'integration requires a complete registered capability configuration.',
+            ) from error
+        if integration.service_id not in REGISTERED_INTEGRATION_IDS:
+            raise _error(
+                422,
+                'INTEGRATION_CONFIGURATION_INVALID',
+                'The integration service_id is not registered by the runtime.',
+            )
+        expected_capability = REGISTERED_INTEGRATION_CAPABILITIES[integration.service_id]
+        if integration.capability != expected_capability:
+            raise _error(
+                422,
+                'INTEGRATION_CONFIGURATION_INVALID',
+                'The integration capability does not match the registered runtime capability.',
+            )
         return
     try:
         profile = DataProfileConfiguration.model_validate(values)

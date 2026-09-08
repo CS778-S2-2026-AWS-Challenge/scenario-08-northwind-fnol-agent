@@ -107,6 +107,996 @@
         "title": "ActorType",
         "type": "string"
       },
+      "AdminAccountSessionPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAccountSessionProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AdminAccountSessionPage",
+        "type": "object"
+      },
+      "AdminAccountSessionProjection": {
+        "additionalProperties": false,
+        "description": "One revocable identity session without bearer-token material.",
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "session_id": {
+            "pattern": "^ias_[A-Za-z0-9_-]{1,96}$",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AdminSessionState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "state",
+          "revision",
+          "created_at",
+          "expires_at",
+          "updated_at"
+        ],
+        "title": "AdminAccountSessionProjection",
+        "type": "object"
+      },
+      "AdminActionAvailability": {
+        "enum": [
+          "available",
+          "confirmation_required",
+          "blocked"
+        ],
+        "title": "AdminActionAvailability",
+        "type": "string"
+      },
+      "AdminActionProjection": {
+        "additionalProperties": false,
+        "description": "One server-projected Control Plane action for a specific resource revision.",
+        "properties": {
+          "action_code": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Action Code",
+            "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/AdminActionAvailability"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action_code",
+          "availability"
+        ],
+        "title": "AdminActionProjection",
+        "type": "object"
+      },
+      "AdminConfigurationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminConfigurationProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AdminConfigurationPage",
+        "type": "object"
+      },
+      "AdminConfigurationProjection": {
+        "additionalProperties": false,
+        "description": "Configuration record plus principal-aware lifecycle actions.",
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "configuration_id": {
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "configuration_key": {
+            "default": "default",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Configuration Key",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "effective_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Time"
+          },
+          "impact": {
+            "$ref": "#/components/schemas/ConfigurationImpact"
+          },
+          "previous_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          },
+          "secret_references": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secret References",
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConfigurationState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          },
+          "values": {
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "domain",
+          "revision",
+          "state",
+          "impact",
+          "values",
+          "author",
+          "reason",
+          "updated_at"
+        ],
+        "title": "AdminConfigurationProjection",
+        "type": "object"
+      },
+      "AdminCustomerAccountCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "initial_password": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Initial Password",
+            "type": "string"
+          },
+          "phone": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "initial_password",
+          "display_name"
+        ],
+        "title": "AdminCustomerAccountCreate",
+        "type": "object"
+      },
+      "AdminCustomerAccountPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminCustomerAccountProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AdminCustomerAccountPage",
+        "type": "object"
+      },
+      "AdminCustomerAccountPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "title": "AdminCustomerAccountPatch",
+        "type": "object"
+      },
+      "AdminCustomerAccountProjection": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "communication_preferences": {
+            "$ref": "#/components/schemas/CommunicationPreferences"
+          },
+          "customer_id": {
+            "title": "Customer Id",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id",
+          "email",
+          "display_name",
+          "phone",
+          "active",
+          "communication_preferences",
+          "revision",
+          "updated_at"
+        ],
+        "title": "AdminCustomerAccountProjection",
+        "type": "object"
+      },
+      "AdminKnowledgeSourceProjection": {
+        "additionalProperties": false,
+        "description": "Knowledge record plus principal-aware lifecycle actions.",
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "author": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "authority": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Authority",
+            "type": "string"
+          },
+          "chunk_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Count"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_type": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Type",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expected_checksum": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Checksum"
+          },
+          "ingestion_operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingestion Operation Id"
+          },
+          "insurer": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurer"
+          },
+          "jurisdiction": {
+            "maxLength": 20,
+            "minLength": 2,
+            "title": "Jurisdiction",
+            "type": "string"
+          },
+          "knowledge_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "previous_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_key": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_uri": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/KnowledgeVersionState"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          },
+          "version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "visibility": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id",
+          "document_id",
+          "version",
+          "source_key",
+          "title",
+          "document_type",
+          "source_uri",
+          "jurisdiction",
+          "authority",
+          "visibility",
+          "state",
+          "revision",
+          "author",
+          "updated_at"
+        ],
+        "title": "AdminKnowledgeSourceProjection",
+        "type": "object"
+      },
+      "AdminReleaseSetPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminReleaseSetProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AdminReleaseSetPage",
+        "type": "object"
+      },
+      "AdminReleaseSetProjection": {
+        "additionalProperties": false,
+        "description": "Release Set record plus server-derived lifecycle actions.",
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "configuration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Configuration Refs",
+            "type": "object"
+          },
+          "effective_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Time"
+          },
+          "environment": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "integration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Integration Refs",
+            "type": "object"
+          },
+          "knowledge_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KnowledgeReference"
+            },
+            "title": "Knowledge Refs",
+            "type": "object"
+          },
+          "previous_release_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Release Set Id"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "release_set_id": {
+            "title": "Release Set Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          },
+          "runtime_profile": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Runtime Profile",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReleaseSetState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          }
+        },
+        "required": [
+          "release_set_id",
+          "environment",
+          "runtime_profile",
+          "revision",
+          "state",
+          "configuration_refs",
+          "author",
+          "reason",
+          "updated_at"
+        ],
+        "title": "AdminReleaseSetProjection",
+        "type": "object"
+      },
+      "AdminSessionState": {
+        "enum": [
+          "active",
+          "expired",
+          "revoked"
+        ],
+        "title": "AdminSessionState",
+        "type": "string"
+      },
+      "AdminStaffAccountCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "initial_password": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Initial Password",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "email",
+          "initial_password",
+          "display_name",
+          "roles"
+        ],
+        "title": "AdminStaffAccountCreate",
+        "type": "object"
+      },
+      "AdminStaffAccountPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminStaffAccountProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AdminStaffAccountPage",
+        "type": "object"
+      },
+      "AdminStaffAccountPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roles"
+          }
+        },
+        "title": "AdminStaffAccountPatch",
+        "type": "object"
+      },
+      "AdminStaffAccountProjection": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "staff_id": {
+            "title": "Staff Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "staff_id",
+          "email",
+          "display_name",
+          "roles",
+          "active",
+          "revision",
+          "updated_at"
+        ],
+        "title": "AdminStaffAccountProjection",
+        "type": "object"
+      },
       "AgentAction": {
         "enum": [
           "ASK",
@@ -120,6 +1110,195 @@
         ],
         "title": "AgentAction",
         "type": "string"
+      },
+      "AgentFeatureSettingsConfiguration": {
+        "additionalProperties": false,
+        "description": "Non-safety Agent capabilities that a published release may disable.",
+        "properties": {
+          "feature_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Feature Version",
+            "type": "string"
+          },
+          "knowledge_retrieval": {
+            "default": true,
+            "title": "Knowledge Retrieval",
+            "type": "boolean"
+          },
+          "model_assisted_turns": {
+            "default": true,
+            "title": "Model Assisted Turns",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "feature_version"
+        ],
+        "title": "AgentFeatureSettingsConfiguration",
+        "type": "object"
+      },
+      "AgentInstructionConfiguration": {
+        "additionalProperties": false,
+        "description": "Versioned system instruction compiled into claimant model requests.",
+        "properties": {
+          "prompt_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "purpose": {
+            "const": "claimant_agent",
+            "default": "claimant_agent",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "system_prompt": {
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt_version",
+          "system_prompt"
+        ],
+        "title": "AgentInstructionConfiguration",
+        "type": "object"
+      },
+      "AgentRuleComponent": {
+        "enum": [
+          "instructions",
+          "tool_permissions",
+          "controlled_rules",
+          "feature_settings"
+        ],
+        "title": "AgentRuleComponent",
+        "type": "string"
+      },
+      "AgentRuleCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "impact": {
+            "$ref": "#/components/schemas/ConfigurationImpact",
+            "default": "high"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentInstructionConfiguration"
+              },
+              {
+                "$ref": "#/components/schemas/AgentToolPolicyConfiguration"
+              },
+              {
+                "$ref": "#/components/schemas/ControlledRulesConfiguration"
+              },
+              {
+                "$ref": "#/components/schemas/AgentFeatureSettingsConfiguration"
+              }
+            ],
+            "title": "Values"
+          }
+        },
+        "required": [
+          "values",
+          "reason"
+        ],
+        "title": "AgentRuleCreate",
+        "type": "object"
+      },
+      "AgentRulePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "AgentRulePage",
+        "type": "object"
+      },
+      "AgentToolPolicyConfiguration": {
+        "additionalProperties": false,
+        "description": "Additional allow-list over server-registered actions and tools.",
+        "properties": {
+          "allowed_action_codes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Allowed Action Codes",
+            "type": "array"
+          },
+          "allowed_tool_names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Allowed Tool Names",
+            "type": "array"
+          },
+          "policy_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Policy Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_version",
+          "allowed_action_codes"
+        ],
+        "title": "AgentToolPolicyConfiguration",
+        "type": "object"
+      },
+      "ApprovalDecision": {
+        "enum": [
+          "approved",
+          "rejected"
+        ],
+        "title": "ApprovalDecision",
+        "type": "string"
+      },
+      "ApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecision"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "title": "ApprovalRequest",
+        "type": "object"
       },
       "AssessorLocation": {
         "additionalProperties": false,
@@ -1667,6 +2846,55 @@
         "title": "CompleteEvidenceUploadRequest",
         "type": "object"
       },
+      "ConfigurationApprovalRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "configuration_id": {
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "configuration_revision": {
+            "minimum": 1.0,
+            "title": "Configuration Revision",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecision"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "reviewer": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_id",
+          "configuration_id",
+          "configuration_revision",
+          "reviewer",
+          "decision",
+          "reason",
+          "created_at"
+        ],
+        "title": "ConfigurationApprovalRecord",
+        "type": "object"
+      },
       "ConfigurationCreate": {
         "additionalProperties": false,
         "properties": {
@@ -1765,6 +2993,13 @@
             "title": "Configuration Id",
             "type": "string"
           },
+          "configuration_key": {
+            "default": "default",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Configuration Key",
+            "type": "string"
+          },
           "domain": {
             "maxLength": 80,
             "minLength": 1,
@@ -1860,6 +3095,28 @@
           "updated_at"
         ],
         "title": "ConfigurationRecord",
+        "type": "object"
+      },
+      "ConfigurationReference": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "revision"
+        ],
+        "title": "ConfigurationReference",
         "type": "object"
       },
       "ConfigurationState": {
@@ -2000,6 +3257,39 @@
         ],
         "title": "ContentsOwnership",
         "type": "string"
+      },
+      "ControlledRulesConfiguration": {
+        "additionalProperties": false,
+        "description": "Bounded overlay for registered Dynamic Form branch rules.",
+        "properties": {
+          "disabled_rule_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Disabled Rule Ids",
+            "type": "array"
+          },
+          "observation_rule_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Observation Rule Ids",
+            "type": "array"
+          },
+          "rules_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Rules Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rules_version"
+        ],
+        "title": "ControlledRulesConfiguration",
+        "type": "object"
       },
       "Coverage": {
         "enum": [
@@ -2710,6 +4000,403 @@
         ],
         "title": "DynamicFormProjection",
         "type": "object"
+      },
+      "EvaluationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Id"
+          },
+          "configuration_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Revision"
+          },
+          "dataset_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "fixture_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixture Version"
+          },
+          "knowledge_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Version"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "model_version": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model Version",
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rule_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Version"
+          },
+          "scenario_results": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationScenarioResult"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Scenario Results",
+            "type": "array"
+          },
+          "source_versions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Source Versions",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EvaluationState",
+            "default": "succeeded"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "purpose",
+          "model_version",
+          "dataset_id",
+          "dataset_version",
+          "scenario_results"
+        ],
+        "title": "EvaluationCreate",
+        "type": "object"
+      },
+      "EvaluationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "EvaluationPage",
+        "type": "object"
+      },
+      "EvaluationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "configuration_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Id"
+          },
+          "configuration_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Revision"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "evaluation_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Evaluation Id",
+            "type": "string"
+          },
+          "fixture_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixture Version"
+          },
+          "knowledge_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Version"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "model_version": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model Version",
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rule_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Version"
+          },
+          "scenario_results": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationScenarioResult"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Scenario Results",
+            "type": "array"
+          },
+          "source_versions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Source Versions",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EvaluationState"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "purpose",
+          "state",
+          "model_version",
+          "dataset_id",
+          "dataset_version",
+          "scenario_results",
+          "created_at"
+        ],
+        "title": "EvaluationRecord",
+        "type": "object"
+      },
+      "EvaluationScenarioResult": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Evidence",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/EvaluationState"
+          },
+          "scenario_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "outcome",
+          "evidence"
+        ],
+        "title": "EvaluationScenarioResult",
+        "type": "object"
+      },
+      "EvaluationState": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "unknown"
+        ],
+        "title": "EvaluationState",
+        "type": "string"
       },
       "EvidenceCompleteResponse": {
         "additionalProperties": false,
@@ -4176,6 +5863,127 @@
         "title": "HandoffType",
         "type": "string"
       },
+      "IntegrationHealthCheckPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationHealthCheckRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Page",
+            "type": "object"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "IntegrationHealthCheckPage",
+        "type": "object"
+      },
+      "IntegrationHealthCheckRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "check_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Check Id",
+            "type": "string"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "health": {
+            "$ref": "#/components/schemas/IntegrationHealthState"
+          },
+          "implementation": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Implementation",
+            "type": "string"
+          },
+          "integration_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "latency_ms": {
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "source": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_id",
+          "integration_id",
+          "health",
+          "source",
+          "implementation",
+          "latency_ms",
+          "checked_at"
+        ],
+        "title": "IntegrationHealthCheckRecord",
+        "type": "object"
+      },
+      "IntegrationHealthState": {
+        "enum": [
+          "using_fixture",
+          "verified",
+          "configured_service",
+          "pending_confirmation",
+          "unavailable",
+          "unknown"
+        ],
+        "title": "IntegrationHealthState",
+        "type": "string"
+      },
       "IntegrationSource": {
         "enum": [
           "fixture",
@@ -4183,6 +5991,114 @@
         ],
         "title": "IntegrationSource",
         "type": "string"
+      },
+      "IntegrationStatusPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationStatusProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "IntegrationStatusPage",
+        "type": "object"
+      },
+      "IntegrationStatusProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminActionProjection"
+            },
+            "title": "Allowed Actions",
+            "type": "array"
+          },
+          "capability": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Capability",
+            "type": "string"
+          },
+          "configuration_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Configuration Ids",
+            "type": "array"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "health": {
+            "$ref": "#/components/schemas/IntegrationHealthState"
+          },
+          "implementation": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Implementation",
+            "type": "string"
+          },
+          "integration_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Integration Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "source": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "integration_id",
+          "label",
+          "capability",
+          "health",
+          "implementation",
+          "source"
+        ],
+        "title": "IntegrationStatusProjection",
+        "type": "object"
       },
       "KnowledgeCitation": {
         "additionalProperties": false,
@@ -4231,6 +6147,29 @@
           "text"
         ],
         "title": "KnowledgeCitation",
+        "type": "object"
+      },
+      "KnowledgeReference": {
+        "additionalProperties": false,
+        "description": "Reference to one immutable, published knowledge version.",
+        "properties": {
+          "knowledge_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "knowledge_id",
+          "revision"
+        ],
+        "title": "KnowledgeReference",
         "type": "object"
       },
       "KnowledgeSearchRequest": {
@@ -4364,6 +6303,425 @@
         ],
         "title": "KnowledgeSearchResponse",
         "type": "object"
+      },
+      "KnowledgeSourceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "authority": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Authority",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 2000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_type": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Type",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "expected_checksum": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Checksum"
+          },
+          "insurer": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurer"
+          },
+          "jurisdiction": {
+            "maxLength": 20,
+            "minLength": 2,
+            "title": "Jurisdiction",
+            "type": "string"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "source_key": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_uri": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "visibility": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "version",
+          "source_key",
+          "title",
+          "document_type",
+          "source_uri",
+          "jurisdiction",
+          "authority",
+          "visibility"
+        ],
+        "title": "KnowledgeSourceCreate",
+        "type": "object"
+      },
+      "KnowledgeSourcePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminKnowledgeSourceProjection"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "KnowledgeSourcePage",
+        "type": "object"
+      },
+      "KnowledgeSourceRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "authority": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Authority",
+            "type": "string"
+          },
+          "chunk_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Count"
+          },
+          "document_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_type": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Type",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expected_checksum": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Checksum"
+          },
+          "ingestion_operation_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingestion Operation Id"
+          },
+          "insurer": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurer"
+          },
+          "jurisdiction": {
+            "maxLength": 20,
+            "minLength": 2,
+            "title": "Jurisdiction",
+            "type": "string"
+          },
+          "knowledge_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Knowledge Id",
+            "type": "string"
+          },
+          "previous_version": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_key": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          },
+          "source_uri": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/KnowledgeVersionState"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          },
+          "version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          },
+          "visibility": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "knowledge_id",
+          "document_id",
+          "version",
+          "source_key",
+          "title",
+          "document_type",
+          "source_uri",
+          "jurisdiction",
+          "authority",
+          "visibility",
+          "state",
+          "revision",
+          "author",
+          "updated_at"
+        ],
+        "title": "KnowledgeSourceRecord",
+        "type": "object"
+      },
+      "KnowledgeValidationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scenario_results": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Scenario Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenario_results"
+        ],
+        "title": "KnowledgeValidationRequest",
+        "type": "object"
+      },
+      "KnowledgeVersionState": {
+        "enum": [
+          "draft",
+          "validating",
+          "indexed",
+          "awaiting_approval",
+          "published",
+          "withdrawn",
+          "superseded",
+          "failed"
+        ],
+        "title": "KnowledgeVersionState",
+        "type": "string"
       },
       "LivenessResponse": {
         "properties": {
@@ -4628,6 +6986,118 @@
         "title": "ModelCapability",
         "type": "object"
       },
+      "ModelCostMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Id"
+          },
+          "configuration_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Revision"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "estimated_microunits": {
+            "minimum": 0.0,
+            "title": "Estimated Microunits",
+            "type": "integer"
+          },
+          "priced_calls": {
+            "minimum": 0.0,
+            "title": "Priced Calls",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "configured",
+              "partial",
+              "unconfigured"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "unpriced_calls": {
+            "minimum": 0.0,
+            "title": "Unpriced Calls",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "estimated_microunits",
+          "priced_calls",
+          "unpriced_calls"
+        ],
+        "title": "ModelCostMetrics",
+        "type": "object"
+      },
+      "ModelUsageMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "minimum": 0.0,
+            "title": "Calls",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reported_calls": {
+            "minimum": 0.0,
+            "title": "Reported Calls",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "minimum": 0.0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "reported_calls",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "title": "ModelUsageMetrics",
+        "type": "object"
+      },
       "MoneyAmount": {
         "additionalProperties": false,
         "properties": {
@@ -4658,6 +7128,260 @@
         ],
         "title": "NeededFor",
         "type": "string"
+      },
+      "OperationKind": {
+        "enum": [
+          "configuration_validation",
+          "knowledge_ingestion",
+          "knowledge_indexing",
+          "retrieval_check",
+          "evaluation",
+          "integration_health_check",
+          "model_invocation"
+        ],
+        "title": "OperationKind",
+        "type": "string"
+      },
+      "OperationMetricsProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalAlertProjection"
+            },
+            "title": "Alerts",
+            "type": "array"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Kind",
+            "type": "object"
+          },
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By State",
+            "type": "object"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/ModelCostMetrics"
+          },
+          "rate_limit": {
+            "$ref": "#/components/schemas/RateLimitMetrics"
+          },
+          "source": {
+            "const": "control_plane_operation_repository",
+            "default": "control_plane_operation_repository",
+            "title": "Source",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ModelUsageMetrics"
+          }
+        },
+        "required": [
+          "total",
+          "by_state",
+          "by_kind",
+          "usage",
+          "cost",
+          "rate_limit",
+          "alerts"
+        ],
+        "title": "OperationMetricsProjection",
+        "type": "object"
+      },
+      "OperationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OperationRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "OperationPage",
+        "type": "object"
+      },
+      "OperationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OperationKind"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "progress_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Percent"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "status_url": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Status Url",
+            "type": "string"
+          },
+          "subject_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Subject Id",
+            "type": "string"
+          },
+          "subject_type": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Subject Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind",
+          "subject_type",
+          "subject_id",
+          "state",
+          "revision",
+          "status_url",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OperationRecord",
+        "type": "object"
+      },
+      "OperationState": {
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "unknown",
+          "cancelled"
+        ],
+        "title": "OperationState",
+        "type": "string"
+      },
+      "OperationalAlertProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Alert Code",
+            "type": "string"
+          },
+          "metric": {
+            "enum": [
+              "total_tokens",
+              "estimated_cost_microunits",
+              "rate_limit_events"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed"
+          },
+          "status": {
+            "enum": [
+              "clear",
+              "triggered",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "threshold": {
+            "minimum": 1.0,
+            "title": "Threshold",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alert_code",
+          "metric",
+          "status",
+          "threshold"
+        ],
+        "title": "OperationalAlertProjection",
+        "type": "object"
       },
       "OwnershipState": {
         "enum": [
@@ -5032,6 +7756,56 @@
         "title": "ProfilePatchRequest",
         "type": "object"
       },
+      "RateLimitMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "events_in_window": {
+            "minimum": 0.0,
+            "title": "Events In Window",
+            "type": "integer"
+          },
+          "latest_event_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Event At"
+          },
+          "status": {
+            "enum": [
+              "clear",
+              "limited",
+              "unconfigured"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds"
+          }
+        },
+        "required": [
+          "status",
+          "events_in_window"
+        ],
+        "title": "RateLimitMetrics",
+        "type": "object"
+      },
       "ReadinessResponse": {
         "properties": {
           "checked_at": {
@@ -5140,6 +7914,239 @@
           "display_name"
         ],
         "title": "RegistrationRequest",
+        "type": "object"
+      },
+      "ReleaseSetCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "minProperties": 1,
+            "title": "Configuration Refs",
+            "type": "object"
+          },
+          "environment": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "integration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Integration Refs",
+            "type": "object"
+          },
+          "knowledge_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KnowledgeReference"
+            },
+            "title": "Knowledge Refs",
+            "type": "object"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "runtime_profile": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Runtime Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment",
+          "runtime_profile",
+          "configuration_refs",
+          "reason"
+        ],
+        "title": "ReleaseSetCreate",
+        "type": "object"
+      },
+      "ReleaseSetRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "configuration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Configuration Refs",
+            "type": "object"
+          },
+          "effective_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Time"
+          },
+          "environment": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "integration_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationReference"
+            },
+            "title": "Integration Refs",
+            "type": "object"
+          },
+          "knowledge_refs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KnowledgeReference"
+            },
+            "title": "Knowledge Refs",
+            "type": "object"
+          },
+          "previous_release_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Release Set Id"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "release_set_id": {
+            "title": "Release Set Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          },
+          "runtime_profile": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Runtime Profile",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReleaseSetState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validation_evidence": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Evidence"
+          }
+        },
+        "required": [
+          "release_set_id",
+          "environment",
+          "runtime_profile",
+          "revision",
+          "state",
+          "configuration_refs",
+          "author",
+          "reason",
+          "updated_at"
+        ],
+        "title": "ReleaseSetRecord",
+        "type": "object"
+      },
+      "ReleaseSetState": {
+        "enum": [
+          "draft",
+          "validation",
+          "published",
+          "superseded",
+          "withdrawn"
+        ],
+        "title": "ReleaseSetState",
+        "type": "string"
+      },
+      "ReleaseSetTransitionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "rollback_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollback Target"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReleaseSetTransitionRequest",
+        "type": "object"
+      },
+      "ReleaseSetValidationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "scenario_results": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationScenarioResult"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Scenario Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenario_results"
+        ],
+        "title": "ReleaseSetValidationRequest",
         "type": "object"
       },
       "RequestEvidenceUploadRequest": {
@@ -5438,6 +8445,58 @@
           "models"
         ],
         "title": "RuntimeCapabilitiesResponse",
+        "type": "object"
+      },
+      "RuntimeSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "configurations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationRecord"
+            },
+            "title": "Configurations",
+            "type": "object"
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "integrations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationRecord"
+            },
+            "title": "Integrations",
+            "type": "object"
+          },
+          "knowledge": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KnowledgeSourceRecord"
+            },
+            "title": "Knowledge",
+            "type": "object"
+          },
+          "loaded_at": {
+            "format": "date-time",
+            "title": "Loaded At",
+            "type": "string"
+          },
+          "release_set_id": {
+            "title": "Release Set Id",
+            "type": "string"
+          },
+          "runtime_profile": {
+            "title": "Runtime Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_set_id",
+          "environment",
+          "runtime_profile",
+          "loaded_at",
+          "configurations"
+        ],
+        "title": "RuntimeSnapshot",
         "type": "object"
       },
       "SessionStatus": {
@@ -15140,13 +18199,25 @@
         ]
       }
     },
-    "/internal/v1/admin/configurations": {
+    "/internal/v1/admin/access/policies": {
       "get": {
-        "operationId": "list_configurations_internal_v1_admin_configurations_get",
+        "operationId": "list_policies_internal_v1_admin_access_policies_get",
         "parameters": [
           {
             "in": "query",
-            "name": "domain",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
             "required": false,
             "schema": {
               "anyOf": [
@@ -15157,7 +18228,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Domain"
+              "title": "Cursor"
             }
           },
           {
@@ -15182,8 +18253,1504 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response List Configurations Internal V1 Admin Configurations Get",
+                  "title": "Response List Policies Internal V1 Admin Access Policies Get",
                   "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Policies",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_policy_internal_v1_admin_access_policies_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigurationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Policy",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/customers": {
+      "get": {
+        "operationId": "list_customers_internal_v1_admin_accounts_customers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCustomerAccountPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Customers",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_customer_internal_v1_admin_accounts_customers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCustomerAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCustomerAccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Customer",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/customers/{customer_id}": {
+      "patch": {
+        "operationId": "update_customer_internal_v1_admin_accounts_customers__customer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCustomerAccountPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCustomerAccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Customer",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/customers/{customer_id}/audit": {
+      "get": {
+        "operationId": "audit_customer_internal_v1_admin_accounts_customers__customer_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Audit Customer Internal V1 Admin Accounts Customers  Customer Id  Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Customer",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/customers/{customer_id}/sessions": {
+      "get": {
+        "operationId": "list_customer_sessions_internal_v1_admin_accounts_customers__customer_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountSessionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Customer Sessions",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/customers/{customer_id}/sessions/{session_id}/revoke": {
+      "post": {
+        "operationId": "revoke_customer_session_internal_v1_admin_accounts_customers__customer_id__sessions__session_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customer_id",
+            "required": true,
+            "schema": {
+              "title": "Customer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountSessionProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Customer Session",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/staff": {
+      "get": {
+        "operationId": "list_staff_internal_v1_admin_accounts_staff_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStaffAccountPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Staff",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_staff_internal_v1_admin_accounts_staff_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminStaffAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStaffAccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Staff",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/staff/{staff_id}": {
+      "patch": {
+        "operationId": "update_staff_internal_v1_admin_accounts_staff__staff_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "staff_id",
+            "required": true,
+            "schema": {
+              "title": "Staff Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminStaffAccountPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStaffAccountProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Staff",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/staff/{staff_id}/audit": {
+      "get": {
+        "operationId": "audit_staff_internal_v1_admin_accounts_staff__staff_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "staff_id",
+            "required": true,
+            "schema": {
+              "title": "Staff Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Audit Staff Internal V1 Admin Accounts Staff  Staff Id  Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Staff",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/staff/{staff_id}/sessions": {
+      "get": {
+        "operationId": "list_staff_sessions_internal_v1_admin_accounts_staff__staff_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "staff_id",
+            "required": true,
+            "schema": {
+              "title": "Staff Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountSessionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Staff Sessions",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/accounts/staff/{staff_id}/sessions/{session_id}/revoke": {
+      "post": {
+        "operationId": "revoke_staff_session_internal_v1_admin_accounts_staff__staff_id__sessions__session_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "staff_id",
+            "required": true,
+            "schema": {
+              "title": "Staff Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountSessionProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Staff Session",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/agent-rules": {
+      "get": {
+        "operationId": "list_components_internal_v1_admin_agent_rules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentRuleComponent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRulePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Components",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/agent-rules/{component}": {
+      "post": {
+        "operationId": "create_component_internal_v1_admin_agent_rules__component__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AgentRuleComponent"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Component",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/audit": {
+      "get": {
+        "operationId": "list_audit_events_internal_v1_admin_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 50,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response List Audit Events Internal V1 Admin Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Audit Events",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/configurations": {
+      "get": {
+        "operationId": "list_configurations_internal_v1_admin_configurations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConfigurationPage"
                 }
               }
             },
@@ -15314,7 +19881,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConfigurationRecord"
+                  "$ref": "#/components/schemas/AdminConfigurationProjection"
                 }
               }
             },
@@ -15430,6 +19997,182 @@
           }
         },
         "summary": "Patch Configuration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/configurations/{configuration_id}/approval": {
+      "post": {
+        "operationId": "approve_configuration_internal_v1_admin_configurations__configuration_id__approval_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration_id",
+            "required": true,
+            "schema": {
+              "title": "Configuration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationApprovalRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Configuration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/configurations/{configuration_id}/approvals": {
+      "get": {
+        "operationId": "list_configuration_approvals_internal_v1_admin_configurations__configuration_id__approvals_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration_id",
+            "required": true,
+            "schema": {
+              "title": "Configuration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response List Configuration Approvals Internal V1 Admin Configurations  Configuration Id  Approvals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Configuration Approvals",
         "tags": [
           "administration"
         ]
@@ -15888,6 +20631,2099 @@
           }
         },
         "summary": "Withdraw Configuration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/evaluations": {
+      "get": {
+        "operationId": "list_evaluations_internal_v1_admin_evaluations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "purpose",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Evaluations",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_evaluation_internal_v1_admin_evaluations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Evaluation",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/evaluations/{evaluation_id}": {
+      "get": {
+        "operationId": "get_evaluation_internal_v1_admin_evaluations__evaluation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evaluation",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/integrations": {
+      "get": {
+        "operationId": "list_integrations_internal_v1_admin_integrations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationStatusPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Integrations",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/integrations/{integration_id}": {
+      "get": {
+        "operationId": "get_integration_internal_v1_admin_integrations__integration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationStatusProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/integrations/{integration_id}/health-check": {
+      "post": {
+        "operationId": "check_integration_internal_v1_admin_integrations__integration_id__health_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationHealthCheckRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Integration",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/integrations/{integration_id}/health-checks": {
+      "get": {
+        "operationId": "health_history_internal_v1_admin_integrations__integration_id__health_checks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationHealthCheckPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Health History",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge": {
+      "get": {
+        "operationId": "list_sources_internal_v1_admin_knowledge_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/KnowledgeVersionState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourcePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sources",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_source_internal_v1_admin_knowledge_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}": {
+      "get": {
+        "operationId": "get_source_internal_v1_admin_knowledge__knowledge_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminKnowledgeSourceProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/audit": {
+      "get": {
+        "operationId": "audit_source_internal_v1_admin_knowledge__knowledge_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Audit Source Internal V1 Admin Knowledge  Knowledge Id  Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/ingest": {
+      "post": {
+        "operationId": "ingest_source_internal_v1_admin_knowledge__knowledge_id__ingest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/publish": {
+      "post": {
+        "operationId": "publish_source_internal_v1_admin_knowledge__knowledge_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/retrieval-check": {
+      "post": {
+        "operationId": "retrieval_check_internal_v1_admin_knowledge__knowledge_id__retrieval_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Retrieval Check Internal V1 Admin Knowledge  Knowledge Id  Retrieval Check Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retrieval Check",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/validate": {
+      "post": {
+        "operationId": "validate_source_internal_v1_admin_knowledge__knowledge_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/knowledge/{knowledge_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_source_internal_v1_admin_knowledge__knowledge_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Withdraw Source",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/operations": {
+      "get": {
+        "operationId": "list_operations_internal_v1_admin_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Operations",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/operations/metrics": {
+      "get": {
+        "operationId": "operation_metrics_internal_v1_admin_operations_metrics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationMetricsProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operation Metrics",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/operations/{operation_id}": {
+      "get": {
+        "operationId": "get_operation_internal_v1_admin_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Operation",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets": {
+      "get": {
+        "operationId": "list_release_sets_internal_v1_admin_release_sets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "environment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runtime_profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runtime Profile"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReleaseSetPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Release Sets",
+        "tags": [
+          "administration"
+        ]
+      },
+      "post": {
+        "operationId": "create_release_set_internal_v1_admin_release_sets_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}": {
+      "get": {
+        "operationId": "get_release_set_internal_v1_admin_release_sets__release_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReleaseSetProjection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/audit": {
+      "get": {
+        "operationId": "audit_release_set_internal_v1_admin_release_sets__release_set_id__audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Audit Release Set Internal V1 Admin Release Sets  Release Set Id  Audit Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/publish": {
+      "post": {
+        "operationId": "publish_release_set_internal_v1_admin_release_sets__release_set_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetTransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/rollback": {
+      "post": {
+        "operationId": "rollback_release_set_internal_v1_admin_release_sets__release_set_id__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetTransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/release-sets/{release_set_id}/validate": {
+      "post": {
+        "operationId": "validate_release_set_internal_v1_admin_release_sets__release_set_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "release_set_id",
+            "required": true,
+            "schema": {
+              "title": "Release Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseSetValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseSetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Release Set",
+        "tags": [
+          "administration"
+        ]
+      }
+    },
+    "/internal/v1/admin/runtime-snapshots": {
+      "get": {
+        "operationId": "get_runtime_snapshot_internal_v1_admin_runtime_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "environment",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Environment",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runtime_profile",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Runtime Profile",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Runtime Snapshot",
         "tags": [
           "administration"
         ]

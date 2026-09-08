@@ -50,6 +50,9 @@ them:
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
+- The independently served `admin/` React/Vite console consumes the authenticated Admin API for
+  server-backed configuration, knowledge, Agent-rule, evaluation, operation, integration, access,
+  audit, and account projections.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
@@ -96,6 +99,7 @@ documents remain authoritative for implemented behaviour.
 - [Claim Data Readiness Inventory](status/claim-data-readiness.md)
 - [Runtime Profile Validation Record](status/runtime-profile-validation.md)
 - [MVP Capability Register](status/mvp-capability-register.md)
+- [Control Plane Implementation Status](status/control-plane-progress.md)
 
 Status records must name repeatable evidence and their limitations. They should be updated or
 superseded when the implementation state changes.

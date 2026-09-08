@@ -45,6 +45,10 @@ class AssessorRoutingOutcome:
 class ClaimsServiceAdapter(Protocol):
     """Stable boundary implemented by fixtures now and an AWS adapter later."""
 
+    @property
+    def integration_source(self) -> IntegrationSource:
+        raise NotImplementedError
+
     def create_claim(
         self,
         command: CreateExternalClaimRequest,
@@ -81,6 +85,13 @@ class MockClaimsServiceAdapter(ClaimsServiceAdapter):
 
     def __init__(self) -> None:
         self._created: dict[str, tuple[str, ExternalClaimResult]] = {}
+
+    @property
+    def integration_source(self) -> IntegrationSource:
+        return IntegrationSource.FIXTURE
+
+    def connection_status(self) -> str:
+        return 'using_fixture'
 
     def reset_demo_state(self) -> dict[str, int]:
         cleared = {'mock_claim_results': len(self._created)}
@@ -124,6 +135,9 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
     """
 
     integration_source = IntegrationSource.FIXTURE
+
+    def connection_status(self) -> str:
+        return 'using_fixture'
 
     def __init__(
         self,

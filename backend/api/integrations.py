@@ -33,6 +33,7 @@ from backend.services.external_tasks import list_external_tasks
 from backend.services.integrations import create_external_claim, route_assessor
 from backend.services.knowledge_search import search_knowledge
 from backend.services.retrieval import search_claim_history, search_policy
+from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 
 router = APIRouter(prefix='/internal/v1', tags=['internal-integrations'])
 logger = logging.getLogger(__name__)
@@ -43,10 +44,12 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 
 def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
+    runtime_integration_policy_for(request).require('claims_service')
     return cast(ClaimsServiceAdapter, request.app.state.claims_service_adapter)
 
 
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
+    runtime_integration_policy_for(request).require('assessor_service')
     return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
 
 
@@ -59,7 +62,12 @@ def policy_history_adapter_for(request: Request) -> PolicyHistoryAdapter:
 
 
 def knowledge_retriever_for(request: Request) -> KnowledgeRetriever:
+    runtime_integration_policy_for(request).require('knowledge_retrieval')
     return cast(KnowledgeRetriever, request.app.state.knowledge_retriever)
+
+
+def runtime_integration_policy_for(request: Request) -> RuntimeIntegrationPolicy:
+    return cast(RuntimeIntegrationPolicy, request.app.state.runtime_integration_policy)
 
 
 @router.get('/claims/{claim_id}/external-tasks', response_model=ExternalTaskListResponse)
@@ -85,6 +93,7 @@ def read_external_tasks_integration(
     Raises:
         ApiError: The claim or cursor is unavailable or invalid.
     """
+    runtime_integration_policy_for(request).require('persistence')
     logger.info(
         'external_tasks.list',
         extra={
@@ -117,6 +126,7 @@ def search_policy_integration(
     request: Request,
     _principal: Principal = Depends(require_integration_service),
 ) -> PolicySearchResponse:
+    runtime_integration_policy_for(request).require('policy')
     return search_policy(
         repository_for(request),
         policy_history_adapter_for(request),
@@ -130,6 +140,7 @@ def search_claim_history_integration(
     request: Request,
     _principal: Principal = Depends(require_integration_service),
 ) -> ClaimHistorySearchResponse:
+    runtime_integration_policy_for(request).require('claim_history')
     return search_claim_history(
         repository_for(request),
         policy_history_adapter_for(request),
@@ -183,6 +194,7 @@ def complete_evidence_processing_integration(
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
     if_match: str | None = Header(default=None, alias='If-Match'),
 ) -> EvidenceProcessingResponse:
+    runtime_integration_policy_for(request).require('evidence_storage')
     return complete_evidence_processing(
         repository_for(request),
         claim_id,

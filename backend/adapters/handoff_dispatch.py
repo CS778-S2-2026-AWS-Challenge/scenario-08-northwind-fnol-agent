@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Protocol
 
-from backend.domain.models import HandoffDeliveryState, HandoffRecord
+from backend.domain.models import HandoffDeliveryState, HandoffRecord, IntegrationSource
 
 
 class HandoffDispatchUnavailable(Exception):
@@ -28,6 +28,8 @@ class HandoffDispatchReceipt:
 class HandoffDispatchAdapter(Protocol):
     """Stable notification boundary implemented by a fixture now and a queue later."""
 
+    integration_source: IntegrationSource
+
     def dispatch(self, handoff: HandoffRecord) -> HandoffDispatchReceipt:
         raise NotImplementedError
 
@@ -47,6 +49,8 @@ class MockHandoffDispatchAdapter(HandoffDispatchAdapter):
     Dispatch is keyed by handoff so a retried support request cannot notify the
     staff queue twice for the same handoff.
     """
+
+    integration_source = IntegrationSource.FIXTURE
 
     def __init__(self, outage: HandoffDispatchUnavailable | None = None) -> None:
         self._outage = outage

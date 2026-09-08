@@ -66,6 +66,9 @@ db.sqlite3-journal
 .northwind-staff-identity.sqlite3
 .northwind-staff-identity.sqlite3-shm
 .northwind-staff-identity.sqlite3-wal
+.northwind-control-plane.sqlite3
+.northwind-control-plane.sqlite3-shm
+.northwind-control-plane.sqlite3-wal
 
 # Flask stuff:
 instance/
