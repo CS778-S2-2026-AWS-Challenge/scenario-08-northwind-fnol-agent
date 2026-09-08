@@ -1,0 +1,231 @@
+{
+  "scenario_id": "AT-16-field-states-contents",
+  "description": "Synthetic contents field-state example for the Week 6 validation prototype.",
+  "claim": {
+    "claim_id": "clm_fixture_at16",
+    "customer_id": "cus_demo",
+    "revision": 1,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "contents",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "not_assessed",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "collecting",
+      "next_action": "ASK"
+    },
+    "form": {
+      "claim.product_family": {
+        "value": "contents",
+        "source": "claimant",
+        "source_refs": ["msg_at16_family"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T03:01:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.description": {
+        "value": "A laptop and camera were damaged when a shelf fell during a move.",
+        "source": "claimant",
+        "source_refs": ["msg_at16_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T03:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.type": {
+        "value": "other",
+        "source": "claimant",
+        "source_refs": ["msg_at16_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T03:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "loss.description": {
+        "value": "Household electronics and a camera were damaged.",
+        "source": "inference",
+        "source_refs": ["msg_at16_description"],
+        "status": "proposed",
+        "needed_for": "later_action",
+        "confidence": 0.78,
+        "updated_at": "2026-09-08T03:03:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "incident.location": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "current_action",
+        "confidence": null,
+        "updated_at": "2026-09-08T03:03:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "incident.cause": {
+        "value": "shelf collapse during move",
+        "source": "claimant",
+        "source_refs": ["msg_at16_description", "msg_at16_followup"],
+        "status": "disputed",
+        "needed_for": "later_action",
+        "confidence": 0.5,
+        "current_assertion_id": "assert_at16_review",
+        "assertions": [
+          {
+            "assertion_id": "assert_at16_claimant",
+            "normalized_value": "the shelf fell while the items were being moved",
+            "source_refs": ["msg_at16_description"],
+            "relation": "initial",
+            "status": "proposed",
+            "precision": "exact",
+            "created_at": "2026-09-08T03:02:00Z"
+          },
+          {
+            "assertion_id": "assert_at16_review",
+            "normalized_value": "the cause and responsibility require clarification",
+            "source_refs": ["msg_at16_followup"],
+            "relation": "material_conflict",
+            "status": "proposed",
+            "precision": "unknown",
+            "reason_code": "CAUSE_REQUIRES_CLARIFICATION",
+            "created_at": "2026-09-08T03:04:00Z"
+          }
+        ],
+        "updated_at": "2026-09-08T03:04:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "contents_items": [
+      {
+        "item_id": "contents_at16_laptop",
+        "description": "Synthetic laptop with a cracked display",
+        "category": "electronics",
+        "quantity": 1,
+        "loss_type": "damaged",
+        "ownership": "owned",
+        "estimated_value": {"amount": 1800.0, "currency": "NZD"},
+        "source": "claimant",
+        "source_refs": ["msg_at16_item"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T03:03:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      {
+        "item_id": "contents_at16_camera",
+        "description": "Synthetic camera with a damaged lens",
+        "category": "photography",
+        "quantity": 1,
+        "loss_type": "damaged",
+        "ownership": "owned",
+        "estimated_value": null,
+        "source": "inference",
+        "source_refs": ["msg_at16_description"],
+        "status": "proposed",
+        "needed_for": "later_action",
+        "confidence": 0.68,
+        "updated_at": "2026-09-08T03:03:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    ],
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": null,
+    "active_session_id": "ses_fixture_at16",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "confirm_contents_details",
+      "summary": "Confirm the loss location and resolve the cause before the next action.",
+      "responsible_party": "claimant",
+      "can_resume": true,
+      "required_items": ["incident.location", "incident.cause"]
+    },
+    "created_at": "2026-09-08T03:00:00Z",
+    "updated_at": "2026-09-08T03:04:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at16",
+      "claim_id": "clm_fixture_at16",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Contents loss with one confirmed item, one inferred item, and unresolved cause/location.",
+      "unresolved_questions": ["confirm:incident.location", "resolve:incident.cause"],
+      "pending_items": [],
+      "prior_commitments": [],
+      "context_revision": 1,
+      "started_at": "2026-09-08T03:00:00Z",
+      "last_active_at": "2026-09-08T03:04:00Z",
+      "closed_at": null
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at16_family",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-family",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "This is a contents claim."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-09-08T03:01:00Z"
+    },
+    {
+      "message_id": "msg_at16_description",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "A laptop and camera were damaged when a shelf fell during a move."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at16_family",
+      "created_at": "2026-09-08T03:02:00Z"
+    },
+    {
+      "message_id": "msg_at16_item",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-item",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "The laptop has a cracked display and belongs to me."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at16_description",
+      "created_at": "2026-09-08T03:03:00Z"
+    },
+    {
+      "message_id": "msg_at16_followup",
+      "claim_id": "clm_fixture_at16",
+      "session_id": "ses_fixture_at16",
+      "client_message_id": "at16-followup",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I am not sure whether the shelf was defective or moved incorrectly."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at16_item",
+      "created_at": "2026-09-08T03:04:00Z"
+    }
+  ],
+  "expected": {
+    "family": "contents",
+    "field_states": {
+      "confirmed": ["claim.product_family", "incident.description", "incident.type"],
+      "inferred": ["loss.description", "contents_items[contents_at16_camera]"],
+      "missing": ["incident.location"],
+      "conflicting": ["incident.cause"],
+      "not_applicable": ["vehicle.registration", "property.address"]
+    },
+    "claimant_hidden_fields": ["contents_items.confidence", "contents_items.updated_by"],
+    "workbench_only_fields": ["contents_items.confidence", "contents_items.updated_by"]
+  }
+}

@@ -17,6 +17,20 @@ They are the source used by the development/test demo seeding workflow.
 | `AT-10-controlled-assessor.json` | Created claim, assessor route, evidence state, and next responsible action |
 | `AT-13-staff-action-lifecycle.json` | Completed assign, review, resolve, and claimant-safe write-back audit trail |
 
+## Week 6 Field-State Examples
+
+The `AT-14-field-states-motor.json`, `AT-15-field-states-home.json`, and
+`AT-16-field-states-contents.json` records are synthetic P2.2 examples for the
+three representative product families. They demonstrate the shared field
+states `confirmed`, `proposed` (inferred), `missing`, and `disputed`, together
+with family-specific inactive projections. The contents example stores item
+records in `WorkingClaim.contents_items`; it does not invent flattened
+`contents.*` form fields.
+
+These records are validation fixtures, not additional canonical business paths,
+and are intentionally excluded from `load_mvp_journey_scenarios()` and the
+five-path connected MVP demo seed.
+
 Validate the reusable scenario records from the repository root:
 
 ```powershell

@@ -1,0 +1,218 @@
+{
+  "scenario_id": "AT-15-field-states-home",
+  "description": "Synthetic home field-state example for the Week 6 validation prototype.",
+  "claim": {
+    "claim_id": "clm_fixture_at15",
+    "customer_id": "cus_demo",
+    "revision": 1,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "home",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "ambiguous",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "professional_review",
+      "next_action": "HANDOFF"
+    },
+    "form": {
+      "claim.product_family": {
+        "value": "home",
+        "source": "claimant",
+        "source_refs": ["msg_at15_family"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T02:01:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.description": {
+        "value": "A pipe burst overnight and damaged the kitchen floor.",
+        "source": "claimant",
+        "source_refs": ["msg_at15_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T02:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.type": {
+        "value": "water",
+        "source": "claimant",
+        "source_refs": ["msg_at15_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T02:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "property.address": {
+        "value": "14 Synthetic Lane, Auckland",
+        "source": "claimant",
+        "source_refs": ["msg_at15_address"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T02:03:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "property.affected_areas": {
+        "value": ["kitchen floor", "lower cabinets"],
+        "source": "claimant",
+        "source_refs": ["msg_at15_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T02:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "property.ongoing_risk": {
+        "value": "active_leak",
+        "source": "inference",
+        "source_refs": ["msg_at15_description"],
+        "status": "proposed",
+        "needed_for": "current_action",
+        "confidence": 0.7,
+        "updated_at": "2026-09-08T02:04:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "property.habitable": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "later_action",
+        "confidence": null,
+        "updated_at": "2026-09-08T02:04:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "incident.cause": {
+        "value": "burst pipe",
+        "source": "claimant",
+        "source_refs": ["msg_at15_description", "msg_at15_followup"],
+        "status": "disputed",
+        "needed_for": "current_action",
+        "confidence": 0.55,
+        "current_assertion_id": "assert_at15_review",
+        "assertions": [
+          {
+            "assertion_id": "assert_at15_claimant",
+            "normalized_value": "a pipe burst suddenly",
+            "source_refs": ["msg_at15_description"],
+            "relation": "initial",
+            "status": "proposed",
+            "precision": "exact",
+            "created_at": "2026-09-08T02:02:00Z"
+          },
+          {
+            "assertion_id": "assert_at15_review",
+            "normalized_value": "the cause and policy applicability require review",
+            "source_refs": ["msg_at15_followup"],
+            "relation": "material_conflict",
+            "status": "proposed",
+            "precision": "unknown",
+            "reason_code": "COVERAGE_AMBIGUITY_REVIEW",
+            "created_at": "2026-09-08T02:05:00Z"
+          }
+        ],
+        "updated_at": "2026-09-08T02:05:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "contents_items": [],
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": "professional_review",
+    "active_session_id": "ses_fixture_at15",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "professional_review_queued",
+      "summary": "A claims professional is reviewing the cause and relevant policy wording.",
+      "responsible_party": "claims_professional",
+      "can_resume": true,
+      "required_items": []
+    },
+    "created_at": "2026-09-08T02:00:00Z",
+    "updated_at": "2026-09-08T02:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at15",
+      "claim_id": "clm_fixture_at15",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Home water damage with an unresolved cause and policy applicability.",
+      "unresolved_questions": ["resolve:incident.cause", "confirm:property.habitable"],
+      "pending_items": [],
+      "prior_commitments": [],
+      "context_revision": 1,
+      "started_at": "2026-09-08T02:00:00Z",
+      "last_active_at": "2026-09-08T02:05:00Z",
+      "closed_at": null
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at15_family",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "client_message_id": "at15-family",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "This is about my home."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-09-08T02:01:00Z"
+    },
+    {
+      "message_id": "msg_at15_description",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "client_message_id": "at15-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "A pipe burst overnight and damaged the kitchen floor."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at15_family",
+      "created_at": "2026-09-08T02:02:00Z"
+    },
+    {
+      "message_id": "msg_at15_address",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "client_message_id": "at15-address",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "The property is 14 Synthetic Lane, Auckland."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at15_description",
+      "created_at": "2026-09-08T02:03:00Z"
+    },
+    {
+      "message_id": "msg_at15_followup",
+      "claim_id": "clm_fixture_at15",
+      "session_id": "ses_fixture_at15",
+      "client_message_id": "at15-followup",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I cannot tell whether the pipe had been leaking before last night."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at15_address",
+      "created_at": "2026-09-08T02:05:00Z"
+    }
+  ],
+  "expected": {
+    "family": "home",
+    "field_states": {
+      "confirmed": ["claim.product_family", "incident.description", "incident.type", "property.address", "property.affected_areas"],
+      "inferred": ["property.ongoing_risk"],
+      "missing": ["property.habitable"],
+      "conflicting": ["incident.cause"],
+      "not_applicable": ["vehicle.registration", "contents.items"]
+    },
+    "claimant_hidden_fields": [],
+    "workbench_only_fields": []
+  }
+}
