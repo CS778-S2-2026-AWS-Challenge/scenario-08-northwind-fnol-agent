@@ -9313,6 +9313,80 @@
         "title": "StaffMessageResponse",
         "type": "object"
       },
+      "StaffPresenceRecord": {
+        "description": "Short-lived, provider-neutral staff presence used for Workbench eligibility.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "online": {
+            "title": "Online",
+            "type": "boolean"
+          },
+          "revision": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "staff_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Staff Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "staff_id",
+          "online",
+          "available",
+          "last_seen_at",
+          "expires_at",
+          "updated_at"
+        ],
+        "title": "StaffPresenceRecord",
+        "type": "object"
+      },
+      "StaffPresenceUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "lease_seconds": {
+            "default": 60,
+            "maximum": 300.0,
+            "minimum": 15.0,
+            "title": "Lease Seconds",
+            "type": "integer"
+          },
+          "online": {
+            "default": true,
+            "title": "Online",
+            "type": "boolean"
+          }
+        },
+        "title": "StaffPresenceUpdate",
+        "type": "object"
+      },
       "StaffProfileProjection": {
         "properties": {
           "development_identity": {
@@ -18413,6 +18487,165 @@
         "summary": "Seed Scenarios",
         "tags": [
           "workbench-demo"
+        ]
+      }
+    },
+    "/api/v1/workbench/staff/online": {
+      "get": {
+        "operationId": "get_online_staff_api_v1_workbench_staff_online_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StaffPresenceRecord"
+                  },
+                  "title": "Response Get Online Staff Api V1 Workbench Staff Online Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Online Staff",
+        "tags": [
+          "workbench staff"
+        ]
+      }
+    },
+    "/api/v1/workbench/staff/presence": {
+      "get": {
+        "operationId": "get_presence_api_v1_workbench_staff_presence_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffPresenceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Presence",
+        "tags": [
+          "workbench staff"
+        ]
+      },
+      "put": {
+        "operationId": "put_presence_api_v1_workbench_staff_presence_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffPresenceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffPresenceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Presence",
+        "tags": [
+          "workbench staff"
         ]
       }
     },
