@@ -5,14 +5,16 @@ from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
-    ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
     ExternalTaskResult,
+    ExternalTaskResultVerification,
     assert_disclosure_within_consent,
     assert_request_matches_task,
     assert_result_advance_is_permitted,
+    assert_result_evidence_is_linked,
+    assert_result_matches_task,
 )
 from backend.domain.models import (
     ActorType,
@@ -96,6 +98,7 @@ class FixtureRepository(PersistenceRepository):
             'external_tasks': len(self._external_tasks),
             'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
+            'external_task_results': len(self._external_task_results),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
             'staff_actions': len(self._staff_actions),
@@ -119,6 +122,7 @@ class FixtureRepository(PersistenceRepository):
         self._external_tasks.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
+        self._external_task_results.clear()
         self._retrievals.clear()
         self._review_signals.clear()
         self._staff_actions.clear()
@@ -1278,19 +1282,27 @@ class FixtureRepository(PersistenceRepository):
         if self.get_claim(result.claim_id, customer_id) is None:
             raise KeyError(result.claim_id)
         task = self._external_tasks.get(result.task_id)
-        if task is None or task.claim_id != result.claim_id:
+        if task is None:
             raise KeyError(result.task_id)
-        # Only a request that reached the provider can have produced an answer. An
-        # acknowledgement of routing is not an answer, so an unsubmitted task carries no
-        # result at all.
-        if task.delivery is not ExternalTaskDelivery.SUBMITTED:
-            raise KeyError(result.task_id)
+        # The domain already decides which task states can carry an answer and how a
+        # result reaches its material. Re-deciding either here would be a second,
+        # quietly different rule.
+        try:
+            assert_result_matches_task(result, task)
+            assert_result_evidence_is_linked(
+                result,
+                [
+                    link
+                    for link in self._external_task_evidence_links.values()
+                    if link.evidence_id in result.evidence_ids
+                ],
+            )
+        except ValueError as mismatch:
+            raise KeyError(result.task_id) from mismatch
         for evidence_id in result.evidence_ids:
-            link = self._external_task_evidence_links.get((result.claim_id, evidence_id))
-            if link is None or link.task_id != result.task_id:
-                raise KeyError(evidence_id)
             if self.get_evidence(result.claim_id, evidence_id, customer_id) is None:
                 raise KeyError(evidence_id)
+
         held = next(
             (
                 stored
@@ -1299,7 +1311,17 @@ class FixtureRepository(PersistenceRepository):
             ),
             None,
         )
-        if held is not None:
+        # A result identity belongs to one task for good, so a reused identifier is a
+        # conflict even when the task it now names holds nothing.
+        by_identity = self._external_task_results.get(result.result_id)
+        if by_identity is not None and by_identity.task_id != result.task_id:
+            raise IdempotencyConflict(result.result_id)
+        if held is None:
+            # Only the verification operation may record a check, so an answer arrives
+            # unverified or not at all.
+            if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
+                raise IdempotencyConflict(result.result_id)
+        else:
             try:
                 assert_result_advance_is_permitted(held, result)
             except ValueError as conflict:

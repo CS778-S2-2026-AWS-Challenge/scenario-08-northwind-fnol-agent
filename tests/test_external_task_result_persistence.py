@@ -18,6 +18,7 @@ import pytest
 from backend.domain.external_services import (
     ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
+    ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskResult,
@@ -396,4 +397,72 @@ def test_a_result_cannot_name_a_task_that_is_not_on_this_claim(
     with pytest.raises(KeyError):
         repository.save_external_task_result(_result(task_id='tsk_absent'), CUSTOMER)
 
+    assert repository.list_external_task_results_internal(CLAIM) == []
+
+
+def test_ingestion_cannot_start_from_a_checked_verification(
+    repository: PersistenceRepository,
+) -> None:
+    """Constraint 6: only the verification operation may record a checked state."""
+
+    _seed(repository)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_result(
+            _result(
+                verification=ExternalTaskResultVerification.CONSISTENT,
+                verified_at=BASE + timedelta(minutes=5),
+                verified_against_revision=1,
+            ),
+            CUSTOMER,
+        )
+
+    assert repository.list_external_task_results_internal(CLAIM) == []
+
+
+def test_a_failed_task_carries_no_result_even_when_it_was_submitted(
+    repository: PersistenceRepository,
+) -> None:
+    """`assert_result_matches_task` allows only accepted and unknown_outcome."""
+
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    repository.save_external_task(
+        _task(task_id='tsk_failed').model_copy(
+            update={
+                'status': ExternalTaskOperationStatus.TERMINAL_FAILURE,
+                'failure_code': ExternalTaskFailureCode.MALFORMED,
+            }
+        ),
+        CUSTOMER,
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_external_task_result(_result(task_id='tsk_failed'), CUSTOMER)
+
+    assert repository.list_external_task_results_internal(CLAIM) == []
+
+
+def test_a_result_id_cannot_be_reused_for_another_task(
+    repository: PersistenceRepository,
+) -> None:
+    _seed(repository)
+    repository.save_external_task_result(_result(), CUSTOMER)
+    repository.save_external_task(_task(task_id='tsk_second'), CUSTOMER)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_result(_result(task_id='tsk_second'), CUSTOMER)
+
+    stored = repository.list_external_task_results_internal(CLAIM)
+    assert [(item.result_id, item.task_id) for item in stored] == [('res_result_001', TASK)]
+
+
+def test_demo_reset_clears_returned_results() -> None:
+    repository = FixtureRepository()
+    _seed(repository)
+    repository.save_external_task_result(_result(), CUSTOMER)
+
+    cleared = repository.reset_demo_state()
+
+    assert cleared['external_task_results'] == 1
     assert repository.list_external_task_results_internal(CLAIM) == []
