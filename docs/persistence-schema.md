@@ -474,6 +474,32 @@ Evidence record or protected object.
   neither field can be cleared or replaced. `sent_at` records that Northwind handed the request
   to the selected service entry. Provider receipt remains the separate task `delivery` state and
   requires named delivery evidence.
+- An external task result records what the third party returned, which is a different fact from
+  the acknowledgement that a request reached it. Which task states can carry one is the
+  established result-bearing rule and is not restated by the persistence layer: `accepted`, where
+  the provider took the request, and `unknown_outcome`, which is the state a late answer resolves.
+  Delivery is not the test, because a `partial` failure is an unknown outcome whether or not the
+  request was recorded as submitted. The task's `provider_reference` remains a provider reference
+  and is never the result.
+- One task carries at most one canonical result. A second result identity for the same task is
+  refused rather than stored beside the first, so "the result" is unambiguous for every reader.
+- What arrived is fixed at ingestion: the result identity, its task and claim association, its
+  `source` provenance, its summary, its evidence identifiers, and `received_at`. `received_at`
+  records when the answer arrived and is never an advancing update stamp, so unlike a task
+  record a later write cannot push it forward.
+- A concurrent writer that stores the identical result is this call's own outcome, not a conflict.
+  After a duplicate-key refusal or a lost compare-and-swap, the canonical result is reread and the
+  write reports success when it equals the proposal, so a retrying producer is never told that
+  ingestion failed after it succeeded. A different stored result is refused.
+- A result is ingested `unverified` and may make one transition to a checked verification state,
+  which must name both the time of the check and the claim revision it was checked against, so a
+  later revision can tell that the check is stale. Writing the identical record again is a no-op,
+  which makes an ingestion retry safe. A different checked state, or a return to `unverified`,
+  contradicts a check already recorded and fails closed.
+- Every evidence identifier a result names must exist under the same claim and customer and must
+  already be linked to that same task. A result cannot borrow another task's material.
+- The `source` provenance identifies where the returned material came from. It must not be
+  populated from the request acknowledgement `provider_reference`.
 
 ## Configuration and Control Plane Invariants
 
