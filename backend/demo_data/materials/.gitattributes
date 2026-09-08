@@ -1,0 +1,8 @@
+# PDF and JPEG demonstration materials are byte-exact artefacts. The PDF cross-
+# reference table is a fixed-width record format whose rows end in a mandatory
+# space, and every entry in it is a byte offset into the file, so any end-of-line
+# normalisation shifts the offsets and the document stops opening. The same
+# applies to JPEG entropy-coded data. `binary` is `-text -diff -merge`: no
+# conversion on checkout, no line-based diff, no line-based merge.
+*.pdf binary
+*.jpg binary
