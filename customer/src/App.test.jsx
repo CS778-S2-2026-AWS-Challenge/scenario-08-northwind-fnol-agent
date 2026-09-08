@@ -1863,6 +1863,97 @@ describe('adaptive claimant entry', () => {
     expect(screen.queryByText('Internal identity field.')).not.toBeInTheDocument()
   })
 
+  it('replaces a corrected contents item from the authoritative turn projection', async () => {
+    const contentsItem = {
+      item_id: 'itm_laptop',
+      description: 'Laptop computer',
+      category: 'electronics',
+      quantity: 1,
+      loss_type: 'damaged',
+      ownership: 'owned',
+      estimated_value: null,
+      source: 'claimant',
+      source_refs: ['msg_contents_initial'],
+      status: 'proposed',
+      needed_for: 'current_action',
+      resolution_state: 'needs_confirmation',
+      updated_at: '2026-09-08T00:00:00Z',
+    }
+    const dynamicForm = {
+      claim_id: 'clm_test',
+      claim_revision: 2,
+      field_registry_version: '5',
+      branch_rules_version: 'vp-dynamic-form-branch-rules-v1',
+      selected_family: 'contents',
+      active_branches: ['family.contents'],
+      fields: [],
+      requirements: {
+        satisfied: [],
+        missing_required_now: ['contents.items'],
+        pending_later: [],
+        next_required_item: 'contents.items',
+        ready: false,
+        current_action_satisfied: 0,
+        current_action_total: 6,
+      },
+    }
+    const initialTurn = {
+      ...firstTurn(),
+      claim_revision: 2,
+      form_changes: [],
+      contents_item_changes: [contentsItem],
+      dynamic_form: dynamicForm,
+      decision: {
+        ...firstTurn().decision,
+        customer_next_step: {
+          ...firstTurn().decision.customer_next_step,
+          required_items: ['contents.items'],
+        },
+      },
+    }
+    const correctedTurn = {
+      ...initialTurn,
+      claim_revision: 3,
+      claimant_message: {
+        ...initialTurn.claimant_message,
+        message_id: 'msg_contents_correction',
+        content: { type: 'text', text: 'Actually, the laptop was stolen.' },
+      },
+      agent_message: {
+        ...initialTurn.agent_message,
+        message_id: 'msg_contents_agent_correction',
+        in_reply_to: 'msg_contents_correction',
+      },
+      contents_item_changes: [{
+        ...contentsItem,
+        loss_type: 'stolen',
+        source_refs: ['msg_contents_correction'],
+        updated_at: '2026-09-08T00:01:00Z',
+      }],
+      dynamic_form: { ...dynamicForm, claim_revision: 3 },
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(initialTurn))
+      .mockResolvedValueOnce(jsonResponse({ items: [], revision: 2, page: { next_cursor: null } }))
+      .mockResolvedValueOnce(jsonResponse(correctedTurn))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'My laptop was damaged.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByText('1 × electronics · damaged')).toBeVisible()
+
+    await user.type(screen.getByLabelText('Add more information'), 'Actually, it was stolen.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText('1 × electronics · stolen')).toBeVisible()
+    expect(screen.queryByText('1 × electronics · damaged')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Laptop computer needs your review.')).toHaveLength(1)
+    expect(screen.getByText('Updated with revision 3')).toBeVisible()
+  })
+
   it('starts an anonymous claim with a browser session header instead of an empty bearer token', async () => {
     fetch
       .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
@@ -2039,7 +2130,7 @@ describe('adaptive claimant entry', () => {
     }))
 
     expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
-    expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    expect(screen.getAllByText('A Northwind staff member is now assisting you.').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: 'Motor claim details' })).toBeVisible()
     expect(screen.getByText('Updated with revision 4')).toBeVisible()
     expect(realtime.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({

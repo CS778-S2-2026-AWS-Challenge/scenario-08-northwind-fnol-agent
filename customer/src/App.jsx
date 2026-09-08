@@ -38,8 +38,18 @@ import ExternalServiceAction from './components/ExternalServiceAction.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
+  'incident.injury_or_danger': 'Injury or immediate danger',
+  'incident.occurred_at': 'When it happened',
   'incident.location': 'Incident location',
   'loss.description': 'Damage or loss',
+  'parties.other_parties': 'Other people or vehicles involved',
+  'vehicle.damage_description': 'Vehicle damage',
+  'vehicle.drivable': 'Vehicle safe to drive',
+  'property.address': 'Affected property',
+  'property.affected_areas': 'Affected areas',
+  'property.ongoing_risk': 'Ongoing property risk',
+  'property.habitable': 'Property safe to live in',
+  'contents.items': 'Damaged, lost, or stolen items',
 }
 
 const INPUT_LABELS = {
@@ -131,22 +141,25 @@ function mergeFields(current, changes) {
   )
 }
 
-function claimProgress(nextStep, form) {
-  const status = nextStep?.status
-  const stages = {
-    describe_incident: { current: 1, total: 3, label: 'Describe the incident' },
-    provide_incident_location: { current: 2, total: 3, label: 'Add the key details' },
-    confirmation_required: { current: 2, total: 3, label: 'Check the details' },
-    ready_to_create: { current: 3, total: 3, label: 'Ready to create' },
-    claim_created: { current: 3, total: 3, label: 'Claim submitted' },
-  }
-  const fallback = Object.keys(form).length > 0
-    ? { current: 2, total: 3, label: 'Add the key details' }
-    : stages.describe_incident
-  const stage = stages[status] || fallback
+function mergeContentsItems(current, changes) {
+  const incomingById = new Map(changes.map((item) => [item.item_id, item]))
+  const merged = current.map((item) => incomingById.get(item.item_id) || item)
+  const currentIds = new Set(current.map((item) => item.item_id))
+  return [
+    ...merged,
+    ...changes.filter((item) => !currentIds.has(item.item_id)),
+  ]
+}
+
+function claimProgress(nextStep, dynamicForm) {
+  const requirements = dynamicForm?.requirements
+  const total = requirements?.current_action_total || 0
+  const current = requirements?.current_action_satisfied || 0
   return {
-    ...stage,
-    saved: Object.values(form).filter((field) => field.status === 'confirmed').length,
+    current,
+    total,
+    label: requirements?.ready ? 'Ready to create' : nextStep?.summary || 'Describe the incident',
+    available: Boolean(requirements),
   }
 }
 
@@ -169,6 +182,7 @@ function App() {
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [form, setForm] = useState({})
+  const [contentsItems, setContentsItems] = useState([])
   const [dynamicForm, setDynamicForm] = useState(null)
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -296,12 +310,16 @@ function App() {
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
   )
+  const proposedContentsItems = useMemo(
+    () => contentsItems.filter((item) => item.status === 'proposed'),
+    [contentsItems],
+  )
   const confirmedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'confirmed'),
     [form],
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
-  const progress = useMemo(() => claimProgress(nextStep, form), [nextStep, form])
+  const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [nextStep, dynamicForm])
   const visibleDynamicFields = useMemo(
     () => (dynamicForm?.fields || []).filter(
       (field) => !['inactive', 'system_owned'].includes(field.selection_state),
@@ -408,6 +426,7 @@ function App() {
       latestRevision.current = currentClaim.revision
       setClaim(currentClaim)
       setForm(currentClaim.form)
+      setContentsItems(currentClaim.contents_items || [])
       setDynamicForm(currentClaim.dynamic_form || null)
       setNextStep(currentClaim.customer_next_step)
       setHandoff(currentClaim.handoff || null)
@@ -569,6 +588,7 @@ function App() {
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
         setForm(activeClaim.form)
+        setContentsItems(activeClaim.contents_items || [])
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
       }
@@ -645,6 +665,7 @@ function App() {
     const current = await getClaim(claim.claim_id)
     setClaim(current)
     setForm(current.form)
+    setContentsItems(current.contents_items || [])
     setDynamicForm(current.dynamic_form || null)
     setNextStep(current.customer_next_step)
   }
@@ -688,6 +709,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(activeSessionId)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
         messageWasSubmitted = true
@@ -707,6 +729,7 @@ function App() {
         ...(turn.agent_message ? [turn.agent_message] : []),
       ])
       setForm((current) => mergeFields(current, turn.form_changes))
+      setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
       setClaim((current) => ({ ...current, revision: turn.claim_revision }))
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
@@ -757,6 +780,7 @@ function App() {
         const refreshedClaim = await getClaim(claim.claim_id)
         setClaim(refreshedClaim)
         setForm(refreshedClaim.form)
+        setContentsItems(refreshedClaim.contents_items || [])
         setDynamicForm(refreshedClaim.dynamic_form || null)
         setNextStep(refreshedClaim.customer_next_step)
         setSessionId(session.session_id)
@@ -774,6 +798,7 @@ function App() {
       setSessionId(created.session.session_id)
       setMessages([])
       setForm(created.claim.form)
+      setContentsItems(created.claim.contents_items || [])
       setDynamicForm(created.claim.dynamic_form || null)
       setNextStep(created.claim.customer_next_step)
       setHandoff(null)
@@ -789,11 +814,14 @@ function App() {
   }
 
   async function confirmProposedFields() {
-    if (!claim || proposedFields.length === 0 || isBusy) return
+    if (!claim || (proposedFields.length === 0 && proposedContentsItems.length === 0) || isBusy) return
     setError('')
     setStatus('confirming')
     try {
-      const fieldCodes = proposedFields.map(([fieldCode]) => fieldCode)
+      const fieldCodes = [
+        ...proposedFields.map(([fieldCode]) => fieldCode),
+        ...(proposedContentsItems.length > 0 ? ['contents.items'] : []),
+      ]
       const fingerprint = `${claim.revision}:${fieldCodes.join(',')}`
       if (pendingConfirmation.current?.fingerprint !== fingerprint) {
         pendingConfirmation.current = {
@@ -808,6 +836,8 @@ function App() {
         idempotencyKey: pendingConfirmation.current.idempotencyKey,
       })
       setForm((current) => ({ ...current, ...response.confirmed_fields }))
+      setContentsItems(response.confirmed_contents_items || contentsItems)
+      setDynamicForm(response.dynamic_form || null)
       setClaim((current) => ({ ...current, revision: response.revision }))
       setNextStep(response.customer_next_step)
       pendingConfirmation.current = null
@@ -845,6 +875,7 @@ function App() {
       let revision = update.revision
       let updatedForm = { ...form, ...update.updated_fields }
       let updatedNextStep = update.customer_next_step
+      let updatedDynamicForm = update.dynamic_form || null
 
       if (field.status === 'proposed') {
         const confirmation = await confirmClaimFields({
@@ -855,11 +886,13 @@ function App() {
         revision = confirmation.revision
         updatedForm = { ...updatedForm, ...confirmation.confirmed_fields }
         updatedNextStep = confirmation.customer_next_step
+        updatedDynamicForm = confirmation.dynamic_form || null
       }
 
       setForm(updatedForm)
       setClaim((current) => ({ ...current, revision }))
       setNextStep(updatedNextStep)
+      setDynamicForm(updatedDynamicForm)
       setEditingField(null)
       setStatus('idle')
     } catch (requestError) {
@@ -973,6 +1006,7 @@ function App() {
         latestRevision.current = current.revision
         setClaim(current)
         setForm(current.form)
+        setContentsItems(current.contents_items || [])
         setDynamicForm(current.dynamic_form || null)
         setNextStep(current.customer_next_step)
         setHandoff(current.handoff || null)
@@ -1045,6 +1079,7 @@ function App() {
       setSessionId(session.session_id)
       setMessages(conversation.items)
       setForm(current.form)
+      setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
@@ -1071,6 +1106,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
@@ -1083,6 +1119,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
@@ -1116,6 +1153,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
@@ -1128,6 +1166,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
@@ -1148,6 +1187,7 @@ function App() {
     setSessionId(null)
     setMessages([])
     setForm({})
+    setContentsItems([])
     setDynamicForm(null)
     setNextStep(null)
     setHandoff(null)
@@ -1466,19 +1506,29 @@ function App() {
 
             <section
               className="journey-progress"
-              aria-label={`Claim progress: Step ${progress.current} of ${progress.total}, ${progress.label}`}
+              aria-label={progress.available
+                ? `Claim progress: ${progress.current} of ${progress.total} current details satisfied, ${progress.label}`
+                : `Claim progress: ${progress.label}`}
             >
               <div className="journey-progress-heading">
-                <span>Step {progress.current} of {progress.total}</span>
+                <span>{progress.available
+                  ? `${progress.current} of ${progress.total} needed now`
+                  : 'Start your report'}</span>
                 <strong>{progress.label}</strong>
               </div>
               <div className="progress-track" aria-hidden="true">
                 <span
                   className="progress-fill"
-                  style={{ '--progress-width': `${(progress.current / progress.total) * 100}%` }}
+                  style={{
+                    '--progress-width': progress.total > 0
+                      ? `${(progress.current / progress.total) * 100}%`
+                      : '0%',
+                  }}
                 />
               </div>
-              <p>{progress.saved} {progress.saved === 1 ? 'detail' : 'details'} saved from your conversation.</p>
+              <p>{progress.available
+                ? `${progress.current} ${progress.current === 1 ? 'requirement is' : 'requirements are'} satisfied for the current action.`
+                : 'Describe what happened and Northwind will identify what is needed next.'}</p>
             </section>
 
             <div className="message-list" aria-live="polite">
@@ -1631,7 +1681,7 @@ function App() {
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              hint={proposedFields.length > 0
+              hint={proposedFields.length > 0 || proposedContentsItems.length > 0
                 ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
                 : null}
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
@@ -1685,7 +1735,17 @@ function App() {
                   </div>
                   <span className="dynamic-form-revision">Updated with revision {dynamicForm.claim_revision}</span>
                 </div>
-                {visibleDynamicFields.length === 0 ? (
+                {dynamicForm.requirements?.next_required_item && (
+                  <p className="dynamic-form-reason">
+                    Next needed: {fieldLabel(dynamicForm.requirements.next_required_item)}
+                  </p>
+                )}
+                {(dynamicForm.requirements?.pending_later || []).length > 0 && (
+                  <p className="dynamic-form-reason">
+                    Needed later: {dynamicForm.requirements.pending_later.map(fieldLabel).join(', ')}
+                  </p>
+                )}
+                {visibleDynamicFields.length === 0 && contentsItems.length === 0 ? (
                   <p className="dynamic-form-empty">No additional details are needed for the current step.</p>
                 ) : (
                   <ul className="dynamic-form-fields">
@@ -1710,6 +1770,20 @@ function App() {
                         </li>
                       )
                     })}
+                    {contentsItems.map((item) => (
+                      <li className="dynamic-form-field" key={item.item_id}>
+                        <div className="dynamic-form-field-heading">
+                          <span>{item.description}</span>
+                          <span className={`dynamic-selection dynamic-selection-${item.status === 'confirmed' ? 'candidate_now' : 'required_now'}`}>
+                            {item.status === 'confirmed' ? 'Confirmed item' : 'Needs your review'}
+                          </span>
+                        </div>
+                        <p className="dynamic-form-value">
+                          {item.quantity} × {item.category} · {item.loss_type}
+                        </p>
+                        <p className="dynamic-form-meta">{fieldSourceLabel(item.source)}</p>
+                      </li>
+                    ))}
                   </ul>
                 )}
               </section>
@@ -1772,13 +1846,16 @@ function App() {
               </div>
             )}
 
-            {proposedFields.length > 0 && editingField === null && (
+            {(proposedFields.length > 0 || proposedContentsItems.length > 0) && editingField === null && (
               <section className="confirmation-bar" aria-labelledby="confirmation-title">
                 <p className="confirmation-kicker">Review before we continue</p>
                 <h2 id="confirmation-title">Check these details</h2>
                 <ul className="confirmation-list">
                   {proposedFields.map(([fieldCode]) => (
                     <li key={fieldCode}>{fieldLabel(fieldCode)} needs your review.</li>
+                  ))}
+                  {proposedContentsItems.map((item) => (
+                    <li key={item.item_id}>{item.description} needs your review.</li>
                   ))}
                 </ul>
                 <p>Use the conversation to correct anything in your own words, or edit a detail here.</p>
@@ -1793,7 +1870,9 @@ function App() {
               </section>
             )}
 
-            {confirmedFields.length > 0 && proposedFields.length === 0 && (
+            {(confirmedFields.length > 0 || contentsItems.length > 0)
+              && proposedFields.length === 0
+              && proposedContentsItems.length === 0 && (
               <div className="next-step" role="status">
                 <span>Next</span>
                 <p>{nextStep?.summary}</p>

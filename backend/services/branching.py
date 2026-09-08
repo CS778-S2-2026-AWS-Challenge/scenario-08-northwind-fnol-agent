@@ -77,6 +77,7 @@ def claimant_dynamic_form_projection(
             result.branch_id for result in evaluation.branch_results if result.status == 'active'
         ],
         fields=claimant_projection_fields(evaluation),
+        requirements=evaluation.requirements,
     )
 
 
@@ -124,6 +125,7 @@ def build_applied_branch_evaluation(
         interruption_result=evaluated.interruption_result,
         permitted_actions=evaluated.permitted_actions,
         permitted_tools=evaluated.permitted_tools,
+        requirements=evaluated.requirements,
         recomputation_reason=evaluated.recomputation_reason,
         status=BranchEvaluationStatus.APPLIED,
         created_at=created_at or now_utc(),

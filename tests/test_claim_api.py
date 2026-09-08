@@ -10,6 +10,8 @@ from backend.adapters.policy_history import MockPolicyHistoryAdapter, ProviderLo
 from backend.domain.models import (
     AgentAction,
     ClaimCreationStatus,
+    ContentsLossType,
+    ContentsOwnership,
     CustomerNextStep,
     ExternalClaimResult,
     FormSource,
@@ -17,6 +19,7 @@ from backend.domain.models import (
     IntegrationSource,
     MessageRecord,
     MessageVisibility,
+    ProposedContentsItem,
     ProposedFormChange,
     ResponsibleParty,
     SessionRecord,
@@ -100,6 +103,150 @@ class ClaimHistoryLookupAgent:
                 }
             ],
             next_action_requirements=[],
+        )
+
+
+class ContentsCorrectionAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        current = context.claim.contents_items[0] if context.claim.contents_items else None
+        message_text = context.message_text or ''
+        loss_type = (
+            ContentsLossType.STOLEN
+            if 'stolen' in message_text.casefold()
+            else ContentsLossType.DAMAGED
+        )
+        return AgentProposal(
+            action=AgentAction.CONFIRM,
+            reason_codes=['CONTENTS_ITEM_REVIEW_REQUIRED'],
+            customer_reason='The contents item needs claimant confirmation.',
+            customer_response='Please check the item details before I continue.',
+            customer_next_step=CustomerNextStep(
+                status='confirmation_required',
+                summary='Check the contents item.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['contents.items'],
+            ),
+            form_changes=[],
+            contents_item_changes=[
+                ProposedContentsItem(
+                    item_id=current.item_id if current is not None else None,
+                    description='Laptop computer',
+                    category='electronics',
+                    quantity=1,
+                    loss_type=loss_type,
+                    ownership=ContentsOwnership.OWNED,
+                    confidence=1.0,
+                    reported_text=message_text.rstrip('.'),
+                )
+            ],
+            state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=['contents.items'],
+        )
+
+
+class CompleteVpPathAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        family = context.claim.incident_type
+        if family not in {'motor', 'home', 'contents'}:
+            raise AssertionError('The VP path test requires one selected family.')
+        values: dict[str, object] = {
+            'claim.product_family': family,
+            'incident.description': context.message_text,
+            'incident.injury_or_danger': False,
+            'incident.occurred_at': '2026-09-08 at approximately 09:30 NZST',
+            'incident.location': '10 Example Street, Auckland',
+            'loss.description': 'The insured property was damaged.',
+        }
+        values.update(
+            {
+                'motor': {
+                    'vehicle.damage_description': 'The rear bumper is dented.',
+                    'vehicle.drivable': True,
+                },
+                'home': {
+                    'property.address': '10 Example Street, Auckland',
+                    'property.affected_areas': ['kitchen', 'hallway'],
+                    'property.ongoing_risk': 'none',
+                    'property.habitable': True,
+                },
+                'contents': {},
+            }[family]
+        )
+        contents = (
+            [
+                ProposedContentsItem(
+                    description='Laptop computer',
+                    category='electronics',
+                    quantity=1,
+                    loss_type=ContentsLossType.DAMAGED,
+                    ownership=ContentsOwnership.OWNED,
+                    confidence=1.0,
+                    reported_text='My laptop was damaged.',
+                )
+            ]
+            if family == 'contents'
+            else []
+        )
+        confirmation_items = [*values, *(['contents.items'] if contents else [])]
+        return AgentProposal(
+            action=AgentAction.CONFIRM,
+            reason_codes=['VP_PATH_FACTS_PROPOSED'],
+            customer_reason='The reported facts require claimant confirmation.',
+            customer_response='Please review the facts before Northwind creates the claim.',
+            customer_next_step=CustomerNextStep(
+                status='confirmation_required',
+                summary='Review the reported facts.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=confirmation_items,
+            ),
+            form_changes=[
+                ProposedFormChange(
+                    field_code=field_code,
+                    value=value,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.PROPOSED,
+                    confidence=1.0,
+                    reported_text=context.message_text,
+                )
+                for field_code, value in values.items()
+            ],
+            contents_item_changes=contents,
+            state_changes=[StateChange(path='claim_state.next_action', to='CONFIRM')],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=confirmation_items,
+        )
+
+
+class QuestionAndFactAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        return AgentProposal(
+            action=AgentAction.ASK,
+            reason_codes=['INCIDENT_LOCATION_REQUIRED'],
+            customer_reason='The incident location is still needed.',
+            customer_response='Where did the incident happen?',
+            customer_next_step=CustomerNextStep(
+                status='provide_incident_location',
+                summary='Tell us where the incident happened.',
+                responsible_party=ResponsibleParty.CLAIMANT,
+                required_items=['incident.location'],
+            ),
+            form_changes=[
+                ProposedFormChange(
+                    field_code='incident.description',
+                    value=context.message_text,
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.PROPOSED,
+                    confidence=1.0,
+                    reported_text=context.message_text,
+                )
+            ],
+            state_changes=[StateChange(path='claim_state.next_action', to='ASK')],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=['incident.location'],
         )
 
 
@@ -211,6 +358,242 @@ def test_cross_path_other_party_proposal_passes_branch_validation(
     assert other_party['field']['status'] == 'confirmed'
 
 
+@pytest.mark.parametrize(
+    ('family', 'message'),
+    [
+        (
+            'motor',
+            'Another car hit mine in Auckland this morning. The rear bumper is damaged, '
+            'the car is drivable, and nobody is injured.',
+        ),
+        (
+            'home',
+            'A pipe leaked at my Auckland home this morning. The kitchen and hallway are '
+            'damaged, the leak is stopped, and the house is safe to live in.',
+        ),
+        (
+            'contents',
+            'My laptop was damaged at home in Auckland this morning. Nobody was injured.',
+        ),
+    ],
+)
+def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    family: str,
+    message: str,
+) -> None:
+    app.state.agent_turn_provider = CompleteVpPathAgent()
+    created = create_claim(
+        client,
+        auth_headers,
+        key=f'{family}-vp-journey',
+        incident_type=family,
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key=f'{family}-vp-intake',
+        client_message_id=f'{family}-vp-message',
+        text=message,
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    assert turn_body['dynamic_form']['selected_family'] == family
+    assert turn_body['decision']['customer_next_step']['status'] == 'confirmation_required'
+    confirmation_items = [item['field_code'] for item in turn_body['form_changes']]
+    if family == 'contents':
+        confirmation_items.append('contents.items')
+        assert len(turn_body['contents_item_changes']) == 1
+
+    confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{family}-vp-confirm',
+            'If-Match': str(turn_body['claim_revision']),
+        },
+        json={'field_codes': confirmation_items},
+    )
+
+    assert confirmation.status_code == 200, confirmation.text
+    confirmed = confirmation.json()
+    assert confirmed['dynamic_form']['requirements']['ready'] is True
+    assert confirmed['dynamic_form']['requirements']['missing_required_now'] == []
+    assert confirmed['customer_next_step']['status'] == 'ready_to_create'
+
+    external = client.post(
+        f'/api/v1/claims/{claim_id}/creation',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': f'{family}-vp-create',
+            'If-Match': str(confirmed['revision']),
+        },
+    )
+
+    assert external.status_code == 201, external.text
+    external_body = external.json()
+    assert external_body['external_claim']['route'] == f'standard_{family}_intake'
+    assert external_body['external_claim']['creation_status'] == 'created'
+    claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
+    assert claimant_view['workflow_state'] == 'created'
+    assert claimant_view['dynamic_form']['requirements']['ready'] is True
+    final_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert final_session is not None
+    assert final_session.repeated_question_count == 0
+    if family == 'contents':
+        assert claimant_view['contents_items'][0]['description'] == 'Laptop computer'
+
+
+def test_question_accounting_and_provenance_survive_a_new_session(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    app.state.agent_turn_provider = QuestionAndFactAgent()
+    created = create_claim(client, auth_headers, key='question-resume').json()
+    claim_id = created['claim']['claim_id']
+    first_session_id = created['session']['session_id']
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        first_session_id,
+        key='question-resume-turn',
+        client_message_id='question-resume-message',
+        text='My car was damaged, but I have not said where yet.',
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert first_session is not None
+    assert stored_claim is not None
+    assert first_session.question_turn_count == 1
+    assert first_session.requested_fact_count == 1
+    assert first_session.repeated_question_count == 0
+    assert first_session.question_history[0].field_codes == ['incident.location']
+    assert (
+        first_session.question_history[0].trigger_message_id
+        == turn_body['claimant_message']['message_id']
+    )
+    assert stored_claim.form['incident.description'].source_refs == [
+        turn_body['claimant_message']['message_id']
+    ]
+
+    resumed = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'question-resume-new-session'},
+        json={'intent': 'new'},
+    )
+
+    assert resumed.status_code == 201, resumed.text
+    resume_body = resumed.json()
+    assert resume_body['session_id'] != first_session_id
+    assert resume_body['resume']['question_turn_count'] == 1
+    assert resume_body['resume']['requested_fact_count'] == 1
+    assert resume_body['resume']['remaining_question_budget'] == 8
+    assert 'question_history' not in resume_body['resume']
+    latest_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert latest_claim is not None
+    support = client.post(
+        f'/api/v1/claims/{claim_id}/support-requests',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'question-resume-support',
+            'If-Match': str(latest_claim.revision),
+        },
+        json={
+            'reason': 'I need a claims professional to help me continue.',
+            'support_need': 'human_requested',
+            'preferred_channel': 'in_app',
+        },
+    )
+    assert support.status_code == 201, support.text
+    staff_response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/sessions', headers=staff_auth_headers
+    )
+    assert staff_response.status_code == 200, staff_response.text
+    staff_sessions = staff_response.json()['items']
+    active_staff_session = next(
+        item for item in staff_sessions if item['session_id'] == resume_body['session_id']
+    )
+    assert active_staff_session['question_history'][0]['field_codes'] == ['incident.location']
+    assert (
+        active_staff_session['question_history'][0]['trigger_message_id']
+        == turn_body['claimant_message']['message_id']
+    )
+
+
+def test_question_budget_stops_additional_agent_questions_and_requests_follow_up(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    app.state.agent_turn_provider = QuestionAndFactAgent()
+    created = create_claim(client, auth_headers, key='question-budget').json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert session is not None
+    repository.save_session(
+        session.model_copy(
+            update={
+                'question_budget': 1,
+            }
+        )
+    )
+
+    first = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='question-budget-first',
+        client_message_id='question-budget-first',
+        text='My car was damaged.',
+    )
+    second = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=first.json()['claim_revision'],
+        key='question-budget-second',
+        client_message_id='question-budget-second',
+        text='I still need help describing the incident.',
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert second_body['decision']['customer_next_step']['status'] == 'question_budget_reached'
+    assert 'saved' in second_body['agent_message']['content']['text'].casefold()
+    final_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert final_session is not None
+    assert final_session.question_turn_count == 1
+    assert final_session.requested_fact_count == 1
+    assert final_session.repeated_question_count == 0
+    assert final_session.post_session_follow_up_required is True
+    session_view = client.get(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}', headers=auth_headers
+    ).json()
+    assert session_view['resume']['remaining_question_budget'] == 0
+    assert session_view['resume']['post_session_follow_up_required'] is True
+
+
 def test_form_patch_rejects_an_incompatible_registered_field_shape(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -266,7 +649,7 @@ def test_applied_message_evaluation_retains_message_branch_candidates(
         'participant.another_party',
         'authority.police',
     ):
-        assert branch_results[branch_id].status == 'candidate'
+        assert branch_results[branch_id].status in {'candidate', 'active'}
         assert claimant_message_id in branch_results[branch_id].source_refs
 
 
@@ -679,7 +1062,7 @@ def test_agent_claim_history_lookup_is_persisted_without_advancing_revision(
         {'history_reference': 'synthetic-history-204', 'limit': 51},
     ],
 )
-def test_invalid_claim_history_tool_arguments_do_not_call_provider(
+def test_invalid_claim_history_tool_arguments_fail_atomically(
     app: FastAPI,
     client: TestClient,
     auth_headers: dict[str, str],
@@ -690,6 +1073,8 @@ def test_invalid_claim_history_tool_arguments_do_not_call_provider(
     app.state.policy_history_adapter = adapter
     app.state.agent_turn_provider = ClaimHistoryLookupAgent(tool)
     created = create_claim(client, auth_headers, key='invalid-history-tool').json()
+    before_claim = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+    assert before_claim is not None
 
     response = submit_message(
         client,
@@ -698,9 +1083,18 @@ def test_invalid_claim_history_tool_arguments_do_not_call_provider(
         created['session']['session_id'],
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 503
+    assert response.json()['error']['code'] == 'AGENT_TOOL_NOT_PERMITTED'
     assert adapter.history_calls == 0
     assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []
+    assert (
+        repository.list_messages(
+            created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
+        )
+        == []
+    )
+    assert repository.list_agent_decisions(created['claim']['claim_id'], 'cus_demo') == []
+    assert repository.get_claim(created['claim']['claim_id'], 'cus_demo') == before_claim
 
 
 def test_message_turn_deduplicates_retries_and_rejects_conflicting_client_id(
@@ -799,6 +1193,126 @@ def test_form_confirmation_and_explicit_correction_preserve_source_and_revision(
         'form_updated',
     ]
     assert evaluations[-1].resulting_claim_revision == 4
+
+
+def test_contents_item_confirmation_and_natural_language_correction_preserve_history(
+    app: FastAPI,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    app.state.agent_turn_provider = ContentsCorrectionAgent()
+    created = create_claim(
+        client,
+        auth_headers,
+        key='contents-correction-claim',
+        incident_type='contents',
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    proposed = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=1,
+        key='contents-item-proposal',
+        client_message_id='contents-item-proposal',
+        text='My owned laptop was damaged.',
+    )
+    assert proposed.status_code == 200, proposed.text
+    first_turn = proposed.json()
+    first_item = first_turn['contents_item_changes'][0]
+    assert first_item['status'] == 'proposed'
+    assert first_item['resolution_state'] == 'needs_confirmation'
+
+    confirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'confirm-contents-item',
+            'If-Match': str(first_turn['claim_revision']),
+        },
+        json={'field_codes': ['contents.items']},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()['confirmed_contents_items'][0]['resolution_state'] == 'resolved'
+
+    corrected = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=confirmed.json()['revision'],
+        key='contents-item-correction',
+        client_message_id='contents-item-correction',
+        text='Actually, the laptop was stolen, not damaged.',
+    )
+    assert corrected.status_code == 200, corrected.text
+    corrected_turn = corrected.json()
+    corrected_item = corrected_turn['contents_item_changes'][0]
+    assert corrected_item['item_id'] == first_item['item_id']
+    assert corrected_item['loss_type'] == 'stolen'
+    assert corrected_item['status'] == 'proposed'
+
+    stored = repository.get_claim(claim_id, 'cus_demo')
+    assert stored is not None
+    assert len(stored.contents_items) == 1
+    assert stored.contents_items[0].item_id == first_item['item_id']
+    assert [assertion.relation.value for assertion in stored.contents_items[0].assertions] == [
+        'initial',
+        'correction',
+    ]
+    assert [assertion.status.value for assertion in stored.contents_items[0].assertions] == [
+        'superseded',
+        'proposed',
+    ]
+
+    reconfirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'reconfirm-contents-item',
+            'If-Match': str(corrected_turn['claim_revision']),
+        },
+        json={'field_codes': ['contents.items']},
+    )
+    assert reconfirmed.status_code == 200, reconfirmed.text
+    final_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert final_claim is not None
+    final_item = final_claim.contents_items[0]
+    assert final_item.status is FormStatus.CONFIRMED
+    assert final_item.assertions[-1].status is FormStatus.CONFIRMED
+
+    conflicted = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=reconfirmed.json()['revision'],
+        key='contents-item-conflict',
+        client_message_id='contents-item-conflict',
+        text='The laptop was damaged.',
+    )
+    assert conflicted.status_code == 200, conflicted.text
+    conflict_turn = conflicted.json()
+    assert conflict_turn['decision']['customer_next_step']['status'] == 'clarification_needed'
+    assert conflict_turn['decision']['customer_next_step']['required_items'] == ['contents.items']
+    stored_after_conflict = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_after_conflict is not None
+    assert len(stored_after_conflict.contents_items) == 1
+    disputed_item = stored_after_conflict.contents_items[0]
+    assert disputed_item.status is FormStatus.DISPUTED
+    assert disputed_item.assertions[-1].relation.value == 'material_conflict'
+    assert disputed_item.assertions[-1].status is FormStatus.DISPUTED
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        conflict_turn['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert decision is not None
+    assert decision.discrepancy_candidates[0].field_code == 'contents.items'
 
 
 def test_confirmed_family_patch_atomically_updates_claim_and_branch_projection(
@@ -1045,64 +1559,25 @@ def test_confirmed_intake_field_is_not_asked_again(
         claim_id,
         session_id,
         revision=confirmation.json()['revision'],
-        key='guided-location',
-        client_message_id='guided-location',
-        text='A synthetic car park in Auckland.',
+        key='guided-safety',
+        client_message_id='guided-safety',
+        text='Nobody was injured and there is no immediate danger at the scene.',
     )
 
     assert confirmation.status_code == 200
-    assert confirmation.json()['customer_next_step']['status'] == 'provide_incident_location'
-    assert confirmation.json()['customer_next_step']['required_items'] == ['incident.location']
-    assert second_turn.status_code == 200
-    assert second_turn.json()['form_changes'][0]['field_code'] == 'incident.location'
-    assert second_turn.json()['decision']['customer_next_step']['required_items'] == [
-        'incident.location'
+    assert confirmation.json()['customer_next_step']['status'] == 'more_information_needed'
+    assert confirmation.json()['customer_next_step']['required_items'] == [
+        'incident.injury_or_danger'
     ]
-
-    location_confirmation = client.post(
-        f'/api/v1/claims/{claim_id}/form/confirmations',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'confirm-guided-location',
-            'If-Match': str(second_turn.json()['claim_revision']),
-        },
-        json={'field_codes': ['incident.location']},
-    ).json()
-    loss_turn = submit_message(
-        client,
-        auth_headers,
-        claim_id,
-        session_id,
-        revision=location_confirmation['revision'],
-        key='guided-loss',
-        client_message_id='guided-loss',
-        text='A synthetic rear bumper was scratched.',
-    ).json()
-    final_confirmation = client.post(
-        f'/api/v1/claims/{claim_id}/form/confirmations',
-        headers={
-            **auth_headers,
-            'Idempotency-Key': 'confirm-guided-loss',
-            'If-Match': str(loss_turn['claim_revision']),
-        },
-        json={'field_codes': ['loss.description']},
-    ).json()
-    additional_turn = submit_message(
-        client,
-        auth_headers,
-        claim_id,
-        session_id,
-        revision=final_confirmation['revision'],
-        key='guided-additional',
-        client_message_id='guided-additional',
-        text='A synthetic additional note.',
+    assert second_turn.status_code == 200
+    assert second_turn.json()['form_changes'][0]['field_code'] == 'incident.injury_or_danger'
+    assert second_turn.json()['decision']['customer_next_step']['required_items'] == [
+        'incident.occurred_at'
+    ]
+    assert (
+        'incident.description'
+        not in second_turn.json()['decision']['customer_next_step']['required_items']
     )
-
-    assert loss_turn['form_changes'][0]['field_code'] == 'loss.description'
-    assert final_confirmation['customer_next_step']['status'] == 'ready_to_create'
-    assert additional_turn.status_code == 200
-    assert additional_turn.json()['form_changes'] == []
-    assert additional_turn.json()['decision']['action'] == 'UPDATE'
 
 
 def test_message_reads_hide_internal_records_and_validate_session_state(

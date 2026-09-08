@@ -3,7 +3,7 @@ from hashlib import sha256
 from backend.adapters.claims_service import ClaimsServiceAdapter
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.intake import CONTROLLED_INTAKE_FIELDS
+from backend.domain.branch_registry import BranchRuleEvaluator
 from backend.domain.models import (
     ActorType,
     AgentAction,
@@ -128,19 +128,21 @@ def create_claim_from_confirmed_report(
         )
     if claim.external_claim is not None:
         raise _invalid_state('This working claim has already been created in the claims service.')
-    if claim.incident_type != 'motor':
-        raise _invalid_state(
-            'Controlled claim creation is currently available only for the motor fixture path.'
-        )
+    if claim.incident_type not in {'motor', 'home', 'contents'}:
+        raise _invalid_state('A supported claim family must be confirmed before claim creation.')
     if claim.claim_state.workflow_state is WorkflowState.PROFESSIONAL_REVIEW:
         raise _invalid_state('This report is not ready for controlled claim creation.')
 
-    missing_or_unconfirmed = [
-        field.field_code
-        for field in CONTROLLED_INTAKE_FIELDS
-        if claim.form.get(field.field_code) is None
-        or claim.form[field.field_code].status is not FormStatus.CONFIRMED
-    ]
+    requirements = (
+        BranchRuleEvaluator()
+        .evaluate(
+            claim,
+            current_action=AgentAction.CREATE_CLAIM,
+            recomputation_reason='claim_creation_validation',
+        )
+        .requirements
+    )
+    missing_or_unconfirmed = requirements.missing_required_now
     if missing_or_unconfirmed:
         raise _invalid_state(
             'Required claim facts must be confirmed before claim creation.',
@@ -177,7 +179,8 @@ def create_claim_from_confirmed_report(
         action=AgentAction.CREATE_CLAIM,
         reason_codes=['CLAIM_CREATION_AUTHORISED'],
         customer_reason=(
-            'The controlled intake fields are confirmed and no open handoff blocks creation.'
+            'The registered current-action requirements are satisfied and no open handoff '
+            'blocks creation.'
         ),
         customer_response=(
             'Your confirmed report is being created through the configured claims service.'
@@ -222,7 +225,7 @@ def create_claim_from_confirmed_report(
                 for item in evidence
                 if item.status is EvidenceStatus.PENDING_GENERATION
             ],
-            route='standard_motor_intake',
+            route=f'standard_{claim.incident_type}_intake',
         ),
     )
     updated = repository.get_claim(claim_id, principal.subject)

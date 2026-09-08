@@ -441,7 +441,7 @@ PROVIDER_CONFIGURATION_INVALID` and cannot enter the lifecycle. Model validation
 publication only when `evaluation_status` is `configured`; protocol, base URL, and credential
 environment-variable name match the deployment-owned startup settings; and purpose, privacy
 class, executable prompt identifier, and structured-output capability match the claimant Runtime
-contract. The current executable prompt identifier is `northwind-fnol-motor-claimant-v4`. A
+contract. The current executable prompt identifier is `northwind-fnol-claimant-v5`. A
 degraded, unavailable, deployment-mismatched, or Runtime-incompatible profile returns `422
 PROVIDER_CONFIGURATION_UNAVAILABLE` and remains a draft. Other invalid or incomplete model values
 return `422 PROVIDER_CONFIGURATION_INVALID`.
@@ -655,20 +655,22 @@ The canonical backend record has these fields. API projections omit fields the c
 | `pending_items` | array | Yes | Evidence or actions still outstanding; initially empty |
 | `prior_commitments` | array | Yes | Customer-visible commitments and promised next steps; initially empty |
 | `context_revision` | integer | Yes | Claim revision from which the summary was produced |
-| `question_budget` | integer | Yes | Maximum claimant-question turns for the Claim trajectory; currently `9` |
-| `question_turn_count` | integer | Yes | Question turns already presented, including resumed sessions |
-| `requested_fact_count` | integer | Yes | Registered field requests made across those question turns |
-| `repeated_question_count` | integer | Yes | Question turns whose registered fields had all been requested before |
-| `post_session_follow_up_required` | boolean | Yes | Whether remaining work must continue without another Agent question in this trajectory |
-| `question_history` | array | Yes | Internal ordered records of question identity, triggering message, requested field codes, purpose, repetition, and time |
+| `question_budget` | integer | Yes | Maximum Agent question turns retained across resumed sessions; defaults to 9 |
+| `question_turn_count` | integer | Yes | Accepted Agent turns that asked for a registered fact |
+| `requested_fact_count` | integer | Yes | Total registered facts requested by recorded Agent questions |
+| `repeated_question_count` | integer | Yes | Questions whose complete registered fact set had already been requested |
+| `post_session_follow_up_required` | boolean | Yes | True when the bounded question budget is exhausted before the current requirements are satisfied |
+| `question_history` | object array | Staff only | Stable question identity, trigger message, registered field codes, purpose, repeat marker, and time |
 | `started_at` | timestamp | Yes | Session creation time |
 | `last_active_at` | timestamp | Yes | Last accepted claimant or agent message time |
 | `closed_at` | timestamp | No | Present only when closed |
 
-Complete messages remain in durable storage. `summary`, unresolved work, question accounting, and
-selected source-message references form a bounded resume package; they do not replace the formal
-Claim record. A new session for the same Claim copies the counters and ordered question history so
-restarting the browser or resuming days later cannot reset the customer-effort budget.
+Complete messages remain in durable storage. `summary`, `unresolved_questions`, question counters,
+and selected recent message references form a bounded resume package; they do not replace the
+formal claim record. Claimant session responses expose the counters and remaining budget but omit
+the internal `question_history`. The authorised Workbench session projection includes the history
+for effort and repetition review. Starting a new session for the same Claim carries the counters
+and history forward so a restart cannot reset the claimant-effort boundary.
 
 #### Session Lifecycle
 
@@ -751,21 +753,6 @@ The form is a map keyed by a registered field code. Every entry uses the same en
   "status": "confirmed",
   "needed_for": "current_action",
   "confidence": 1.0,
-  "resolution_state": "resolved",
-  "precision": "exact",
-  "current_assertion_id": "ast_01K4Y7T1KC",
-  "assertions": [
-    {
-      "assertion_id": "ast_01K4Y7T1KC",
-      "normalized_value": "Rear-ended while stopped at traffic lights",
-      "source_refs": ["msg_01J4Y7T1KC"],
-      "relation": "initial",
-      "status": "confirmed",
-      "precision": "exact",
-      "reason_code": null,
-      "created_at": "2026-08-10T03:42:10Z"
-    }
-  ],
   "updated_at": "2026-08-10T03:42:10Z",
   "updated_by": {
     "actor_type": "claimant",
@@ -776,16 +763,16 @@ The form is a map keyed by a registered field code. Every entry uses the same en
 
 | Property | Type | Rule |
 |---|---|---|
-| `value` | JSON value | Current selected value, typed by the field registry; may be `null` for missing, pending, unavailable, or superseded fields |
+| `value` | JSON value | Typed according to the field registry; may be `null` only for missing or pending fields |
 | `source` | enum | `claimant`, `image`, `document`, `policy`, `claim_history`, `inference`, `staff` |
 | `source_refs` | string array | IDs of messages, evidence, policy citations, history records, or staff actions |
 | `status` | enum | `proposed`, `confirmed`, `disputed`, `missing`, `pending_generation`, `unavailable`, `superseded` |
 | `needed_for` | enum | `current_action`, `later_action` |
 | `confidence` | number | Optional `0.0` to `1.0`; never a substitute for confirmation |
 | `resolution_state` | enum | `resolved`, `needs_confirmation`, `clarification_required`, `unavailable`, or `superseded` |
-| `precision` | enum | `exact`, `approximate`, `range`, `partial`, or `unknown` |
-| `current_assertion_id` | string/null | Assertion selected as the current field value; omitted for legacy or source-filtered projections when no visible assertion is selectable |
-| `assertions` | array | Ordered source-preserving statements; a correction supersedes rather than deletes the prior assertion |
+| `precision` | enum | `exact`, `approximate`, `range`, `partial`, or `unknown`; temporal values preserve claimant precision |
+| `current_assertion_id` | string/null | Current assertion selected from immutable assertion history |
+| `assertions` | object array | Source-linked assertion history; repetition, refinement, correction, conflict, and irrelevant input remain distinguishable |
 | `updated_at` | timestamp | Server generated |
 | `updated_by` | actor reference | Server derived from the authenticated actor |
 
@@ -799,7 +786,7 @@ Initial common field codes:
 | `claimant.contact_preference` | enum | `in_app`, `email`, `phone`, or `sms` when supported |
 | `claim.product_family` | enum | `motor`, `home`, or `contents`; source-aware family field projected through top-level `incident_type` for compatibility |
 | `incident.type` | enum | `collision`, `fire`, `water`, `theft`, `weather`, or `other`; never the product family |
-| `incident.occurred_at` | temporal string or object | Exact, approximate, range, partial, unknown, and timezone-aware occurrence wording without invented precision |
+| `incident.occurred_at` | timestamp | When the incident occurred |
 | `incident.location` | object | Structured place plus claimant wording |
 | `incident.description` | string | Claimant-confirmed factual account |
 | `incident.injury_or_danger` | boolean | Explicit safety routing input; not a diagnosis |
@@ -840,22 +827,22 @@ internal references are omitted. Workbench projections retain the full authorise
 | `status` | enum | Existing `FormStatus`; `proposed` is used for inference and `disputed` for conflicts |
 | `needed_for` | enum | `current_action` or `later_action` |
 | `confidence` | number/null | Optional 0.0–1.0 confidence; never confirmation |
+| `resolution_state` | enum | Same resolution states as structured form fields |
+| `current_assertion_id` | string/null | Current item assertion selected from immutable item history |
+| `assertions` | object array | Immutable item assertion history with relation, status, and source references |
 | `updated_at` / `updated_by` | timestamp / actor reference | Server-maintained provenance |
 
 The backend MUST maintain a versioned field registry with validation and display metadata. New product fields require a registry change; clients MUST NOT invent arbitrary field codes.
 
-An assertion records `assertion_id`, `normalized_value`, `source_refs`, its relation to the
-selected assertion (`initial`, `equivalent`, `refinement`, `correction`,
-`material_conflict`, or `irrelevant`), status, precision, optional reason code, and creation time.
-Assertions are embedded provenance history, not another Claim State. `source_refs` resolve to the
-immutable source record; for claimant dialogue, the full `MessageRecord` remains authoritative.
-An optional span may be added later as a lookup hint, but it cannot replace or rewrite that
-message. Claimant projections remove internal retrieval references from both the field and its
-assertions; Workbench projections retain authorised provenance.
+Every claimant Dynamic Form projection includes deterministic `requirements`: `satisfied`,
+`missing_required_now`, `pending_later`, `next_required_item`, `ready`,
+`current_action_total`, and `current_action_satisfied`. The backend recalculates this projection
+from authoritative Claim State, the selected registered branch, and the current action. Clients
+must not calculate readiness or choose required fields locally.
 
-The temporal object accepts `date`, `time`, `timezone`, `start`, `end`, `precision`, and a bounded
-`reported_text`. At least one reported component is required, and a `range` requires a start or
-end. Existing non-empty strings remain valid for backward compatibility.
+Each field assertion records a stable identifier, the reported wording when available, normalized
+value, source references, relation, status, precision, optional reason code, and creation time. A
+later claimant statement is resolved against existing assertions rather than silently discarded.
 
 ### Evidence
 
@@ -924,7 +911,6 @@ Extracted facts use the structured form envelope with `source` set to `image` or
     "validated_by": "rule_engine",
     "outcome": "authorised"
   },
-  "discrepancy_candidates": [],
   "created_at": "2026-08-10T03:46:00Z"
 }
 ```
@@ -936,13 +922,6 @@ be relabelled as a target `TurnPlan`, `AgentProposal`, `ExecutionPlan`, or `Turn
 Those records distinguish model proposal, runtime approval, execution, and actual outcome
 and require new schemas, persistence, consumers, fixtures, and contract tests before
 entering this normative HTTP contract.
-
-`discrepancy_candidates` is an internal-only list produced after Runtime compares a new
-source-linked assertion with the selected Claim fact. A `MATERIAL_VALUE_CONFLICT` candidate names
-the field and at least two source references. It is not a fraud finding, does not change
-`claim_state.fraud_signal`, does not create a `ReviewSignalRecord`, and is never returned through
-claimant decision projections. Any later fraud-review signal still requires its existing
-server-authorised evidence and validation path.
 
 ### Internal Signal
 
@@ -1240,12 +1219,6 @@ Response `201` includes:
     "unresolved_questions": [],
     "pending_items": ["police_report"],
     "prior_commitments": ["You can add the police report later without restarting."],
-    "question_budget": 9,
-    "question_turn_count": 4,
-    "requested_fact_count": 5,
-    "repeated_question_count": 0,
-    "remaining_question_budget": 5,
-    "post_session_follow_up_required": false,
     "customer_next_step": {}
   },
   "started_at": "2026-08-20T01:10:00Z",
@@ -1257,12 +1230,7 @@ Only one active claimant session per claim is permitted. If an active session al
 
 ### `GET /api/v1/claims/{claim_id}/sessions/{session_id}`
 
-Returns session status, compact resume summary, unresolved questions, pending items, prior
-commitments, question counters, remaining budget, follow-up state, and current customer next step.
-It MUST NOT return question-history internals, discrepancy candidates, hidden internal state, or
-the complete conversation by default. The current budget is nine question turns across the Claim
-trajectory, leaving the tenth possible interaction for a non-question response that saves
-progress and identifies professional follow-up.
+Returns session status, compact resume summary, unresolved questions, pending items, prior commitments, and current customer next step. It MUST NOT return hidden internal state or the complete conversation by default.
 
 ### `POST /api/v1/claims/{claim_id}/sessions/{session_id}/messages`
 

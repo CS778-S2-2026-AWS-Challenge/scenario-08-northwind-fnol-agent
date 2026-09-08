@@ -63,9 +63,9 @@ projections, fixtures, and transaction tests change together.
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, current structured facts with embedded source-preserving assertion history, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
-| Interaction | intent, sessions, immutable messages, compact summaries, unresolved work, prior commitments, and bounded question accounting | `session_id`, optionally linked to `claim_id` |
+| Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
 | Agent turn | TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelopes, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
@@ -269,21 +269,6 @@ the append-only audit collection through a bounded, filterable projection.
 ## Session and Resume Invariants
 
 - The Working Claim is authoritative; sessions hold bounded interaction context only.
-- Each current structured field may embed an ordered assertion history. An assertion has a stable
-  identity, normalized value, relation, resolution/confirmation status, precision, source
-  references, and creation time. This history explains the selected value but is not a second
-  current-state store and cannot advance the Claim revision independently.
-- Equivalent statements preserve the selected value. A compatible refinement or explicit
-  claimant correction supersedes, rather than deletes, the prior assertion. A material conflict
-  preserves both sources and leaves the field in `clarification_required` until a later claimant
-  selection, correction, or authorised staff decision resolves it.
-- `source_refs` resolve through the owning repository and access boundary. For dialogue facts,
-  `message_id` points to the immutable full `MessageRecord`, which remains the provenance
-  authority. Optional character or segment spans are lookup hints only and never become a copied
-  or rewritten message body.
-- `incident.occurred_at` accepts legacy non-empty strings and a temporal object that preserves
-  exact, approximate, range, partial, unknown, and timezone-aware input. Storage must not turn an
-  approximate or partial claimant statement into an invented exact timestamp.
 - A session may have `interaction_intent = non_claim_intent` and no `claim_id` when the
   conversation has no credible claim purpose.
 - Once a session has produced material incident facts, a draft claim may be linked to
@@ -300,11 +285,14 @@ the append-only audit collection through a bounded, filterable projection.
   approved product contract explicitly changes this rule.
 - Resume preserves confirmed facts, evidence records, pending work, and prior
   commitments while using the latest authorised Claim State.
-- A claimant session persists a budget of nine question turns plus counts for question turns,
-  requested registered facts, repeated questions, and whether professional follow-up is needed.
-  New sessions for the same Claim carry those values and the ordered question history forward;
-  reopening a Claim does not reset the effort measure. Once exhausted, the Runtime preserves the
-  report and returns a non-question follow-up message instead of asking a tenth question.
+- Session question accounting persists `question_budget`, `question_turn_count`,
+  `requested_fact_count`, `repeated_question_count`, `post_session_follow_up_required`, and an
+  append-only `question_history`. A new session for the same Claim carries these values forward;
+  it cannot reset the claimant-effort boundary.
+- Each question-history record retains its stable identity, trigger message, registered field
+  codes, purpose, repeat marker, and accepted time. Claimant projections expose counters and the
+  remaining budget but not the detailed history; the Workbench projection may expose it to
+  authorised staff.
 
 ## Staff Agent Session Invariants
 
@@ -404,6 +392,18 @@ Evidence record or protected object.
 - Model-authored customer prose and model-proposed internal signals are not persistence
   authority. Claimant-visible response fields are server-rendered after deterministic
   validation, and any non-empty model signal proposal rejects the complete turn before write.
+- A structured form field retains an immutable assertion list plus one
+  `current_assertion_id`. Assertions preserve reported wording, normalized value, source
+  references, relation, status, temporal precision, optional reason code, and creation time.
+  Equivalent repetition and compatible refinement retain history without creating a false
+  conflict; explicit correction supersedes the former current assertion; a material conflict
+  remains disputed until claimant clarification or authorised staff review.
+- `WorkingClaim.contents_items` uses the same history-preserving rule through immutable item
+  assertions and stable item IDs. Correcting an item replaces its current projection without
+  deleting the previous assertion or creating a duplicate item.
+- Agent decisions persist validated context-tool results and any discrepancy candidates used by
+  Runtime review. A discrepancy candidate is internal evidence of conflicting sources only; it
+  does not set `fraud_signal`, make a fraud conclusion, or enter claimant projections.
 
 ## Handoff and Staff-work Invariants
 
@@ -474,32 +474,6 @@ Evidence record or protected object.
   neither field can be cleared or replaced. `sent_at` records that Northwind handed the request
   to the selected service entry. Provider receipt remains the separate task `delivery` state and
   requires named delivery evidence.
-- An external task result records what the third party returned, which is a different fact from
-  the acknowledgement that a request reached it. Which task states can carry one is the
-  established result-bearing rule and is not restated by the persistence layer: `accepted`, where
-  the provider took the request, and `unknown_outcome`, which is the state a late answer resolves.
-  Delivery is not the test, because a `partial` failure is an unknown outcome whether or not the
-  request was recorded as submitted. The task's `provider_reference` remains a provider reference
-  and is never the result.
-- One task carries at most one canonical result. A second result identity for the same task is
-  refused rather than stored beside the first, so "the result" is unambiguous for every reader.
-- What arrived is fixed at ingestion: the result identity, its task and claim association, its
-  `source` provenance, its summary, its evidence identifiers, and `received_at`. `received_at`
-  records when the answer arrived and is never an advancing update stamp, so unlike a task
-  record a later write cannot push it forward.
-- A concurrent writer that stores the identical result is this call's own outcome, not a conflict.
-  After a duplicate-key refusal or a lost compare-and-swap, the canonical result is reread and the
-  write reports success when it equals the proposal, so a retrying producer is never told that
-  ingestion failed after it succeeded. A different stored result is refused.
-- A result is ingested `unverified` and may make one transition to a checked verification state,
-  which must name both the time of the check and the claim revision it was checked against, so a
-  later revision can tell that the check is stale. Writing the identical record again is a no-op,
-  which makes an ingestion retry safe. A different checked state, or a return to `unverified`,
-  contradicts a check already recorded and fails closed.
-- Every evidence identifier a result names must exist under the same claim and customer and must
-  already be linked to that same task. A result cannot borrow another task's material.
-- The `source` provenance identifies where the returned material came from. It must not be
-  populated from the request acknowledgement `provider_reference`.
 
 ## Configuration and Control Plane Invariants
 
@@ -603,12 +577,6 @@ and revision, and each selected knowledge ID, revision, and external version. It
 configuration values, system instructions, knowledge content, endpoint data, or secret references.
 The record is an audit coordinate into immutable Control Plane history rather than a second source
 of runtime configuration truth.
-
-The same compatibility decision may contain internal `discrepancy_candidates`. Each candidate
-names one materially conflicting field and at least two source references. It records that Runtime
-found an unresolved difference; it is not a `ReviewSignalRecord`, does not adjudicate fraud, and
-cannot change Claim State or enter a claimant projection. A later signal requires the ordinary
-authorised validation and persistence path.
 
 Access policies use the same `configuration_records` table with `domain=access`. Their closed
 values contain the named role, actor type, scopes, visibility classes, active flag, and optional
