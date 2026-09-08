@@ -115,6 +115,15 @@ function messageText(message) {
   return message?.content?.type === 'text' ? message.content.text : ''
 }
 
+function evidenceFileStatusLabel(fileStatus, status) {
+  if (fileStatus === 'awaiting_upload') return 'Upload incomplete'
+  if (fileStatus === 'processing') return 'Processing'
+  if (fileStatus === 'failed') return 'Processing failed'
+  if (fileStatus === 'ready') return 'Ready'
+  if (fileStatus) return fileStatus
+  return status === 'received' ? 'Received' : status
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -175,6 +184,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
   const [evidenceItems, setEvidenceItems] = useState([])
+  const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
+  const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
@@ -189,6 +200,10 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const latestEvidenceRevision = useRef(0)
+  const latestEvidenceItems = useRef([])
+  const evidenceHasLocalMutation = useRef(false)
+  const evidenceClaimId = useRef(null)
   const hasStarted = claim !== null
 
   useEffect(() => {
@@ -299,6 +314,62 @@ function App() {
     ? externalServiceInteraction.error
     : null
 
+  function attachmentForEvidence(evidence, current = {}) {
+    const fileStatus = evidence.file_status || evidence.status
+    const status = fileStatus === 'awaiting_upload'
+      ? 'failed'
+      : fileStatus === 'processing' || fileStatus === 'failed'
+        ? fileStatus
+        : 'uploaded'
+    const statusLabel = evidenceFileStatusLabel(fileStatus, evidence.status) || 'Uploaded'
+    const canCheckStatus = fileStatus === 'failed'
+      && current.retryFile
+      && current.retryAttempt
+    return {
+      ...current,
+      id: current.id || evidence.evidence_id,
+      evidenceId: evidence.evidence_id,
+      name: evidence.original_filename || evidence.kind,
+      status,
+      statusLabel,
+      ...(canCheckStatus
+        ? {
+          retry: () => handleFileSelected(current.retryFile, current.retryAttempt),
+          retryLabel: 'Check status',
+        }
+        : fileStatus === 'failed'
+          ? {}
+          : { retry: null, retryLabel: null }),
+    }
+  }
+
+  function syncEvidenceProjection(response) {
+    const responseRevision = Number(response.revision || 0)
+    if (responseRevision && responseRevision < latestEvidenceRevision.current) return false
+    if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
+    latestEvidenceRevision.current = Math.max(latestEvidenceRevision.current, responseRevision)
+    const items = response.items || []
+    latestEvidenceItems.current = items
+    setEvidenceItems(items)
+    setClaim((current) => current ? { ...current, revision: response.revision } : current)
+    setAttachments((current) => {
+      const currentByEvidenceId = new Map(
+        current.filter((item) => item.evidenceId).map((item) => [item.evidenceId, item]),
+      )
+      if (items.length === 0 && current.some((item) => item.status === 'uploading' || item.retry || item.retryFile)) {
+        return current
+      }
+      if (current.some((item) => item.status === 'uploading')) {
+        return current.map((item) => {
+          const evidence = items.find((candidate) => candidate.evidence_id === item.evidenceId)
+          return evidence ? attachmentForEvidence(evidence, item) : item
+        })
+      }
+      return items.map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
+    })
+    return true
+  }
+
   function setServiceConsentChecked(consentChecked) {
     setExternalServiceInteraction((current) => ({
       claimId: claim?.claim_id || null,
@@ -404,61 +475,71 @@ function App() {
 
   useEffect(() => {
     if (!claim?.claim_id) {
+      evidenceClaimId.current = null
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
       setEvidenceItems([])
       setAttachments([])
+      setEvidencePollingKey(0)
       return undefined
+    }
+    if (evidenceClaimId.current !== claim.claim_id) {
+      evidenceClaimId.current = claim.claim_id
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
     }
     let active = true
     getClaimEvidence(claim.claim_id)
       .then((response) => {
         if (active) {
-          setEvidenceItems(response.items || [])
-          setAttachments((current) => current.some((item) => item.status === 'uploading')
-            ? current
-            : (response.items || []).map((item) => ({
-              id: item.evidence_id,
-              evidenceId: item.evidence_id,
-              name: item.original_filename || item.kind,
-              status: item.file_status === 'awaiting_upload' ? 'failed' : 'uploaded',
-              statusLabel: item.file_status === 'awaiting_upload' ? 'Upload incomplete' : (item.file_status || 'Uploaded'),
-            })))
-          setClaim((current) => current ? { ...current, revision: response.revision } : current)
+          if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
+          if ((response.items || []).some((item) => item.file_status === 'processing')) {
+            setEvidencePollingKey((current) => current + 1)
+          }
         }
       })
       .catch(() => {})
     return () => { active = false }
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
 
   useEffect(() => {
-    if (!claim?.claim_id || !evidenceItems.some((item) => item.file_status === 'processing')) {
+    if (!claim?.claim_id || !evidencePollingKey) {
       return undefined
     }
     let active = true
-    const timer = globalThis.setTimeout(() => {
-      getClaimEvidence(claim.claim_id)
-        .then((response) => {
-          if (!active) return
-          setEvidenceItems(response.items || [])
-          setClaim((current) => current ? { ...current, revision: response.revision } : current)
-          setAttachments((current) => current.map((item) => {
-            const evidence = (response.items || []).find((candidate) => candidate.evidence_id === item.evidenceId)
-            if (!evidence || item.status === 'uploading') return item
-            return {
-              ...item,
-              status: evidence.file_status,
-              statusLabel: evidence.file_status === 'processing'
-                ? 'Processing'
-                : evidence.file_status === 'failed' ? 'Processing failed' : 'Ready',
-            }
-          }))
-        })
-        .catch(() => {})
-    }, 1500)
+    let timer
+    let delay = 1500
+    const maxDelay = 12000
+    const schedule = () => {
+      timer = globalThis.setTimeout(sync, delay)
+    }
+    async function sync() {
+      try {
+        const response = await getClaimEvidence(claim.claim_id)
+        if (!active) return
+        const applied = syncEvidenceProjection(response)
+        if (applied) setEvidenceSyncNotice('')
+        delay = 1500
+        if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
+      } catch {
+        if (!active) return
+        setEvidenceSyncNotice('We could not check the latest file status because the connection was interrupted. We will keep trying to reconnect.')
+        delay = Math.min(delay * 2, maxDelay)
+        schedule()
+      }
+    }
+    schedule()
     return () => {
       active = false
       globalThis.clearTimeout(timer)
     }
-  }, [claim?.claim_id, evidenceItems])
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claim?.claim_id, evidencePollingKey])
 
   async function handleFileSelected(file, existingAttempt = null) {
     if (isBusy) return
@@ -491,6 +572,30 @@ function App() {
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
       }
+      if (existingAttempt) {
+        const authoritative = await getClaimEvidence(activeClaim.claim_id)
+        syncEvidenceProjection(authoritative)
+        setEvidenceSyncNotice('')
+        const observed = (authoritative.items || []).find(
+          (item) => item.evidence_id === attempt.evidenceId,
+        )
+        if (observed && observed.file_status !== 'awaiting_upload') {
+          if (observed.file_status === 'processing') {
+            setEvidencePollingKey((current) => current + 1)
+          }
+          setAttachments((current) => current.map((item) => item.id === localId
+            ? attachmentForEvidence(observed, {
+              ...item,
+              retry: observed.file_status === 'failed'
+                ? () => handleFileSelected(file, attempt)
+                : null,
+              retryLabel: observed.file_status === 'failed' ? 'Check status' : null,
+            })
+            : item))
+          setStatus('idle')
+          return
+        }
+      }
       const requested = await requestEvidenceUpload({
         claimId: activeClaim.claim_id,
         revision: activeClaim.revision,
@@ -498,6 +603,9 @@ function App() {
         kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
         idempotencyKey: attempt.uploadKey,
       })
+      evidenceHasLocalMutation.current = true
+      latestEvidenceRevision.current = requested.revision
+      attempt.evidenceId = requested.evidence_id
       setClaim((current) => current ? { ...current, revision: requested.revision } : current)
       await uploadEvidenceContent({ upload: requested.upload, file })
       const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
@@ -509,11 +617,20 @@ function App() {
         checksum,
         idempotencyKey: attempt.completeKey,
       })
+      latestEvidenceRevision.current = completed.revision
+      attempt.evidenceId = completed.evidence.evidence_id
+      latestEvidenceItems.current = [completed.evidence]
+      setEvidencePollingKey((current) => current + 1)
       setClaim((current) => current ? { ...current, revision: completed.revision } : current)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'uploaded', statusLabel: 'Uploaded', evidenceId: completed.evidence.evidence_id }
+        ? attachmentForEvidence(completed.evidence, {
+          ...item,
+          retryFile: file,
+          retryAttempt: attempt,
+        })
         : item))
+      setStatus('idle')
     } catch (requestError) {
       setAttachments((current) => current.map((item) => item.id === localId
         ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
@@ -1323,7 +1440,7 @@ function App() {
                     {evidenceItems.map((item) => (
                       <li key={item.evidence_id} className="uploaded-file-row">
                         <div><strong>{item.original_filename || item.kind}</strong><span>{item.media_type || 'File'} · {item.file_status || item.status}</span></div>
-                        <span className="file-status">{item.file_status === 'processing' ? 'Processing' : item.status === 'received' ? 'Received' : item.file_status}</span>
+                        <span className="file-status">{evidenceFileStatusLabel(item.file_status, item.status)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1498,6 +1615,13 @@ function App() {
                 status={status}
                 error={serviceError}
               />
+            )}
+
+            {evidenceSyncNotice && (
+              <p className="backend-status" role="status">
+                <span className="status-dot" />
+                <span>{evidenceSyncNotice}</span>
+              </p>
             )}
 
             <MessageComposer

@@ -70,7 +70,7 @@ export default function MessageComposer({
                   <strong>{attachment.name}</strong>
                   <small>{attachment.statusLabel || attachment.status || 'Uploaded'}</small>
                 </span>
-                {attachment.retry && <button type="button" className="text-button" onClick={attachment.retry}>Retry</button>}
+                {attachment.retry && <button type="button" className="text-button" onClick={attachment.retry}>{attachment.retryLabel || 'Retry'}</button>}
               </div>
             ))}
           </div>
