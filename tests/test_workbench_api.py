@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -42,12 +42,14 @@ from backend.domain.models import (
     WorkflowState,
 )
 from backend.domain.retrieval import RetrievalSource
+from backend.domain.staff_identity import StaffPresenceUpdate
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_access import (
     ClaimStaffAccess,
     claim_staff_access,
     require_claim_collaborator,
 )
+from backend.services.staff_presence import list_online_staff, read_presence, update_presence
 from backend.services.support import now_utc
 from backend.services.workbench import _external_lifecycle
 
@@ -1823,3 +1825,200 @@ def test_staff_access_projection_distinguishes_primary_and_read_only_claimants(
     assert claim_staff_access(repository, owner, outsider) is ClaimStaffAccess.READ_ONLY
     with pytest.raises(ApiError):
         require_claim_collaborator(repository, owner, outsider)
+
+
+def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.patch(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': True, 'available': True, 'lease_seconds': 30},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body['staff_id'] == 'stf_demo'
+    assert body['expires_at'] > body['last_seen_at']
+    current = client.get('/api/v1/workbench/staff/presence', headers=staff_auth_headers)
+    assert current.status_code == 200
+    assert current.json()['staff_id'] == 'stf_demo'
+
+    online = client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers)
+    assert online.status_code == 200
+    assert any(item['staff_id'] == 'stf_demo' for item in online.json()['items'])
+
+    offline = client.patch(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': False, 'available': True, 'lease_seconds': 30},
+    )
+    assert offline.status_code == 200
+    assert offline.json()['available'] is False
+    assert (
+        client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json()['items']
+        == []
+    )
+
+
+def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_reads(
+    repository: FixtureRepository,
+) -> None:
+    unknown = read_presence(repository, Principal(subject='stf_unknown', actor_type='staff'))
+    assert unknown.online is False
+    assert unknown.available is False
+    with pytest.raises(ApiError) as error:
+        list_online_staff(repository, Principal(subject='cus_demo', actor_type='claimant'))
+    assert error.value.code == 'ACCESS_DENIED'
+
+
+def test_presence_update_maps_repository_revision_conflict(
+    repository: FixtureRepository,
+) -> None:
+    def stale_save(*args: object, **kwargs: object) -> None:
+        from backend.repositories.protocols import RevisionConflict
+
+        raise RevisionConflict(9)
+
+    repository.save_staff_presence = stale_save  # type: ignore[method-assign]
+    with pytest.raises(ApiError) as error:
+        update_presence(
+            repository,
+            Principal(subject='stf_demo', actor_type='staff'),
+            StaffPresenceUpdate(online=True, available=True),
+        )
+    assert error.value.code == 'REVISION_CONFLICT'
+
+
+def test_staff_logout_rejects_a_session_that_is_already_inactive(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.delete('/api/v1/staff/auth/session', headers=staff_auth_headers)
+    assert response.status_code == 401
+    assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
+def test_staff_logout_removes_authenticated_staff_from_online_pool(
+    app: FastAPI,
+    client: TestClient,
+) -> None:
+    staff_id, headers = _provision_staff(
+        app, client, email='logout-presence@example.test', display_name='Logout Presence'
+    )
+    assert any(
+        item['staff_id'] == staff_id
+        for item in client.get('/api/v1/workbench/staff/online', headers=headers).json()['items']
+    )
+
+    response = client.delete('/api/v1/staff/auth/session', headers=headers)
+
+    assert response.status_code == 204
+    assert client.get('/api/v1/workbench/staff/online', headers=headers).status_code == 401
+    presence = app.state.claim_repository.get_staff_presence(staff_id)
+    assert presence is not None
+    assert presence.online is False
+    assert presence.available is False
+
+
+def test_staff_logout_revokes_session_when_presence_cleanup_fails(
+    app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, headers = _provision_staff(
+        app, client, email='logout-presence-failure@example.test', display_name='Logout Failure'
+    )
+
+    def fail_presence(*args: object, **kwargs: object) -> None:
+        raise RuntimeError('presence store unavailable')
+
+    monkeypatch.setattr(app.state.claim_repository, 'save_staff_presence', fail_presence)
+    response = client.delete('/api/v1/staff/auth/session', headers=headers)
+    assert response.status_code == 204
+    assert client.get('/api/v1/staff/auth/session', headers=headers).status_code == 401
+
+
+def test_staff_login_revokes_session_when_presence_cannot_be_established(
+    app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email = 'presence-failure@example.test'
+    password = 'workbench-test-password'
+    account = app.state.staff_identity_repository.provision_account(
+        email, password, 'Presence Failure', ('claims_professional',)
+    )
+
+    def fail_presence(*args: object, **kwargs: object) -> None:
+        raise RuntimeError('presence store unavailable')
+
+    monkeypatch.setattr('backend.api.staff_identity.mark_staff_online', fail_presence)
+    response = client.post(
+        '/api/v1/staff/auth/sessions',
+        json={'email': email, 'password': password},
+    )
+
+    assert response.status_code == 503
+    assert response.json()['error']['code'] == 'STAFF_PRESENCE_UNAVAILABLE'
+    sessions = app.state.staff_identity_repository.list_sessions(account.staff_id)
+    assert len(sessions) == 1
+    assert sessions[0].revoked_at is not None
+
+
+def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(
+        client, auth_headers, repository, key_suffix='offline-staff'
+    )
+    client.patch(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': False, 'available': False, 'lease_seconds': 30},
+    )
+    response = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'offline-staff-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    )
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'STAFF_NOT_AVAILABLE'
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.revision == revision
+    assert stored.assignee_id is None
+
+
+def test_expired_presence_is_not_claimable(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    current = repository.get_staff_presence('stf_demo')
+    assert current is not None
+    now = datetime.now(UTC)
+    repository.save_staff_presence(
+        current.model_copy(
+            update={
+                'online': True,
+                'available': True,
+                'last_seen_at': now - timedelta(minutes=2),
+                'expires_at': now - timedelta(minutes=1),
+                'revision': current.revision + 1,
+                'updated_at': now,
+            }
+        ),
+        current.revision,
+    )
+    assert (
+        client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json()['items']
+        == []
+    )

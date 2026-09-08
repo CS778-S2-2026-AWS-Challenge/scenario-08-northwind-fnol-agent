@@ -58,6 +58,7 @@ from backend.domain.retrieval import (
     ReviewSignalRecord,
 )
 from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -183,7 +184,6 @@ class MongoDBRepository:
     ) -> None:
         self._client = client
         self._collection: Collection[dict[str, Any]] = client[database_name][collection_name]
-        self._collection.create_index([('record_type', 1), ('claim_id', 1), ('created_at', 1)])
         self._collection.create_index(
             [
                 ('record_type', 1),
@@ -1840,6 +1840,48 @@ class MongoDBRepository:
     def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
         return self._list('staff_action', StaffActionRecord, {'claim_id': claim_id}, 'created_at')
 
+    def get_staff_presence(self, staff_id: str) -> StaffPresenceRecord | None:
+        return self._get('staff_presence', staff_id, StaffPresenceRecord)
+
+    def list_staff_presence(self) -> list[StaffPresenceRecord]:
+        return self._list('staff_presence', StaffPresenceRecord, {}, 'staff_id')
+
+    def save_staff_presence(
+        self, presence: StaffPresenceRecord, expected_revision: int | None = None
+    ) -> None:
+        record_id = self._record_id('staff_presence', presence.staff_id)
+        current = self._collection.find_one({'_id': record_id, 'record_type': 'staff_presence'})
+        current_revision = int(current['revision']) if current is not None else 0
+        if expected_revision is not None and current_revision != expected_revision:
+            raise RevisionConflict(current_revision)
+        if current is None:
+            if presence.revision != 1:
+                raise RevisionConflict(0)
+            document = {
+                **presence.model_dump(mode='json'),
+                '_id': record_id,
+                'record_type': 'staff_presence',
+            }
+            try:
+                self._collection.insert_one(document)
+            except DuplicateKeyError as error:
+                raise RevisionConflict(1) from error
+            return
+        if presence.revision != current_revision + 1:
+            raise RevisionConflict(current_revision)
+        document = {
+            **presence.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'staff_presence',
+        }
+        result = self._collection.replace_one(
+            {'_id': record_id, 'record_type': 'staff_presence', 'revision': current_revision},
+            document,
+        )
+        if result.modified_count != 1:
+            latest = self._collection.find_one({'_id': record_id})
+            raise RevisionConflict(int(latest['revision']) if latest else 0)
+
     def get_staff_action(self, claim_id: str, action_id: str) -> StaffActionRecord | None:
         record = self._get('staff_action', action_id, StaffActionRecord)
         return record if record is not None and record.claim_id == claim_id else None
@@ -1916,6 +1958,8 @@ class MongoDBRepository:
         signal_decision: SignalDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         supplied = (staff_action, customer_update, signal_decision, handoff, message)
         if (
@@ -1951,6 +1995,8 @@ class MongoDBRepository:
                 idempotency,
                 mongo_session,
                 records=records,
+                required_staff_id=required_staff_id,
+                required_staff_revision=required_staff_revision,
             )
         )
 
@@ -2176,9 +2222,40 @@ class MongoDBRepository:
         *,
         records: list[tuple[str, str, BaseModel]],
         session: SessionRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
         self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        if required_staff_id is not None:
+            presence = self._collection.find_one(
+                {
+                    '_id': self._record_id('staff_presence', required_staff_id),
+                    'record_type': 'staff_presence',
+                    'online': True,
+                    'available': True,
+                    **(
+                        {'revision': required_staff_revision}
+                        if required_staff_revision is not None
+                        else {}
+                    ),
+                    'expires_at': {'$gt': datetime.now(UTC).isoformat()},
+                },
+                session=mongo_session,
+            )
+            if presence is None:
+                raise KeyError('staff_not_available')
+            guard = self._collection.update_one(
+                {
+                    '_id': self._record_id('staff_presence', required_staff_id),
+                    'record_type': 'staff_presence',
+                    'revision': presence['revision'],
+                },
+                {'$inc': {'revision': 1}},
+                session=mongo_session,
+            )
+            if guard.modified_count != 1:
+                raise KeyError('staff_not_available')
         stored_session: SessionRecord | None = None
         if session is not None:
             stored_session = self._get(

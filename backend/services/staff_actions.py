@@ -47,6 +47,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
 )
 from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
+from backend.services.staff_presence import require_claimable_staff
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -153,6 +154,14 @@ def _save(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    except KeyError as conflict:
+        if conflict.args == ('staff_not_available',):
+            raise ApiError(
+                status_code=409,
+                code='STAFF_NOT_AVAILABLE',
+                message='Staff must be online and available to accept a Claim.',
+            ) from conflict
+        raise
     except IdempotencyConflict as conflict:
         raise ApiError(
             status_code=409,
@@ -189,6 +198,8 @@ def accept_handoff(
     if replay is not None:
         return HandoffMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
+    presence = repository.get_staff_presence(principal.subject)
+    require_claimable_staff(repository, principal)
     projected_action = require_workbench_action(
         repository, principal, claim, expected, 'human.accept_handoff', handoff_id
     )
@@ -253,7 +264,15 @@ def accept_handoff(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    _save(repository, updated, expected, idempotency, handoff=accepted)
+    _save(
+        repository,
+        updated,
+        expected,
+        idempotency,
+        handoff=accepted,
+        required_staff_id=principal.subject,
+        required_staff_revision=presence.revision if presence is not None else None,
+    )
     return response
 
 

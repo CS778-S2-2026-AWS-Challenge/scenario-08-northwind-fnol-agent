@@ -32,6 +32,34 @@ class StaffAuthSessionRecord:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+class StaffPresenceRecord(BaseModel):
+    """Short-lived, provider-neutral staff presence used for Workbench eligibility."""
+
+    staff_id: str = Field(min_length=1, max_length=100)
+    online: bool
+    available: bool
+    last_seen_at: datetime
+    expires_at: datetime
+    revision: int = Field(default=1, ge=1)
+    updated_at: datetime
+
+    def is_claimable(self, now: datetime) -> bool:
+        return self.online and self.available and self.expires_at > now
+
+
+class StaffPresenceUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    online: bool = True
+    available: bool = True
+    lease_seconds: int = Field(default=60, ge=15, le=300)
+
+
+class StaffPresencePage(BaseModel):
+    items: list[StaffPresenceRecord]
+    page: PageInfo
+
+
 class StaffLoginRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
