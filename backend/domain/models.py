@@ -145,6 +145,35 @@ class FormStatus(str, Enum):
     DISPUTED = 'disputed'
     MISSING = 'missing'
     PENDING_GENERATION = 'pending_generation'
+    UNAVAILABLE = 'unavailable'
+    SUPERSEDED = 'superseded'
+
+
+class FactResolutionState(str, Enum):
+    """Resolution of a structured fact independent from its storage status."""
+
+    RESOLVED = 'resolved'
+    NEEDS_CONFIRMATION = 'needs_confirmation'
+    CLARIFICATION_REQUIRED = 'clarification_required'
+    UNAVAILABLE = 'unavailable'
+    SUPERSEDED = 'superseded'
+
+
+class FactPrecision(str, Enum):
+    EXACT = 'exact'
+    APPROXIMATE = 'approximate'
+    RANGE = 'range'
+    PARTIAL = 'partial'
+    UNKNOWN = 'unknown'
+
+
+class AssertionRelation(str, Enum):
+    INITIAL = 'initial'
+    EQUIVALENT = 'equivalent'
+    REFINEMENT = 'refinement'
+    CORRECTION = 'correction'
+    MATERIAL_CONFLICT = 'material_conflict'
+    IRRELEVANT = 'irrelevant'
 
 
 class NeededFor(str, Enum):
@@ -293,6 +322,39 @@ class CustomerNextStep(ContractModel):
     required_items: list[str] = Field(default_factory=list)
 
 
+class TemporalFactValue(ContractModel):
+    """A claimant time statement without inventing missing precision."""
+
+    date: str | None = None
+    time: str | None = None
+    timezone: str | None = None
+    precision: FactPrecision = FactPrecision.UNKNOWN
+    start: str | None = None
+    end: str | None = None
+    reported_text: str | None = None
+
+    @model_validator(mode='after')
+    def require_temporal_content(self) -> 'TemporalFactValue':
+        if not any((self.date, self.time, self.start, self.end, self.reported_text)):
+            raise ValueError('A temporal value must preserve at least one reported component.')
+        if self.precision is FactPrecision.RANGE and not (self.start or self.end):
+            raise ValueError('A range temporal value requires a start or end.')
+        return self
+
+
+class FactAssertion(ContractModel):
+    """One source-linked statement that contributed to a structured field."""
+
+    assertion_id: str = Field(min_length=1, max_length=120)
+    normalized_value: Any
+    source_refs: list[str] = Field(default_factory=list)
+    relation: AssertionRelation = AssertionRelation.INITIAL
+    status: FormStatus = FormStatus.PROPOSED
+    precision: FactPrecision = FactPrecision.EXACT
+    reason_code: str | None = Field(default=None, max_length=120)
+    created_at: datetime
+
+
 class StructuredFormField(ContractModel):
     value: Any
     source: FormSource
@@ -300,8 +362,25 @@ class StructuredFormField(ContractModel):
     status: FormStatus
     needed_for: NeededFor
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    resolution_state: FactResolutionState | None = None
+    precision: FactPrecision = FactPrecision.EXACT
+    current_assertion_id: str | None = Field(default=None, max_length=120)
+    assertions: list[FactAssertion] = Field(default_factory=list)
     updated_at: datetime
     updated_by: ActorReference
+
+    @model_validator(mode='after')
+    def derive_resolution_state(self) -> 'StructuredFormField':
+        if self.resolution_state is not None:
+            return self
+        derived = {
+            FormStatus.CONFIRMED: FactResolutionState.RESOLVED,
+            FormStatus.DISPUTED: FactResolutionState.CLARIFICATION_REQUIRED,
+            FormStatus.UNAVAILABLE: FactResolutionState.UNAVAILABLE,
+            FormStatus.SUPERSEDED: FactResolutionState.SUPERSEDED,
+        }.get(self.status, FactResolutionState.NEEDS_CONFIRMATION)
+        self.resolution_state = derived
+        return self
 
 
 class ContentsLossType(str, Enum):
@@ -495,7 +574,22 @@ class ResumePackage(ContractModel):
     unresolved_questions: list[str] = Field(default_factory=list)
     pending_items: list[str] = Field(default_factory=list)
     prior_commitments: list[str] = Field(default_factory=list)
+    question_budget: int = Field(default=9, ge=1)
+    question_turn_count: int = Field(default=0, ge=0)
+    requested_fact_count: int = Field(default=0, ge=0)
+    repeated_question_count: int = Field(default=0, ge=0)
+    remaining_question_budget: int = Field(default=9, ge=0)
+    post_session_follow_up_required: bool = False
     customer_next_step: CustomerNextStep
+
+
+class QuestionRecord(ContractModel):
+    question_id: str = Field(min_length=1, max_length=120)
+    trigger_message_id: str = Field(min_length=1, max_length=120)
+    field_codes: list[str] = Field(default_factory=list)
+    purpose: str = Field(min_length=1, max_length=120)
+    repeated: bool = False
+    asked_at: datetime
 
 
 class SessionRecord(ContractModel):
@@ -508,6 +602,12 @@ class SessionRecord(ContractModel):
     pending_items: list[str] = Field(default_factory=list)
     prior_commitments: list[str] = Field(default_factory=list)
     context_revision: int = Field(default=1, ge=1)
+    question_budget: int = Field(default=9, ge=1)
+    question_turn_count: int = Field(default=0, ge=0)
+    requested_fact_count: int = Field(default=0, ge=0)
+    repeated_question_count: int = Field(default=0, ge=0)
+    post_session_follow_up_required: bool = False
+    question_history: list[QuestionRecord] = Field(default_factory=list)
     started_at: datetime
     last_active_at: datetime
     closed_at: datetime | None = None
@@ -533,6 +633,16 @@ class StateChange(ContractModel):
     to: Any
 
 
+class DiscrepancyCandidate(ContractModel):
+    """Internal candidate only; it is not a fraud finding or ReviewSignalRecord."""
+
+    candidate_id: str = Field(min_length=1, max_length=120)
+    field_code: str = Field(min_length=1, max_length=100)
+    code: Literal['MATERIAL_VALUE_CONFLICT'] = 'MATERIAL_VALUE_CONFLICT'
+    source_refs: list[str] = Field(min_length=2, max_length=100)
+    created_at: datetime
+
+
 class ProposedFormChange(ContractModel):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
@@ -540,6 +650,8 @@ class ProposedFormChange(ContractModel):
     status: FormStatus = FormStatus.PROPOSED
     needed_for: NeededFor = NeededFor.CURRENT_ACTION
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    precision: FactPrecision = FactPrecision.EXACT
+    relation: AssertionRelation | None = None
 
 
 class AgentAuthority(ContractModel):
@@ -599,6 +711,7 @@ class AgentDecisionRecord(ContractModel):
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
     resulting_revision: int = Field(ge=1)
     created_at: datetime
+    discrepancy_candidates: list[DiscrepancyCandidate] = Field(default_factory=list)
 
 
 class EvidenceRecord(ContractModel):
@@ -705,6 +818,13 @@ class WorkbenchSession(ContractModel):
     pending_items: list[str] = Field(default_factory=list)
     prior_commitments: list[str] = Field(default_factory=list)
     context_revision: int = Field(ge=1)
+    question_budget: int = Field(default=9, ge=1)
+    question_turn_count: int = Field(default=0, ge=0)
+    requested_fact_count: int = Field(default=0, ge=0)
+    repeated_question_count: int = Field(default=0, ge=0)
+    remaining_question_budget: int = Field(default=9, ge=0)
+    post_session_follow_up_required: bool = False
+    question_history: list[QuestionRecord] = Field(default_factory=list)
     started_at: datetime
     last_active_at: datetime
     closed_at: datetime | None = None

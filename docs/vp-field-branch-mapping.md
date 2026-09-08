@@ -33,7 +33,7 @@ the Dynamic Form evaluator.
 | `claimant.contact_preference` | all | `common` | enum | claimant/profile | yes | claimant/staff | support and follow-up |
 | `claim.product_family` | all | `family.*` | enum | claimant plus deterministic routing | yes | claimant/staff | family activation |
 | `incident.type` | all | `common` | enum | claimant; staff may correct | conditional | claimant/staff | safety and conditional branches |
-| `incident.occurred_at` | all | `common` | text | claimant/evidence | conditional | claimant/staff | chronology and next action |
+| `incident.occurred_at` | all | `common` | temporal | claimant/evidence | conditional | claimant/staff | chronology and next action without invented precision |
 | `incident.location` | all | `common` | location | claimant/evidence | conditional | claimant/staff | safety, routing, service scope |
 | `incident.description` | all | `common` | text | claimant natural account | conditional | claimant/staff | intake summary |
 | `incident.injury_or_danger` | all | `common` + `safety.injury_or_danger` | boolean | claimant; staff may verify | conditional | claimant/staff | urgent interruption and safe action |
