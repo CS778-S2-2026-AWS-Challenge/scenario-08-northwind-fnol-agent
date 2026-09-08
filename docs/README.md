@@ -109,6 +109,7 @@ superseded when the implementation state changes.
 
 - [Research-to-Product Traceability](research/research-to-prototype-traceability.md)
 - [FNOL Evidence Sheet](research/fnol-evidence-sheet.md)
+- [Third-Party Stakeholder Independent Challenge Review](research/third-party-stakeholder-independent-challenge-review.md)
 - [Pain Point Analysis](research/pain-point-analysis.md)
 - [User Personas](research/user-personas.md)
 - [FNOL As-Is Process and Reporting Fields](research/fnol-as-is-process-and-reporting-fields.md)
