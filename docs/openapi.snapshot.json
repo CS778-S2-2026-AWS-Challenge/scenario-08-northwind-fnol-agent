@@ -2169,6 +2169,13 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "contents_items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Contents Items",
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2262,6 +2269,86 @@
           "updated_at"
         ],
         "title": "ClaimantClaim",
+        "type": "object"
+      },
+      "ClaimantContentsItem": {
+        "additionalProperties": false,
+        "description": "Claimant-safe contents item projection without internal assessment metadata.",
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "item_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
+          },
+          "loss_type": {
+            "$ref": "#/components/schemas/ContentsLossType"
+          },
+          "needed_for": {
+            "$ref": "#/components/schemas/NeededFor"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ContentsOwnership"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FormSource"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "description",
+          "category",
+          "loss_type",
+          "ownership",
+          "source",
+          "status",
+          "needed_for",
+          "updated_at"
+        ],
+        "title": "ClaimantContentsItem",
         "type": "object"
       },
       "ClaimantDecision": {
@@ -3051,6 +3138,124 @@
           "high_impact"
         ],
         "title": "ConfirmationLevel",
+        "type": "string"
+      },
+      "ContentsItem": {
+        "additionalProperties": false,
+        "description": "One source-aware contents item; Evidence associations remain separate records.",
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "item_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
+          },
+          "loss_type": {
+            "$ref": "#/components/schemas/ContentsLossType"
+          },
+          "needed_for": {
+            "$ref": "#/components/schemas/NeededFor"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ContentsOwnership"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FormSource"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "$ref": "#/components/schemas/ActorReference"
+          }
+        },
+        "required": [
+          "item_id",
+          "description",
+          "category",
+          "loss_type",
+          "ownership",
+          "source",
+          "status",
+          "needed_for",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "ContentsItem",
+        "type": "object"
+      },
+      "ContentsLossType": {
+        "enum": [
+          "damaged",
+          "lost",
+          "stolen",
+          "destroyed"
+        ],
+        "title": "ContentsLossType",
+        "type": "string"
+      },
+      "ContentsOwnership": {
+        "enum": [
+          "owned",
+          "leased",
+          "borrowed",
+          "gifted",
+          "other"
+        ],
+        "title": "ContentsOwnership",
         "type": "string"
       },
       "ControlledRulesConfiguration": {
@@ -6893,6 +7098,29 @@
         "title": "ModelUsageMetrics",
         "type": "object"
       },
+      "MoneyAmount": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "minimum": 0.0,
+            "title": "Amount",
+            "type": "number"
+          },
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "MoneyAmount",
+        "type": "object"
+      },
       "NeededFor": {
         "enum": [
           "current_action",
@@ -9871,6 +10099,13 @@
           },
           "claimant": {
             "$ref": "#/components/schemas/WorkbenchClaimantSummary"
+          },
+          "contents_items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItem"
+            },
+            "title": "Contents Items",
+            "type": "array"
           },
           "created_at": {
             "format": "date-time",

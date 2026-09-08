@@ -304,6 +304,62 @@ class StructuredFormField(ContractModel):
     updated_by: ActorReference
 
 
+class ContentsLossType(str, Enum):
+    DAMAGED = 'damaged'
+    LOST = 'lost'
+    STOLEN = 'stolen'
+    DESTROYED = 'destroyed'
+
+
+class ContentsOwnership(str, Enum):
+    OWNED = 'owned'
+    LEASED = 'leased'
+    BORROWED = 'borrowed'
+    GIFTED = 'gifted'
+    OTHER = 'other'
+
+
+class MoneyAmount(ContractModel):
+    amount: float = Field(ge=0.0)
+    currency: str = Field(min_length=3, max_length=3, pattern=r'^[A-Z]{3}$')
+
+
+class ContentsItem(ContractModel):
+    """One source-aware contents item; Evidence associations remain separate records."""
+
+    item_id: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    category: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, ge=1)
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    source: FormSource
+    source_refs: list[str] = Field(default_factory=list)
+    status: FormStatus
+    needed_for: NeededFor
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    updated_at: datetime
+    updated_by: ActorReference
+
+
+class ClaimantContentsItem(ContractModel):
+    """Claimant-safe contents item projection without internal assessment metadata."""
+
+    item_id: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    category: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, ge=1)
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    source: FormSource
+    source_refs: list[str] = Field(default_factory=list)
+    status: FormStatus
+    needed_for: NeededFor
+    updated_at: datetime
+
+
 class EvidenceSummary(ContractModel):
     received: int = 0
     pending: int = 0
@@ -408,6 +464,7 @@ class WorkingClaim(ContractModel):
     incident_type: str | None = None
     claim_state: ClaimState = Field(default_factory=ClaimState)
     form: dict[str, StructuredFormField] = Field(default_factory=dict)
+    contents_items: list[ContentsItem] = Field(default_factory=list)
     evidence_summary: EvidenceSummary = Field(default_factory=EvidenceSummary)
     route: str | None = None
     assignee_id: str | None = Field(default=None, min_length=1, max_length=100)
@@ -427,6 +484,9 @@ class WorkingClaim(ContractModel):
         consent_refs = [record.consent_ref for record in self.external_service_consents]
         if len(consent_refs) != len(set(consent_refs)):
             raise ValueError('External-service consent references must be unique.')
+        item_ids = [item.item_id for item in self.contents_items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError('Contents item identifiers must be unique within a Claim.')
         return self
 
 
@@ -1156,6 +1216,7 @@ class ClaimantClaim(ContractModel):
     incident_type: str | None = None
     workflow_state: WorkflowState
     form: dict[str, StructuredFormField]
+    contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
     evidence_summary: EvidenceSummary
     external_claim: ExternalClaimResult | None = None
     external_service_action: ClaimantExternalServiceAction | None = None

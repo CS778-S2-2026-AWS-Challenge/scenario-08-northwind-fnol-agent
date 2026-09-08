@@ -243,6 +243,11 @@ the append-only audit collection through a bounded, filterable projection.
   routing result, and then completes the missing idempotency response.
 - Child records must not introduce a second concurrency counter that permits them to
   overwrite shared Claim State.
+- `WorkingClaim.contents_items` is an optional embedded list of source-aware `ContentsItem`
+  records. `item_id` is unique within the Claim; the Claim revision remains the only optimistic
+  concurrency token. The list is persisted by each provider through the existing Claim record
+  serialization boundary. Item-to-Evidence associations are not represented by this slice and
+  must use a separate immutable Evidence contract when added.
 - A Branch Evaluation is evidence of a deterministic calculation, not a second Claim State. It
   records separate Field Registry and branch-rule versions, rule/source coordinates, the Claim
   revision it evaluated, and the resulting revision.

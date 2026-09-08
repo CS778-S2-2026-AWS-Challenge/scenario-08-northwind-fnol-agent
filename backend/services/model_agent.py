@@ -66,6 +66,8 @@ _MODEL_CONTEXT_FIELD_CODES = frozenset(
         'vehicle.damage_description',
         'vehicle.drivable',
         'property.affected_areas',
+        'property.ongoing_risk',
+        'property.habitable',
     }
 )
 
