@@ -15,6 +15,7 @@ from backend.domain.models import (
     FieldSelectionResult,
     FieldSelectionState,
     FormStatus,
+    TemporalFactValue,
     WorkingClaim,
 )
 from backend.domain.support_intent import (
@@ -107,7 +108,7 @@ FIELD_VALUE_CONTRACTS: dict[str, tuple[str, frozenset[str]]] = {
         'enum',
         frozenset({'collision', 'fire', 'water', 'theft', 'weather', 'other'}),
     ),
-    'incident.occurred_at': ('text', frozenset()),
+    'incident.occurred_at': ('temporal', frozenset()),
     'incident.location': ('location', frozenset()),
     'incident.description': ('text', frozenset()),
     'incident.injury_or_danger': ('boolean', frozenset()),
@@ -908,7 +909,12 @@ def validate_registered_field_value(
     definition = active_registry.field_by_code.get(field_code)
     if definition is None:
         raise ValueError(f'Unknown registered field: {field_code}.')
-    if value is None and status in {FormStatus.MISSING, FormStatus.PENDING_GENERATION}:
+    if value is None and status in {
+        FormStatus.MISSING,
+        FormStatus.PENDING_GENERATION,
+        FormStatus.UNAVAILABLE,
+        FormStatus.SUPERSEDED,
+    }:
         return
     valid = False
     if definition.value_type == 'text':
@@ -927,6 +933,14 @@ def validate_registered_field_value(
             and bool(value)
             and all(isinstance(item, str) and bool(item.strip()) for item in value)
         )
+    elif definition.value_type == 'temporal':
+        valid = isinstance(value, str) and bool(value.strip())
+        if isinstance(value, Mapping):
+            try:
+                TemporalFactValue.model_validate(value)
+                valid = True
+            except ValueError:
+                valid = False
     if not valid:
         allowed = (
             f' Allowed values: {", ".join(sorted(definition.allowed_values))}.'

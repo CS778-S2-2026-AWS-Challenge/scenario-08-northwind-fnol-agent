@@ -197,6 +197,13 @@ def _workbench_session(session: SessionRecord) -> WorkbenchSession:
         pending_items=session.pending_items,
         prior_commitments=session.prior_commitments,
         context_revision=session.context_revision,
+        question_budget=session.question_budget,
+        question_turn_count=session.question_turn_count,
+        requested_fact_count=session.requested_fact_count,
+        repeated_question_count=session.repeated_question_count,
+        remaining_question_budget=max(0, session.question_budget - session.question_turn_count),
+        post_session_follow_up_required=session.post_session_follow_up_required,
+        question_history=session.question_history,
         started_at=session.started_at,
         last_active_at=session.last_active_at,
         closed_at=session.closed_at,
@@ -482,6 +489,7 @@ def _missing_information(
             FormStatus.MISSING: WorkbenchGapStatus.MISSING,
             FormStatus.DISPUTED: WorkbenchGapStatus.DISPUTED,
             FormStatus.PENDING_GENERATION: WorkbenchGapStatus.PENDING,
+            FormStatus.UNAVAILABLE: WorkbenchGapStatus.UNAVAILABLE,
             FormStatus.PROPOSED: WorkbenchGapStatus.UNCERTAIN,
         }.get(field.status)
         if status is None:
