@@ -595,6 +595,8 @@ contract. Claim acceptance continues to use the existing atomic Claim/handoff/id
 mutation, so presence does not introduce a second assignment or ownership truth. The acceptance
 guard advances the accepted staff presence revision in both Fixture and MongoDB adapters; this
 provider-neutral lease revision is the transaction conflict point.
+Staff logout revokes the server-side auth session even when this best-effort presence cleanup
+cannot be persisted; presence failure must never leave the bearer session active.
 
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
