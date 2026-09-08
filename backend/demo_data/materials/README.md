@@ -43,15 +43,35 @@ registration, policy number, or date, because it is shown on both the claimant a
 
 ## `materials.json`
 
-The runtime metadata for the set. For every asset it records the path, the claim path, the material
-class, the catalogue condition it demonstrates, its media type, its title, the text rendered onto
-it, and that its origin is simulated.
+The runtime metadata for the set, and the authoritative description #602 reads when it associates
+materials with Claim and Evidence records.
+
+For every asset it answers all ten attributes section 3 of the catalogue requires: the decision the
+material supports, the path and journey point it applies to, who provides it, every condition it can
+occupy and what each means for that material specifically, what makes an instance usable or
+insufficient, its provenance and what checking it has received, whether disclosure needs consent and
+what each side may see, what it attaches to, what the surfaces must show in each condition, and its
+retention handling.
+
+**Where the catalogue leaves a decision open, the manifest records the dependency rather than
+inventing a value.** Section 3 says an unanswered attribute is an open decision from section 9, not
+a blank filled in during production, so those entries read
+`{"unresolved": "...", "blocked_on": "P2"}` and name the work that would settle them — P2 for
+registered fields, P3 for issuing stakeholders, P5 for consent copy and disclosure scope, privacy
+review for the retention rule of the Elevated classes, and backend contract work for how a condition
+maps onto persisted status values.
+
+Answers that belong to a material class rather than one asset — who provides it, what disclosure
+requires, how long it is kept — are held once in `CLASS_PROFILE` and merged in. Behaviour when a
+material is not usable is a property of the condition, from section 7, and is merged from
+`CONDITION_BEHAVIOUR`.
 
 It deliberately carries **no Claim, Evidence, or storage reference**. Associating a material with a
-claim record, a source, and a processing status is issue #602; this file describes only the
-materials themselves, so that work has something authoritative to read.
+claim record, a source, and a processing status is issue #602.
 
-`generate_materials.py` writes it, and `--check` fails if it has drifted from the `ASSETS` table.
+`generate_materials.py` writes it, and `--check` fails if any material omits a required attribute,
+if the manifest has drifted from the tables, or if a material demonstrates a condition it does not
+record itself as able to occupy.
 
 ## Byte exactness
 
