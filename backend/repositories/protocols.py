@@ -187,6 +187,32 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """
         raise NotImplementedError
 
+    def list_audit_events_admin(
+        self,
+        *,
+        event_type: str | None = None,
+        subject_type: str | None = None,
+        actor_id: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        """List bounded audit events for an authorised administration projection.
+
+        Args:
+            event_type: Optional controlled event type filter.
+            subject_type: Optional logical subject type filter.
+            actor_id: Optional actor identity filter.
+            start_at: Optional inclusive lower timestamp bound.
+            end_at: Optional inclusive upper timestamp bound.
+
+        Returns:
+            Matching immutable events in stable time and identity order.
+
+        Raises:
+            ValueError: The requested time range is invalid.
+        """
+        raise NotImplementedError
+
     def save_claim_mutation_with_audit(
         self,
         claim: WorkingClaim,

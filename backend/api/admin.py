@@ -1,13 +1,18 @@
 from collections.abc import Callable
-from typing import cast
+from typing import TypeVar, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from backend.core.auth import Principal, require_administrator
 from backend.domain.configuration import (
+    AdminConfigurationPage,
+    AdminConfigurationProjection,
+    ApprovalRequest,
     AuditEvent,
     AuditPage,
+    ConfigurationApprovalRecord,
     ConfigurationCreate,
     ConfigurationPatch,
     ConfigurationRecord,
@@ -22,9 +27,16 @@ from backend.repositories.configuration import (
     ConfigurationRepository,
 )
 from backend.services import configuration as service
-from backend.services.support import parse_if_match, request_fingerprint, require_idempotency_key
+from backend.services.admin_action_projection import configuration_projection
+from backend.services.support import (
+    paginate,
+    parse_if_match,
+    request_fingerprint,
+    require_idempotency_key,
+)
 
 router = APIRouter(prefix='/internal/v1/admin', tags=['administration'])
+ModelT = TypeVar('ModelT', bound=BaseModel)
 
 
 def repo(request: Request) -> ConfigurationRepository:
@@ -50,9 +62,9 @@ def _idempotent(
     key: str | None,
     route: str,
     payload: object,
-    operation: Callable[[], ConfigurationRecord],
+    operation: Callable[[], ModelT],
     success_status: int = status.HTTP_200_OK,
-) -> ConfigurationRecord | JSONResponse:
+) -> ModelT | JSONResponse:
     idempotency_key = require_idempotency_key(key)
     fingerprint = request_fingerprint(payload)
     repository = repo(request)
@@ -83,13 +95,24 @@ def _expected_revision(value: str | None) -> int:
     return parse_if_match(value)
 
 
-@router.get('/configurations', response_model=dict)
+@router.get('/configurations', response_model=AdminConfigurationPage)
 def list_configurations(
     request: Request,
     domain: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
     _principal: Principal = Depends(require_administrator),
-) -> dict[str, object]:
-    return {'items': repo(request).list_configurations(domain), 'page': {'next_cursor': None}}
+) -> AdminConfigurationPage:
+    records, page = paginate(repo(request).list_configurations(domain), limit, cursor)
+    items = [
+        configuration_projection(
+            item,
+            _principal.subject,
+            repo(request).approvals(item.configuration_id, item.revision),
+        )
+        for item in records
+    ]
+    return AdminConfigurationPage(items=items, page=page)
 
 
 @router.post(
@@ -112,11 +135,16 @@ def create_configuration(
     )
 
 
-@router.get('/configurations/{configuration_id}', response_model=ConfigurationRecord)
+@router.get('/configurations/{configuration_id}', response_model=AdminConfigurationProjection)
 def get_configuration(
-    request: Request, configuration_id: str, _principal: Principal = Depends(require_administrator)
-) -> ConfigurationRecord:
-    return service.read(repo(request), configuration_id)
+    request: Request, configuration_id: str, principal: Principal = Depends(require_administrator)
+) -> AdminConfigurationProjection:
+    record = service.read(repo(request), configuration_id)
+    return configuration_projection(
+        record,
+        principal.subject,
+        repo(request).approvals(record.configuration_id, record.revision),
+    )
 
 
 @router.patch('/configurations/{configuration_id}', response_model=ConfigurationRecord)
@@ -188,6 +216,45 @@ def publish_configuration(
             repo(request), configuration_id, payload, principal.subject, expected
         ),
     )
+
+
+@router.post(
+    '/configurations/{configuration_id}/approval',
+    response_model=ConfigurationApprovalRecord,
+)
+def approve_configuration(
+    request: Request,
+    configuration_id: str,
+    payload: ApprovalRequest,
+    if_match: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    principal: Principal = Depends(require_administrator),
+) -> ConfigurationApprovalRecord | JSONResponse:
+    expected = _expected_revision(if_match)
+    return _idempotent(
+        request,
+        principal,
+        idempotency_key,
+        f'POST /internal/v1/admin/configurations/{configuration_id}/approval',
+        {'payload': payload.model_dump(mode='json'), 'revision': expected},
+        lambda: service.approve(
+            repo(request), configuration_id, payload, principal.subject, expected
+        ),
+    )
+
+
+@router.get('/configurations/{configuration_id}/approvals', response_model=dict)
+def list_configuration_approvals(
+    request: Request,
+    configuration_id: str,
+    revision: int | None = Query(default=None, ge=1),
+    _principal: Principal = Depends(require_administrator),
+) -> dict[str, object]:
+    service.read(repo(request), configuration_id)
+    return {
+        'items': repo(request).approvals(configuration_id, revision),
+        'page': {'next_cursor': None},
+    }
 
 
 @router.post('/configurations/{configuration_id}/withdraw', response_model=ConfigurationRecord)

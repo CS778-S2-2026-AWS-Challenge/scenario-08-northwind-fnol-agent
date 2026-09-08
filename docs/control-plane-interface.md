@@ -3,16 +3,8 @@
 ## Status and Purpose
 
 This document defines the bounded information architecture and screen inventory for the
-first Northwind Control Plane frontend deliverable. Issues #250, #258, and #260 consume
-this interface input. The document does not claim that an Admin Console or Admin API is
-implemented.
-
-The first implementation slice covers navigation and honest capability status for
-knowledge, model profiles, data runtime profiles, integrations, and publication history.
-The final administrator roles, approval requirements, and publication transition
-ownership remain dependent on issue #208. Until that contract is accepted, the role and
-lifecycle descriptions below are provisional and must not be treated as approved
-Northwind policy.
+Northwind Control Plane frontend and its backend projection boundary. The implemented Admin
+Console and Admin API use this inventory together with `docs/control-plane-governance.md`.
 
 ## Boundary
 
@@ -56,36 +48,27 @@ Implementation status uses the following exact labels:
 - **Unavailable**: visible dependency or capability is not configured or implemented.
 - **Planned**: outside the first implementation slice; no working behaviour is implied.
 
-At the #240 baseline every screen is contract-only: there is no Admin Console or Admin
-API on `main`. A later screen may be relabelled **Real** only when its consumer, API,
-tests, and contract are implemented together.
+The following routes are connected to the authenticated Admin API. A route is **Real** only for
+the actions stated in this table; an adjacent operation not listed here remains unavailable.
 
-| Route | Screen | Primary purpose | #240 baseline | First-release target | Dependency |
-| --- | --- | --- | --- | --- | --- |
-| `/admin` | Overview | Summarise active versions, draft work, validation failures, and unavailable capabilities | Planned | UI only | #250 shell; #258 data |
-| `/admin/knowledge` | Knowledge sources | List source versions, metadata, ingestion state, and publication state | Planned | UI only | #211; #260 bounded view |
-| `/admin/knowledge/:sourceId` | Knowledge source detail | Inspect safe metadata, parsing/chunk status, citation preview, validation, and version history | Planned | Unavailable | #211 |
-| `/admin/models` | Model profiles | List provider-neutral endpoint type, capabilities, limits, secret-reference presence, and version state | Planned | UI only or Real for the selected #260 workflow | #204, #258, #260 |
-| `/admin/models/:profileId` | Model profile detail | Read, edit, validate, and save a versioned model-profile draft | Planned | Candidate Real workflow | #204, #208, #258, #260 |
-| `/admin/data-profiles` | Data runtime profiles | Show fixture, Cloudflare, MongoDB, and AWS profile status without implying mixed-provider fallback | Planned | UI only | #203, #212, #260 |
-| `/admin/data-profiles/:profileId` | Data profile detail | Inspect capability, migration, deployment impact, validation, and version state | Planned | Unavailable | #203, #212 |
-| `/admin/integrations` | Integrations | List bounded capability, latency, failure, and safe secret-reference status | Planned | UI only | #212, #260 |
-| `/admin/integrations/:integrationId` | Integration detail | Inspect configuration metadata and run an authorised capability validation | Planned | Unavailable | #212 |
-| `/admin/publications` | Publication history | Show version, actor, reason, validation evidence, effective time, previous version, and rollback target | Planned | UI only or Real when exposed by #258 | #208, #258 |
-| `/admin/publications/:publicationId` | Publication detail | Inspect immutable publication and audit metadata; expose only authorised lifecycle actions | Planned | Unavailable | #208, #258, #215 |
-| `/admin/agent-rules` | Agent rules | Future instructions, controlled rules, tool permissions, and feature settings | Planned | Planned | #213 |
-| `/admin/evaluation` | Evaluation | Future scenario and version-linked evaluation results | Planned | Planned | #214 |
-| `/admin/operations` | Operations | Future health, jobs, latency, error, token, and cost views | Planned | Planned | #214 |
-| `/admin/access` | Access | Future role and permission administration | Planned | Planned | #208 and a confirmed identity contract |
-| `/admin/audit` | Audit | Future restricted configuration audit search | Planned | Planned | #209, #214 |
+| Route | Screen | Server-backed behaviour | Status |
+| --- | --- | --- | --- |
+| `/admin` | Overview | Navigate to the authenticated Control Plane resource areas | Real |
+| `/admin/configurations` | Configurations | Filter, create drafts, edit, validate, record an independent decision, publish, withdraw, and roll back using server-projected actions | Real |
+| `/admin/releases` | Release Sets | Create, validate, publish, and roll back complete version-pinned Runtime releases | Real |
+| `/admin/runtime` | Runtime Snapshot | Resolve the active Release Set for an explicit environment and runtime profile | Real |
+| `/admin/knowledge` | Knowledge | Create source versions, ingest, validate, run retrieval checks, publish, withdraw, and inspect safe metadata | Real |
+| `/admin/evaluations` | Evaluations | Filter and create immutable version-linked evaluation evidence | Real |
+| `/admin/operations` | Operations | Filter durable operations and inspect model usage, estimated cost, rate-limit state, and configured alerts | Real |
+| `/admin/integrations` | Integrations | Inspect registered capabilities, run bounded health checks, and read persisted health history | Real |
+| `/admin/audit` | Audit | Filter restricted cross-resource audit projections | Real |
+| `/admin/customers` | Customers | Create, read, revision-check updates, and revoke active sessions through the claimant identity repository | Real |
+| `/admin/staff` | Staff | Create, read, revision-check updates, manage registered roles, and revoke active sessions through the staff identity repository | Real |
 
-Planned and unavailable screens remain navigable in the first shell so the boundary is
-discoverable, but they must display this message or an equivalent explicit statement:
-
-> Not implemented in this release. No configuration changes are available from this
-> screen.
-
-They must not show enabled save, validate, publish, withdraw, or rollback actions.
+Model, data-profile, Agent-rule, feature, and access records use the common configuration screen
+and their closed backend schemas. Account credential creation and session revocation stay inside
+the authenticated identity API boundary; the console never receives password hashes, token hashes,
+or bearer credentials. It does not edit Claim State or contact a provider business operation.
 
 ## Shared Screen States
 
@@ -124,27 +107,21 @@ Knowledge, models, data profiles, and integrations use one predictable pattern:
 6. Saving a draft does not imply validation, approval, or publication.
 7. Publication history remains visible after withdrawal, supersession, or rollback.
 
-## Candidate First Real Workflow
+## Implemented configuration workflow
 
-The preferred #260 candidate is a provider-neutral model profile because the repository
-already defines a model-gateway boundary in #204. This is a coordination recommendation,
-not a schema decision. #258 and #260 owners must agree the first configuration type and
-document it in the Admin API contract before implementation.
-
-The smallest honest flow is:
+The console uses one backend-owned workflow for model, data-profile, Agent-rule, feature,
+Integration, access, and other registered configuration domains:
 
 ```text
-read current model-profile metadata and version
+read current projection and allowed actions
 -> create or update a revision-checked draft
--> validate capability metadata and protected secret reference
--> save the draft
--> read its validation and publication state
+-> validate the exact revision
+-> record an independent decision when the backend requires one
+-> publish, withdraw, or roll back through the projected action
+-> reload the authoritative server projection
 ```
 
-This flow does not publish, roll back, contact a model endpoint directly from the
-browser, or prove a production integration. If the backend selects a different first
-configuration type, the same list/detail and state pattern applies and this document
-must be updated with the agreed type.
+The browser never contacts a model endpoint, object store, provider, or secret manager directly.
 
 ## Provisional Publication Presentation
 
@@ -157,24 +134,35 @@ draft -> validate -> approve when required -> publish -> observe
                                                 -> roll back to an approved prior version
 ```
 
-This diagram describes presentation needs only. #208 owns which roles may perform each
-transition, which changes require approval, and whether withdrawal or rollback creates a
-new immutable publication record. Until then, the UI must not enable those actions.
+The authenticated Admin API enforces which roles may perform each transition, records approval
+decisions, and preserves immutable publication history. The console renders only the action codes
+and availability projected by that API, requires confirmation when the projection says so, sends
+the projected revision in `If-Match`, and reloads server state after the mutation.
 
 Publication and rollback views must retain version, actor, reason, validation evidence,
 approver when required, effective time, previous version, rollback target, and result.
 Rollback must never erase intervening history.
 
-## Explicitly Unfinished First-Release Modules
+## Current implementation boundary
 
-The first release does not claim complete knowledge ingestion, provider switching,
-integration connection testing, publication, rollback, Agent-rule management,
-evaluation, operations, access management, or audit search. It must not use local-only
-mock success messages to suggest those behaviours exist.
+The current Admin Console provides real API-backed workflows for configuration and knowledge
+lifecycle actions, Release Sets, Runtime Snapshot resolution, evaluation evidence, operation
+metrics, Integration health, restricted audit search, and customer/staff account creation,
+revision-checked updates, and active-session revocation. The
+backend derives every visible action from persisted state, revision, approval evidence, and the
+authenticated principal. Consequential actions require explicit confirmation in the console and
+are revalidated by the mutation endpoint.
 
-One configuration type may become **Real** through #258 and #260. All other types retain
-their actual **UI only**, **Unavailable**, or **Planned** label until their API and tests
-exist. A fixture capability is labelled `fixture`, never `configured` or `production`.
+The Operations view reads persisted model-call records and the active published operational
+configuration. It distinguishes reported from unreported usage, configured from partial or
+unconfigured cost, and clear from limited or unconfigured rate-limit state. Cost remains an
+estimate, and incomplete usage or price data remains visible rather than being treated as zero.
+Production provider secret-manager verification remains deployment-specific; the interface must
+not imply that it is available.
+
+Each capability retains its actual **Real**, **UI only**, **Unavailable**, or **Planned** label
+based on the API and UI evidence that exists. A fixture capability is labelled `fixture`, never
+`configured` or `production`.
 
 ## Repeatable Acceptance Checks
 

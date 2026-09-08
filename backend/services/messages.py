@@ -76,6 +76,11 @@ from backend.services.handoffs import (
 )
 from backend.services.professional_reviews import build_policy_review_handoff
 from backend.services.retrieval import search_claim_history, search_policy
+from backend.services.runtime_agent_policy import (
+    RuntimeAgentPolicyResolver,
+    enforce_agent_proposal,
+)
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -629,6 +634,7 @@ def submit_message(
     payload: CreateMessageRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    runtime_agent_policy_resolver: RuntimeAgentPolicyResolver | None = None,
 ) -> MessageTurnResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -836,8 +842,24 @@ def submit_message(
         evidence_refs=payload.evidence_refs,
         created_at=timestamp,
     )
+    try:
+        runtime_policy = (
+            runtime_agent_policy_resolver.resolve_for_turn()
+            if runtime_agent_policy_resolver is not None
+            else None
+        )
+    except RuntimeConfigurationResolutionError as error:
+        raise ApiError(
+            status_code=503,
+            code='AGENT_RUNTIME_CONFIGURATION_UNAVAILABLE',
+            message='The active Agent runtime configuration cannot be loaded safely.',
+            retryable=False,
+        ) from error
+    branch_evaluator = (
+        runtime_policy.branch_evaluator() if runtime_policy else BranchRuleEvaluator()
+    )
     previous_evaluation = latest_applied_branch_evaluation(repository, claim)
-    branch_evaluation = BranchRuleEvaluator().evaluate(
+    branch_evaluation = branch_evaluator.evaluate(
         claim,
         latest_message=(payload.content.text if payload.content is not None else None),
         trigger_source_refs=[claimant_message.message_id],
@@ -864,8 +886,14 @@ def submit_message(
                 signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
             ),
             branch_evaluation=branch_evaluation,
+            runtime_configuration_snapshot=(
+                runtime_policy.runtime_snapshot if runtime_policy is not None else None
+            ),
+            runtime_policy=runtime_policy,
         )
     )
+    if runtime_policy is not None:
+        enforce_agent_proposal(runtime_policy, proposal)
     authority = validate_proposal(proposal)
     executed_state_changes = authorised_state_changes(proposal, authority)
     effective_customer_reason = proposal.customer_reason
@@ -1074,6 +1102,7 @@ def submit_message(
         authority=authority,
         proposal_source=proposal.proposal_source,
         model_provenance=proposal.model_provenance,
+        runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
         form_changes=form_changes,
         resulting_revision=resulting_revision,
         created_at=timestamp,
@@ -1090,7 +1119,7 @@ def submit_message(
         decision_id=decision.decision_id,
         handoff_id=handoff.handoff_id if handoff is not None else None,
     )
-    applied_evaluation = BranchRuleEvaluator().evaluate(
+    applied_evaluation = branch_evaluator.evaluate(
         updated_claim,
         latest_message=(payload.content.text if payload.content is not None else None),
         trigger_source_refs=[claimant_message.message_id],

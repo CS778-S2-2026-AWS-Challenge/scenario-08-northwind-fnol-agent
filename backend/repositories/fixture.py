@@ -69,6 +69,9 @@ class FixtureRepository(PersistenceRepository):
         self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
 
+    def connection_status(self) -> str:
+        return 'using_fixture'
+
     @property
     def claim_count(self) -> int:
         return len(self._claims)
@@ -169,6 +172,28 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(event)
             for event in self._audit_events.values()
             if event.subject == subject
+            and (start_at is None or event.created_at >= start_at)
+            and (end_at is None or event.created_at <= end_at)
+        ]
+        return sorted(events, key=lambda event: (event.created_at, event.event_id))
+
+    def list_audit_events_admin(
+        self,
+        *,
+        event_type: str | None = None,
+        subject_type: str | None = None,
+        actor_id: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[AuditEventEnvelope]:
+        if start_at is not None and end_at is not None and start_at > end_at:
+            raise ValueError('Audit event start_at must not be after end_at.')
+        events = [
+            deepcopy(event)
+            for event in self._audit_events.values()
+            if (event_type is None or event.event_type.value == event_type)
+            and (subject_type is None or event.subject.subject_type.value == subject_type)
+            and (actor_id is None or event.actor.actor_id == actor_id)
             and (start_at is None or event.created_at >= start_at)
             and (end_at is None or event.created_at <= end_at)
         ]

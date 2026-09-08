@@ -38,6 +38,7 @@ from backend.domain.model_gateway import (
     ModelResponse,
     ModelRole,
     ModelTool,
+    ModelUsage,
 )
 from backend.domain.models import (
     ActorReference,
@@ -59,6 +60,7 @@ from backend.domain.models import (
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.operations import OperationRepository
 from backend.services.agent import (
     AgentTurnContext,
     InvariantGuardedAgent,
@@ -66,6 +68,7 @@ from backend.services.agent import (
     validate_proposal,
 )
 from backend.services.model_agent import GatewayAgent
+from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.workbench import get_workbench_claim_detail
 
 
@@ -1196,6 +1199,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         ModelResponse(
             provider_model='provider-model-private',
             provider_request_id='provider-request-private',
+            usage=ModelUsage(input_tokens=30, output_tokens=10, total_tokens=40),
             structured_output={
                 'action': 'CREATE_CLAIM',
                 'reason_codes': ['MODEL_SAYS_READY'],
@@ -1223,7 +1227,8 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
             },
         )
     )
-    agent = GatewayAgent(gateway)
+    operations = OperationRepository()
+    agent = GatewayAgent(gateway, operations=ModelOperationsRecorder(operations))
     timestamp = datetime.now(UTC)
     claim = _working_claim().model_copy(
         update={
@@ -1333,6 +1338,19 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     authority = validate_proposal(proposal)
     assert authority.outcome is AuthorityOutcome.REVIEW_REQUIRED
     assert authorised_state_changes(proposal, authority) == []
+    operation = operations.metrics_records()[0]
+    assert operation.kind.value == 'model_invocation'
+    assert operation.subject_id == 'agent_turn'
+    assert operation.state.value == 'succeeded'
+    assert operation.result is not None
+    assert operation.result == {
+        'purpose': 'agent_turn',
+        'provider_model': 'provider-model-private',
+        'input_tokens': 30,
+        'output_tokens': 10,
+        'total_tokens': 40,
+        'latency_ms': operation.result['latency_ms'],
+    }
 
 
 def test_gateway_agent_receives_bounded_branch_context() -> None:

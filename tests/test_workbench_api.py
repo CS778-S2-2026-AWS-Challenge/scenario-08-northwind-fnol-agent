@@ -19,6 +19,9 @@ from backend.domain.models import (
     AgentAuthority,
     AgentDecisionRecord,
     AuthorityOutcome,
+    ContentsItem,
+    ContentsLossType,
+    ContentsOwnership,
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceStatus,
@@ -30,6 +33,7 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     ResponsibleParty,
+    StructuredFormField,
     WorkflowState,
 )
 from backend.repositories.fixture import FixtureRepository
@@ -39,6 +43,71 @@ from backend.services.staff_access import (
     require_claim_collaborator,
 )
 from backend.services.support import now_utc
+from backend.services.workbench import _external_lifecycle
+
+
+def test_public_claim_and_workbench_detail_use_role_safe_contents_projection(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _, _ = _request_staff_support(
+        client, auth_headers, repository, key_suffix='contents-projection'
+    )
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    item = ContentsItem(
+        item_id='item_projection_1',
+        description='Synthetic laptop',
+        category='electronics',
+        loss_type=ContentsLossType.DAMAGED,
+        ownership=ContentsOwnership.OWNED,
+        estimated_value={'amount': 1200.0, 'currency': 'NZD'},
+        source='staff',
+        source_refs=['msg_public', 'staff_action_internal', 'ret_policy_internal'],
+        status='proposed',
+        needed_for='later_action',
+        confidence=0.6,
+        updated_at=now_utc(),
+        updated_by={'actor_type': 'staff', 'actor_id': 'stf_internal'},
+    )
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'revision': claim.revision + 1,
+                'contents_items': [item],
+                'form': {
+                    **claim.form,
+                    'claimant.client_number': StructuredFormField(
+                        value='internal-client',
+                        source='staff',
+                        status='confirmed',
+                        needed_for='later_action',
+                        updated_at=now_utc(),
+                        updated_by={'actor_type': 'staff', 'actor_id': 'stf_internal'},
+                    ),
+                },
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+
+    claimant = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers)
+    assert claimant.status_code == 200
+    claimant_item = claimant.json()['contents_items'][0]
+    assert claimant_item['item_id'] == 'item_projection_1'
+    assert claimant_item['source_refs'] == ['msg_public']
+    assert 'confidence' not in claimant_item
+    assert 'updated_by' not in claimant_item
+    assert 'claimant.client_number' not in claimant.json()['form']
+
+    staff = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert staff.status_code == 200
+    staff_item = staff.json()['contents_items'][0]
+    assert staff_item['source_refs'] == item.source_refs
+    assert staff_item['confidence'] == 0.6
+    assert staff_item['updated_by']['actor_id'] == 'stf_internal'
 
 
 def _provision_staff(
@@ -413,6 +482,79 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
     assert gap['source_refs'] == [task.task_id, task.delivery_evidence]
     assert source['source_label'] == 'Controlled fixture service'
     assert source['status'] == 'unknown_outcome'
+
+
+@pytest.mark.parametrize(
+    ('status', 'delivery', 'failure_code', 'expected_verification', 'attention'),
+    [
+        (
+            ExternalTaskOperationStatus.PREPARED,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            None,
+            'not_started',
+            False,
+        ),
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskDelivery.SUBMITTED,
+            None,
+            'pending_verification',
+            False,
+        ),
+        (
+            ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.UNAVAILABLE,
+            'failed_unverified',
+            True,
+        ),
+        (
+            ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+            ExternalTaskDelivery.SUBMITTED,
+            ExternalTaskFailureCode.TIMEOUT,
+            'reconciliation_required',
+            True,
+        ),
+        (
+            ExternalTaskOperationStatus.TERMINAL_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.MALFORMED,
+            'review_required',
+            True,
+        ),
+    ],
+)
+def test_external_lifecycle_projection_covers_each_delivery_outcome(
+    status: ExternalTaskOperationStatus,
+    delivery: ExternalTaskDelivery,
+    failure_code: ExternalTaskFailureCode | None,
+    expected_verification: str,
+    attention: bool,
+) -> None:
+    timestamp = now_utc()
+    task = ExternalTaskRecord(
+        task_id=f'tsk-lifecycle-{status.value}',
+        claim_id='clm_lifecycle',
+        service_identity='damage_assessment',
+        requested_action='request_assessment',
+        integration_source=IntegrationSource.FIXTURE,
+        status=status,
+        delivery=delivery,
+        delivery_evidence='delivery-receipt'
+        if delivery is ExternalTaskDelivery.SUBMITTED
+        else None,
+        failure_code=failure_code,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+    projection = _external_lifecycle(task, None)
+
+    assert projection.verification_state == expected_verification
+    assert projection.needs_attention is attention
+    assert projection.authority_state == 'not_recorded'
+    assert projection.consent_state == 'not_recorded'
+    assert projection.limitation
 
 
 def test_staff_primary_action_pair_resolves_to_the_exact_non_blocked_action(

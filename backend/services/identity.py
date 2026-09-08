@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -120,9 +121,14 @@ def update_profile(
             code='RESOURCE_NOT_FOUND',
             message='The claimant account was not found.',
         )
-    account.display_name = payload.display_name.strip()
-    account.phone = payload.phone.strip()
-    repository.save_account(account)
+    updated = replace(
+        account,
+        display_name=payload.display_name.strip(),
+        phone=payload.phone.strip(),
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(updated, account.revision)
     return account_projection(repository, principal)
 
 
@@ -136,6 +142,11 @@ def update_preferences(
             code='RESOURCE_NOT_FOUND',
             message='The claimant account was not found.',
         )
-    account.communication_preferences = {'email': payload.email, 'sms': payload.sms}
-    repository.save_account(account)
+    updated = replace(
+        account,
+        communication_preferences={'email': payload.email, 'sms': payload.sms},
+        revision=account.revision + 1,
+        updated_at=datetime.now(UTC),
+    )
+    repository.save_account(updated, account.revision)
     return account_projection(repository, principal)

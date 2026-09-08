@@ -41,6 +41,7 @@ from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
 )
+from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -317,6 +318,7 @@ def create_support_request(
     payload: CreateSupportRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    runtime_integration_policy: RuntimeIntegrationPolicy,
 ) -> SupportRequestResponse:
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
@@ -347,7 +349,11 @@ def create_support_request(
                 message='The idempotent support request could not be restored.',
                 retryable=True,
             )
-        return _response(handoff, claim, notify_staff_queue(dispatch, handoff))
+        return _response(
+            handoff,
+            claim,
+            _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
+        )
 
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
@@ -381,7 +387,11 @@ def create_support_request(
                 handoff_id=active_handoff.handoff_id,
             )
         )
-        return _response(active_handoff, claim, notify_staff_queue(dispatch, active_handoff))
+        return _response(
+            active_handoff,
+            claim,
+            _notify_staff_queue(runtime_integration_policy, dispatch, active_handoff),
+        )
 
     handoff, next_step = build_handoff(
         repository,
@@ -428,4 +438,20 @@ def create_support_request(
             code='IDEMPOTENCY_CONFLICT',
             message='The support request was already accepted with different retry data.',
         ) from conflict
-    return _response(handoff, updated_claim, notify_staff_queue(dispatch, handoff))
+    return _response(
+        handoff,
+        updated_claim,
+        _notify_staff_queue(runtime_integration_policy, dispatch, handoff),
+    )
+
+
+def _notify_staff_queue(
+    policy: RuntimeIntegrationPolicy,
+    dispatch: HandoffDispatchAdapter,
+    handoff: HandoffRecord,
+) -> HandoffDispatchReceipt:
+    try:
+        policy.require('handoff_dispatch')
+    except ApiError:
+        return local_queue_receipt()
+    return notify_staff_queue(dispatch, handoff)

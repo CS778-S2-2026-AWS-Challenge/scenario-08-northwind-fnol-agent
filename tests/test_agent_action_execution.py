@@ -1,4 +1,8 @@
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
+
+import pytest
 
 from backend.core.errors import ApiError
 from backend.domain.agent_action_commands import ClaimContextCommand, build_claim_context_command
@@ -13,8 +17,9 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
-from backend.repositories.protocols import RevisionConflict
+from backend.repositories.protocols import ClaimRepository, IdempotencyConflict, RevisionConflict
 from backend.services.agent_action_execution import (
+    ClaimContextExecutionResult,
     ClaimContextExecutionStatus,
     ClaimContextHandlerBinding,
     ClaimContextHandlerOutcome,
@@ -331,3 +336,255 @@ def test_unsupported_command_is_rejected_without_execution() -> None:
     assert result.status is ClaimContextExecutionStatus.REJECTED
     assert result.reason_code == 'UNSUPPORTED_ACTION'
     assert result.failure_policy == command.failure_policy
+
+
+def test_execution_gate_rejects_invalid_inputs_and_tool_bindings() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    command = _fact_patch_command()
+
+    try:
+        execute_claim_context_command(repository, object(), {})  # type: ignore[arg-type]
+    except TypeError as error:
+        assert str(error) == 'command must be a ClaimContextCommand.'
+    else:
+        raise AssertionError('invalid command type must be rejected')
+
+    try:
+        execute_claim_context_command(repository, command, [])  # type: ignore[arg-type]
+    except TypeError as error:
+        assert str(error) == 'handlers must be a mapping.'
+    else:
+        raise AssertionError('invalid handler mapping must be rejected')
+
+    no_tool_command = _tool_free_command()
+    result = execute_claim_context_command(
+        repository,
+        no_tool_command,
+        {
+            no_tool_command.action_code: ClaimContextHandlerBinding(
+                tool_name='unexpected.tool',
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution', resulting_revision=1
+                ),
+            )
+        },
+    )
+    assert result.reason_code == 'TOOL_NOT_ALLOWED'
+
+
+def test_execution_gate_handles_missing_claim_and_dependency_failure() -> None:
+    command = _fact_patch_command()
+
+    class MissingRepository:
+        def get_claim_internal(self, _claim_id: str) -> None:
+            return None
+
+    missing = execute_claim_context_command(
+        cast(ClaimRepository, MissingRepository()),
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set',
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution', resulting_revision=2
+                ),
+            )
+        },
+    )
+    assert missing.status is ClaimContextExecutionStatus.REJECTED
+    assert missing.reason_code == 'CLAIM_NOT_FOUND'
+
+    class FailingRepository:
+        def get_claim_internal(self, _claim_id: str) -> None:
+            raise RuntimeError('repository unavailable')
+
+    failed = execute_claim_context_command(
+        cast(ClaimRepository, FailingRepository()),
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set',
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution', resulting_revision=2
+                ),
+            )
+        },
+    )
+    assert failed.status is ClaimContextExecutionStatus.FAILED
+    assert failed.reason_code == 'DEPENDENCY_FAILURE'
+    assert failed.retryable is True
+
+
+def test_execution_gate_maps_handler_failures_to_safe_results() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    command = _fact_patch_command()
+
+    def run(handler: object) -> ClaimContextExecutionResult:
+        return execute_claim_context_command(
+            repository,
+            command,
+            {
+                command.action_code: ClaimContextHandlerBinding(
+                    tool_name='claim_store.compare_and_set',
+                    handler=handler,  # type: ignore[arg-type]
+                )
+            },
+        )
+
+    def idempotency_handler(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        raise IdempotencyConflict()
+
+    def key_error_handler(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        raise KeyError('claim')
+
+    def runtime_handler(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        raise RuntimeError('adapter')
+
+    def client_error_handler(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        raise ApiError(status_code=422, code='INVALID_COMMAND', message='invalid')
+
+    idempotency = run(idempotency_handler)
+    assert idempotency.reason_code == 'IDEMPOTENCY_CONFLICT'
+
+    key_error = run(key_error_handler)
+    assert key_error.reason_code == 'RESOURCE_NOT_FOUND'
+
+    runtime = run(runtime_handler)
+    assert runtime.status is ClaimContextExecutionStatus.FAILED
+    assert runtime.reason_code == 'DEPENDENCY_FAILURE'
+
+    client_error = run(client_error_handler)
+    assert client_error.status is ClaimContextExecutionStatus.REJECTED
+    assert client_error.reason_code == 'INVALID_COMMAND'
+
+
+def test_execution_gate_rejects_missing_scope_and_invalid_handler_outcomes() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    scoped = replace(_tool_free_command(), payload={'expected_revision': 1})
+    missing_scope = execute_claim_context_command(
+        repository,
+        scoped,
+        {
+            scoped.action_code: ClaimContextHandlerBinding(
+                tool_name=None,
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution', resulting_revision=1
+                ),
+            )
+        },
+    )
+    assert missing_scope.reason_code == 'CLAIM_SCOPE_REQUIRED'
+
+    command = _fact_patch_command()
+
+    def invalid_handler(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        return cast(ClaimContextHandlerOutcome, object())
+
+    invalid = execute_claim_context_command(
+        repository,
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set',
+                handler=invalid_handler,
+            )
+        },
+    )
+    assert invalid.status is ClaimContextExecutionStatus.FAILED
+    assert invalid.reason_code == 'INVALID_EXECUTION_RESULT'
+
+
+def test_execution_gate_rejects_invalid_binding_and_postcondition_failures() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    command = _fact_patch_command()
+
+    with pytest.raises(TypeError, match='handler bindings'):
+        execute_claim_context_command(
+            repository,
+            command,
+            {command.action_code: cast(ClaimContextHandlerBinding, object())},
+        )
+
+    missing_transition = execute_claim_context_command(
+        repository,
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set',
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_execution', resulting_revision=1
+                ),
+            )
+        },
+    )
+    assert missing_transition.reason_code == 'MISSING_STATE_TRANSITION'
+
+    wrong_claim = execute_claim_context_command(
+        repository,
+        command,
+        {
+            command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set',
+                handler=lambda _command: ClaimContextHandlerOutcome(
+                    claim_id='clm_other', resulting_revision=2
+                ),
+            )
+        },
+    )
+    assert wrong_claim.reason_code == 'INVALID_EXECUTION_RESULT'
+
+
+def test_execution_gate_rejects_unexpected_proposal_mutation_and_post_read_failure() -> None:
+    repository = FixtureRepository()
+    _seed_claim(repository)
+    command = _tool_free_command()
+
+    def mutate_proposal(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        claim = repository.get_claim_internal('clm_execution')
+        assert claim is not None
+        updated = claim.model_copy(update={'revision': 2, 'updated_at': datetime.now(UTC)})
+        repository.save_claim(updated, expected_revision=1)
+        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=2)
+
+    mutated = execute_claim_context_command(
+        repository,
+        command,
+        {command.action_code: ClaimContextHandlerBinding(tool_name=None, handler=mutate_proposal)},
+    )
+    assert mutated.reason_code == 'UNEXPECTED_STATE_MUTATION'
+
+    class PostReadFailureRepository(FixtureRepository):
+        reads = 0
+
+        def get_claim_internal(self, claim_id: str) -> WorkingClaim | None:
+            self.reads += 1
+            if self.reads == 2:
+                raise RuntimeError('postcondition read failed')
+            return super().get_claim_internal(claim_id)
+
+    failing_repository = PostReadFailureRepository()
+    _seed_claim(failing_repository)
+    failure_command = _fact_patch_command()
+
+    def persist(_command: ClaimContextCommand) -> ClaimContextHandlerOutcome:
+        claim = FixtureRepository.get_claim_internal(failing_repository, 'clm_execution')
+        assert claim is not None
+        updated = claim.model_copy(update={'revision': 2, 'updated_at': datetime.now(UTC)})
+        failing_repository.save_claim(updated, expected_revision=1)
+        return ClaimContextHandlerOutcome(claim_id='clm_execution', resulting_revision=2)
+
+    failed = execute_claim_context_command(
+        failing_repository,
+        failure_command,
+        {
+            failure_command.action_code: ClaimContextHandlerBinding(
+                tool_name='claim_store.compare_and_set', handler=persist
+            )
+        },
+    )
+    assert failed.reason_code == 'DEPENDENCY_FAILURE'
+    assert failed.retryable is True
