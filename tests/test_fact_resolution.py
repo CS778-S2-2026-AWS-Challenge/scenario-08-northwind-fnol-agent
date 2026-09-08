@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -29,6 +30,7 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.scenario_loader import load_scenario, seed_scenario
 from backend.services.agent import AgentProposal, AgentTurnContext
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
@@ -518,3 +520,71 @@ def test_question_budget_is_persisted_across_a_restarted_claim_session() -> None
     assert stored_session.post_session_follow_up_required is True
     assert turn['decision']['customer_next_step']['status'] == 'question_budget_reached'
     assert '?' not in turn['agent_message']['content']['text']
+
+
+def test_claimant_form_mutation_responses_filter_internal_retrieval_provenance() -> None:
+    scenario = load_scenario(
+        Path(__file__).parents[1]
+        / 'backend'
+        / 'demo_data'
+        / 'scenarios'
+        / 'AT-02-coverage-ambiguity.json'
+    )
+    repository = FixtureRepository()
+    seed_scenario(repository, scenario)
+    claim_id = scenario.claim.claim_id
+    session_id = scenario.claim.active_session_id
+    assert session_id is not None
+
+    with TestClient(create_app(SETTINGS, repository, RepeatingQuestionAgent())) as client:
+        patch_response = client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={**AUTH, 'If-Match': str(scenario.claim.revision)},
+            json={
+                'updates': [
+                    {
+                        'field_code': 'policy.policy_number',
+                        'value': scenario.claim.form['policy.policy_number'].value,
+                        'status': 'confirmed',
+                    }
+                ]
+            },
+        )
+        assert patch_response.status_code == 200, patch_response.text
+        patched = patch_response.json()['updated_fields']['policy.policy_number']
+        assert all(not reference.startswith('ret_') for reference in patched['source_refs'])
+        assert all(
+            not reference.startswith('ret_')
+            for assertion in patched['assertions']
+            for reference in assertion['source_refs']
+        )
+
+        confirmation_response = client.post(
+            f'/api/v1/claims/{claim_id}/form/confirmations',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'filter-retrieval-confirmation',
+                'If-Match': str(patch_response.json()['revision']),
+            },
+            json={'field_codes': ['policy.policy_number']},
+        )
+        assert confirmation_response.status_code == 200, confirmation_response.text
+        confirmed = confirmation_response.json()['confirmed_fields']['policy.policy_number']
+        assert all(not reference.startswith('ret_') for reference in confirmed['source_refs'])
+        assert all(
+            not reference.startswith('ret_')
+            for assertion in confirmed['assertions']
+            for reference in assertion['source_refs']
+        )
+
+        replay = client.post(
+            f'/api/v1/claims/{claim_id}/form/confirmations',
+            headers={
+                **AUTH,
+                'Idempotency-Key': 'filter-retrieval-confirmation',
+                'If-Match': str(patch_response.json()['revision']),
+            },
+            json={'field_codes': ['policy.policy_number']},
+        )
+        assert replay.status_code == 200
+        assert replay.json() == confirmation_response.json()

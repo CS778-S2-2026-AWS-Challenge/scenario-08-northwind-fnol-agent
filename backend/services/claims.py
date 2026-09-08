@@ -737,10 +737,18 @@ def update_form(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    claimant_updated_fields = _claimant_form(
+        repository,
+        updated_claim,
+    )
     return FormPatchResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
-        updated_fields=updated_fields,
+        updated_fields={
+            field_code: claimant_updated_fields[field_code]
+            for field_code in updated_fields
+            if field_code in claimant_updated_fields
+        },
         customer_next_step=updated_claim.customer_next_step,
     )
 
@@ -858,10 +866,18 @@ def confirm_form_fields(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    claimant_confirmed_fields = _claimant_form(
+        repository,
+        updated_claim,
+    )
     response = FormConfirmationResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
-        confirmed_fields=confirmed_fields,
+        confirmed_fields={
+            field_code: claimant_confirmed_fields[field_code]
+            for field_code in confirmed_fields
+            if field_code in claimant_confirmed_fields
+        },
         customer_next_step=next_step,
     )
     repository.save_idempotency(
