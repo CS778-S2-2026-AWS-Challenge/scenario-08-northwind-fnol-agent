@@ -219,12 +219,14 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert handoff['packet']['incident_summary'] == first_spec['input']
     assert handoff['packet']['form_snapshot']['incident.injury_or_danger']['value'] is False
     assert evidence[0]['evidence_id'] in handoff['packet']['pending_items']
-    assert any(
-        journey['policy']['reference'] in item for item in handoff['packet']['policy_citation_refs']
-    )
+    assert handoff['packet']['policy_citation_refs'] == [retrieval.retrieval_id]
     assert retrieval.retrieval_id in handoff['packet']['source_refs']
     review_signal = repository.list_review_signals(claim_id, 'cus_demo')[0]
     assert review_signal.signal_id in handoff['packet']['source_refs']
+    assert any(
+        item.startswith('tag_registry:northwind-fnol-staff-tags:')
+        for item in handoff['packet']['source_refs']
+    )
     assert any(
         item['evidence_id'] == evidence[0]['evidence_id'] and item['status'] == 'pending_generation'
         for item in handoff['packet']['evidence']
