@@ -1586,6 +1586,15 @@ def test_presence_update_maps_repository_revision_conflict(
     assert error.value.code == 'REVISION_CONFLICT'
 
 
+def test_staff_logout_rejects_a_session_that_is_already_inactive(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.delete('/api/v1/staff/auth/session', headers=staff_auth_headers)
+    assert response.status_code == 401
+    assert response.json()['error']['code'] == 'AUTHENTICATION_REQUIRED'
+
+
 def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
     client: TestClient,
     auth_headers: dict[str, str],
