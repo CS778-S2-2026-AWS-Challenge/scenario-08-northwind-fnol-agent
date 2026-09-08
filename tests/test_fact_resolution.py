@@ -37,6 +37,7 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.messages import _apply_question_accounting, _build_form_changes
+from backend.services.retrieval_review import persist_retrieval_record
 
 NOW = datetime(2026, 9, 8, 2, 0, tzinfo=UTC)
 CLAIMANT = ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_fact')
@@ -364,6 +365,30 @@ class RepeatingQuestionAgent:
         return asking_proposal('incident.location')
 
 
+class EquivalentPolicyNumberAgent:
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        next_step = context.claim.customer_next_step
+        return AgentProposal(
+            action=AgentAction.UPDATE,
+            reason_codes=['POLICY_NUMBER_RECORDED'],
+            customer_reason='The policy number was recorded.',
+            customer_response='I recorded that policy number.',
+            customer_next_step=next_step,
+            form_changes=[
+                ProposedFormChange(
+                    field_code='policy.policy_number',
+                    value='POL-MVP-HOME-2048',
+                    source=FormSource.CLAIMANT,
+                    status=FormStatus.CONFIRMED,
+                )
+            ],
+            state_changes=[],
+            proposed_signals=[],
+            required_tools=[],
+            next_action_requirements=[],
+        )
+
+
 def _create_claim(client: TestClient, family: str, key: str) -> dict[str, Any]:
     response = client.post(
         '/api/v1/claims',
@@ -588,3 +613,74 @@ def test_claimant_form_mutation_responses_filter_internal_retrieval_provenance()
         )
         assert replay.status_code == 200
         assert replay.json() == confirmation_response.json()
+
+
+def test_claimant_message_response_filters_internal_retrieval_provenance() -> None:
+    scenario = load_scenario(
+        Path(__file__).parents[1]
+        / 'backend'
+        / 'demo_data'
+        / 'scenarios'
+        / 'AT-02-coverage-ambiguity.json'
+    )
+    repository = FixtureRepository()
+
+    with TestClient(create_app(SETTINGS, repository, EquivalentPolicyNumberAgent())) as client:
+        created = _create_claim(client, 'home', 'create-message-projection-claim')
+        claim_id = str(created['claim']['claim_id'])
+        session_id = str(created['session']['session_id'])
+        claim = repository.get_claim(claim_id, 'cus_demo')
+        assert claim is not None
+        retrieval = scenario.retrievals[0].model_copy(update={'claim_id': claim_id})
+        persist_retrieval_record(repository, retrieval, 'cus_demo')
+        policy_field = scenario.claim.form['policy.policy_number']
+        claim_with_policy = claim.model_copy(
+            update={
+                'form': {**claim.form, 'policy.policy_number': policy_field},
+                'revision': claim.revision + 1,
+            }
+        )
+        repository.save_claim(claim_with_policy, expected_revision=claim.revision)
+
+        turn = _send(
+            client,
+            claim_id,
+            session_id,
+            claim_with_policy.revision,
+            'My policy number is POL-MVP-HOME-2048.',
+            'filter-message-retrieval',
+        )
+        replay = _send(
+            client,
+            claim_id,
+            session_id,
+            claim_with_policy.revision,
+            'My policy number is POL-MVP-HOME-2048.',
+            'filter-message-retrieval',
+        )
+
+    assert replay == turn
+    assert len(turn['form_changes']) == 1, turn
+    projected = turn['form_changes'][0]['field']
+    assert all(not reference.startswith('ret_') for reference in projected['source_refs'])
+    assert all(
+        not reference.startswith('ret_')
+        for assertion in projected['assertions']
+        for reference in assertion['source_refs']
+    )
+    assert projected['current_assertion_id'] is None
+
+    decision = repository.find_agent_decision_for_trigger(
+        claim_id,
+        turn['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert decision is not None
+    persisted = decision.form_changes['policy.policy_number']
+    assert 'ret_fixture_at02_policy' in persisted.source_refs
+    assert any(
+        'ret_fixture_at02_policy' in assertion.source_refs for assertion in persisted.assertions
+    )
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert 'ret_fixture_at02_policy' in stored_claim.form['policy.policy_number'].source_refs

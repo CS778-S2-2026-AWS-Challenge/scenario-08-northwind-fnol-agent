@@ -3,7 +3,7 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import CLAIMANT_HIDDEN_FIELDS, validate_registered_field_value
+from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -52,6 +52,7 @@ from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
 )
+from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
 from backend.services.fact_resolution import confirm_form_field, resolve_form_change
@@ -136,43 +137,7 @@ def _claimant_form(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> dict[str, StructuredFormField]:
-    """Keep field provenance but never expose internal retrieval identifiers to a claimant."""
-
-    internal_refs = {
-        record.retrieval_id
-        for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
-    }
-    projected: dict[str, StructuredFormField] = {}
-    for field_code, fact in claim.form.items():
-        if field_code in CLAIMANT_HIDDEN_FIELDS:
-            continue
-        visible_refs = [ref for ref in fact.source_refs if ref not in internal_refs]
-        visible_assertions = [
-            assertion.model_copy(
-                update={
-                    'source_refs': [
-                        ref for ref in assertion.source_refs if ref not in internal_refs
-                    ]
-                }
-            )
-            for assertion in fact.assertions
-            if any(ref not in internal_refs for ref in assertion.source_refs)
-        ]
-        projected[field_code] = fact.model_copy(
-            update={
-                'source_refs': visible_refs,
-                'assertions': visible_assertions,
-                'current_assertion_id': (
-                    fact.current_assertion_id
-                    if any(
-                        assertion.assertion_id == fact.current_assertion_id
-                        for assertion in visible_assertions
-                    )
-                    else None
-                ),
-            }
-        )
-    return projected
+    return project_claimant_form_fields(repository, claim, claim.form)
 
 
 def _claimant_contents_items(
@@ -737,9 +702,10 @@ def update_form(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
-    claimant_updated_fields = _claimant_form(
+    claimant_updated_fields = project_claimant_form_fields(
         repository,
         updated_claim,
+        updated_fields,
     )
     return FormPatchResponse(
         claim_id=claim_id,
@@ -866,9 +832,10 @@ def confirm_form_fields(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
-    claimant_confirmed_fields = _claimant_form(
+    claimant_confirmed_fields = project_claimant_form_fields(
         repository,
         updated_claim,
+        confirmed_fields,
     )
     response = FormConfirmationResponse(
         claim_id=claim_id,
