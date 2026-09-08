@@ -9313,6 +9313,26 @@
         "title": "StaffMessageResponse",
         "type": "object"
       },
+      "StaffPresencePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffPresenceRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "StaffPresencePage",
+        "type": "object"
+      },
       "StaffPresenceRecord": {
         "description": "Short-lived, provider-neutral staff presence used for Workbench eligibility.",
         "properties": {
@@ -9361,26 +9381,6 @@
           "updated_at"
         ],
         "title": "StaffPresenceRecord",
-        "type": "object"
-      },
-      "StaffPresencePage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/StaffPresenceRecord"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "page": {
-            "$ref": "#/components/schemas/PageInfo"
-          }
-        },
-        "required": [
-          "items",
-          "page"
-        ],
-        "title": "StaffPresencePage",
         "type": "object"
       },
       "StaffPresenceUpdate": {
@@ -18515,22 +18515,6 @@
         "operationId": "get_online_staff_api_v1_workbench_staff_online_get",
         "parameters": [
           {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -18547,10 +18531,30 @@
             "required": false,
             "schema": {
               "anyOf": [
-                {"type": "string"},
-                {"type": "null"}
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -18631,7 +18635,7 @@
         ]
       },
       "patch": {
-        "operationId": "patch_presence_api_v1_workbench_staff_presence_patch",
+        "operationId": "put_presence_api_v1_workbench_staff_presence_patch",
         "parameters": [
           {
             "in": "header",
