@@ -1803,7 +1803,10 @@ def test_deterministic_interrupts_precede_model_gateway(
     handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
     assert handoff.type.value == expected_type
     assert handoff.trigger.value == expected_trigger
-    assert handoff.priority.value == turn['handoff']['priority']
+    assert handoff.priority.value == (
+        'urgent' if expected_action == 'URGENT_HANDOFF' else 'standard'
+    )
+    assert 'priority' not in turn['handoff']
     assert handoff.source_message_id == turn['claimant_message']['message_id']
 
 

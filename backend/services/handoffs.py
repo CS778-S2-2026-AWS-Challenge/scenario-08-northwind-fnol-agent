@@ -71,7 +71,6 @@ def claimant_handoff(handoff: HandoffRecord) -> ClaimantHandoff:
     return ClaimantHandoff(
         handoff_id=handoff.handoff_id,
         status=handoff.status,
-        priority=handoff.priority,
         support_need=handoff.support_need,
         summary=handoff.packet.promised_next_step,
         created_at=handoff.created_at,

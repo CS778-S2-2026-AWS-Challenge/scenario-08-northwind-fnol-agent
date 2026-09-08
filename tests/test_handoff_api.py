@@ -63,7 +63,7 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
 
     assert turn['form_changes'] == []
     assert turn['decision']['action'] == 'URGENT_HANDOFF'  # type: ignore[index]
-    assert turn['handoff']['priority'] == 'urgent'  # type: ignore[index]
+    assert 'priority' not in turn['handoff']  # type: ignore[operator]
     summary = str(turn['handoff']['summary'])  # type: ignore[index]
     assert 'Contact local emergency services yourself' in summary
     assert 'contacted emergency services' not in summary
@@ -74,6 +74,7 @@ def test_explicit_injury_interrupts_intake_and_persists_urgent_handoff(
     handoffs = repository.list_handoffs(str(claim['claim_id']), 'cus_demo')
     stored_claim = repository.get_claim(str(claim['claim_id']), 'cus_demo')
     assert len(handoffs) == 1
+    assert handoffs[0].priority.value == 'urgent'
     assert handoffs[0].queue == 'urgent_support'
     assert handoffs[0].source_message_id == turn['claimant_message']['message_id']  # type: ignore[index]
     assert stored_claim is not None
@@ -198,8 +199,9 @@ def test_explicit_human_request_preserves_confirmed_context(
 
     assert turn['decision']['action'] == 'HANDOFF'  # type: ignore[index]
     assert turn['handoff']['support_need'] == 'human_requested'  # type: ignore[index]
-    assert turn['handoff']['priority'] == 'standard'  # type: ignore[index]
+    assert 'priority' not in turn['handoff']  # type: ignore[operator]
     handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
+    assert handoff.priority.value == 'standard'
     assert handoff.applied_rule == 'prototype_immediate_transfer'
     assert handoff.packet.incident_summary == (
         'A synthetic vehicle hit my parked car. Nobody was injured.'
@@ -272,9 +274,10 @@ def test_accessibility_and_distress_create_high_priority_source_linked_handoff(
     assert replay == turn
     assert turn['decision']['action'] == 'HANDOFF'  # type: ignore[index]
     assert turn['handoff']['support_need'] == expected_need  # type: ignore[index]
-    assert turn['handoff']['priority'] == 'high'  # type: ignore[index]
+    assert 'priority' not in turn['handoff']  # type: ignore[operator]
     handoffs = repository.list_handoffs(claim_id, 'cus_demo')
     assert len(handoffs) == 1
+    assert handoffs[0].priority.value == 'high'
     assert handoffs[0].trigger.value == expected_reason
     evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
     support_branch = next(
@@ -335,7 +338,6 @@ def test_support_endpoint_is_revision_protected_idempotent_and_claimant_safe(
     assert set(response.json()['handoff']) == {
         'handoff_id',
         'status',
-        'priority',
         'support_need',
         'summary',
         'created_at',

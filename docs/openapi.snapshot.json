@@ -2612,7 +2612,7 @@
       },
       "ClaimantHandoff": {
         "additionalProperties": false,
-        "description": "Customer-safe projection; staff routing reasons and packet details are excluded.",
+        "description": "Customer-safe projection; internal routing and packet details are excluded.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -2622,9 +2622,6 @@
           "handoff_id": {
             "title": "Handoff Id",
             "type": "string"
-          },
-          "priority": {
-            "$ref": "#/components/schemas/HandoffPriority"
           },
           "status": {
             "$ref": "#/components/schemas/HandoffStatus"
@@ -2640,7 +2637,6 @@
         "required": [
           "handoff_id",
           "status",
-          "priority",
           "support_need",
           "summary",
           "created_at"
@@ -6908,13 +6904,12 @@
           "handoff": {
             "anyOf": [
               {
-                "type": "object"
+                "$ref": "#/components/schemas/ClaimantHandoff"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Handoff"
+            ]
           },
           "session_id": {
             "title": "Session Id",

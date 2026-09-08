@@ -828,6 +828,7 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
 
     stored_handoffs = repository.list_handoffs(claim_id, stored_claim.customer_id)
     assert len(stored_handoffs) == 1
+    assert stored_handoffs[0].priority.value == 'standard'
     staff_response = client.get(
         f'/api/v1/workbench/claims/{claim_id}',
         headers=staff_auth_headers,
@@ -848,6 +849,7 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
     assert handoffs_response.status_code == 200
     staff_handoff = handoffs_response.json()['items'][0]
     assert staff_handoff == stored_handoffs[0].model_dump(mode='json')
+    assert staff_handoff['priority'] == 'standard'
     assert staff_handoff['queue'] == 'claimant_support'
     assert staff_handoff['reason_codes'] == ['HUMAN_SUPPORT_REQUESTED']
     assert staff_handoff['requested_action'].startswith('Contact the claimant')
@@ -877,7 +879,6 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
     assert set(claimant_handoff) == {
         'handoff_id',
         'status',
-        'priority',
         'support_need',
         'summary',
         'created_at',
@@ -893,7 +894,10 @@ def test_staff_receives_complete_handoff_packet_while_claimant_projection_is_saf
         'assigned_to',
     }.isdisjoint(claimant_handoff)
     assert claimant_claim.status_code == 200
-    assert 'handoffs' not in claimant_claim.json()
+    claimant_claim_body = claimant_claim.json()
+    assert 'handoffs' not in claimant_claim_body
+    assert claimant_claim_body['handoff'] == claimant_handoff
+    assert 'priority' not in claimant_claim_body['handoff']
 
 
 def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
