@@ -183,6 +183,28 @@ static Registries and deterministic validation remain the enforceable authority 
 - Do not require the claimant to audit the complete internal form. Show the structured
   form when requested or when it is the clearest way to correct a material issue.
 - Stop questioning when the current action can progress safely.
+- Count every Agent turn that presents an `ASK`, `CLARIFY`, or `CONFIRM` question. The current
+  Claim-trajectory budget is nine such turns, including turns carried into resumed sessions.
+- When the budget is exhausted, preserve accepted progress, state the remaining follow-up
+  honestly, and return a non-question response owned by a claims professional. Do not hide a tenth
+  question in prose or reset the counter by starting another session.
+
+### Fact resolution and provenance
+
+- Keep one selected value in authoritative Claim State while retaining the source-linked
+  assertions that led to it. Assertion history explains Claim State; it does not compete with it.
+- Runtime, not the model, determines whether a new statement is equivalent repetition, compatible
+  refinement, explicit correction, or material conflict. Model relation and precision claims do
+  not grant authority.
+- Equivalent repetition must not create a conflict. A correction or refinement retains and marks
+  the prior assertion as superseded rather than deleting it. A material conflict remains
+  unresolved until claimant clarification or authorised professional action selects the fact.
+- A material discrepancy is an internal candidate only. It cannot be represented to the claimant
+  as fraud, cannot create a fraud-review signal by itself, and cannot change coverage, severity,
+  priority, or workflow without their existing authority paths.
+- Preserve approximate, ranged, partial, unknown, and timezone-aware time statements. Never turn
+  phrases such as "around 8pm" into an exact timestamp unless a later source supplies that
+  precision.
 
 ### Field and branch selection
 
@@ -324,6 +346,10 @@ action-level authority check.
   summary, necessary recent messages, prior commitments, authorised structured results,
   relevant cited knowledge, and permitted tool results.
 - Complete conversations and claim history remain durable outside routine model context.
+- Resolve a fact's message references to full immutable `MessageRecord` content only when an
+  unresolved field needs explanation, correction, conflict resolution, or missing semantics.
+  Routine resolved fields do not cause full transcript retrieval. Optional source spans are lookup
+  hints and never replace the complete source message.
 - Summarisation must preserve confirmed facts, unresolved conflicts, source references,
   pending work, responsibility, and promised next steps.
 - Customer preferences may adapt communication but cannot replace formal claim records,

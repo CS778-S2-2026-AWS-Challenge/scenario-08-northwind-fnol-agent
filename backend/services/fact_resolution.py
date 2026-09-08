@@ -129,7 +129,8 @@ def resolve_form_change(
     relation = (
         AssertionRelation.INITIAL
         if existing is None
-        else _relation(
+        else proposal.relation
+        or _relation(
             field_code,
             existing,
             proposal.model_copy(update={'precision': precision}),
@@ -155,6 +156,36 @@ def resolve_form_change(
         history.append(_legacy_assertion(field_code, existing))
 
     if relation is AssertionRelation.EQUIVALENT and existing is not None:
+        if (
+            existing.resolution_state is FactResolutionState.CLARIFICATION_REQUIRED
+            and accepted_status is FormStatus.CONFIRMED
+        ):
+            current_id = existing.current_assertion_id or history[-1].assertion_id
+            resolved_history = [
+                item.model_copy(
+                    update={
+                        'status': (
+                            FormStatus.CONFIRMED
+                            if item.assertion_id == current_id
+                            else FormStatus.SUPERSEDED
+                            if item.status is FormStatus.DISPUTED
+                            else item.status
+                        )
+                    }
+                )
+                for item in history
+            ]
+            return existing.model_copy(
+                update={
+                    'source_refs': list(dict.fromkeys([*existing.source_refs, source_ref])),
+                    'status': FormStatus.CONFIRMED,
+                    'resolution_state': FactResolutionState.RESOLVED,
+                    'assertions': [*resolved_history, assertion],
+                    'current_assertion_id': current_id,
+                    'updated_at': timestamp,
+                    'updated_by': updated_by,
+                }
+            )
         return existing.model_copy(
             update={
                 'source_refs': list(dict.fromkeys([*existing.source_refs, source_ref])),

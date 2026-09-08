@@ -105,7 +105,7 @@ make their boundary explicit.
 | `claim.product_family` | Motor, home, or contents family | common/enum/no | C,Y/y/y/y | routing/y/registered | Registry + form; top-level `incident_type` remains the compatibility projection | C/S; authority |
 | `incident.type` | Collision, fire, water, theft, weather, etc. | common/enum/no | C/y/y/y | safety/y/registered | Registry + form | C/S; review if disputed |
 | `incident.description` | Natural account of what happened | common/scalar/no | C/y/n/y | y/c/registered | Registry + form | C/S; privacy |
-| `incident.occurred_at` | Loss occurrence date/time | common/date-time/no | C/y/y/y | safety/c/registered | Registry + form | C/S; privacy |
+| `incident.occurred_at` | Loss occurrence date/time without invented precision | common/temporal/no | C/y/y/y | safety/c/registered | Registry + form assertion history | C/S; exact, approximate, range, partial, unknown, timezone-aware |
 | `incident.discovered_at` | Discovery time, especially theft | conditional/date-time/no | C/y/y/y | safety/c/candidate | No field/schema | C/S; privacy |
 | `incident.location` | Incident place or useful region | common/location/no | C/y/y/y | safety/y/registered | Registry + form | C/S; privacy |
 | `incident.cause` | Initial cause, not coverage conclusion | common/scalar/no | C,E/y/y/y | safety/c/registered | Registry; evidence proposal gap | C/S; review if conflict |

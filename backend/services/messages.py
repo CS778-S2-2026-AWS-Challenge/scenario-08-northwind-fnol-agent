@@ -78,6 +78,7 @@ from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
 )
+from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
     resolve_contents_item_change,
@@ -277,6 +278,15 @@ def _message_turn_response(
     dynamic_form = (
         claimant_dynamic_form_projection(repository, claim) if claim is not None else None
     )
+    projected_form_changes = (
+        project_claimant_form_fields(
+            repository,
+            claim,
+            decision.form_changes,
+        )
+        if claim is not None
+        else decision.form_changes
+    )
     return MessageTurnResponse(
         claim_id=claim_id,
         session_id=claimant_message.session_id,
@@ -285,7 +295,7 @@ def _message_turn_response(
         agent_message=_claimant_message(agent_message),
         form_changes=[
             FormChange(field_code=field_code, field=field)
-            for field_code, field in decision.form_changes.items()
+            for field_code, field in projected_form_changes.items()
         ],
         contents_item_changes=[
             _claimant_contents_item(item) for item in decision.contents_item_changes

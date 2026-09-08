@@ -20,6 +20,12 @@ tests until the coordinated migration is accepted. It is a deprecated fallback b
 not the target Agent action model. New runtime design must not add private variants to this
 enum.
 
+The compatibility records may add source-preserving fact assertions, resolution and precision
+state, question accounting, and internal discrepancy candidates without creating another action
+enum or another Claim truth. These additions remain governed by the current revision-checked
+message transaction. They do not satisfy the removal gate for target `TurnPlan`,
+`ExecutionPlan`, `ActionEnvelope`, or `TurnResult` records.
+
 ## Target Mapping
 
 | Compatibility value | Target direction | Migration note |

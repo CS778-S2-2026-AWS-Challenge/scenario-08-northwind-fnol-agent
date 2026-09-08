@@ -4,7 +4,6 @@ from datetime import datetime
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import (
-    CLAIMANT_HIDDEN_FIELDS,
     BranchRuleEvaluator,
     validate_registered_field_value,
 )
@@ -56,6 +55,7 @@ from backend.services.branching import (
     build_applied_branch_evaluation,
     claimant_dynamic_form_projection,
 )
+from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
 from backend.services.fact_resolution import (
@@ -144,21 +144,7 @@ def _claimant_form(
 ) -> dict[str, StructuredFormField]:
     """Keep field provenance but never expose internal retrieval identifiers to a claimant."""
 
-    internal_refs = {
-        record.retrieval_id
-        for record in repository.list_retrieval_records(claim.claim_id, claim.customer_id)
-    }
-    projected: dict[str, StructuredFormField] = {}
-    for field_code, fact in claim.form.items():
-        if field_code in CLAIMANT_HIDDEN_FIELDS:
-            continue
-        visible_refs = [ref for ref in fact.source_refs if ref not in internal_refs]
-        projected[field_code] = (
-            fact
-            if len(visible_refs) == len(fact.source_refs)
-            else fact.model_copy(update={'source_refs': visible_refs})
-        )
-    return projected
+    return project_claimant_form_fields(repository, claim, claim.form)
 
 
 def _claimant_contents_items(
@@ -720,10 +706,15 @@ def update_form(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    claimant_updated_fields = project_claimant_form_fields(
+        repository,
+        updated_claim,
+        updated_fields,
+    )
     return FormPatchResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
-        updated_fields=updated_fields,
+        updated_fields=claimant_updated_fields,
         customer_next_step=next_step,
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
     )
@@ -876,10 +867,15 @@ def confirm_form_fields(
             retryable=True,
             current_revision=conflict.current_revision,
         ) from conflict
+    claimant_confirmed_fields = project_claimant_form_fields(
+        repository,
+        updated_claim,
+        confirmed_fields,
+    )
     response = FormConfirmationResponse(
         claim_id=claim_id,
         revision=updated_claim.revision,
-        confirmed_fields=confirmed_fields,
+        confirmed_fields=claimant_confirmed_fields,
         confirmed_contents_items=_claimant_contents_items(repository, updated_claim),
         customer_next_step=next_step,
         dynamic_form=claimant_dynamic_form_projection(repository, updated_claim),
