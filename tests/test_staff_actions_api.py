@@ -68,27 +68,34 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
         'equals': 'completed',
     }
 
-    completed = client.patch(
-        f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
-        headers={**staff_auth_headers, 'Idempotency-Key': 'complete-review', 'If-Match': '2'},
-        json={
-            'status': 'completed',
-            'result': {
-                'outcome': 'professional_review_completed',
-                'summary': 'The fixture wording was reviewed.',
-                'reason_codes': ['POLICY_SECTION_CONFIRMED'],
-                'source_refs': [],
-            },
-            'state_changes': [
-                {'path': 'claim_state.coverage', 'to': 'clear'},
-                {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
-            ],
-            'customer_update': {
-                'summary': 'The policy review is complete and your report can continue.',
-                'responsible_party': 'claimant',
-                'related_refs': [action['action_id']],
-            },
+    completion_endpoint = f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}'
+    completion_headers = {
+        **staff_auth_headers,
+        'Idempotency-Key': 'complete-review',
+        'If-Match': '2',
+    }
+    completion_payload: dict[str, Any] = {
+        'status': 'completed',
+        'result': {
+            'outcome': 'professional_review_completed',
+            'summary': 'The fixture wording was reviewed.',
+            'reason_codes': ['POLICY_SECTION_CONFIRMED'],
+            'source_refs': [],
         },
+        'state_changes': [
+            {'path': 'claim_state.coverage', 'to': 'clear'},
+            {'path': 'claim_state.workflow_state', 'to': 'ready_for_next'},
+        ],
+        'customer_update': {
+            'summary': 'The policy review is complete and your report can continue.',
+            'responsible_party': 'claimant',
+            'related_refs': [action['action_id']],
+        },
+    }
+    completed = client.patch(
+        completion_endpoint,
+        headers=completion_headers,
+        json=completion_payload,
     )
     assert completed.status_code == 200
     body = completed.json()
@@ -99,7 +106,20 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     assert stored.revision == 3
     assert stored.claim_state.coverage.value == 'clear'
     assert stored.claim_state.workflow_state.value == 'ready_for_next'
-    assert len(repository.list_customer_updates(claim_id)) == 1
+    persisted_actions = repository.list_staff_actions(claim_id)
+    persisted_updates = repository.list_customer_updates(claim_id)
+    assert len(persisted_actions) == 1
+    persisted_action = persisted_actions[0]
+    assert persisted_action.action_id == action['action_id']
+    assert persisted_action.status.value == 'completed'
+    assert persisted_action.completed_by == 'stf_demo'
+    assert persisted_action.completed_at is not None
+    assert persisted_action.source_refs == action['source_refs']
+    assert persisted_action.result is not None
+    assert persisted_action.result.outcome == 'professional_review_completed'
+    assert persisted_action.result.reason_codes == ['POLICY_SECTION_CONFIRMED']
+    assert persisted_action.result.source_refs == action['source_refs']
+    assert len(persisted_updates) == 1
     audit_record = repository.find_idempotency(
         'stf_demo',
         f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
@@ -109,6 +129,39 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
     assert audit_record.action_registry_version == '2026-09-04.2'
     assert audit_record.action_code == 'work_item.update'
     assert audit_record.target_ref == action['action_id']
+
+    replay = client.patch(
+        completion_endpoint,
+        headers=completion_headers,
+        json=completion_payload,
+    )
+    assert replay.status_code == 200
+    assert replay.json() == body
+    replayed_claim = repository.get_claim_internal(claim_id)
+    assert replayed_claim is not None
+    assert replayed_claim.revision == 3
+    assert repository.list_staff_actions(claim_id) == persisted_actions
+    assert repository.list_customer_updates(claim_id) == persisted_updates
+
+    conflicting_payload = {
+        **completion_payload,
+        'result': {
+            **completion_payload['result'],
+            'summary': 'A changed result must not reuse the accepted operation identity.',
+        },
+    }
+    conflict = client.patch(
+        completion_endpoint,
+        headers=completion_headers,
+        json=conflicting_payload,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    unchanged_claim = repository.get_claim_internal(claim_id)
+    assert unchanged_claim is not None
+    assert unchanged_claim.revision == 3
+    assert repository.list_staff_actions(claim_id) == persisted_actions
+    assert repository.list_customer_updates(claim_id) == persisted_updates
 
     closed_action = client.patch(
         f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action["action_id"]}',
