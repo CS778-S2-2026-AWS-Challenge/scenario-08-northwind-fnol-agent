@@ -257,6 +257,7 @@ def _pending_evidence(records: Sequence[EvidenceRecord]) -> list[EvidenceRecord]
         EvidenceFileStatus.UPLOADING,
         EvidenceFileStatus.UPLOADED,
         EvidenceFileStatus.PROCESSING,
+        EvidenceFileStatus.FAILED,
     }
     return [
         record

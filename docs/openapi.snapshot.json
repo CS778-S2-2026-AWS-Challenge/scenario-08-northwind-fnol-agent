@@ -2832,14 +2832,20 @@
               "$ref": "#/components/schemas/EvidenceFactProposal"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Facts",
             "type": "array"
+          },
+          "outcome": {
+            "default": "ready",
+            "enum": [
+              "ready",
+              "failed",
+              "retry"
+            ],
+            "title": "Outcome",
+            "type": "string"
           }
         },
-        "required": [
-          "facts"
-        ],
         "title": "CompleteEvidenceProcessingRequest",
         "type": "object"
       },

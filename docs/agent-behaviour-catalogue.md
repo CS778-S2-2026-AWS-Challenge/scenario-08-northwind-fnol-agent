@@ -225,7 +225,7 @@ permitted next action; it is not a keyword shortcut.
 - **Permitted actions:** Record evidence state and provenance, create a bounded WorkItem, process accepted uploads, and continue actions that do not depend on the missing item.
 - **Prohibited actions:** Treating pending evidence as proof, blocking all claim progress, silently replacing an occupied field, or claiming an external document exists.
 - **Claim State effect:** Evidence metadata and WorkItems update through their own validated records linked to the current Claim revision; material facts remain proposed until accepted.
-- **Failure behaviour:** Storage or processing failure preserves the evidence commitment and returns a retryable or bounded unavailable result.
+- **Failure behaviour:** Storage or processing failure preserves the evidence commitment and returns a retryable or bounded unavailable result. Processing and failed Evidence remain attention-required in Claim Context; only ready Evidence is usable. A retry reuses the same Evidence identity and revision/idempotency boundary.
 - **Visibility:** Claimant sees safe evidence status and responsibility; staff sees lifecycle, provenance, and blocked action; provider details remain restricted.
 - **Claimant-visible response:** Distinguish what is pending, what can continue, who is responsible, and any known timing without treating absence as failure.
 - **Handoff condition:** Required only when evidence conflict, professional judgement, or an unresolved service failure cannot progress safely.

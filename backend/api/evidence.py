@@ -8,7 +8,7 @@ from backend.adapters.evidence_storage import (
     EvidenceUploadNotFound,
     EvidenceUploadSizeMismatch,
 )
-from backend.core.auth import Principal, require_claimant
+from backend.core.auth import Principal, require_claimant, require_durable_claimant
 from backend.core.errors import ApiError
 from backend.domain.models import (
     CompleteEvidenceUploadRequest,
@@ -152,6 +152,7 @@ async def upload_evidence_content(
     request: Request,
     principal: Principal = Depends(require_claimant),
 ) -> Response:
+    require_durable_claimant(principal)
     repository = repository_for(request)
     storage = storage_for(request)
     evidence = repository.get_evidence(claim_id, evidence_id, principal.subject)

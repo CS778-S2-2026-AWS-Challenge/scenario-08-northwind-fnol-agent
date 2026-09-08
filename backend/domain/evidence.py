@@ -53,8 +53,13 @@ def lifecycle_stage_for(record: EvidenceRecord) -> EvidenceLifecycleStage:
         and record.file_status is EvidenceFileStatus.NOT_AVAILABLE
     ):
         return EvidenceLifecycleStage.NOT_YET_GENERATED
-    if record.status is EvidenceStatus.RECEIVED and record.file_status is EvidenceFileStatus.READY:
-        return EvidenceLifecycleStage.RECEIVED
+    if record.status is EvidenceStatus.RECEIVED:
+        if record.file_status is EvidenceFileStatus.READY:
+            return EvidenceLifecycleStage.RECEIVED
+        if record.file_status is EvidenceFileStatus.PROCESSING:
+            return EvidenceLifecycleStage.PENDING
+        if record.file_status is EvidenceFileStatus.FAILED:
+            return EvidenceLifecycleStage.INCOMPLETE
     if record.status is EvidenceStatus.INCOMPLETE:
         if record.file_status in PENDING_FILE_STATES:
             return EvidenceLifecycleStage.PENDING
@@ -124,6 +129,10 @@ def evidence_state_for(records: Sequence[EvidenceRecord]) -> EvidenceState:
         return EvidenceState.UNOFFICIAL
     if EvidenceStatus.PENDING_GENERATION in statuses:
         return EvidenceState.PENDING_GENERATION
+    if any(record.file_status in PENDING_FILE_STATES for record in records):
+        return EvidenceState.INCOMPLETE
+    if any(record.file_status is EvidenceFileStatus.FAILED for record in records):
+        return EvidenceState.INCOMPLETE
     if records and statuses == {EvidenceStatus.RECEIVED}:
         return EvidenceState.RECEIVED
     return EvidenceState.NOT_STARTED
