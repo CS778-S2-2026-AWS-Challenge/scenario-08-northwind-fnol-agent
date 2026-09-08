@@ -25,6 +25,11 @@ from backend.domain.configuration import (
     ConfigurationState,
     now_utc,
 )
+from backend.domain.knowledge import (
+    KnowledgeChunk,
+    KnowledgeRetrievalUnavailable,
+    KnowledgeSearch,
+)
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -38,6 +43,7 @@ from backend.domain.model_gateway import (
     ModelResponse,
     ModelRole,
     ModelTool,
+    ModelToolCall,
     ModelUsage,
 )
 from backend.domain.models import (
@@ -47,6 +53,9 @@ from backend.domain.models import (
     AgentProposalSource,
     AuthorityOutcome,
     Channel,
+    ContentsItem,
+    ContentsLossType,
+    ContentsOwnership,
     CustomerNextStep,
     FieldSelectionState,
     FormSource,
@@ -67,8 +76,13 @@ from backend.services.agent import (
     authorised_state_changes,
     validate_proposal,
 )
-from backend.services.model_agent import GatewayAgent
+from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.runtime_configuration import (
+    RuntimeConfigurationResolutionError,
+    RuntimeConfigurationResolver,
+    RuntimeConfigurationSnapshot,
+)
 from backend.services.workbench import get_workbench_claim_detail
 
 
@@ -906,6 +920,66 @@ class StaticGateway:
         return self.response
 
 
+class SequencedGateway:
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        self.responses = [
+            response.model_copy(update={'completion_status': ModelCompletionStatus.COMPLETE})
+            for response in responses
+        ]
+        self.requests: list[ModelRequest] = []
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=False)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return self.responses[len(self.requests) - 1]
+
+
+class StaticKnowledgeRetriever:
+    def __init__(self, chunks: list[KnowledgeChunk]) -> None:
+        self.chunks = chunks
+        self.requests: list[KnowledgeSearch] = []
+
+    def connection_status(self) -> str:
+        return 'using_fixture'
+
+    def search(self, request: KnowledgeSearch) -> list[KnowledgeChunk]:
+        self.requests.append(request)
+        return self.chunks
+
+
+def model_turn_output(
+    *,
+    action: str = 'UPDATE',
+    required_tools: list[dict[str, object]] | None = None,
+    form_changes: list[dict[str, object]] | None = None,
+    required_items: list[str] | None = None,
+) -> ModelResponse:
+    return ModelResponse(
+        structured_output={
+            'action': action,
+            'reason_codes': ['BOUNDED_CONTEXT_USED'],
+            'customer_reason': 'The bounded context was evaluated.',
+            'customer_response': 'I checked the available information safely.',
+            'customer_next_step': {
+                'status': 'confirmation_required' if form_changes else 'more_information_needed',
+                'summary': 'Review the result or continue with the report.',
+                'responsible_party': 'claimant',
+                'required_items': required_items or [],
+            },
+            'form_changes': form_changes or [],
+            'contents_item_changes': [],
+            'state_changes': [{'path': 'claim_state.next_action', 'to': action}],
+            'proposed_signals': [],
+            'required_tools': required_tools or [],
+            'next_action_requirements': required_items or [],
+            'handoff_priority': None,
+        }
+    )
+
+
 class FailingGateway:
     def __init__(self, code: ModelGatewayErrorCode, *, retryable: bool = False) -> None:
         self.code = code
@@ -928,6 +1002,253 @@ def model_gateway_settings(protocol: str) -> Settings:
         model_base_url='https://model.example.test/v1',
         model_identifier='northwind-test-model',
     )
+
+
+def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> None:
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What information is needed after vehicle damage?',
+                    }
+                ]
+            ),
+            model_turn_output(),
+        ]
+    )
+    chunk = KnowledgeChunk(
+        document_id='northwind-motor-vp',
+        chunk_id='northwind-motor-vp#next-steps',
+        title='Northwind Motor Claim Guide',
+        document_type='synthetic_process_guide',
+        version='MVP-2026.1',
+        section_path='Next steps',
+        page=None,
+        source_uri='northwind://synthetic-guide/motor/MVP-2026.1',
+        jurisdiction='NZ',
+        insurer='Northwind Insurance',
+        product='motor',
+        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+        effective_to=datetime(2027, 1, 1, tzinfo=UTC),
+        authority='northwind_synthetic_demo',
+        visibility='customer_and_staff',
+        checksum='synthetic-checksum',
+        ingested_at=datetime(2026, 8, 25, tzinfo=UTC),
+        text='Record the incident facts before claim creation.',
+    )
+    retriever = StaticKnowledgeRetriever([chunk])
+    provider = KnowledgeGroundedAgent(GatewayAgent(gateway), retriever)
+    claim = _working_claim().model_copy(update={'incident_type': 'motor'})
+    branch = BranchRuleEvaluator().evaluate(claim, recomputation_reason='knowledge_test')
+
+    proposal = provider.propose_turn(
+        AgentTurnContext(
+            claim=claim,
+            session_id='ses-knowledge',
+            trigger_message_id='msg-knowledge',
+            message_text='What information do you need about the vehicle damage?',
+            evidence_refs=[],
+            branch_evaluation=branch,
+        )
+    )
+
+    assert len(gateway.requests) == 2
+    assert len(retriever.requests) == 1
+    search = retriever.requests[0]
+    assert search.product == 'motor'
+    assert search.jurisdiction == 'NZ'
+    assert search.authority == 'northwind_synthetic_demo'
+    replanned_context = json.loads(gateway.requests[1].messages[1].content)
+    assert replanned_context['knowledge_status'] == 'evidence_found'
+    assert replanned_context['knowledge_citations'][0]['chunk_id'] == chunk.chunk_id
+    assert proposal.tool_results == [
+        {
+            'tool': 'knowledge_search',
+            'status': 'evidence_found',
+            'source_refs': [chunk.chunk_id],
+            'limitations': [],
+        }
+    ]
+
+
+def test_policy_lookup_replans_once_and_persists_source_linked_fact() -> None:
+    protocol = 'policy_replan_success'
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'policy_history',
+                        'operation': 'search_policy',
+                        'policy_reference': 'synthetic-policy-101',
+                        'question': 'Confirm the policy reference.',
+                    }
+                ]
+            ),
+            model_turn_output(
+                action='CONFIRM',
+                form_changes=[
+                    {
+                        'field_code': 'policy.policy_number',
+                        'value': 'synthetic-policy-101',
+                    }
+                ],
+                required_items=['policy.policy_number'],
+            ),
+        ]
+    )
+    registry = ModelGatewayRegistry()
+    registry.register(protocol, lambda _config: gateway)
+    repository = FixtureRepository()
+    claimant = {'Authorization': 'Bearer synthetic-claimant'}
+
+    with TestClient(
+        create_app(
+            model_gateway_settings(protocol),
+            repository=repository,
+            model_gateway_registry=registry,
+        )
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**claimant, 'Idempotency-Key': 'policy-replan-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        ).json()
+        response = client.post(
+            f'/api/v1/claims/{created["claim"]["claim_id"]}/sessions/'
+            f'{created["session"]["session_id"]}/messages',
+            headers={
+                **claimant,
+                'Idempotency-Key': 'policy-replan-turn',
+                'If-Match': str(created['claim']['revision']),
+            },
+            json={
+                'client_message_id': 'policy-replan-message',
+                'content': {
+                    'type': 'text',
+                    'text': 'Please check policy synthetic-policy-101 for this motor claim.',
+                },
+                'evidence_refs': [],
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(gateway.requests) == 2
+    records = repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo')
+    assert len(records) == 1
+    retrieval_id = records[0].retrieval_id
+    stored = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+    assert stored is not None
+    policy_field = stored.form['policy.policy_number']
+    assert policy_field.status is FormStatus.PROPOSED
+    assert retrieval_id in policy_field.source_refs
+    assert retrieval_id in policy_field.assertions[-1].source_refs
+    decision = repository.find_agent_decision_for_trigger(
+        created['claim']['claim_id'],
+        response.json()['claimant_message']['message_id'],
+        'cus_demo',
+    )
+    assert decision is not None
+    assert decision.tool_results[0]['status'] == 'evidence_found'
+    assert decision.tool_results[0]['source_refs'] == [retrieval_id]
+    assert response.json()['dynamic_form']['requirements']['ready'] is False
+
+
+@pytest.mark.parametrize(
+    ('policy_reference', 'second_tools', 'expected_status', 'expected_code'),
+    [
+        ('missing-policy', [], 503, 'AGENT_TOOL_NOT_PERMITTED'),
+        (
+            'synthetic-policy-101',
+            [
+                {
+                    'tool': 'claim_history',
+                    'operation': 'search_claim_history',
+                    'history_reference': 'synthetic-history-204',
+                    'limit': 10,
+                }
+            ],
+            502,
+            'DEPENDENCY_FAILED',
+        ),
+    ],
+)
+def test_failed_or_second_context_round_cannot_mutate_claim(
+    policy_reference: str,
+    second_tools: list[dict[str, object]],
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    protocol = f'policy_replan_rejected_{len(second_tools)}'
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'policy_history',
+                        'operation': 'search_policy',
+                        'policy_reference': policy_reference,
+                    }
+                ]
+            ),
+            model_turn_output(
+                action='CONFIRM',
+                required_tools=second_tools,
+                form_changes=(
+                    []
+                    if second_tools
+                    else [{'field_code': 'policy.policy_number', 'value': policy_reference}]
+                ),
+                required_items=[] if second_tools else ['policy.policy_number'],
+            ),
+        ]
+    )
+    registry = ModelGatewayRegistry()
+    registry.register(protocol, lambda _config: gateway)
+    repository = FixtureRepository()
+    claimant = {'Authorization': 'Bearer synthetic-claimant'}
+
+    with TestClient(
+        create_app(
+            model_gateway_settings(protocol),
+            repository=repository,
+            model_gateway_registry=registry,
+        )
+    ) as client:
+        created = client.post(
+            '/api/v1/claims',
+            headers={**claimant, 'Idempotency-Key': f'{protocol}-claim'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        ).json()
+        before = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
+        response = client.post(
+            f'/api/v1/claims/{created["claim"]["claim_id"]}/sessions/'
+            f'{created["session"]["session_id"]}/messages',
+            headers={
+                **claimant,
+                'Idempotency-Key': f'{protocol}-turn',
+                'If-Match': str(created['claim']['revision']),
+            },
+            json={
+                'client_message_id': f'{protocol}-message',
+                'content': {'type': 'text', 'text': 'Check the applicable policy.'},
+                'evidence_refs': [],
+            },
+        )
+
+    assert response.status_code == expected_status
+    assert response.json()['error']['code'] == expected_code
+    assert repository.get_claim(created['claim']['claim_id'], 'cus_demo') == before
+    assert (
+        repository.list_messages(
+            created['claim']['claim_id'], created['session']['session_id'], 'cus_demo'
+        )
+        == []
+    )
+    assert repository.list_agent_decisions(created['claim']['claim_id'], 'cus_demo') == []
 
 
 def submit_model_message(
@@ -1033,7 +1354,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
         inner_gateway: ModelGateway = OpenAICompatibleModelGateway(
             gateway_config(
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v4',
+                prompt_version='northwind-fnol-claimant-v5',
             ),
             transport=transport,
         )
@@ -1057,7 +1378,7 @@ def test_non_complete_provider_results_are_bounded_and_atomic_at_message_api(
             gateway_config(
                 credential_environment_variable='TEST_BEDROCK_COMPLETION_TOKEN',
                 tools=False,
-                prompt_version='northwind-fnol-motor-claimant-v4',
+                prompt_version='northwind-fnol-claimant-v5',
             ),
             transport=transport,
         )
@@ -1281,6 +1602,7 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'knowledge_status',
         'knowledge_citations',
         'knowledge_limitations',
+        'tool_results',
         'provenance_messages',
     }
     assert model_context['branch'] is None
@@ -1288,17 +1610,18 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
     assert model_context['knowledge_status'] == 'not_requested'
     assert model_context['knowledge_citations'] == []
     assert model_context['knowledge_limitations'] == []
-    assert model_context['provenance_messages'] == []
     assert set(model_context['claim']) == {
         'channel',
         'locale',
         'incident_type',
         'claim_state',
         'form',
+        'contents_items',
         'known_field_codes',
         'evidence_summary',
         'customer_next_step',
     }
+    assert model_context['claim']['contents_items'] == []
     assert 'fraud_signal' not in model_context['claim']['claim_state']
     assert set(model_context['claim']['form']) == {'incident.description'}
     assert set(model_context['claim']['known_field_codes']) == {
@@ -1311,17 +1634,14 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'status',
         'needed_for',
         'confidence',
-        'resolution_state',
         'precision',
         'source_refs',
     }
-    assert model_context['claim']['form']['incident.description']['source_refs'] == []
     serialised_context = json.dumps(model_context)
     for private_value in (
         'clm_private_gateway',
         'cus_private_gateway',
         'ses_private_gateway',
-        'msg_private_gateway',
         'evd_private_gateway',
         'private-external-fingerprint',
         'private-assessor-fingerprint',
@@ -1333,12 +1653,15 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'Cause for later action',
     ):
         assert private_value not in serialised_context
+    assert model_context['claim']['form']['incident.description']['source_refs'] == [
+        'msg_private_gateway'
+    ]
     assert proposal.action is AgentAction.CREATE_CLAIM
     assert proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY
     assert proposal.model_provenance is not None
     assert proposal.model_provenance.provider_model == 'provider-model-private'
     assert proposal.model_provenance.provider_request_id == 'provider-request-private'
-    assert proposal.model_provenance.prompt_id == 'northwind-fnol-motor-claimant-v4'
+    assert proposal.model_provenance.prompt_id == 'northwind-fnol-claimant-v5'
     assert proposal.form_changes[0].source is FormSource.INFERENCE
     assert proposal.form_changes[0].status is FormStatus.PROPOSED
     authority = validate_proposal(proposal)
@@ -1390,7 +1713,30 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
             'form': {
                 'incident.type': _form_field('collision', timestamp),
                 'incident.description': _form_field('A rear-end collision.', timestamp),
+                'vehicle.registration': _form_field('ABC123', timestamp),
+                'property.address': _form_field('1 Example Street', timestamp),
+                'claimant.client_number': _form_field('CLIENT-PRIVATE', timestamp),
             },
+            'contents_items': [
+                ContentsItem(
+                    item_id='itm_existing',
+                    description='Laptop computer',
+                    category='electronics',
+                    quantity=1,
+                    loss_type=ContentsLossType.DAMAGED,
+                    ownership=ContentsOwnership.OWNED,
+                    source=FormSource.CLAIMANT,
+                    source_refs=['msg_contents'],
+                    status=FormStatus.CONFIRMED,
+                    needed_for=NeededFor.CURRENT_ACTION,
+                    confidence=1.0,
+                    updated_at=timestamp,
+                    updated_by=ActorReference(
+                        actor_type=ActorType.CLAIMANT,
+                        actor_id='cus_gateway',
+                    ),
+                )
+            ],
         }
     )
     branch = BranchRuleEvaluator().evaluate(claim, recomputation_reason='model_context')
@@ -1423,6 +1769,23 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
     assert 'vehicle.registration' in model_context['branch']['allowed_field_codes']
     assert 'property.address' not in model_context['branch']['allowed_field_codes']
     assert 'claimant.client_number' not in model_context['branch']['allowed_field_codes']
+    assert model_context['claim']['form']['vehicle.registration']['value'] == 'ABC123'
+    assert 'vehicle.registration' in model_context['claim']['known_field_codes']
+    assert 'property.address' not in model_context['claim']['form']
+    assert 'claimant.client_number' not in model_context['claim']['known_field_codes']
+    assert model_context['claim']['contents_items'][0] == {
+        'item_id': 'itm_existing',
+        'description': 'Laptop computer',
+        'category': 'electronics',
+        'quantity': 1,
+        'loss_type': 'damaged',
+        'ownership': 'owned',
+        'estimated_value': None,
+        'source': 'claimant',
+        'source_refs': ['msg_contents'],
+        'status': 'confirmed',
+        'resolution_state': 'resolved',
+    }
     assert set(model_context['branch']) == {
         'field_registry_version',
         'branch_rules_version',
@@ -1436,6 +1799,11 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
         'interruption_result',
         'permitted_actions',
         'permitted_tools',
+        'satisfied_requirements',
+        'missing_required_now',
+        'pending_later',
+        'next_required_item',
+        'ready',
     }
 
 
@@ -1900,6 +2268,7 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
                     {'field_code': 'incident.occurred_at', 'value': 'around 10 this morning'},
                     {'field_code': 'incident.location', 'value': 'Queen Street'},
                     {'field_code': 'incident.injury_or_danger', 'value': False},
+                    {'field_code': 'parties.other_parties', 'value': True},
                     {
                         'field_code': 'vehicle.damage_description',
                         'value': 'The rear bumper is damaged.',
@@ -2073,7 +2442,7 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
         assert any(message['content'].get('text') == staff_reply for message in history)
 
 
-def test_gateway_agent_rejects_model_requested_server_tools() -> None:
+def test_gateway_agent_preserves_structured_tool_request_for_runtime_validation() -> None:
     gateway = StaticGateway(
         ModelResponse(
             structured_output={
@@ -2097,18 +2466,17 @@ def test_gateway_agent_rejects_model_requested_server_tools() -> None:
         )
     )
 
-    with pytest.raises(ModelGatewayError) as captured:
-        GatewayAgent(gateway).propose_turn(
-            AgentTurnContext(
-                claim=_working_claim(),
-                session_id='ses-gateway',
-                trigger_message_id='msg-gateway',
-                message_text='Look up my policy.',
-                evidence_refs=[],
-            )
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-gateway',
+            trigger_message_id='msg-gateway',
+            message_text='Look up my policy.',
+            evidence_refs=[],
         )
+    )
 
-    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+    assert proposal.required_tools == [{'tool': 'policy_history', 'operation': 'search_policy'}]
 
 
 def test_custom_protocol_registration_composes_without_route_changes() -> None:
@@ -2231,11 +2599,11 @@ def test_published_model_cannot_override_runtime_authority(
 def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> None:
     prompt = load_motor_claimant_prompt()
 
-    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-motor-claimant-v4'
-    assert 'Prompt ID: `northwind-fnol-motor-claimant-v4`' in prompt
-    assert '`knowledge_citations` from approved retrieval' in prompt
-    assert 'untrusted reference material' in prompt
-    assert 'do not invent a policy or knowledge answer' in prompt
+    assert MOTOR_CLAIMANT_PROMPT_ID == 'northwind-fnol-claimant-v5'
+    assert 'Prompt ID: `northwind-fnol-claimant-v5`' in prompt
+    assert 'current-action requirements' in prompt
+    assert 'one normalized' in prompt
+    assert 'cannot become a positive fact or a readiness signal' in prompt
 
 
 def test_gateway_agent_requires_structured_output_at_composition() -> None:
@@ -2288,3 +2656,486 @@ def test_invalid_credential_environment_names_fail_closed(
 
     assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
     assert credential_name not in str(captured.value)
+
+
+def test_gateway_agent_uses_the_published_snapshot_completion_path() -> None:
+    response = model_turn_output()
+
+    class SnapshotGateway(StaticGateway):
+        def complete(self, _request: ModelRequest) -> ModelResponse:
+            raise AssertionError('the snapshot completion path should be selected')
+
+        def complete_for_snapshot(
+            self, request: ModelRequest, snapshot: RuntimeConfigurationSnapshot
+        ) -> ModelResponse:
+            self.call_count += 1
+            self.last_request = request
+            self.snapshot = snapshot
+            return self.response
+
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel_vp',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+    gateway = SnapshotGateway(response)
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-snapshot',
+            trigger_message_id='msg-snapshot',
+            message_text='A routine update.',
+            evidence_refs=[],
+            runtime_configuration_snapshot=snapshot,
+        )
+    )
+
+    assert proposal.action is AgentAction.UPDATE
+    assert gateway.call_count == 1
+    assert gateway.snapshot is snapshot
+
+
+@pytest.mark.parametrize(
+    ('response', 'expected_code'),
+    [
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.INCOMPLETE),
+            ModelGatewayErrorCode.INCOMPLETE_RESPONSE,
+        ),
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.REFUSED),
+            ModelGatewayErrorCode.REFUSED_RESPONSE,
+        ),
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.UNKNOWN),
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+        ),
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.COMPLETE),
+            ModelGatewayErrorCode.MALFORMED_RESPONSE,
+        ),
+        (
+            ModelResponse(
+                structured_output=_model_proposal_output(),
+                tool_calls=[ModelToolCall(call_id='call-1', name='unknown', arguments={})],
+            ),
+            ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+        ),
+    ],
+)
+def test_gateway_agent_rejects_non_complete_or_unsafe_provider_results(
+    response: ModelResponse,
+    expected_code: ModelGatewayErrorCode,
+) -> None:
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(StaticGateway(response)).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-invalid-response',
+                trigger_message_id='msg-invalid-response',
+                message_text='A routine update.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code is expected_code
+
+
+def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            provider_model='vp-model',
+            provider_request_id='vp-request',
+            structured_output=_model_proposal_output(
+                form_changes=[
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'rear bumper',
+                        'reported_text': 'The rear bumper',
+                    },
+                    {
+                        'field_code': 'claim.product_family',
+                        'value': 'motor',
+                        'reported_text': 'motor claim',
+                    },
+                    {
+                        'field_code': 'property.affected_areas',
+                        'value': ['kitchen', 'roof'],
+                        'reported_text': 'the kitchen and roof',
+                    },
+                    {
+                        'field_code': 'incident.injury_or_danger',
+                        'value': False,
+                        'reported_text': 'nobody was injured',
+                    },
+                    {
+                        'field_code': 'parties.other_parties',
+                        'value': True,
+                        'reported_text': 'another vehicle was involved',
+                    },
+                    {
+                        'field_code': 'incident.occurred_at',
+                        'value': 123,
+                        'reported_text': 'yesterday',
+                    },
+                ]
+            ),
+        )
+    )
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-provenance',
+            trigger_message_id='msg-provenance',
+            message_text=(
+                'This is a motor claim. The rear bumper was damaged in the kitchen and roof. '
+                'Nobody was injured, another vehicle was involved, and it happened yesterday.'
+            ),
+            evidence_refs=[],
+        )
+    )
+
+    sources = {change.field_code: change.source for change in proposal.form_changes}
+    assert sources['incident.description'] is FormSource.CLAIMANT
+    assert sources['claim.product_family'] is FormSource.CLAIMANT
+    assert sources['property.affected_areas'] is FormSource.CLAIMANT
+    assert sources['incident.injury_or_danger'] is FormSource.CLAIMANT
+    assert sources['parties.other_parties'] is FormSource.CLAIMANT
+    assert sources['incident.occurred_at'] is FormSource.INFERENCE
+
+
+def test_gateway_agent_rejects_unquoted_and_unmapped_claimant_evidence() -> None:
+    gateway = StaticGateway(
+        ModelResponse(
+            structured_output=_model_proposal_output(
+                form_changes=[
+                    {
+                        'field_code': 'incident.description',
+                        'value': 'rear bumper',
+                        'reported_text': '   ',
+                    },
+                    {
+                        'field_code': 'claim.product_family',
+                        'value': 'motor',
+                        'reported_text': 'vehicle incident',
+                    },
+                ]
+            )
+        )
+    )
+    proposal = GatewayAgent(gateway).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-unquoted-evidence',
+            trigger_message_id='msg-unquoted-evidence',
+            message_text='A vehicle incident happened; it is a motor claim.',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.form_changes[0].source is FormSource.INFERENCE
+    assert proposal.form_changes[1].source is FormSource.CLAIMANT
+
+
+def test_knowledge_grounded_agent_returns_no_evidence_without_confirmed_product() -> None:
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    }
+                ]
+            ),
+            model_turn_output(),
+        ]
+    )
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), StaticKnowledgeRetriever([])
+    ).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim(),
+            session_id='ses-no-product',
+            trigger_message_id='msg-no-product',
+            message_text='What happens next?',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.tool_results[0]['status'] == 'no_evidence'
+    assert proposal.tool_results[0]['source_refs'] == []
+    assert gateway.requests[1]
+
+
+def test_knowledge_grounded_agent_fails_closed_when_release_has_no_product() -> None:
+    class MissingKnowledgeRelease:
+        def resolve_knowledge(self, product: str) -> object:
+            assert product == 'motor'
+            raise RuntimeConfigurationResolutionError('knowledge is not selected')
+
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    }
+                ]
+            ),
+            model_turn_output(),
+        ]
+    )
+    resolver = cast(RuntimeConfigurationResolver, MissingKnowledgeRelease())
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway),
+        StaticKnowledgeRetriever([]),
+        runtime_configuration_resolver=resolver,
+    ).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+            session_id='ses-no-release-knowledge',
+            trigger_message_id='msg-no-release-knowledge',
+            message_text='What happens next?',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.tool_results[0]['status'] == 'unavailable'
+    assert proposal.tool_results[0]['source_refs'] == []
+
+
+def test_knowledge_grounded_agent_honours_snapshot_knowledge_selection() -> None:
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel_without_motor_knowledge',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    }
+                ]
+            ),
+            model_turn_output(),
+        ]
+    )
+    proposal = KnowledgeGroundedAgent(
+        GatewayAgent(gateway), StaticKnowledgeRetriever([])
+    ).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+            session_id='ses-snapshot-knowledge',
+            trigger_message_id='msg-snapshot-knowledge',
+            message_text='What happens next?',
+            evidence_refs=[],
+            runtime_configuration_snapshot=snapshot,
+        )
+    )
+
+    assert proposal.tool_results[0]['status'] == 'unavailable'
+    assert proposal.tool_results[0]['source_refs'] == []
+
+
+@pytest.mark.parametrize(
+    ('runtime_policy', 'knowledge_status'),
+    [
+        (
+            type(
+                'Policy',
+                (),
+                {
+                    'instruction': type(
+                        'Instruction',
+                        (),
+                        {'system_prompt': 'test', 'prompt_version': 'test'},
+                    )(),
+                    'tool_policy': type('Tools', (), {'allowed_tool_names': []})(),
+                    'features': type('Features', (), {'knowledge_retrieval': True})(),
+                },
+            )(),
+            'not_requested',
+        ),
+        (
+            type(
+                'Policy',
+                (),
+                {
+                    'instruction': type(
+                        'Instruction',
+                        (),
+                        {'system_prompt': 'test', 'prompt_version': 'test'},
+                    )(),
+                    'tool_policy': type(
+                        'Tools', (), {'allowed_tool_names': ['knowledge_search']}
+                    )(),
+                    'features': type('Features', (), {'knowledge_retrieval': True})(),
+                },
+            )(),
+            'evidence_found',
+        ),
+    ],
+)
+def test_knowledge_grounded_agent_rejects_disallowed_or_repeated_context_lookup(
+    runtime_policy: object,
+    knowledge_status: str,
+) -> None:
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    }
+                ]
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as captured:
+        KnowledgeGroundedAgent(GatewayAgent(gateway), StaticKnowledgeRetriever([])).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+                session_id='ses-policy-lookup',
+                trigger_message_id='msg-policy-lookup',
+                message_text='What happens next?',
+                evidence_refs=[],
+                knowledge_status=knowledge_status,
+                runtime_policy=runtime_policy,  # type: ignore[arg-type]
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+
+
+@pytest.mark.parametrize('retrieval_result', ['empty', 'unavailable'])
+def test_knowledge_grounded_agent_preserves_bounded_retrieval_failure(
+    retrieval_result: str,
+) -> None:
+    class Retriever:
+        def connection_status(self) -> str:
+            return 'fixture'
+
+        def search(self, _request: KnowledgeSearch) -> list[KnowledgeChunk]:
+            if retrieval_result == 'unavailable':
+                raise KnowledgeRetrievalUnavailable('temporary outage')
+            return []
+
+    gateway = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    }
+                ]
+            ),
+            model_turn_output(),
+        ]
+    )
+    proposal = KnowledgeGroundedAgent(GatewayAgent(gateway), Retriever()).propose_turn(
+        AgentTurnContext(
+            claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+            session_id='ses-retrieval-outcome',
+            trigger_message_id='msg-retrieval-outcome',
+            message_text='What happens next?',
+            evidence_refs=[],
+        )
+    )
+
+    assert proposal.tool_results[0]['status'] == (
+        'unavailable' if retrieval_result == 'unavailable' else 'no_evidence'
+    )
+    assert proposal.tool_results[0]['source_refs'] == []
+
+
+def test_knowledge_grounded_agent_rejects_malformed_or_repeated_tool_requests() -> None:
+    malformed = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[{'tool': 'knowledge_search', 'operation': 'search', 'query': ''}]
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as malformed_error:
+        KnowledgeGroundedAgent(GatewayAgent(malformed), StaticKnowledgeRetriever([])).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+                session_id='ses-malformed-tool',
+                trigger_message_id='msg-malformed-tool',
+                message_text='Search for the next step.',
+                evidence_refs=[],
+            )
+        )
+    assert malformed_error.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+
+    repeated = SequencedGateway(
+        [
+            model_turn_output(
+                required_tools=[
+                    {
+                        'tool': 'knowledge_search',
+                        'operation': 'search',
+                        'query': 'What is the next step?',
+                    },
+                    {
+                        'tool': 'policy_history',
+                        'operation': 'search_policy',
+                        'query': 'What is my policy?',
+                    },
+                ]
+            )
+        ]
+    )
+    with pytest.raises(ModelGatewayError) as repeated_error:
+        KnowledgeGroundedAgent(GatewayAgent(repeated), StaticKnowledgeRetriever([])).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+                session_id='ses-repeated-tool',
+                trigger_message_id='msg-repeated-tool',
+                message_text='Search for the next step.',
+                evidence_refs=[],
+            )
+        )
+    assert repeated_error.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+
+
+def test_knowledge_grounded_agent_rejects_a_second_context_tool_after_replan() -> None:
+    request: dict[str, object] = {
+        'tool': 'knowledge_search',
+        'operation': 'search',
+        'query': 'What is the next step?',
+    }
+    gateway = SequencedGateway(
+        [model_turn_output(required_tools=[request]), model_turn_output(required_tools=[request])]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        KnowledgeGroundedAgent(GatewayAgent(gateway), StaticKnowledgeRetriever([])).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim().model_copy(update={'incident_type': 'motor'}),
+                session_id='ses-second-tool',
+                trigger_message_id='msg-second-tool',
+                message_text='Search for the next step.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY

@@ -1,12 +1,17 @@
 {
   "scenario_id": "AT-01-clear-motor-creation",
   "description": "A clear minor motor report progresses from natural language through confirmation to controlled mock claim creation.",
-  "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+  "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
   "expected_proposed_fields": [
     "incident.description",
     "incident.type",
     "incident.location",
-    "loss.description"
+    "loss.description",
+    "incident.injury_or_danger",
+    "incident.occurred_at",
+    "parties.other_parties",
+    "vehicle.damage_description",
+    "vehicle.drivable"
   ],
   "expected_route": "standard_motor_intake",
   "expected_creation_status": "created",
@@ -18,7 +23,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
           "status": "proposed",
           "source": "claimant"
         },
@@ -36,9 +41,39 @@
         },
         {
           "field_code": "loss.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
           "status": "proposed",
           "source": "inference"
+        },
+        {
+          "field_code": "incident.injury_or_danger",
+          "value": false,
+          "status": "proposed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.occurred_at",
+          "value": "this morning",
+          "status": "proposed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "parties.other_parties",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.damage_description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
+          "status": "proposed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.drivable",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
         }
       ],
       "next_step": {
@@ -52,7 +87,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
           "status": "confirmed",
           "source": "claimant"
         },
@@ -70,9 +105,39 @@
         },
         {
           "field_code": "loss.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
           "status": "confirmed",
           "source": "inference"
+        },
+        {
+          "field_code": "incident.injury_or_danger",
+          "value": false,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.occurred_at",
+          "value": "this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "parties.other_parties",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.damage_description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.drivable",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
         }
       ],
       "next_step": {
@@ -86,7 +151,7 @@
       "facts": [
         {
           "field_code": "incident.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper.",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning. Nobody was injured and the scene was safe. The vehicle is safe to drive.",
           "status": "confirmed",
           "source": "claimant"
         },
@@ -104,9 +169,39 @@
         },
         {
           "field_code": "loss.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
           "status": "confirmed",
           "source": "inference"
+        },
+        {
+          "field_code": "incident.injury_or_danger",
+          "value": false,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.occurred_at",
+          "value": "this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "parties.other_parties",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.damage_description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.drivable",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
         }
       ],
       "next_step": {
@@ -143,9 +238,39 @@
         },
         {
           "field_code": "loss.description",
-          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
           "status": "confirmed",
           "source": "inference"
+        },
+        {
+          "field_code": "incident.injury_or_danger",
+          "value": false,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "incident.occurred_at",
+          "value": "this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "parties.other_parties",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.damage_description",
+          "value": "Another car hit the rear of mine at Queen Street and damaged the rear bumper this morning",
+          "status": "confirmed",
+          "source": "claimant"
+        },
+        {
+          "field_code": "vehicle.drivable",
+          "value": true,
+          "status": "confirmed",
+          "source": "claimant"
         }
       ],
       "next_step": {

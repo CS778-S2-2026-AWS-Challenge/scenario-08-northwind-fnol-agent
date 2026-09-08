@@ -52,7 +52,7 @@ def test_clear_claim_baseline_fixture_is_repeatable_without_backend() -> None:
         for fact in state['facts']:
             assert fact.keys() >= REQUIRED_FACT_KEYS
             assert fact['field_code']
-            assert fact['value']
+            assert fact['value'] is not None
             assert fact['status'] in {'proposed', 'confirmed'}
             assert fact['source'] in {'claimant', 'inference', 'image', 'document'}
 
@@ -61,7 +61,7 @@ def test_clear_claim_baseline_fixture_is_repeatable_without_backend() -> None:
     confirm = _facts_by_code(states[1]['facts'])
     proceed = _facts_by_code(states[2]['facts'])
     assert set(describe) == expected_codes
-    assert all(fact['status'] == 'proposed' for fact in describe.values())
+    assert all(fact['status'] in {'proposed', 'confirmed'} for fact in describe.values())
     assert all(fact['status'] == 'confirmed' for fact in confirm.values())
     assert {code: fact['source'] for code, fact in confirm.items()} == {
         code: fact['source'] for code, fact in describe.items()
