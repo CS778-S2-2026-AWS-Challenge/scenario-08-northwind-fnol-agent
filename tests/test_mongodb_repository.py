@@ -1,3 +1,4 @@
+import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -6,7 +7,8 @@ from typing import Any, ClassVar
 
 import mongomock
 import pytest
-from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
+from pymongo import MongoClient
+from pymongo.errors import ConfigurationError, PyMongoError, ServerSelectionTimeoutError
 
 from backend.adapters.claims_service import MockAssessorServiceAdapter
 from backend.core.errors import ApiError
@@ -1356,6 +1358,117 @@ def test_mongodb_staff_mutation_linearizes_against_presence_revision(
     assert repository.get_claim(claim.claim_id, claim.customer_id) == claim.model_copy(
         update={'revision': 2}
     )
+
+
+def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
+    """Exercise the acceptance guard through a real MongoDB transaction.
+
+    The default URI is the repository's local replica-set composition. CI and
+    developers without that optional service skip this provider-level test;
+    mongomock is intentionally not used because it cannot provide transactions.
+    """
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0',
+    )
+    client = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = 'northwind_staff_presence_race'
+    connected = False
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        repository._collection.delete_many({})
+        claim = _claim().model_copy(
+            update={'claim_id': 'clm_mongo_presence_race', 'assignee_id': None}
+        )
+        session = _session(claim)
+        repository.create_claim(claim, session)
+        now = datetime.now(UTC)
+        presence = StaffPresenceRecord(
+            staff_id='staff-001',
+            online=True,
+            available=True,
+            last_seen_at=now,
+            expires_at=now.replace(microsecond=0).replace(year=now.year + 1),
+            updated_at=now,
+        )
+        repository.save_staff_presence(presence)
+        action = StaffActionRecord(
+            action_id='act_mongo_presence_race',
+            claim_id=claim.claim_id,
+            action_type='review_claim',
+            status=StaffActionStatus.OPEN,
+            assigned_to=presence.staff_id,
+            requested_outcome='Review the collected FNOL information.',
+            created_at=claim.created_at,
+        )
+        idempotency = IdempotencyRecord(
+            actor_id=presence.staff_id,
+            route='/staff-actions',
+            key='staff-presence-race',
+            request_fingerprint='race-fingerprint',
+            claim_id=claim.claim_id,
+            session_id=claim.active_session_id or '',
+        )
+        accepted_claim = claim.model_copy(update={'revision': 2, 'assignee_id': presence.staff_id})
+        offline_presence = presence.model_copy(
+            update={
+                'revision': 2,
+                'online': False,
+                'available': False,
+                'updated_at': now,
+            }
+        )
+        start = Barrier(2)
+
+        def accept() -> str:
+            start.wait(timeout=5)
+            try:
+                repository.save_staff_mutation(
+                    accepted_claim,
+                    1,
+                    idempotency,
+                    staff_action=action,
+                    required_staff_id=presence.staff_id,
+                    required_staff_revision=presence.revision,
+                )
+            except (KeyError, RevisionConflict):
+                return 'rejected'
+            return 'accepted'
+
+        def go_offline() -> str:
+            start.wait(timeout=5)
+            try:
+                repository.save_staff_presence(offline_presence, expected_revision=1)
+            except RevisionConflict:
+                return 'rejected'
+            return 'offline'
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda operation: operation(), (accept, go_offline)))
+
+        assert sorted(results) == ['accepted', 'rejected']
+        stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
+        stored_presence = repository.get_staff_presence(presence.staff_id)
+        assert stored_claim is not None
+        assert stored_presence is not None
+        if results[0] == 'accepted':
+            assert stored_claim == accepted_claim
+            assert stored_presence == presence.model_copy(update={'revision': 2})
+        else:
+            assert stored_claim == claim
+            assert stored_presence == offline_presence
+    finally:
+        if connected:
+            client.drop_database(database_name)
+        client.close()
 
 
 @pytest.mark.parametrize('invalid_session', ['foreign', 'missing'])
