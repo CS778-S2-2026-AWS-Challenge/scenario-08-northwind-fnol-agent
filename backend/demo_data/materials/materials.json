@@ -1,0 +1,317 @@
+{
+  "schema": "northwind.demo-materials/1",
+  "produced_by": "backend/demo_data/materials/generate_materials.py",
+  "specified_by": "docs/demonstration-material-catalogue.md",
+  "origin": "simulated",
+  "origin_statement": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+  "materials": [
+    {
+      "path": "motor/motor-incident-rear-bumper.jpg",
+      "claim_path": "motor",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Rear bumper damage",
+      "described_as": [
+        "Vehicle rear quarter",
+        "Impact damage to bumper and tail light",
+        "Supports vehicle.damage_description"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-incident-scene-wide.jpg",
+      "claim_path": "motor",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Incident scene, wide",
+      "described_as": [
+        "Both vehicles in final position",
+        "Road markings and kerb visible",
+        "Supports position and extent"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-incident-unreadable.jpg",
+      "claim_path": "motor",
+      "material_class": "Incident evidence",
+      "condition": "invalid",
+      "media_type": "image/jpeg",
+      "title": "Unusable photograph",
+      "described_as": [
+        "Motion blur across the whole frame",
+        "Damage not identifiable",
+        "Arrived, but does not support the stated fact"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-incident-conflicting-panel.jpg",
+      "claim_path": "motor",
+      "material_class": "Incident evidence",
+      "condition": "disputed",
+      "media_type": "image/jpeg",
+      "title": "Damage inconsistent with statement",
+      "described_as": [
+        "Shows front nearside damage",
+        "Claimant stated rear impact only",
+        "Neither side resolved; staff decision required"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-police-event-report.pdf",
+      "claim_path": "motor",
+      "material_class": "Authority or official report",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Police event report",
+      "described_as": [
+        "Event reference: SIMULATED",
+        "Attending unit recorded both vehicles and the road position",
+        "Issued outside Northwind and outside the claimant, on the issuer timetable"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-assessment-v1.pdf",
+      "claim_path": "motor",
+      "material_class": "Assessment or estimate",
+      "condition": "superseded",
+      "media_type": "application/pdf",
+      "title": "Vehicle damage assessment, first issue",
+      "described_as": [
+        "Assessor reference: SIMULATED",
+        "Repairable, parts pending",
+        "Replaced by a later assessment; retained in the record"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-assessment-v2.pdf",
+      "claim_path": "motor",
+      "material_class": "Assessment or estimate",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Vehicle damage assessment, revised",
+      "described_as": [
+        "Assessor reference: SIMULATED",
+        "Repairable, revised parts list",
+        "Supersedes the first issue"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "motor/motor-consent-record.pdf",
+      "claim_path": "motor",
+      "material_class": "Communication and consent record",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Assessor disclosure authorisation",
+      "described_as": [
+        "Shared: claim reference, location, damage description",
+        "Purpose: request a vehicle damage assessment",
+        "Authorised by the claimant linked to this claim"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "home/home-incident-ceiling.jpg",
+      "claim_path": "home",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Water damage to ceiling",
+      "described_as": [
+        "Staining across ceiling and cornice",
+        "Active ingress at time of capture",
+        "Supports property.affected_areas"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "home/home-incident-wall-second-room.jpg",
+      "claim_path": "home",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Water damage, second room",
+      "described_as": [
+        "Adjacent room, same event",
+        "Shows extent beyond one area",
+        "Supports property.affected_areas"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "home/home-attendance-note-illegible.pdf",
+      "claim_path": "home",
+      "material_class": "Incident evidence",
+      "condition": "invalid",
+      "media_type": "application/pdf",
+      "title": "Attendance note, unreadable",
+      "described_as": [
+        "Third-party attendance record",
+        "Text not legible in the supplied copy",
+        "Arrived, but carries no usable detail"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "home/home-repair-assessment.pdf",
+      "claim_path": "home",
+      "material_class": "Assessment or estimate",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Repair assessment",
+      "described_as": [
+        "Assessor reference: SIMULATED",
+        "Ingress traced to the roof valley; two rooms affected",
+        "Repairable; scope is the input to the cost conversation, not a decision"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "home/home-consent-record.pdf",
+      "claim_path": "home",
+      "material_class": "Communication and consent record",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Repair assessment disclosure authorisation",
+      "described_as": [
+        "Shared: claim reference, address, affected areas",
+        "Purpose: arrange a repair assessment",
+        "Authorised by the claimant linked to this claim"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-item-damaged.jpg",
+      "claim_path": "contents",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Damaged item",
+      "described_as": [
+        "Item as found after the event",
+        "Visible impact damage to casing",
+        "Identifies the item claimed for"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-item-in-situ.jpg",
+      "claim_path": "contents",
+      "material_class": "Incident evidence",
+      "condition": "received",
+      "media_type": "image/jpeg",
+      "title": "Item before the event",
+      "described_as": [
+        "Same item, undamaged, in place",
+        "Supporting context rather than damage evidence",
+        "Establishes the item existed and where"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-police-theft-report.pdf",
+      "claim_path": "contents",
+      "material_class": "Authority or official report",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Police theft report",
+      "described_as": [
+        "Event reference: SIMULATED",
+        "Records the reported theft of the item claimed for",
+        "Issued outside Northwind and outside the claimant, on the issuer timetable"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-purchase-receipt.pdf",
+      "claim_path": "contents",
+      "material_class": "Identity and ownership evidence",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Purchase receipt",
+      "described_as": [
+        "Retailer: SIMULATED",
+        "Item and purchase date shown",
+        "Supports ownership and value"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-receipt-illegible.pdf",
+      "claim_path": "contents",
+      "material_class": "Identity and ownership evidence",
+      "condition": "invalid",
+      "media_type": "application/pdf",
+      "title": "Receipt, second item, illegible",
+      "described_as": [
+        "Retailer and amount not readable",
+        "Item line partially obscured",
+        "Arrived, but does not carry the needed detail"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-valuation-expired.pdf",
+      "claim_path": "contents",
+      "material_class": "Identity and ownership evidence",
+      "condition": "expired",
+      "media_type": "application/pdf",
+      "title": "Valuation certificate, expired",
+      "described_as": [
+        "Valuation date outside the accepted window",
+        "Was valid; no longer is",
+        "A current valuation would restore it"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-ownership-conflicting.pdf",
+      "claim_path": "contents",
+      "material_class": "Identity and ownership evidence",
+      "condition": "disputed",
+      "media_type": "application/pdf",
+      "title": "Second ownership record, conflicting",
+      "described_as": [
+        "Names a different purchase date to the receipt",
+        "Both documents remain in the record",
+        "Neither side resolved; staff decision required"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-replacement-assessment.pdf",
+      "claim_path": "contents",
+      "material_class": "Assessment or estimate",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Replacement assessment",
+      "described_as": [
+        "Assessor reference: SIMULATED",
+        "Replacement rather than repair",
+        "Input to the cost conversation, not a decision"
+      ],
+      "simulated": true
+    },
+    {
+      "path": "contents/contents-consent-record.pdf",
+      "claim_path": "contents",
+      "material_class": "Communication and consent record",
+      "condition": "received",
+      "media_type": "application/pdf",
+      "title": "Valuation disclosure authorisation",
+      "described_as": [
+        "Shared: claim reference, item description, purchase evidence",
+        "Purpose: obtain a replacement assessment",
+        "Authorised by the claimant linked to this claim"
+      ],
+      "simulated": true
+    }
+  ]
+}

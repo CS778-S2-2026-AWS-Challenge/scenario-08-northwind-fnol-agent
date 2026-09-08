@@ -1,27 +1,41 @@
-"""Produce the demonstration materials named by docs/demonstration-material-catalogue.md.
+"""Produce and verify the demonstration materials named by the material catalogue.
 
 Every asset is generated rather than sourced, so its origin is unambiguous: nothing here
 is a photograph of a real incident or a document issued by a real authority. Each rendered
-asset states that on its face, which is what the catalogue requires of provenance and what
-issue #601 requires of its failure boundary.
+asset states that on its face, and carries the same statement in a machine-readable place
+so that the claim can be checked rather than trusted: a JPEG comment segment for the
+images, the page text for the documents.
 
 Run from the repository root:
 
-    python backend/demo_data/materials/generate_materials.py
+    python backend/demo_data/materials/generate_materials.py          # write every asset
+    python backend/demo_data/materials/generate_materials.py --check  # verify, write nothing
+
+`--check` reads the produced files with the standard library alone. Pillow is needed to
+write the images and is a development dependency only; nothing in the application or the
+test suite imports this module.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import json
 import pathlib
 import zlib
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw
+if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime by --check
+    from PIL.Image import Image as PILImage
 
 HERE = pathlib.Path(__file__).resolve().parent
+MANIFEST = HERE / 'materials.json'
 
 SIMULATED = 'SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT'
+MANIFEST_SCHEMA = 'northwind.demo-materials/1'
+
+PHOTO_SIZE = (900, 640)
 
 # Muted, deliberately unphotographic palette. A demonstration asset should read as a
 # stand-in at a glance rather than invite a viewer to mistake it for a photograph.
@@ -30,6 +44,8 @@ MUTED = (120, 128, 138)
 PAPER = (247, 246, 243)
 FIELD = (214, 219, 224)
 ACCENT = (176, 92, 68)
+
+MEDIA_TYPES = {'photo': 'image/jpeg', 'document': 'application/pdf'}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +59,10 @@ class Asset:
     title: str
     lines: tuple[str, ...]
     kind: str  # 'photo' or 'document'
+
+    @property
+    def media_type(self) -> str:
+        return MEDIA_TYPES[self.kind]
 
 
 ASSETS: tuple[Asset, ...] = (
@@ -98,6 +118,19 @@ ASSETS: tuple[Asset, ...] = (
             'Neither side resolved; staff decision required',
         ),
         'photo',
+    ),
+    Asset(
+        'motor/motor-police-event-report.pdf',
+        'motor',
+        'Authority or official report',
+        'received',
+        'Police event report',
+        (
+            'Event reference: SIMULATED',
+            'Attending unit recorded both vehicles and the road position',
+            'Issued outside Northwind and outside the claimant, on the issuer timetable',
+        ),
+        'document',
     ),
     Asset(
         'motor/motor-assessment-v1.pdf',
@@ -179,6 +212,19 @@ ASSETS: tuple[Asset, ...] = (
         'document',
     ),
     Asset(
+        'home/home-repair-assessment.pdf',
+        'home',
+        'Assessment or estimate',
+        'received',
+        'Repair assessment',
+        (
+            'Assessor reference: SIMULATED',
+            'Ingress traced to the roof valley; two rooms affected',
+            'Repairable; scope is the input to the cost conversation, not a decision',
+        ),
+        'document',
+    ),
+    Asset(
         'home/home-consent-record.pdf',
         'home',
         'Communication and consent record',
@@ -217,6 +263,19 @@ ASSETS: tuple[Asset, ...] = (
             'Establishes the item existed and where',
         ),
         'photo',
+    ),
+    Asset(
+        'contents/contents-police-theft-report.pdf',
+        'contents',
+        'Authority or official report',
+        'received',
+        'Police theft report',
+        (
+            'Event reference: SIMULATED',
+            'Records the reported theft of the item claimed for',
+            'Issued outside Northwind and outside the claimant, on the issuer timetable',
+        ),
+        'document',
     ),
     Asset(
         'contents/contents-purchase-receipt.pdf',
@@ -295,16 +354,16 @@ ASSETS: tuple[Asset, ...] = (
 )
 
 
-def _banner(draw: ImageDraw.ImageDraw, width: int, text: str) -> None:
-    draw.rectangle([(0, 0), (width, 34)], fill=ACCENT)
-    draw.text((14, 11), text, fill=PAPER)
+# --- writing, which is the only path that needs Pillow -----------------------
 
 
-def _photo(asset: Asset, size: tuple[int, int] = (900, 640)) -> Image.Image:
+def _photo(asset: Asset) -> PILImage:
     """A deliberately schematic stand-in, not an imitation photograph."""
 
-    width, height = size
-    image = Image.new('RGB', size, PAPER)
+    from PIL import Image, ImageDraw
+
+    width, height = PHOTO_SIZE
+    image = Image.new('RGB', PHOTO_SIZE, PAPER)
     draw = ImageDraw.Draw(image)
 
     # Schematic subject: blocked shapes rather than anything photographic.
@@ -315,7 +374,8 @@ def _photo(asset: Asset, size: tuple[int, int] = (900, 640)) -> Image.Image:
     draw.line([(140, 200), (width - 200, height - 190)], fill=ACCENT, width=6)
     draw.line([(width - 220, 220), (180, height - 200)], fill=ACCENT, width=4)
 
-    _banner(draw, width, SIMULATED)
+    draw.rectangle([(0, 0), (width, 34)], fill=ACCENT)
+    draw.text((14, 11), SIMULATED, fill=PAPER)
     draw.text((24, 58), asset.title, fill=INK)
     draw.text((24, 84), f'{asset.family} / {asset.material_class} / {asset.condition}', fill=MUTED)
     for index, line in enumerate(asset.lines):
@@ -326,9 +386,9 @@ def _photo(asset: Asset, size: tuple[int, int] = (900, 640)) -> Image.Image:
 def _pdf_bytes(asset: Asset) -> bytes:
     """Write a minimal single-page PDF without a PDF library.
 
-    The repository has no PDF dependency and adding one for demonstration assets would
-    put a runtime dependency behind demo data. A single page of Helvetica text is a small
-    enough format to emit directly, and the output is validated by reopening it below.
+    Adding a PDF dependency for demonstration assets would put a runtime dependency
+    behind demo data. A single page of Helvetica text is a small enough format to emit
+    directly, and `--check` reopens the result rather than trusting this function.
     """
 
     lines = [
@@ -386,32 +446,179 @@ def _pdf_bytes(asset: Asset) -> bytes:
     return bytes(out)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--check', action='store_true', help='verify assets exist, write nothing')
-    args = parser.parse_args()
+def manifest_document() -> dict[str, object]:
+    """Build the machine-readable record of what was produced.
 
-    missing: list[str] = []
+    This describes the materials themselves: what each one is, which claim path it
+    belongs to, which catalogue condition it demonstrates, and that its origin is
+    simulated. It deliberately carries no Claim, Evidence, or storage reference; the
+    association of a material with a claim record is issue #602.
+    """
+
+    return {
+        'schema': MANIFEST_SCHEMA,
+        'produced_by': 'backend/demo_data/materials/generate_materials.py',
+        'specified_by': 'docs/demonstration-material-catalogue.md',
+        'origin': 'simulated',
+        'origin_statement': SIMULATED,
+        'materials': [
+            {
+                'path': asset.path,
+                'claim_path': asset.family,
+                'material_class': asset.material_class,
+                'condition': asset.condition,
+                'media_type': asset.media_type,
+                'title': asset.title,
+                'described_as': list(asset.lines),
+                'simulated': True,
+            }
+            for asset in ASSETS
+        ],
+    }
+
+
+def write_all() -> list[tuple[str, int]]:
+    written: list[tuple[str, int]] = []
     for asset in ASSETS:
         target = HERE / asset.path
-        if args.check:
-            if not target.exists() or target.stat().st_size == 0:
-                missing.append(asset.path)
-            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         if asset.kind == 'photo':
-            _photo(asset).save(target, 'JPEG', quality=82)
+            # The banner is drawn onto the image for a human reader; the comment
+            # segment carries the same statement where --check can read it back.
+            _photo(asset).save(target, 'JPEG', quality=82, comment=SIMULATED.encode('ascii'))
         else:
             target.write_bytes(_pdf_bytes(asset))
-        print(f'{target.stat().st_size:>8} bytes  {asset.path}')
+        written.append((asset.path, target.stat().st_size))
+    MANIFEST.write_text(
+        json.dumps(manifest_document(), indent=2, ensure_ascii=True) + '\n',
+        encoding='utf-8',
+        newline='\n',
+    )
+    written.append((MANIFEST.name, MANIFEST.stat().st_size))
+    return written
 
-    if args.check:
-        if missing:
-            print('missing or empty:')
-            for path in missing:
-                print(f'  {path}')
-            return 1
-        print(f'{len(ASSETS)} assets present')
+
+# --- verification, which uses the standard library alone ---------------------
+
+
+def jpeg_facts(data: bytes) -> tuple[tuple[int, int], list[str]]:
+    """Return the JPEG's pixel size and its comment segments, parsing the markers."""
+
+    if not data.startswith(b'\xff\xd8\xff') or not data.rstrip(b'\x00').endswith(b'\xff\xd9'):
+        raise ValueError('not a JPEG envelope')
+    size = (0, 0)
+    comments: list[str] = []
+    index = 2
+    while index < len(data) - 1:
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        if marker in {0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+            index += 2
+            continue
+        if marker == 0xDA:  # start of scan; entropy-coded data follows
+            break
+        length = int.from_bytes(data[index + 2 : index + 4], 'big')
+        segment = data[index + 4 : index + 2 + length]
+        if marker == 0xFE:
+            comments.append(segment.split(b'\x00', 1)[0].decode('latin-1'))
+        elif 0xC0 <= marker <= 0xCF and marker not in {0xC4, 0xC8, 0xCC}:
+            size = (
+                int.from_bytes(segment[3:5], 'big'),
+                int.from_bytes(segment[1:3], 'big'),
+            )
+        index += 2 + length
+    return size, comments
+
+
+def pdf_page_text(data: bytes) -> str:
+    """Return the decompressed page-content text of a single-page PDF."""
+
+    if not data.startswith(b'%PDF-1.4') or not data.rstrip().endswith(b'%%EOF'):
+        raise ValueError('not a PDF envelope')
+    parts: list[str] = []
+    marker = b'stream\n'
+    start = data.find(marker)
+    while start != -1:
+        end = data.find(b'\nendstream', start)
+        if end == -1:
+            break
+        with contextlib.suppress(zlib.error):
+            parts.append(zlib.decompress(data[start + len(marker) : end]).decode('latin-1'))
+        start = data.find(marker, end)
+    return '\n'.join(parts)
+
+
+def check_all() -> tuple[list[str], list[str]]:
+    """Verify every asset exists, is the declared type, and states its simulated origin."""
+
+    reports: list[str] = []
+    failures: list[str] = []
+    for asset in ASSETS:
+        target = HERE / asset.path
+        if not target.exists() or target.stat().st_size == 0:
+            failures.append(f'{asset.path}: missing or empty')
+            continue
+        data = target.read_bytes()
+        try:
+            if asset.kind == 'photo':
+                size, comments = jpeg_facts(data)
+                if size != PHOTO_SIZE:
+                    failures.append(f'{asset.path}: {size[0]}x{size[1]}, expected 900x640')
+                    continue
+                if SIMULATED not in comments:
+                    failures.append(f'{asset.path}: no simulated-origin comment segment')
+                    continue
+                detail = f'JPEG {size[0]}x{size[1]}, origin in comment segment'
+            else:
+                text = pdf_page_text(data)
+                if SIMULATED not in text:
+                    failures.append(f'{asset.path}: no simulated-origin statement in page text')
+                    continue
+                detail = 'PDF-1.4 single page, origin in page text'
+        except ValueError as error:
+            failures.append(f'{asset.path}: {error}')
+            continue
+        reports.append(f'{target.stat().st_size:>7} B  {asset.media_type:<16} {asset.path}')
+        reports[-1] += f'  {detail}'
+
+    if not MANIFEST.exists():
+        failures.append(f'{MANIFEST.name}: missing')
+    else:
+        stored = json.loads(MANIFEST.read_text(encoding='utf-8'))
+        if stored != manifest_document():
+            failures.append(f'{MANIFEST.name}: does not match the ASSETS table; regenerate')
+    return reports, failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--check',
+        action='store_true',
+        help='verify each asset opens, is the declared type, and states its simulated origin',
+    )
+    args = parser.parse_args()
+
+    if not args.check:
+        for path, size in write_all():
+            print(f'{size:>8} bytes  {path}')
+        return 0
+
+    reports, failures = check_all()
+    for line in reports:
+        print(line)
+    print()
+    if failures:
+        print(f'{len(failures)} problem(s):')
+        for line in failures:
+            print(f'  {line}')
+        return 1
+    print(
+        f'{len(reports)} assets verified: each opens, is the declared media type, '
+        'and states its simulated origin; the manifest matches the asset table'
+    )
     return 0
 
 

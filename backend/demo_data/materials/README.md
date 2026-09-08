@@ -1,7 +1,7 @@
 # Demonstration Materials
 
 The image and document assets a Validation Prototype demonstration uses for the `motor`, `home`,
-and `contents` paths.
+and `contents` paths, together with the machine-readable record of what each one is.
 
 ## What these are
 
@@ -16,9 +16,10 @@ demonstration.
 
 **Every asset is generated, not sourced.** No file here is a photograph of a real incident, a
 document issued by a real authority, or a record from a real retailer or assessor. Each asset states
-that on its own face, which is what `docs/demonstration-material-catalogue.md` requires of
-provenance and what issue #601 requires of its failure boundary: simulated origin is explicit, and
-no live provider is represented.
+that in two places: on its face for a human reader, and in a machine-readable place so the claim can
+be checked rather than trusted — a JPEG comment segment for the images, the page text for the
+documents. That is what `docs/demonstration-material-catalogue.md` requires of provenance and what
+issue #601 requires of its failure boundary.
 
 ## What governs the set
 
@@ -40,17 +41,39 @@ One directory per claim path. `jpg` for the schematic stand-ins that represent p
 for the ones that represent documents. The filename carries no claimant name, address,
 registration, policy number, or date, because it is shown on both the claimant and staff surfaces.
 
-## Regenerating
+## `materials.json`
 
-`generate_materials.py` in this directory is the producer and the manifest: its `ASSETS` table is
-the authoritative list of what exists, and for each asset it records the path, the claim path, the
-material class, the condition it demonstrates, and the text rendered onto it.
+The runtime metadata for the set. For every asset it records the path, the claim path, the material
+class, the catalogue condition it demonstrates, its media type, its title, the text rendered onto
+it, and that its origin is simulated.
+
+It deliberately carries **no Claim, Evidence, or storage reference**. Associating a material with a
+claim record, a source, and a processing status is issue #602; this file describes only the
+materials themselves, so that work has something authoritative to read.
+
+`generate_materials.py` writes it, and `--check` fails if it has drifted from the `ASSETS` table.
+
+## Byte exactness
+
+`.gitattributes` in this directory marks `*.pdf` and `*.jpg` as non-text, overriding the repository
+root's `* text=auto`. This is not cosmetic. A PDF cross-reference table is a fixed-width record
+format whose rows end in a mandatory space and whose entries are byte offsets into the file; if Git
+normalises line endings on checkout, every offset shifts and the document stops opening. The same
+applies to the JPEG entropy-coded data.
+
+## Regenerating and verifying
 
 ```bash
 python backend/demo_data/materials/generate_materials.py          # write every asset
-python backend/demo_data/materials/generate_materials.py --check  # verify each one exists
+python backend/demo_data/materials/generate_materials.py --check  # verify, write nothing
 ```
 
-It imports Pillow, which is **not** a declared project dependency. That is deliberate: the assets
-are committed, so nothing in the application or the test suite needs Pillow to use them. Only
-regenerating them does. The script is not imported by any application module.
+`--check` opens every asset with the standard library alone: it parses the JPEG markers for the
+pixel size and the comment segment, decompresses the PDF page stream to read its text, confirms each
+file is the media type the table declares, confirms the simulated-origin statement is present, and
+confirms `materials.json` still matches the table. It needs no third-party package, so anyone can
+reproduce the acceptance evidence from the declared project dependencies.
+
+Writing the images needs Pillow, which is declared in `backend/requirements-dev.txt` as a
+development dependency. Nothing in the application or the test suite imports this module or needs
+Pillow to *use* the committed assets; only regenerating them does.
