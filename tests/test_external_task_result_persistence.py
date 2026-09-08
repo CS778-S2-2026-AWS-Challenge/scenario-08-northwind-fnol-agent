@@ -14,6 +14,7 @@ from typing import Any
 
 import mongomock
 import pytest
+from pymongo.errors import DuplicateKeyError
 
 from backend.domain.external_services import (
     ExternalTaskDelivery,
@@ -466,3 +467,102 @@ def test_demo_reset_clears_returned_results() -> None:
 
     assert cleared['external_task_results'] == 1
     assert repository.list_external_task_results_internal(CLAIM) == []
+
+
+def test_a_partial_unknown_outcome_carries_a_result_even_when_not_submitted(
+    repository: PersistenceRepository,
+) -> None:
+    """`partial` is an unknown outcome whatever delivery says, so it can hold an answer."""
+
+    claim = _claim()
+    repository.create_claim(claim, _session(claim))
+    repository.save_external_task(
+        _task(task_id='tsk_partial', delivery=ExternalTaskDelivery.NOT_SUBMITTED).model_copy(
+            update={
+                'status': ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+                'failure_code': ExternalTaskFailureCode.PARTIAL,
+            }
+        ),
+        CUSTOMER,
+    )
+
+    repository.save_external_task_result(_result(task_id='tsk_partial'), CUSTOMER)
+
+    stored = repository.list_external_task_results_internal(CLAIM)
+    assert [item.task_id for item in stored] == ['tsk_partial']
+
+
+def test_an_identical_create_that_loses_a_race_is_not_reported_as_conflict() -> None:
+    """A competing writer storing the same document is this call's own outcome."""
+
+    store = MongoDBRepository(mongomock.MongoClient(), 'northwind_race_create')
+    store._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    _seed(store)
+    result = _result()
+
+    real_insert = store._collection.insert_one
+    calls: list[int] = []
+
+    def competing_insert(document: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        real_insert(document, *args, **kwargs)
+        raise DuplicateKeyError('a competing writer stored it first')
+
+    store._collection.insert_one = competing_insert  # type: ignore[method-assign]
+    store.save_external_task_result(result, CUSTOMER)
+    store._collection.insert_one = real_insert  # type: ignore[method-assign]
+
+    assert calls == [1]
+    assert store.list_external_task_results_internal(CLAIM) == [result]
+
+
+def test_a_conflicting_create_that_loses_a_race_is_still_refused() -> None:
+    store = MongoDBRepository(mongomock.MongoClient(), 'northwind_race_conflict')
+    store._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    _seed(store)
+    winner = _result(summary='What the competing writer recorded instead.')
+
+    real_insert = store._collection.insert_one
+
+    def competing_insert(document: Any, *args: Any, **kwargs: Any) -> Any:
+        real_insert(
+            {**document, **winner.model_dump(mode='json')},
+            *args,
+            **kwargs,
+        )
+        raise DuplicateKeyError('a competing writer stored something else first')
+
+    store._collection.insert_one = competing_insert  # type: ignore[method-assign]
+    with pytest.raises(IdempotencyConflict):
+        store.save_external_task_result(_result(), CUSTOMER)
+    store._collection.insert_one = real_insert  # type: ignore[method-assign]
+
+    assert store.list_external_task_results_internal(CLAIM) == [winner]
+
+
+def test_an_identical_verification_that_loses_a_race_is_not_reported_as_conflict() -> None:
+    store = MongoDBRepository(mongomock.MongoClient(), 'northwind_race_verify')
+    store._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    _seed(store)
+    store.save_external_task_result(_result(), CUSTOMER)
+    checked = _result(
+        verification=ExternalTaskResultVerification.CONSISTENT,
+        verified_at=BASE + timedelta(minutes=5),
+        verified_against_revision=1,
+    )
+
+    real_replace = store._collection.replace_one
+
+    def competing_replace(query: Any, document: Any, *args: Any, **kwargs: Any) -> Any:
+        real_replace({'_id': document['_id']}, document, *args, **kwargs)
+
+        class Missed:
+            matched_count = 0
+
+        return Missed()
+
+    store._collection.replace_one = competing_replace  # type: ignore[assignment, method-assign]
+    store.save_external_task_result(checked, CUSTOMER)
+    store._collection.replace_one = real_replace  # type: ignore[method-assign]
+
+    assert store.list_external_task_results_internal(CLAIM) == [checked]

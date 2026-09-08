@@ -521,10 +521,12 @@ class PersistenceRepository(ClaimRepository, Protocol):
         record again succeeds and changes nothing; writing a different one fails closed
         rather than overwriting what is stored.
 
-        A result may only be recorded against a task whose request actually reached the
-        provider, which `ExternalTaskDelivery.SUBMITTED` is the record of. Nothing reached
-        a provider otherwise, so no provider answer can exist to record, and a routing or
-        request acknowledgement is not an answer.
+        Which task states can carry an answer is decided by `assert_result_matches_task`,
+        not restated here: `ACCEPTED`, where the provider took the request, and
+        `UNKNOWN_OUTCOME`, which is the state a late answer resolves. Delivery is not the
+        test, because a `PARTIAL` failure is an unknown outcome whether or not the request
+        was recorded as submitted. A routing or request acknowledgement is not an answer
+        in any of those states.
 
         Args:
             result: Returned-result state to ingest or advance to a checked verification.

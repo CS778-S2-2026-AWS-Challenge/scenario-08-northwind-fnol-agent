@@ -1569,7 +1569,12 @@ class MongoDBRepository:
                 self._collection.insert_one(document)
                 return
             except DuplicateKeyError as error:
-                raise IdempotencyConflict(result.result_id) from error
+                # Another writer won the race. Whether that is a conflict depends on what
+                # it stored: an identical document means this call's intended result is
+                # the canonical one, and reporting failure would tell a retrying producer
+                # that ingestion failed after it had actually succeeded.
+                self._assert_race_winner_matches(result, customer_id, error)
+                return
         replaced = self._collection.replace_one(
             {
                 '_id': record_id,
@@ -1581,7 +1586,45 @@ class MongoDBRepository:
             document,
         )
         if replaced.matched_count == 0:
+            # The stored verification moved between the read and the write. The same
+            # question applies: an identical winner is this call's own outcome.
+            self._assert_race_winner_matches(result, customer_id, None)
+
+    def _assert_race_winner_matches(
+        self,
+        result: ExternalTaskResult,
+        customer_id: str,
+        cause: Exception | None,
+    ) -> None:
+        """Refuse only when a concurrent writer stored something else.
+
+        Args:
+            result: The result this call intended to store.
+            customer_id: Customer who owns the parent claim.
+            cause: The duplicate-key error that revealed the race, when there was one.
+
+        Returns:
+            None. The write is treated as already applied.
+
+        Raises:
+            IdempotencyConflict: The stored canonical result differs from the proposal.
+        """
+        stored = next(
+            iter(
+                self._list(
+                    'external_task_result',
+                    ExternalTaskResult,
+                    {'claim_id': result.claim_id, 'task_id': result.task_id},
+                    'received_at',
+                )
+            ),
+            None,
+        )
+        if stored == result:
+            return
+        if cause is None:
             raise IdempotencyConflict(result.result_id)
+        raise IdempotencyConflict(result.result_id) from cause
 
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records for an already-authorised internal claim read.
