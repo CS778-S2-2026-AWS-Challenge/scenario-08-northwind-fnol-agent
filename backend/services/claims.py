@@ -3,7 +3,10 @@ from datetime import datetime
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
-from backend.domain.branch_registry import validate_registered_field_value
+from backend.domain.branch_registry import (
+    BranchRuleEvaluator,
+    validate_registered_field_value,
+)
 from backend.domain.evidence import evidence_summary_for
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
@@ -23,6 +26,7 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
+    FieldSelectionState,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -587,6 +591,14 @@ def update_form(
 
     timestamp = now_utc()
     updated_fields: dict[str, StructuredFormField] = {}
+    branch_evaluation = BranchRuleEvaluator().evaluate(
+        claim,
+        current_action=claim.claim_state.next_action,
+        recomputation_reason='form_update_validation',
+    )
+    field_selection = {
+        item.field_code: item.selection_state for item in branch_evaluation.field_selection
+    }
     for update in payload.updates:
         if update.field_code not in REGISTERED_FIELD_CODES:
             raise ApiError(
@@ -610,6 +622,21 @@ def update_form(
                 message='The form update contains an invalid registered-field value.',
                 details=[ErrorDetail(field=update.field_code, reason=str(error))],
             ) from error
+        if (
+            update.field_code != 'claim.product_family'
+            and field_selection.get(update.field_code) is FieldSelectionState.INACTIVE
+        ):
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='The form update is incompatible with the selected claim family.',
+                details=[
+                    ErrorDetail(
+                        field=update.field_code,
+                        reason='The field is inactive for the selected or confirmed family.',
+                    )
+                ],
+            )
         existing = claim.form.get(update.field_code)
         if (
             update.field_code == 'claim.product_family'
