@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime
 
 from backend.adapters.policy_history import PolicyHistoryAdapter
@@ -9,6 +10,7 @@ from backend.domain.branch_registry import (
 )
 from backend.domain.field_registry import REGISTERED_FIELD_CODES
 from backend.domain.ids import new_id
+from backend.domain.intake import intake_field_for_requirement, next_requirement_step
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -20,8 +22,10 @@ from backend.domain.models import (
     BranchEvaluationRecord,
     BranchEvaluationResult,
     BranchEvaluationStatus,
+    ClaimantContentsItem,
     ClaimantDecision,
     ClaimantMessage,
+    ContentsItem,
     Coverage,
     CreateMessageRequest,
     CustomerNextStep,
@@ -47,6 +51,7 @@ from backend.domain.models import (
     StructuredFormField,
     SupportNeed,
     WorkflowState,
+    WorkingClaim,
 )
 from backend.domain.retrieval import (
     ClaimHistoryRetrievalRecord,
@@ -76,6 +81,7 @@ from backend.services.branching import (
 from backend.services.claimant_form_projection import project_claimant_form_fields
 from backend.services.fact_resolution import (
     provenance_messages_for_fields,
+    resolve_contents_item_change,
     resolve_form_change,
 )
 from backend.services.handoffs import (
@@ -108,6 +114,98 @@ INTERNAL_ONLY_REASON_CODES = frozenset(
         'ADDITIONAL_CONTEXT_RECORDED',
     }
 )
+
+_CONTEXT_TOOL_OPERATIONS = {
+    'policy_history': frozenset({'search_policy'}),
+    'claim_history': frozenset({'search_claim_history', 'lookup'}),
+}
+_ACTION_TOOL_OPERATIONS = {
+    'evidence_registry': frozenset({'record_pending_generation'}),
+    'professional_review': frozenset({'create_policy_review'}),
+}
+
+
+def _validate_tool_requests(
+    proposal: AgentProposal,
+    branch_evaluation: BranchEvaluationResult,
+) -> None:
+    if len(proposal.required_tools) > 3:
+        raise ApiError(
+            status_code=503,
+            code='AGENT_TOOL_NOT_PERMITTED',
+            message='The Agent requested too many tools for one bounded turn.',
+        )
+    allowed_names = set(branch_evaluation.permitted_tools)
+    seen: set[tuple[str, str]] = set()
+    context_tool_count = sum(
+        request.get('tool') in _CONTEXT_TOOL_OPERATIONS for request in proposal.required_tools
+    )
+    if context_tool_count > 1:
+        raise ApiError(
+            status_code=503,
+            code='AGENT_TOOL_NOT_PERMITTED',
+            message='The Agent requested more than one context lookup in a bounded turn.',
+        )
+    for request in proposal.required_tools:
+        tool = request.get('tool')
+        operation = request.get('operation')
+        if not isinstance(tool, str) or not isinstance(operation, str):
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent supplied an invalid structured tool request.',
+            )
+        operations = _CONTEXT_TOOL_OPERATIONS.get(tool) or _ACTION_TOOL_OPERATIONS.get(tool)
+        identity = (tool, operation)
+        if tool not in allowed_names or operations is None or operation not in operations:
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent requested an unregistered tool operation.',
+            )
+        if identity in seen:
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent repeated a tool operation in one bounded turn.',
+            )
+        seen.add(identity)
+        if (
+            tool == 'policy_history'
+            and operation == 'search_policy'
+            and (
+                not isinstance(request.get('policy_reference'), str)
+                or not str(request['policy_reference']).strip()
+            )
+        ):
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent supplied an invalid policy lookup request.',
+            )
+        if tool == 'claim_history' and operation in {'search_claim_history', 'lookup'}:
+            if (
+                not isinstance(request.get('history_reference'), str)
+                or not str(request['history_reference']).strip()
+            ):
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid claim-history lookup request.',
+                )
+            limit = request.get('limit', 10)
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an invalid claim-history result limit.',
+                )
+        if tool == 'evidence_registry' and request.get('kind') != 'police_report':
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent requested an unsupported pending-evidence operation.',
+            )
 
 
 def _session_not_found() -> ApiError:
@@ -180,10 +278,14 @@ def _message_turn_response(
     dynamic_form = (
         claimant_dynamic_form_projection(repository, claim) if claim is not None else None
     )
-    form_changes = (
-        project_claimant_form_fields(repository, claim, decision.form_changes)
+    projected_form_changes = (
+        project_claimant_form_fields(
+            repository,
+            claim,
+            decision.form_changes,
+        )
         if claim is not None
-        else {}
+        else decision.form_changes
     )
     return MessageTurnResponse(
         claim_id=claim_id,
@@ -193,7 +295,10 @@ def _message_turn_response(
         agent_message=_claimant_message(agent_message),
         form_changes=[
             FormChange(field_code=field_code, field=field)
-            for field_code, field in form_changes.items()
+            for field_code, field in projected_form_changes.items()
+        ],
+        contents_item_changes=[
+            _claimant_contents_item(item) for item in decision.contents_item_changes
         ],
         decision=_claimant_decision(decision),
         handoff=(
@@ -383,6 +488,7 @@ def _build_form_changes(
     authority_outcome: AuthorityOutcome,
     proposal_source: AgentProposalSource,
     branch_evaluation: BranchEvaluationResult | None = None,
+    grounding_source_refs: set[str] | None = None,
 ) -> dict[str, StructuredFormField]:
     form_changes: dict[str, StructuredFormField] = {}
     normalised_proposals = list(proposals)
@@ -445,18 +551,23 @@ def _build_form_changes(
                     message='The Agent proposed a field outside the active form branches.',
                 )
         existing_field = existing_form.get(proposal.field_code)
+        if (
+            existing_field is not None
+            and existing_field.status is FormStatus.CONFIRMED
+            and proposal.source is not FormSource.CLAIMANT
+            and proposal.value == existing_field.value
+        ):
+            continue
         accepted_status = (
             proposal.status
             if authority_outcome is AuthorityOutcome.AUTHORISED
             and proposal.source is FormSource.CLAIMANT
             else FormStatus.PROPOSED
         )
-        form_changes[proposal.field_code] = resolve_form_change(
+        resolved = resolve_form_change(
             field_code=proposal.field_code,
             existing=existing_field,
-            # A model relation is only a suggestion. Runtime derives the
-            # applied relation from persisted facts and claimant wording.
-            proposal=proposal.model_copy(update={'relation': None}),
+            proposal=proposal,
             source_ref=claimant_message.message_id,
             message_text=str(claimant_message.content.get('text', '')) or None,
             timestamp=timestamp,
@@ -466,17 +577,183 @@ def _build_form_changes(
                 actor_id=proposal_source.value,
             ),
         )
+        if proposal.source is not FormSource.CLAIMANT and grounding_source_refs:
+            assertions = list(resolved.assertions)
+            if assertions:
+                assertions[-1] = assertions[-1].model_copy(
+                    update={
+                        'source_refs': list(
+                            dict.fromkeys(
+                                [*assertions[-1].source_refs, *sorted(grounding_source_refs)]
+                            )
+                        )
+                    }
+                )
+            resolved = resolved.model_copy(
+                update={
+                    'source_refs': list(
+                        dict.fromkeys([*resolved.source_refs, *sorted(grounding_source_refs)])
+                    ),
+                    'assertions': assertions,
+                }
+            )
+        form_changes[proposal.field_code] = resolved
     return form_changes
 
 
+def _build_contents_item_changes(
+    claim: WorkingClaim,
+    proposal: AgentProposal,
+    claimant_message: MessageRecord,
+    timestamp: datetime,
+    authority_outcome: AuthorityOutcome,
+    branch_evaluation: BranchEvaluationResult,
+) -> list[ContentsItem]:
+    if not proposal.contents_item_changes or authority_outcome is not AuthorityOutcome.AUTHORISED:
+        return []
+    contents_available = branch_evaluation.selected_family == 'contents' or (
+        'family.contents' in branch_evaluation.candidate_branches
+    )
+    if not contents_available:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_FIELD_BRANCH',
+            message='The Agent proposed a contents item outside the contents claim branch.',
+        )
+    existing_by_id = {item.item_id: item for item in claim.contents_items}
+    existing_by_description = {
+        item.description.strip().casefold(): item for item in claim.contents_items
+    }
+    changes: list[ContentsItem] = []
+    for item in proposal.contents_item_changes:
+        existing = existing_by_id.get(item.item_id or '')
+        if item.item_id is not None and existing is None:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_CONTENTS_ITEM_REFERENCE',
+                message='The Agent referenced a contents item that is not in this claim.',
+            )
+        if existing is None:
+            existing = existing_by_description.get(item.description.strip().casefold())
+        claimant_supplied = bool(
+            item.reported_text
+            and item.reported_text.casefold()
+            in str(claimant_message.content.get('text', '')).casefold()
+        )
+        contents_item = resolve_contents_item_change(
+            existing=existing,
+            proposal=item,
+            item_id=existing.item_id if existing is not None else new_id('itm'),
+            source_ref=claimant_message.message_id,
+            message_text=str(claimant_message.content.get('text', '')) or None,
+            timestamp=timestamp,
+            accepted_status=FormStatus.PROPOSED,
+            updated_by=ActorReference(
+                actor_type=ActorType.AGENT,
+                actor_id=proposal.proposal_source.value,
+            ),
+        )
+        if not claimant_supplied:
+            contents_item = contents_item.model_copy(update={'source': FormSource.INFERENCE})
+        changes.append(contents_item)
+    return changes
+
+
+def _apply_contents_item_changes(
+    existing: list[ContentsItem],
+    changes: list[ContentsItem],
+) -> list[ContentsItem]:
+    changes_by_id = {item.item_id: item for item in changes}
+    projected = [changes_by_id.pop(item.item_id, item) for item in existing]
+    projected.extend(changes_by_id.values())
+    return projected
+
+
+def _claimant_contents_item(item: ContentsItem) -> ClaimantContentsItem:
+    return ClaimantContentsItem(
+        item_id=item.item_id,
+        description=item.description,
+        category=item.category,
+        quantity=item.quantity,
+        loss_type=item.loss_type,
+        ownership=item.ownership,
+        estimated_value=item.estimated_value,
+        source=item.source,
+        source_refs=[ref for ref in item.source_refs if ref.startswith(('msg_', 'evd_'))],
+        status=item.status,
+        needed_for=item.needed_for,
+        resolution_state=item.resolution_state,
+        updated_at=item.updated_at,
+    )
+
+
 def _question_fields(proposal: AgentProposal, next_step: CustomerNextStep) -> list[str]:
-    values = [*next_step.required_items, *proposal.next_action_requirements]
-    fields = []
+    values = (
+        list(next_step.required_items)
+        if next_step.required_items
+        else list(proposal.next_action_requirements)
+    )
+    fields: list[str] = []
     for value in values:
         field_code = value.removeprefix('confirm:')
-        if field_code in REGISTERED_FIELD_CODES and field_code not in fields:
+        if (field_code in REGISTERED_FIELD_CODES or field_code == 'contents.items') and (
+            field_code not in fields
+        ):
             fields.append(field_code)
     return fields
+
+
+def _tool_source_refs(tool_results: list[dict[str, object]]) -> set[str]:
+    refs: set[str] = set()
+    for result in tool_results:
+        raw_refs = result.get('source_refs')
+        if isinstance(raw_refs, list):
+            refs.update(str(ref) for ref in raw_refs)
+    return refs
+
+
+def _grounding_source_refs(tool_results: list[dict[str, object]]) -> set[str]:
+    return _tool_source_refs(
+        [
+            result
+            for result in tool_results
+            if result.get('tool') in {'knowledge_search', 'policy_history', 'claim_history'}
+            and result.get('status') == RetrievalStatus.EVIDENCE_FOUND.value
+        ]
+    )
+
+
+def _validate_failed_retrieval_changes(
+    proposal: AgentProposal,
+    message_text: str,
+) -> None:
+    failed_results = [
+        result
+        for result in proposal.tool_results
+        if result.get('tool') in {'knowledge_search', 'policy_history', 'claim_history'}
+        and result.get('status') != RetrievalStatus.EVIDENCE_FOUND.value
+    ]
+    if not failed_results:
+        return
+    unsupported_fields = [
+        change.field_code
+        for change in proposal.form_changes
+        if change.source is not FormSource.CLAIMANT
+    ]
+    normalized_message = ' '.join(message_text.split()).casefold()
+    unsupported_contents = [
+        item.description
+        for item in proposal.contents_item_changes
+        if not item.reported_text
+        or ' '.join(item.reported_text.split()).casefold() not in normalized_message
+    ]
+    if unsupported_fields or unsupported_contents:
+        raise ApiError(
+            status_code=503,
+            code='AGENT_TOOL_NOT_PERMITTED',
+            message='The Agent used an unavailable context result as a new Claim fact.',
+            retryable=False,
+        )
 
 
 def _apply_question_accounting(
@@ -487,14 +764,8 @@ def _apply_question_accounting(
     trigger_message_id: str,
     timestamp: datetime,
 ) -> tuple[SessionRecord, CustomerNextStep, str]:
-    asks_question = (
-        proposal.action
-        in {
-            AgentAction.ASK,
-            AgentAction.CLARIFY,
-            AgentAction.CONFIRM,
-        }
-        or next_step.status == 'clarification_needed'
+    asks_question = proposal.action in {AgentAction.ASK, AgentAction.CLARIFY} or (
+        '?' in response_text and bool(_question_fields(proposal, next_step))
     )
     if not asks_question:
         return session, next_step, response_text
@@ -513,10 +784,10 @@ def _apply_question_accounting(
 
     fields = _question_fields(proposal, next_step)
     previously_requested = {
-        field_code for item in session.question_history for field_code in item.field_codes
+        field_code for record in session.question_history for field_code in record.field_codes
     }
     repeated = bool(fields) and all(field_code in previously_requested for field_code in fields)
-    record = QuestionRecord(
+    question = QuestionRecord(
         question_id=new_id('qst'),
         trigger_message_id=trigger_message_id,
         field_codes=fields,
@@ -530,7 +801,7 @@ def _apply_question_accounting(
                 'question_turn_count': session.question_turn_count + 1,
                 'requested_fact_count': session.requested_fact_count + len(fields),
                 'repeated_question_count': session.repeated_question_count + int(repeated),
-                'question_history': [*session.question_history, record],
+                'question_history': [*session.question_history, question],
             }
         ),
         next_step,
@@ -555,7 +826,7 @@ def _execute_policy_search(
     claim_id: str,
     customer_id: str,
     proposal: AgentProposal,
-) -> PolicyRetrievalRecord | None:
+) -> tuple[PolicyRetrievalRecord | None, dict[str, object]] | None:
     tool = _policy_search_tool(proposal)
     if tool is None:
         return None
@@ -572,7 +843,19 @@ def _execute_policy_search(
         None,
     )
     if existing is not None:
-        return existing
+        return (
+            existing,
+            {
+                'tool': 'policy_history',
+                'status': (
+                    RetrievalStatus.AMBIGUOUS.value
+                    if existing.uncertainty
+                    else RetrievalStatus.EVIDENCE_FOUND.value
+                ),
+                'source_refs': [existing.retrieval_id],
+                'limitations': [],
+            },
+        )
     result = search_policy(
         repository,
         adapter,
@@ -582,15 +865,22 @@ def _execute_policy_search(
             question=str(tool.get('question') or '') or None,
         ),
     )
-    if result.status not in {RetrievalStatus.AMBIGUOUS, RetrievalStatus.EVIDENCE_FOUND}:
-        return None
-    return next(
+    record = next(
         (
             record
             for record in repository.list_retrieval_records(claim_id, customer_id)
             if isinstance(record, PolicyRetrievalRecord) and record.retrieval_id == result.result_id
         ),
         None,
+    )
+    return (
+        record,
+        {
+            'tool': 'policy_history',
+            'status': result.status.value,
+            'source_refs': [record.retrieval_id] if record is not None else [],
+            'limitations': list(result.limitations),
+        },
     )
 
 
@@ -612,7 +902,7 @@ def _execute_claim_history_search(
     claim_id: str,
     customer_id: str,
     proposal: AgentProposal,
-) -> ClaimHistoryRetrievalRecord | None:
+) -> tuple[ClaimHistoryRetrievalRecord | None, dict[str, object]] | None:
     tool = _claim_history_search_tool(proposal)
     if tool is None:
         return None
@@ -641,7 +931,19 @@ def _execute_claim_history_search(
         None,
     )
     if existing is not None:
-        return existing
+        return (
+            existing,
+            {
+                'tool': 'claim_history',
+                'status': (
+                    RetrievalStatus.AMBIGUOUS.value
+                    if existing.uncertainty
+                    else RetrievalStatus.EVIDENCE_FOUND.value
+                ),
+                'source_refs': [existing.retrieval_id],
+                'limitations': [],
+            },
+        )
     result = search_claim_history(
         repository,
         adapter,
@@ -652,9 +954,7 @@ def _execute_claim_history_search(
             limit=limit,
         ),
     )
-    if result.status not in {RetrievalStatus.AMBIGUOUS, RetrievalStatus.EVIDENCE_FOUND}:
-        return None
-    return next(
+    record = next(
         (
             record
             for record in repository.list_retrieval_records(claim_id, customer_id)
@@ -662,6 +962,15 @@ def _execute_claim_history_search(
             and record.retrieval_id == result.result_id
         ),
         None,
+    )
+    return (
+        record,
+        {
+            'tool': 'claim_history',
+            'status': result.status.value,
+            'source_refs': [record.retrieval_id] if record is not None else [],
+            'limitations': list(result.limitations),
+        },
     )
 
 
@@ -954,40 +1263,113 @@ def submit_message(
         previous_evaluation=previous_evaluation,
     )
     persisted_review_signals = repository.list_review_signals(claim_id, principal.subject)
-    proposal = agent.propose_turn(
-        AgentTurnContext(
-            claim=claim,
-            session_id=session_id,
-            trigger_message_id=claimant_message.message_id,
-            message_text=(
-                payload.content.text.lstrip()[len('@agent') :].lstrip()
-                if payload.content is not None
-                and payload.content.text.lstrip().lower().startswith('@agent')
-                else payload.content.text
-                if payload.content is not None
-                else None
-            ),
-            evidence_refs=payload.evidence_refs,
-            professional_review_required=any(
-                signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
-            ),
-            branch_evaluation=branch_evaluation,
-            runtime_configuration_snapshot=(
-                runtime_policy.runtime_snapshot if runtime_policy is not None else None
-            ),
-            runtime_policy=runtime_policy,
-            provenance_messages=tuple(
-                provenance_messages_for_fields(
-                    repository,
-                    claim_id=claim_id,
-                    customer_id=principal.subject,
-                    fields=claim.form.values(),
-                )
-            ),
-        )
+    agent_context = AgentTurnContext(
+        claim=claim,
+        session_id=session_id,
+        trigger_message_id=claimant_message.message_id,
+        message_text=(
+            payload.content.text.lstrip()[len('@agent') :].lstrip()
+            if payload.content is not None
+            and payload.content.text.lstrip().lower().startswith('@agent')
+            else payload.content.text
+            if payload.content is not None
+            else None
+        ),
+        evidence_refs=payload.evidence_refs,
+        professional_review_required=any(
+            signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
+        ),
+        branch_evaluation=branch_evaluation,
+        runtime_configuration_snapshot=(
+            runtime_policy.runtime_snapshot if runtime_policy is not None else None
+        ),
+        runtime_policy=runtime_policy,
+        provenance_messages=tuple(
+            provenance_messages_for_fields(
+                repository,
+                claim_id=claim_id,
+                customer_id=principal.subject,
+                fields=claim.form.values(),
+            )
+        ),
     )
+    proposal = agent.propose_turn(agent_context)
     if runtime_policy is not None:
         enforce_agent_proposal(runtime_policy, proposal)
+    preliminary_authority = validate_proposal(proposal)
+    if preliminary_authority.outcome is AuthorityOutcome.AUTHORISED:
+        _validate_tool_requests(proposal, branch_evaluation)
+
+    context_tool_results = list(proposal.tool_results)
+    requested_context_tools = {
+        str(request.get('tool'))
+        for request in proposal.required_tools
+        if preliminary_authority.outcome is AuthorityOutcome.AUTHORISED
+        and request.get('tool') in _CONTEXT_TOOL_OPERATIONS
+    }
+    if requested_context_tools:
+        if any(
+            result.get('tool') in {'knowledge_search', 'policy_history', 'claim_history'}
+            for result in context_tool_results
+        ):
+            raise ApiError(
+                status_code=503,
+                code='AGENT_TOOL_NOT_PERMITTED',
+                message='The Agent attempted a second context-tool round.',
+            )
+        policy_outcome = _execute_policy_search(
+            repository,
+            policy_history_adapter,
+            claim_id,
+            principal.subject,
+            proposal,
+        )
+        history_outcome = _execute_claim_history_search(
+            repository,
+            policy_history_adapter,
+            claim_id,
+            principal.subject,
+            proposal,
+        )
+        for tool, outcome in (
+            ('policy_history', policy_outcome),
+            ('claim_history', history_outcome),
+        ):
+            if tool not in requested_context_tools:
+                continue
+            if outcome is None:
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent supplied an incomplete context-tool request.',
+                )
+            _record, tool_result = outcome
+            context_tool_results.append(tool_result)
+        if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
+            proposal = agent.propose_turn(
+                replace(agent_context, tool_results=tuple(context_tool_results))
+            )
+            if runtime_policy is not None:
+                enforce_agent_proposal(runtime_policy, proposal)
+            replanned_authority = validate_proposal(proposal)
+            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED:
+                _validate_tool_requests(proposal, branch_evaluation)
+            if replanned_authority.outcome is AuthorityOutcome.AUTHORISED and any(
+                request.get('tool') in _CONTEXT_TOOL_OPERATIONS
+                for request in proposal.required_tools
+            ):
+                raise ApiError(
+                    status_code=503,
+                    code='AGENT_TOOL_NOT_PERMITTED',
+                    message='The Agent attempted a second context-tool round.',
+                )
+            proposal = replace(
+                proposal,
+                tool_results=[*context_tool_results, *proposal.tool_results],
+            )
+        else:
+            proposal = replace(proposal, tool_results=context_tool_results)
+    _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
     executed_state_changes = authorised_state_changes(proposal, authority)
     effective_customer_reason = proposal.customer_reason
@@ -1012,13 +1394,29 @@ def submit_message(
         authority.outcome,
         proposal.proposal_source,
         branch_evaluation,
+        _grounding_source_refs(proposal.tool_results),
+    )
+    contents_item_changes = _build_contents_item_changes(
+        claim,
+        proposal,
+        claimant_message,
+        timestamp,
+        authority.outcome,
+        branch_evaluation,
     )
     conflicting_fields = [
         field_code
         for field_code, field in form_changes.items()
         if field.status is FormStatus.DISPUTED
     ]
-    if conflicting_fields:
+    conflicting_contents = [
+        item for item in contents_item_changes if item.status is FormStatus.DISPUTED
+    ]
+    clarification_items = [
+        *conflicting_fields,
+        *(['contents.items'] if conflicting_contents else []),
+    ]
+    if clarification_items:
         effective_customer_reason = 'A material incident detail needs clarification.'
         effective_customer_response = (
             'I have two different versions of an incident detail. Which version should '
@@ -1028,7 +1426,7 @@ def submit_message(
             status='clarification_needed',
             summary='Clarify the conflicting incident detail.',
             responsible_party=ResponsibleParty.CLAIMANT,
-            required_items=conflicting_fields,
+            required_items=clarification_items,
         )
     discrepancy_candidates = [
         DiscrepancyCandidate(
@@ -1040,17 +1438,17 @@ def submit_message(
         for field_code in conflicting_fields
         if len(form_changes[field_code].source_refs) >= 2
     ]
-
-    session_after_questions, effective_next_step, effective_customer_response = (
-        _apply_question_accounting(
-            session,
-            proposal,
-            effective_next_step,
-            effective_customer_response,
-            claimant_message.message_id,
-            timestamp,
+    discrepancy_candidates.extend(
+        DiscrepancyCandidate(
+            candidate_id=new_id('dsc'),
+            field_code='contents.items',
+            source_refs=item.source_refs,
+            created_at=timestamp,
         )
+        for item in conflicting_contents
+        if len(item.source_refs) >= 2
     )
+    session_after_questions = session
     pending_evidence = _pending_evidence_for_proposal(
         claim_id,
         proposal,
@@ -1070,22 +1468,26 @@ def submit_message(
         )
     if authority.outcome is AuthorityOutcome.BLOCKED:
         form_changes = {}
+        contents_item_changes = []
 
-    policy_retrieval = _execute_policy_search(
-        repository,
-        policy_history_adapter,
-        claim_id,
-        principal.subject,
-        proposal,
-    )
-    _execute_claim_history_search(
-        repository,
-        policy_history_adapter,
-        claim_id,
-        principal.subject,
-        proposal,
+    policy_retrieval = next(
+        (
+            record
+            for record in reversed(repository.list_retrieval_records(claim_id, principal.subject))
+            if isinstance(record, PolicyRetrievalRecord)
+            and record.retrieval_id in _tool_source_refs(proposal.tool_results)
+        ),
+        None,
     )
     inferred_incident_type = claim.incident_type
+    proposed_family = form_changes.get('claim.product_family')
+    if (
+        proposed_family is not None
+        and proposed_family.status is FormStatus.CONFIRMED
+        and isinstance(proposed_family.value, str)
+        and proposed_family.value in {'motor', 'home', 'contents'}
+    ):
+        inferred_incident_type = proposed_family.value
 
     next_action = claim.claim_state.next_action
     for state_change in executed_state_changes:
@@ -1119,6 +1521,10 @@ def submit_message(
         updated_claim = updated_claim_for_handoff(claim, handoff, effective_next_step)
     else:
         projected_form = {**claim.form, **form_changes}
+        projected_contents = _apply_contents_item_changes(
+            claim.contents_items,
+            contents_item_changes,
+        )
         professional_review = _professional_review_requested(proposal)
         if professional_review:
             existing_retrievals = repository.list_retrieval_records(claim_id, principal.subject)
@@ -1148,6 +1554,7 @@ def submit_message(
             projected_claim = claim.model_copy(
                 update={
                     'form': projected_form,
+                    'contents_items': projected_contents,
                     'incident_type': inferred_incident_type,
                     'revision': claim.revision + 1,
                 }
@@ -1160,6 +1567,49 @@ def submit_message(
                 source_message_id=claimant_message.message_id,
                 pending_evidence=pending_evidence,
             )
+        has_confirmation_work = any(
+            field.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
+            for field in form_changes.values()
+        ) or any(
+            item.status in {FormStatus.PROPOSED, FormStatus.DISPUTED}
+            for item in contents_item_changes
+        )
+        if (
+            not professional_review
+            and not has_confirmation_work
+            and (form_changes or contents_item_changes or pending_evidence is not None)
+            and not any(
+                code in proposal.reason_codes
+                for code in {'SAFETY_STATUS_RECORDED', 'POLICY_WORDING_REVIEW_NEEDED'}
+            )
+        ):
+            projected_claim = claim.model_copy(
+                update={
+                    'form': projected_form,
+                    'contents_items': projected_contents,
+                    'incident_type': inferred_incident_type,
+                }
+            )
+            requirements = branch_evaluator.evaluate(
+                projected_claim,
+                latest_message=message_text,
+                trigger_source_refs=[claimant_message.message_id],
+                current_action=next_action,
+                recomputation_reason='agent_turn_progress_preview',
+                previous_evaluation=previous_evaluation,
+            ).requirements
+            effective_next_step = next_requirement_step(requirements)
+            if requirements.ready:
+                effective_customer_response = (
+                    'Thanks. I have saved those details. Your confirmed report is ready for '
+                    'claim creation.'
+                )
+            else:
+                next_field = intake_field_for_requirement(requirements.next_required_item)
+                if next_field is not None:
+                    effective_customer_response = (
+                        f'{effective_customer_response.rstrip()} {next_field.prompt}'
+                    )
         updated_claim = claim.model_copy(
             update={
                 'claim_state': claim.claim_state.model_copy(
@@ -1185,6 +1635,7 @@ def submit_message(
                     }
                 ),
                 'form': projected_form,
+                'contents_items': projected_contents,
                 'incident_type': inferred_incident_type,
                 'evidence_summary': (
                     claim.evidence_summary.model_copy(
@@ -1198,6 +1649,18 @@ def submit_message(
                 'updated_at': timestamp,
             }
         )
+    session_after_questions, effective_next_step, effective_customer_response = (
+        _apply_question_accounting(
+            session_after_questions,
+            proposal,
+            effective_next_step,
+            effective_customer_response,
+            claimant_message.message_id,
+            timestamp,
+        )
+    )
+    if updated_claim.customer_next_step != effective_next_step:
+        updated_claim = updated_claim.model_copy(update={'customer_next_step': effective_next_step})
     resulting_revision = updated_claim.revision
     updated_session = session_after_questions.model_copy(
         update={
@@ -1227,6 +1690,7 @@ def submit_message(
         state_changes=proposal.state_changes,
         proposed_signals=proposal.proposed_signals,
         required_tools=proposal.required_tools,
+        tool_results=proposal.tool_results,
         next_action_requirements=proposal.next_action_requirements,
         handoff_priority=proposal.handoff_priority,
         handoff_id=handoff.handoff_id if handoff is not None else None,
@@ -1236,6 +1700,7 @@ def submit_message(
         model_provenance=proposal.model_provenance,
         runtime_configuration=(runtime_policy.provenance() if runtime_policy else None),
         form_changes=form_changes,
+        contents_item_changes=contents_item_changes,
         resulting_revision=resulting_revision,
         created_at=timestamp,
         discrepancy_candidates=discrepancy_candidates,
@@ -1281,6 +1746,7 @@ def submit_message(
         interruption_result=applied_evaluation.interruption_result,
         permitted_actions=applied_evaluation.permitted_actions,
         permitted_tools=applied_evaluation.permitted_tools,
+        requirements=applied_evaluation.requirements,
         recomputation_reason=applied_evaluation.recomputation_reason,
         status=BranchEvaluationStatus.APPLIED,
         created_at=timestamp,
