@@ -2330,6 +2330,9 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "$ref": "#/components/schemas/FactResolutionState"
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -2358,6 +2361,7 @@
           "source",
           "status",
           "needed_for",
+          "resolution_state",
           "updated_at"
         ],
         "title": "ClaimantContentsItem",
@@ -3152,6 +3156,13 @@
         "additionalProperties": false,
         "description": "One source-aware contents item; Evidence associations remain separate records.",
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "category": {
             "maxLength": 100,
             "minLength": 1,
@@ -3170,6 +3181,18 @@
               }
             ],
             "title": "Confidence"
+          },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
           },
           "description": {
             "maxLength": 500,
@@ -3208,6 +3231,16 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -3243,6 +3276,93 @@
           "updated_by"
         ],
         "title": "ContentsItem",
+        "type": "object"
+      },
+      "ContentsItemAssertion": {
+        "additionalProperties": false,
+        "properties": {
+          "assertion_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assertion Id",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loss_type": {
+            "$ref": "#/components/schemas/ContentsLossType"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ContentsOwnership"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/AssertionRelation",
+            "default": "initial"
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "description",
+          "category",
+          "loss_type",
+          "ownership",
+          "status",
+          "created_at"
+        ],
+        "title": "ContentsItemAssertion",
         "type": "object"
       },
       "ContentsLossType": {
@@ -3982,6 +4102,9 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "requirements": {
+            "$ref": "#/components/schemas/RequirementResolution"
           },
           "selected_family": {
             "anyOf": [
@@ -5283,7 +5406,7 @@
       },
       "FactAssertion": {
         "additionalProperties": false,
-        "description": "One source-linked statement that contributed to a structured field.",
+        "description": "One immutable source-linked assertion about a structured Claim fact.",
         "properties": {
           "assertion_id": {
             "maxLength": 120,
@@ -5319,6 +5442,18 @@
             "$ref": "#/components/schemas/AssertionRelation",
             "default": "initial"
           },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
           "source_refs": {
             "items": {
               "type": "string"
@@ -5351,7 +5486,6 @@
         "type": "string"
       },
       "FactResolutionState": {
-        "description": "Resolution of a structured fact independent from its storage status.",
         "enum": [
           "resolved",
           "needs_confirmation",
@@ -5456,6 +5590,13 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "confirmed_contents_items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Confirmed Contents Items",
+            "type": "array"
+          },
           "confirmed_fields": {
             "additionalProperties": {
               "$ref": "#/components/schemas/StructuredFormField-Output"
@@ -5470,6 +5611,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
               },
               {
                 "type": "null"
@@ -5518,6 +5669,16 @@
           },
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "title": "Revision",
@@ -6969,6 +7130,13 @@
           "claimant_message": {
             "$ref": "#/components/schemas/ClaimantMessage"
           },
+          "contents_item_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Contents Item Changes",
+            "type": "array"
+          },
           "decision": {
             "anyOf": [
               {
@@ -8337,6 +8505,63 @@
           "reason"
         ],
         "title": "RequeueClaimRequest",
+        "type": "object"
+      },
+      "RequirementResolution": {
+        "additionalProperties": false,
+        "description": "Deterministic information needed for the current safe action.",
+        "properties": {
+          "current_action_satisfied": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Satisfied",
+            "type": "integer"
+          },
+          "current_action_total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Total",
+            "type": "integer"
+          },
+          "missing_required_now": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Required Now",
+            "type": "array"
+          },
+          "next_required_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Required Item"
+          },
+          "pending_later": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Later",
+            "type": "array"
+          },
+          "ready": {
+            "default": false,
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "satisfied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Satisfied",
+            "type": "array"
+          }
+        },
+        "title": "RequirementResolution",
         "type": "object"
       },
       "ResolveHandoffRequest": {

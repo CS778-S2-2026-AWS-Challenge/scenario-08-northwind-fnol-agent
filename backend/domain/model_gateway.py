@@ -5,15 +5,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.domain.models import (
     AgentAction,
+    AssertionRelation,
     Channel,
+    ContentsLossType,
+    ContentsOwnership,
     CustomerNextStep,
     CustomerSupport,
     EvidenceState,
     EvidenceSummary,
     FactPrecision,
+    FactResolutionState,
     FieldSelectionState,
     FormSource,
     FormStatus,
+    MoneyAmount,
     NeededFor,
     StateChange,
     Urgency,
@@ -137,7 +142,6 @@ class ModelFormFieldContext(ModelContract):
     status: FormStatus
     needed_for: NeededFor
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    resolution_state: str | None = None
     precision: FactPrecision = FactPrecision.EXACT
     source_refs: list[str] = Field(default_factory=list)
 
@@ -148,6 +152,7 @@ class ModelClaimContext(ModelContract):
     incident_type: str | None = None
     claim_state: ModelClaimStateContext
     form: dict[str, ModelFormFieldContext] = Field(default_factory=dict)
+    contents_items: list['ModelContentsItemContext'] = Field(default_factory=list)
     known_field_codes: list[str] = Field(default_factory=list)
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
@@ -157,6 +162,20 @@ class ModelFieldSelectionContext(ModelContract):
     field_code: str
     selection_state: FieldSelectionState
     value_state: FormStatus
+
+
+class ModelContentsItemContext(ModelContract):
+    item_id: str
+    description: str
+    category: str
+    quantity: int
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    source: FormSource
+    source_refs: list[str] = Field(default_factory=list)
+    status: FormStatus
+    resolution_state: FactResolutionState
 
 
 class ModelBranchContext(ModelContract):
@@ -172,6 +191,11 @@ class ModelBranchContext(ModelContract):
     interruption_result: dict[str, Any] = Field(default_factory=dict)
     permitted_actions: list[AgentAction] = Field(default_factory=list)
     permitted_tools: list[str] = Field(default_factory=list)
+    satisfied_requirements: list[str] = Field(default_factory=list)
+    missing_required_now: list[str] = Field(default_factory=list)
+    pending_later: list[str] = Field(default_factory=list)
+    next_required_item: str | None = None
+    ready: bool = False
 
 
 class ModelTurnContext(ModelContract):
@@ -179,13 +203,14 @@ class ModelTurnContext(ModelContract):
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
-    provenance_messages: list['ModelProvenanceMessage'] = Field(default_factory=list)
     branch: ModelBranchContext | None = None
     knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
         'not_requested'
     )
     knowledge_citations: list['ModelKnowledgeCitation'] = Field(default_factory=list)
     knowledge_limitations: list[str] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    provenance_messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ModelKnowledgeCitation(ModelContract):
@@ -199,16 +224,27 @@ class ModelKnowledgeCitation(ModelContract):
     text: str
 
 
-class ModelProvenanceMessage(ModelContract):
-    message_id: str
-    content: str
-
-
 class ModelProposedFormChange(ModelContract):
     field_code: str = Field(min_length=1, max_length=100)
     value: Any
     needed_for: NeededFor = NeededFor.CURRENT_ACTION
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    precision: FactPrecision = FactPrecision.EXACT
+    relation: AssertionRelation | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
+
+
+class ModelProposedContentsItem(ModelContract):
+    item_id: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    category: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, ge=1)
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    relation: AssertionRelation | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
 
 
 class ModelAgentProposal(ModelContract):
@@ -218,6 +254,7 @@ class ModelAgentProposal(ModelContract):
     customer_response: str = Field(min_length=1, max_length=5000)
     customer_next_step: CustomerNextStep
     form_changes: list[ModelProposedFormChange] = Field(default_factory=list)
+    contents_item_changes: list[ModelProposedContentsItem] = Field(default_factory=list)
     state_changes: list[StateChange] = Field(default_factory=list)
     proposed_signals: list[dict[str, object]] = Field(default_factory=list, max_length=0)
     required_tools: list[dict[str, object]] = Field(default_factory=list)
