@@ -38,7 +38,7 @@ def get_presence(
 @router.get('/online', response_model=StaffPresencePage)
 def get_online_staff(
     request: Request,
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=25, ge=1),
     cursor: str | None = Query(default=None),
     principal: Principal = Depends(require_staff),
 ) -> StaffPresencePage:

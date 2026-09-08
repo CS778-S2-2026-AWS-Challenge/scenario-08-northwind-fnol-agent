@@ -9363,6 +9363,26 @@
         "title": "StaffPresenceRecord",
         "type": "object"
       },
+      "StaffPresencePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffPresenceRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "StaffPresencePage",
+        "type": "object"
+      },
       "StaffPresenceUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -18509,6 +18529,29 @@
               ],
               "title": "Authorization"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {"type": "string"},
+                {"type": "null"}
+              ],
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -18516,11 +18559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/StaffPresenceRecord"
-                  },
-                  "title": "Response Get Online Staff Api V1 Workbench Staff Online Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/StaffPresencePage"
                 }
               }
             },
@@ -18591,8 +18630,8 @@
           "workbench staff"
         ]
       },
-      "put": {
-        "operationId": "put_presence_api_v1_workbench_staff_presence_put",
+      "patch": {
+        "operationId": "patch_presence_api_v1_workbench_staff_presence_patch",
         "parameters": [
           {
             "in": "header",

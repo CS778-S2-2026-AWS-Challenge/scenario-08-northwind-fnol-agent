@@ -2059,6 +2059,17 @@ class MongoDBRepository:
             )
             if presence is None:
                 raise KeyError('staff_not_available')
+            guard = self._collection.update_one(
+                {
+                    '_id': self._record_id('staff_presence', required_staff_id),
+                    'record_type': 'staff_presence',
+                    'revision': presence['revision'],
+                },
+                {'$inc': {'revision': 1}},
+                session=mongo_session,
+            )
+            if guard.modified_count != 1:
+                raise KeyError('staff_not_available')
         stored_session: SessionRecord | None = None
         if session is not None:
             stored_session = self._get(
