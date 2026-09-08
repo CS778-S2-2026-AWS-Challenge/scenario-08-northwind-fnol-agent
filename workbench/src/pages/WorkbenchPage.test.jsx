@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,7 +8,7 @@ import WorkbenchPage from './WorkbenchPage.jsx'
 vi.mock('../auth/auth-context.js', () => ({
   useAuth: () => ({
     token: 'staff-token',
-    profile: { display_name: 'Claims Professional', roles: ['claims_professional'] },
+    profile: { staff_id: 'stf_418', display_name: 'Claims Professional', roles: ['claims_professional'] },
     logout: vi.fn(),
   }),
 }))
@@ -307,6 +307,165 @@ describe('WorkbenchPage queue filters', () => {
   })
 })
 
+describe('WorkbenchPage staff takeover and write-back journey', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('renders each authoritative revision from handoff acceptance through claimant-safe WorkItem write-back', async () => {
+    let revision = 7
+    let messageAttempts = 0
+    let workItemCompleted = false
+    const claimantQuestion = 'Could you confirm where the vehicle is stored now?'
+    const internalResult = 'Storage location confirmed against the source conversation.'
+    const claimantUpdate = 'Thanks, we have the location and your report can continue.'
+    const messages = []
+
+    vi.spyOn(workbenchApi, 'claimFilterMetadata').mockResolvedValue(filterMetadata)
+    vi.spyOn(workbenchApi, 'claims').mockImplementation(async () => ({
+      items: [staffJourneyQueueClaim(revision)],
+      page: { next_cursor: null },
+    }))
+    vi.spyOn(workbenchApi, 'claim').mockImplementation(async () => staffJourneyDetail(revision))
+    vi.spyOn(workbenchApi, 'handoffs').mockImplementation(async () => ({
+      items: [staffJourneyHandoff(revision)],
+      page: { next_cursor: null },
+    }))
+    vi.spyOn(workbenchApi, 'collaborationRequests').mockResolvedValue({ items: [], page: { next_cursor: null } })
+    vi.spyOn(workbenchApi, 'sessions').mockResolvedValue({
+      items: [{ session_id: 'ses_418', claim_id: 'clm_418', status: 'active' }],
+      page: { next_cursor: null },
+    })
+    vi.spyOn(workbenchApi, 'messages').mockImplementation(async () => ({
+      items: [...messages],
+      page: { next_cursor: null },
+    }))
+    vi.spyOn(workbenchApi, 'workItems').mockImplementation(async () => ({
+      items: staffJourneyWorkItems(workItemCompleted, internalResult),
+      page: { next_cursor: null },
+    }))
+    vi.spyOn(workbenchApi, 'customerUpdates').mockImplementation(async () => ({
+      items: workItemCompleted ? [{
+        update_id: 'upd_418',
+        summary: claimantUpdate,
+        responsible_party: 'claimant',
+        related_refs: ['act_418'],
+        created_at: '2026-09-08T03:10:00Z',
+      }] : [],
+      page: { next_cursor: null },
+    }))
+    vi.spyOn(workbenchApi, 'events').mockResolvedValue({ items: [], page: { next_cursor: null } })
+    vi.spyOn(workbenchApi, 'acceptHandoff').mockImplementation(async () => {
+      revision = 8
+      return { claim_revision: revision }
+    })
+    vi.spyOn(workbenchApi, 'sendMessage').mockImplementation(async () => {
+      messageAttempts += 1
+      if (messageAttempts === 1) throw new Error('The message was not sent because the Claim changed. Review the latest version and try again.')
+      revision = 9
+      messages.push({
+        message_id: 'msg_418',
+        claim_id: 'clm_418',
+        session_id: 'ses_418',
+        actor: 'staff',
+        visibility: 'shared',
+        content: { type: 'text', text: claimantQuestion },
+        evidence_refs: [],
+        created_at: '2026-09-08T03:05:00Z',
+      })
+      return { claim_revision: revision }
+    })
+    vi.spyOn(workbenchApi, 'updateStaffAction').mockImplementation(async () => {
+      revision = 10
+      workItemCompleted = true
+      return { claim_revision: revision }
+    })
+
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/workbench/claims/clm_418']}>
+        <Routes>
+          <Route path="/workbench/claims/:claimId/*" element={<WorkbenchPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Accept handoff' })).toBeVisible()
+    expect(screen.queryByText('Accept stale handoff')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Review acceptance' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm Accept handoff' }))
+
+    await waitFor(() => expect(workbenchApi.acceptHandoff).toHaveBeenCalledWith(
+      'staff-token', 'clm_418', 'hnd_418', 7,
+    ))
+    expect(await screen.findByRole('heading', { name: 'Ask claimant for location' })).toBeVisible()
+    expect(screen.getByText('Assigned to you')).toBeVisible()
+    expect(screen.getByText('Revision 8')).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Open conversation' }))
+    const reply = await screen.findByLabelText('Reply to claimant')
+    await user.type(reply, claimantQuestion)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The message was not sent because the Claim changed.')
+    expect(reply).toHaveValue(claimantQuestion)
+    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', claimantQuestion, 8)
+
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(reply).toHaveValue(''))
+    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', claimantQuestion, 8)
+    expect(await screen.findByText(claimantQuestion)).toBeVisible()
+    expect(screen.getByText('Revision 9')).toBeVisible()
+    expect(screen.queryByText('Internal handoff reason: possible coverage concern.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Overview' }))
+    expect(await screen.findByRole('heading', { name: 'Complete claimant support' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Open work activity' }))
+
+    const staleRecord = (await screen.findByText('Handoff Support')).closest('details')
+    await user.click(within(staleRecord).getByText('Handoff Support'))
+    expect(within(staleRecord).queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
+    expect(within(staleRecord).getByText(/no work-item update action is projected/i)).toBeVisible()
+
+    const blockedRecord = screen.getByText('Coverage Review').closest('details')
+    await user.click(within(blockedRecord).getByText('Coverage Review'))
+    expect(within(blockedRecord).queryByRole('button', { name: 'Update action' })).not.toBeInTheDocument()
+    expect(within(blockedRecord).getByText('This WorkItem belongs to another professional.')).toBeVisible()
+
+    const currentRecord = screen.getByText('Claimant Support').closest('details')
+    await user.click(within(currentRecord).getByText('Claimant Support'))
+    await user.selectOptions(within(currentRecord).getByLabelText('Status'), 'completed')
+    await user.type(within(currentRecord).getByLabelText('Internal result summary'), internalResult)
+    await user.type(within(currentRecord).getByLabelText('Claimant update'), claimantUpdate)
+    await user.click(within(currentRecord).getByRole('button', { name: 'Update action' }))
+
+    expect(workbenchApi.updateStaffAction).toHaveBeenCalledWith('staff-token', 'clm_418', 'act_418', 9, {
+      status: 'completed',
+      result: {
+        outcome: 'staff_work_completed',
+        reason_codes: ['SUPPORT_NEED_MET'],
+        source_refs: ['msg_418'],
+        summary: internalResult,
+      },
+      state_changes: [],
+      customer_update: {
+        responsible_party: 'claimant',
+        related_refs: ['act_418'],
+        summary: claimantUpdate,
+      },
+    })
+
+    await screen.findByText(internalResult)
+    await user.click(screen.getByText('Claimant Support'))
+    expect(screen.getByText(internalResult)).toBeVisible()
+    const customerUpdateSurface = screen.getByRole('heading', { name: 'Customer updates' }).closest('section')
+    expect(within(customerUpdateSurface).getByText(claimantUpdate)).toBeVisible()
+    expect(within(customerUpdateSurface).queryByText(internalResult)).not.toBeInTheDocument()
+    expect(screen.getByText('Revision 10')).toBeVisible()
+  })
+})
+
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location-search">{location.search}</output>
@@ -346,4 +505,177 @@ function claimDetail() {
     customer_next_step: { summary: 'Continue reviewing this Claim.' },
     allowed_actions: [],
   }
+}
+
+function staffJourneyQueueClaim(revision) {
+  return {
+    ...queueClaim('clm_418', 'NW-418', revision >= 9 ? 'ready_for_next' : 'professional_review', 'high'),
+    revision,
+  }
+}
+
+function staffJourneyDetail(revision) {
+  const base = {
+    ...staffJourneyQueueClaim(revision),
+    active_session_id: 'ses_418',
+    claimant: { customer_id: 'cus_418', display_name: 'Jordan Lee' },
+    incident: { family: 'motor', summary: 'Vehicle storage location requires claimant confirmation.' },
+    lifecycle_state: revision === 7 ? 'staff_support' : 'draft_active',
+    ownership: revision === 7
+      ? { state: 'unassigned', current_staff_access: 'read_only', coworkers: [] }
+      : { state: 'assigned', current_staff_access: 'primary', primary_assignee: { staff_id: 'stf_418', display_name: 'Claims Professional' }, coworkers: [] },
+    priority_projection: { level: 'high' },
+    section_summaries: {},
+    source_summary: { status: 'available', items: [], limitation: null },
+    customer_next_step: {
+      summary: revision >= 10 ? 'Your report can continue.' : 'A claims professional is reviewing your report.',
+      responsible_party: revision >= 10 ? 'claimant' : 'claims_professional',
+    },
+    created_at: '2026-09-08T02:00:00Z',
+    updated_at: `2026-09-08T03:${String(revision).padStart(2, '0')}:00Z`,
+  }
+
+  if (revision === 7) {
+    return {
+      ...base,
+      work_summary: staffJourneyWorkSummary('human.accept_handoff', 'hnd_418'),
+      allowed_actions: [
+        projectedAcceptAction('hnd_418', 'Accept handoff', 7),
+        projectedAcceptAction('hnd_stale', 'Accept stale handoff', 6),
+      ],
+    }
+  }
+  if (revision === 8) {
+    return {
+      ...base,
+      work_summary: staffJourneyWorkSummary('conversation.send_claimant_message', 'ses_418'),
+      allowed_actions: [
+        projectedMessageAction('ses_previous', 'Reply to prior session', 7),
+        projectedMessageAction('ses_418', 'Ask claimant for location', 8),
+      ],
+    }
+  }
+  if (revision === 9) {
+    return {
+      ...base,
+      work_summary: staffJourneyWorkSummary('work_item.update', 'act_418'),
+      allowed_actions: [
+        projectedWorkItemAction('act_previous_revision', 'confirmation_required', 8),
+        projectedWorkItemAction('act_blocked', 'blocked', 9),
+        projectedWorkItemAction('act_418', 'confirmation_required', 9),
+      ],
+    }
+  }
+  return {
+    ...base,
+    work_summary: staffJourneyWorkSummary(null, null),
+    allowed_actions: [],
+  }
+}
+
+function staffJourneyWorkSummary(actionCode, targetRef) {
+  return {
+    queue_key: 'claimant_support',
+    primary_action_code: actionCode,
+    primary_action_target_ref: targetRef,
+    missing_information: [],
+    risk_signals: [],
+  }
+}
+
+function staffJourneyHandoff(revision) {
+  return {
+    handoff_id: 'hnd_418',
+    claim_id: 'clm_418',
+    status: revision === 7 ? 'queued' : revision === 8 ? 'accepted' : 'in_progress',
+    assigned_to: revision === 7 ? null : 'stf_418',
+    requested_action: 'Ask the claimant to confirm the vehicle storage location.',
+    reason: 'Internal handoff reason: possible coverage concern.',
+    priority: 'high',
+    packet: {
+      incident_summary: 'Vehicle storage location is not confirmed.',
+      missing_items: ['vehicle.storage_location'],
+      pending_items: [],
+      conflicts: [],
+      promised_next_step: 'A claims professional will ask one focused question.',
+    },
+  }
+}
+
+function projectedAcceptAction(targetRef, label, basedOnRevision) {
+  return {
+    action_code: 'human.accept_handoff',
+    target_ref: targetRef,
+    label,
+    purpose: 'Take responsibility for the queued handoff.',
+    availability: 'confirmation_required',
+    based_on_revision: basedOnRevision,
+    confirmation: { message: 'Accepting changes Claim ownership.' },
+    expected_effects: ['handoff.accept'],
+    inputs: [],
+  }
+}
+
+function projectedMessageAction(targetRef, label = 'Reply to claimant', basedOnRevision = 8) {
+  return {
+    action_code: 'conversation.send_claimant_message',
+    target_ref: targetRef,
+    label,
+    purpose: 'Ask one claimant-visible question.',
+    availability: 'available',
+    based_on_revision: basedOnRevision,
+    expected_effects: ['message.create'],
+    inputs: [],
+  }
+}
+
+function projectedWorkItemAction(targetRef, availability = 'confirmation_required', basedOnRevision = 9) {
+  return {
+    action_code: 'work_item.update',
+    target_ref: targetRef,
+    label: 'Complete claimant support',
+    purpose: 'Record the source-linked result and separate claimant update.',
+    availability,
+    based_on_revision: basedOnRevision,
+    blocked_reason: availability === 'blocked' ? 'This WorkItem belongs to another professional.' : null,
+    confirmation: { message: 'Completion writes the registered audited result.' },
+    inputs: [
+      {
+        field_code: 'status',
+        label: 'Status',
+        control: 'select',
+        required: true,
+        choices: [
+          { value: 'in_progress', label: 'In progress' },
+          { value: 'completed', label: 'Completed' },
+        ],
+      },
+      { field_code: 'result.summary', label: 'Internal result summary', control: 'textarea', required: false, required_when: { field_code: 'status', equals: 'completed' }, choices: [] },
+      { field_code: 'customer_update.summary', label: 'Claimant update', control: 'textarea', required: false, required_when: { field_code: 'status', equals: 'completed' }, choices: [] },
+    ],
+    payload_defaults: {
+      result: { outcome: 'staff_work_completed', reason_codes: ['SUPPORT_NEED_MET'], source_refs: ['msg_418'] },
+      state_changes: [],
+      customer_update: { responsible_party: 'claimant', related_refs: ['act_418'] },
+    },
+  }
+}
+
+function staffJourneyWorkItems(completed, internalResult) {
+  return [
+    {
+      action_id: 'act_418', action_type: 'claimant_support', requested_outcome: 'Confirm the vehicle storage location.',
+      status: completed ? 'completed' : 'in_progress', assigned_to: 'stf_418', source_refs: ['msg_418'],
+      result: completed ? { outcome: 'staff_work_completed', summary: internalResult, reason_codes: ['SUPPORT_NEED_MET'], source_refs: ['msg_418'] } : null,
+      created_at: '2026-09-08T02:30:00Z', completed_at: completed ? '2026-09-08T03:10:00Z' : null,
+    },
+    {
+      action_id: 'act_stale_record', action_type: 'handoff_support', requested_outcome: 'Old projected work.',
+      status: 'open', assigned_to: 'stf_418', source_refs: [], created_at: '2026-09-08T02:31:00Z',
+    },
+    {
+      action_id: 'act_blocked', action_type: 'coverage_review', requested_outcome: 'Owned by another professional.',
+      status: 'open', assigned_to: 'stf_other', source_refs: [], created_at: '2026-09-08T02:32:00Z',
+    },
+  ]
 }
