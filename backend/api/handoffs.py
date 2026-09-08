@@ -7,6 +7,7 @@ from backend.core.auth import Principal, require_claimant
 from backend.domain.models import CreateSupportRequest, SupportRequestResponse
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.handoffs import create_support_request
+from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant-support'])
 
@@ -17,6 +18,10 @@ def repository_for(request: Request) -> PersistenceRepository:
 
 def dispatch_for(request: Request) -> HandoffDispatchAdapter:
     return cast(HandoffDispatchAdapter, request.app.state.handoff_dispatch_adapter)
+
+
+def runtime_integration_policy_for(request: Request) -> RuntimeIntegrationPolicy:
+    return cast(RuntimeIntegrationPolicy, request.app.state.runtime_integration_policy)
 
 
 @router.post(
@@ -40,4 +45,5 @@ def request_support(
         payload,
         idempotency_key,
         if_match,
+        runtime_integration_policy_for(request),
     )

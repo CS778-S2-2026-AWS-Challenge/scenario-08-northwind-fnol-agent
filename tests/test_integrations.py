@@ -1246,6 +1246,8 @@ def test_assessor_routing_is_not_authorised_by_severity_alone(
 
 
 class PendingClaimsAdapter(ClaimsServiceAdapter):
+    integration_source = IntegrationSource.CONFIGURED_SERVICE
+
     def create_claim(
         self,
         command: CreateExternalClaimRequest,

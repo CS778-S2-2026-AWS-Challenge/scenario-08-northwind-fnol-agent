@@ -43,6 +43,7 @@ from backend.services.staff_access import (
     require_claim_collaborator,
 )
 from backend.services.support import now_utc
+from backend.services.workbench import _external_lifecycle
 
 
 def test_public_claim_and_workbench_detail_use_role_safe_contents_projection(
@@ -481,6 +482,79 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
     assert gap['source_refs'] == [task.task_id, task.delivery_evidence]
     assert source['source_label'] == 'Controlled fixture service'
     assert source['status'] == 'unknown_outcome'
+
+
+@pytest.mark.parametrize(
+    ('status', 'delivery', 'failure_code', 'expected_verification', 'attention'),
+    [
+        (
+            ExternalTaskOperationStatus.PREPARED,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            None,
+            'not_started',
+            False,
+        ),
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskDelivery.SUBMITTED,
+            None,
+            'pending_verification',
+            False,
+        ),
+        (
+            ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.UNAVAILABLE,
+            'failed_unverified',
+            True,
+        ),
+        (
+            ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+            ExternalTaskDelivery.SUBMITTED,
+            ExternalTaskFailureCode.TIMEOUT,
+            'reconciliation_required',
+            True,
+        ),
+        (
+            ExternalTaskOperationStatus.TERMINAL_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.MALFORMED,
+            'review_required',
+            True,
+        ),
+    ],
+)
+def test_external_lifecycle_projection_covers_each_delivery_outcome(
+    status: ExternalTaskOperationStatus,
+    delivery: ExternalTaskDelivery,
+    failure_code: ExternalTaskFailureCode | None,
+    expected_verification: str,
+    attention: bool,
+) -> None:
+    timestamp = now_utc()
+    task = ExternalTaskRecord(
+        task_id=f'tsk-lifecycle-{status.value}',
+        claim_id='clm_lifecycle',
+        service_identity='damage_assessment',
+        requested_action='request_assessment',
+        integration_source=IntegrationSource.FIXTURE,
+        status=status,
+        delivery=delivery,
+        delivery_evidence='delivery-receipt'
+        if delivery is ExternalTaskDelivery.SUBMITTED
+        else None,
+        failure_code=failure_code,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+    projection = _external_lifecycle(task, None)
+
+    assert projection.verification_state == expected_verification
+    assert projection.needs_attention is attention
+    assert projection.authority_state == 'not_recorded'
+    assert projection.consent_state == 'not_recorded'
+    assert projection.limitation
 
 
 def test_staff_primary_action_pair_resolves_to_the_exact_non_blocked_action(

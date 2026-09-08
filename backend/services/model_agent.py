@@ -1,6 +1,9 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from time import perf_counter
+from typing import cast
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -26,6 +29,7 @@ from backend.domain.model_gateway import (
     ModelKnowledgeCitation,
     ModelMessage,
     ModelRequest,
+    ModelResponse,
     ModelRole,
     ModelTurnContext,
 )
@@ -38,7 +42,14 @@ from backend.domain.models import (
     ProposedFormChange,
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
+from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.services.agent import AgentProposal, AgentTurnContext, AgentTurnProvider
+from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.runtime_configuration import (
+    RuntimeConfigurationResolutionError,
+    RuntimeConfigurationResolver,
+    RuntimeConfigurationSnapshot,
+)
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
@@ -171,6 +182,7 @@ def _agent_proposal(
     *,
     provider_model: str | None,
     provider_request_id: str | None,
+    prompt_id: str,
 ) -> AgentProposal:
     return AgentProposal(
         action=proposal.action,
@@ -199,23 +211,44 @@ def _agent_proposal(
         model_provenance=ModelDecisionProvenance(
             provider_model=provider_model,
             provider_request_id=provider_request_id,
-            prompt_id=MOTOR_CLAIMANT_PROMPT_ID,
+            prompt_id=prompt_id,
         ),
     )
 
 
 class GatewayAgent:
-    def __init__(self, gateway: ModelGateway) -> None:
+    def __init__(
+        self,
+        gateway: ModelGateway,
+        instruction_provider: Callable[[], str | None] | None = None,
+        operations: ModelOperationsRecorder | None = None,
+    ) -> None:
         self._gateway = gateway
+        self._instruction_provider = instruction_provider
+        self._operations = operations
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        instruction = (
+            context.runtime_policy.instruction.system_prompt
+            if context.runtime_policy is not None
+            else (self._instruction_provider() if self._instruction_provider else None)
+            or _SYSTEM_INSTRUCTION
+        )
+        prompt_version = (
+            context.runtime_policy.instruction.prompt_version
+            if context.runtime_policy is not None
+            else MOTOR_CLAIMANT_PROMPT_ID
+        )
         request = ModelRequest(
             purpose=CLAIMANT_AGENT_PURPOSE,
-            prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
+            prompt_version=prompt_version,
             privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
             required_capabilities=ModelCapabilities(structured_output=True),
             messages=[
-                ModelMessage(role=ModelRole.SYSTEM, content=_SYSTEM_INSTRUCTION),
+                ModelMessage(
+                    role=ModelRole.SYSTEM,
+                    content=instruction,
+                ),
                 ModelMessage(
                     role=ModelRole.USER,
                     content=json.dumps(
@@ -226,43 +259,131 @@ class GatewayAgent:
             ],
             response_schema=_PROPOSAL_ADAPTER.json_schema(),
         )
-        response = self._gateway.complete(request)
-        if response.completion_status is ModelCompletionStatus.INCOMPLETE:
-            raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
-        if response.completion_status is ModelCompletionStatus.REFUSED:
-            raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
-        if response.completion_status is not ModelCompletionStatus.COMPLETE:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-        if response.structured_output is None:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+        started_at = perf_counter()
+        response: ModelResponse | None = None
         try:
-            proposal = _PROPOSAL_ADAPTER.validate_python(response.structured_output)
-        except ValidationError:
-            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-        if response.tool_calls or proposal.required_tools:
-            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-        return _agent_proposal(
-            proposal,
-            provider_model=response.provider_model,
-            provider_request_id=response.provider_request_id,
-        )
+            complete_for_snapshot = getattr(self._gateway, 'complete_for_snapshot', None)
+            if context.runtime_configuration_snapshot is not None and callable(
+                complete_for_snapshot
+            ):
+                snapshot_completion = cast(
+                    Callable[[ModelRequest, RuntimeConfigurationSnapshot], ModelResponse],
+                    complete_for_snapshot,
+                )
+                response = snapshot_completion(request, context.runtime_configuration_snapshot)
+            else:
+                response = self._gateway.complete(request)
+            if response.completion_status is ModelCompletionStatus.INCOMPLETE:
+                raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
+            if response.completion_status is ModelCompletionStatus.REFUSED:
+                raise ModelGatewayError(ModelGatewayErrorCode.REFUSED_RESPONSE)
+            if response.completion_status is not ModelCompletionStatus.COMPLETE:
+                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+            if response.structured_output is None:
+                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+            try:
+                proposal = _PROPOSAL_ADAPTER.validate_python(response.structured_output)
+            except ValidationError:
+                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+            if response.tool_calls or proposal.required_tools:
+                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+            result = _agent_proposal(
+                proposal,
+                provider_model=response.provider_model,
+                provider_request_id=response.provider_request_id,
+                prompt_id=prompt_version,
+            )
+        except ModelGatewayError as error:
+            if self._operations is not None:
+                self._operations.failed(
+                    request.purpose,
+                    error,
+                    (perf_counter() - started_at) * 1000,
+                    response,
+                )
+            raise
+        if self._operations is not None:
+            self._operations.succeeded(
+                request.purpose,
+                response,
+                (perf_counter() - started_at) * 1000,
+            )
+        return result
 
 
 class KnowledgeGroundedAgent:
     """Retrieve scoped approved knowledge before delegating a model turn."""
 
-    def __init__(self, provider: AgentTurnProvider, retriever: KnowledgeRetriever) -> None:
+    def __init__(
+        self,
+        provider: AgentTurnProvider,
+        retriever: KnowledgeRetriever,
+        knowledge_catalog: KnowledgeAdminRepository | None = None,
+        runtime_configuration_resolver: RuntimeConfigurationResolver | None = None,
+    ) -> None:
         self._provider = provider
         self._retriever = retriever
+        self._knowledge_catalog = knowledge_catalog
+        self._runtime_configuration_resolver = runtime_configuration_resolver
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         if not context.message_text or not context.message_text.strip():
             return self._provider.propose_turn(context)
+        if (
+            context.runtime_policy is not None
+            and not context.runtime_policy.features.knowledge_retrieval
+        ):
+            return self._provider.propose_turn(
+                replace(
+                    context,
+                    knowledge_results=(),
+                    knowledge_status='disabled',
+                    knowledge_limitations=(
+                        'Knowledge retrieval is disabled by the active published feature setting.',
+                    ),
+                )
+            )
         product = _knowledge_product(context.claim.incident_type)
         if product is None:
             return self._provider.propose_turn(context)
-        status = 'evidence_found'
-        limitations: tuple[str, ...] = ()
+        resolution_error = False
+        if (
+            context.runtime_configuration_snapshot is not None
+            and context.runtime_configuration_snapshot.release_set_id is not None
+        ):
+            try:
+                published = context.runtime_configuration_snapshot.knowledge_for_product(product)
+            except RuntimeConfigurationResolutionError:
+                published = None
+                resolution_error = True
+        elif self._runtime_configuration_resolver is not None:
+            try:
+                published = self._runtime_configuration_resolver.resolve_knowledge(product)
+            except RuntimeConfigurationResolutionError:
+                published = None
+                resolution_error = True
+        else:
+            published = (
+                self._knowledge_catalog.published_for_product(product)
+                if self._knowledge_catalog is not None
+                else None
+            )
+        knowledge_version = published.version if published is not None else 'MVP-2026.1'
+        status = 'unavailable' if resolution_error else 'evidence_found'
+        limitations: tuple[str, ...] = (
+            ('The active runtime release does not select an approved knowledge version.',)
+            if resolution_error
+            else ()
+        )
+        if resolution_error:
+            return self._provider.propose_turn(
+                replace(
+                    context,
+                    knowledge_results=(),
+                    knowledge_status=status,
+                    knowledge_limitations=limitations,
+                )
+            )
         try:
             chunks = tuple(
                 self._retriever.search(
@@ -271,7 +392,7 @@ class KnowledgeGroundedAgent:
                         jurisdiction='NZ',
                         visibility='customer_and_staff',
                         authority='northwind_synthetic_demo',
-                        version='MVP-2026.1',
+                        version=knowledge_version,
                         insurer='Northwind Insurance',
                         product=product,
                         effective_at=datetime.now(UTC),

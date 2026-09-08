@@ -1,3 +1,6 @@
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -5,8 +8,25 @@ from fastapi.testclient import TestClient
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
-from backend.domain.configuration import ValidationRequest
-from backend.services.configuration import read_active, validate
+from backend.domain.configuration import (
+    ApprovalDecision,
+    AuditEvent,
+    ConfigurationApprovalRecord,
+    ConfigurationRecord,
+    ValidationRequest,
+)
+from backend.repositories.configuration import (
+    ConfigurationIdempotencyRecord,
+    SQLiteConfigurationRepository,
+)
+from backend.services.configuration import (
+    _configuration_key,
+    _reject_plaintext_secrets,
+    _validate_configuration_values,
+    _validate_secret_references,
+    read_active,
+    validate,
+)
 
 
 def _client() -> TestClient:
@@ -45,6 +65,22 @@ def _model_values(**overrides: object) -> dict[str, object]:
     return values
 
 
+def _controlled_rule_values(version: str = 'controlled-rules-v1') -> dict[str, object]:
+    return {
+        'rules_version': version,
+        'disabled_rule_ids': [],
+        'observation_rule_ids': [],
+    }
+
+
+def _feature_values(enabled: bool) -> dict[str, object]:
+    return {
+        'feature_version': 'agent-features-v1',
+        'model_assisted_turns': enabled,
+        'knowledge_retrieval': enabled,
+    }
+
+
 def _headers(token: str = 'synthetic-admin') -> dict[str, str]:
     return {'Authorization': f'Bearer {token}'}
 
@@ -61,6 +97,16 @@ def _post_headers(
     return headers
 
 
+def _approve(client: TestClient, configuration_id: str, revision: int, key: str) -> None:
+    response = client.post(
+        f'/internal/v1/admin/configurations/{configuration_id}/approval',
+        headers=_post_headers(key, revision, token='synthetic-release-approver'),
+        json={'decision': 'approved', 'reason': 'Independent review completed.'},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()['decision'] == 'approved'
+
+
 def test_admin_configuration_lifecycle_and_audit() -> None:
     with _client() as client:
         created = client.post(
@@ -69,7 +115,7 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
             json={
                 'domain': 'agent_rule',
                 'impact': 'high',
-                'values': {'rule_id': 'motor-intake'},
+                'values': _controlled_rule_values(),
                 'secret_references': {'model_api_key': 'secret://demo/model'},
                 'reason': 'Initial controlled rule.',
             },
@@ -79,6 +125,17 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
         assert record['state'] == 'draft'
         assert 'secret://demo/model' in record['secret_references'].values()
         configuration_id = record['configuration_id']
+        draft_projection = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        ).json()
+        draft_actions = {item['action_code']: item for item in draft_projection['allowed_actions']}
+        assert draft_actions['admin.configuration.patch'] == {
+            'action_code': 'admin.configuration.patch',
+            'availability': 'available',
+            'expected_revision': 1,
+            'reason': None,
+        }
+        assert draft_actions['admin.configuration.publish']['availability'] == 'blocked'
 
         validation = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/validate',
@@ -95,6 +152,19 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
         )
         assert validation.status_code == 200
         assert validation.json()['state'] == 'awaiting_approval'
+        _approve(client, configuration_id, 2, 'approve-1')
+
+        approver_projection = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}',
+            headers=_headers('synthetic-release-approver'),
+        ).json()
+        approver_actions = {
+            item['action_code']: item for item in approver_projection['allowed_actions']
+        }
+        assert approver_actions['admin.configuration.publish']['availability'] == (
+            'confirmation_required'
+        )
+        assert approver_actions['admin.configuration.publish']['expected_revision'] == 2
 
         published = client.post(
             f'/internal/v1/admin/configurations/{configuration_id}/publish',
@@ -112,6 +182,7 @@ def test_admin_configuration_lifecycle_and_audit() -> None:
         assert [item['action'] for item in audits.json()['items']] == [
             'create_draft',
             'validate',
+            'approve',
             'publish',
         ]
 
@@ -124,7 +195,7 @@ def test_high_impact_publish_rejects_the_sole_author_and_audits_attempt() -> Non
             json={
                 'domain': 'agent_rule',
                 'impact': 'high',
-                'values': {'rule_id': 'motor-intake'},
+                'values': _controlled_rule_values(),
                 'reason': 'Create a high-impact rule.',
             },
         ).json()
@@ -159,6 +230,84 @@ def test_high_impact_publish_rejects_the_sole_author_and_audits_attempt() -> Non
         assert audits[-1]['outcome'] == 'rejected'
 
 
+def test_independent_rejection_returns_configuration_to_draft() -> None:
+    with _client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('reject-create'),
+            json={
+                'domain': 'agent_rule',
+                'impact': 'high',
+                'values': _controlled_rule_values(),
+                'reason': 'Create a rule for review.',
+            },
+        ).json()
+        configuration_id = created['configuration_id']
+        validated = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers=_post_headers('reject-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'authority', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert validated.status_code == 200
+        rejected = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/approval',
+            headers=_post_headers('reject-approval', 2, token='synthetic-release-approver'),
+            json={'decision': 'rejected', 'reason': 'Needs a safer fallback.'},
+        )
+        assert rejected.status_code == 200
+        assert rejected.json()['decision'] == 'rejected'
+        current = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+        ).json()
+        assert current['revision'] == 3
+        assert current['state'] == 'draft'
+        assert current['validation_evidence'] is None
+        approvals = client.get(
+            f'/internal/v1/admin/configurations/{configuration_id}/approvals',
+            headers=_headers(),
+        )
+        assert approvals.status_code == 200
+        assert approvals.json()['items'][0]['decision'] == 'rejected'
+
+
+def test_duplicate_approval_for_revision_is_a_conflict() -> None:
+    with _client() as client:
+        created = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('duplicate-approval-create'),
+            json={
+                'domain': 'agent_rule',
+                'impact': 'high',
+                'values': _controlled_rule_values(),
+                'reason': 'Create a rule for duplicate approval test.',
+            },
+        ).json()
+        configuration_id = created['configuration_id']
+        client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/validate',
+            headers=_post_headers('duplicate-approval-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'authority', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        _approve(client, configuration_id, 2, 'duplicate-approval-first')
+        duplicate = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/approval',
+            headers=_post_headers(
+                'duplicate-approval-second', 2, token='synthetic-release-approver'
+            ),
+            json={'decision': 'approved', 'reason': 'A second decision is not allowed.'},
+        )
+        assert duplicate.status_code == 409
+        assert duplicate.json()['error']['code'] == 'APPROVAL_ALREADY_RECORDED'
+
+
 def test_admin_boundary_and_revision_errors() -> None:
     with _client() as client:
         denied = client.get(
@@ -170,7 +319,7 @@ def test_admin_boundary_and_revision_errors() -> None:
         created = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('create-boundary'),
-            json={'domain': 'feature', 'values': {'enabled': True}, 'reason': 'Demo flag.'},
+            json={'domain': 'feature', 'values': _feature_values(True), 'reason': 'Demo flag.'},
         )
         configuration_id = created.json()['configuration_id']
         stale = client.patch(
@@ -189,7 +338,7 @@ def test_draft_update_records_version_actor_time_and_changed_fields() -> None:
             headers=_post_headers('change-create'),
             json={
                 'domain': 'feature',
-                'values': {'enabled': False},
+                'values': _feature_values(False),
                 'reason': 'Create disabled feature.',
             },
         ).json()
@@ -198,7 +347,7 @@ def test_draft_update_records_version_actor_time_and_changed_fields() -> None:
         updated = client.patch(
             f'/internal/v1/admin/configurations/{configuration_id}',
             headers=_post_headers('change-patch', 1),
-            json={'values': {'enabled': True}, 'reason': 'Enable controlled feature.'},
+            json={'values': _feature_values(True), 'reason': 'Enable controlled feature.'},
         )
 
         assert updated.status_code == 200
@@ -405,7 +554,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
             json={
                 'domain': 'agent_rule',
                 'impact': 'high',
-                'values': {'version': 1},
+                'values': _controlled_rule_values('controlled-rules-v1'),
                 'reason': 'First rule.',
             },
         ).json()
@@ -419,6 +568,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
                 ]
             },
         )
+        _approve(client, first_id, 2, 'first-approve')
         client.post(
             f'/internal/v1/admin/configurations/{first_id}/publish',
             headers=_post_headers('first-publish', 2, token='synthetic-release-approver'),
@@ -430,7 +580,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
             json={
                 'domain': 'agent_rule',
                 'impact': 'high',
-                'values': {'version': 2},
+                'values': _controlled_rule_values('controlled-rules-v2'),
                 'reason': 'Second rule.',
             },
         ).json()
@@ -444,6 +594,7 @@ def test_publish_supersedes_previous_and_rollback_keeps_history() -> None:
                 ]
             },
         )
+        _approve(client, second_id, 2, 'second-approve')
         published = client.post(
             f'/internal/v1/admin/configurations/{second_id}/publish',
             headers=_post_headers('second-publish', 2, token='synthetic-release-approver'),
@@ -489,7 +640,11 @@ def test_runtime_reads_only_the_active_published_configuration() -> None:
         draft = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('runtime-draft'),
-            json={'domain': 'feature', 'values': {'enabled': False}, 'reason': 'Draft only.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(False),
+                'reason': 'Draft only.',
+            },
         ).json()
 
         with pytest.raises(Exception) as missing:
@@ -508,7 +663,11 @@ def test_runtime_reads_only_the_active_published_configuration() -> None:
         later_draft = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('runtime-later-draft'),
-            json={'domain': 'feature', 'values': {'enabled': True}, 'reason': 'Not published.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Not published.',
+            },
         ).json()
 
         active = read_active(repository, 'feature')
@@ -522,7 +681,11 @@ def test_normal_validation_supersedes_previous_publication() -> None:
         first = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('normal-first-create'),
-            json={'domain': 'feature', 'reason': 'First normal config.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(False),
+                'reason': 'First normal config.',
+            },
         ).json()
         first_id = first['configuration_id']
         first_published = client.post(
@@ -540,7 +703,11 @@ def test_normal_validation_supersedes_previous_publication() -> None:
         second = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('normal-second-create'),
-            json={'domain': 'feature', 'reason': 'Second normal config.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Second normal config.',
+            },
         ).json()
         second_id = second['configuration_id']
         second_published = client.post(
@@ -566,6 +733,81 @@ def test_normal_validation_supersedes_previous_publication() -> None:
         supersede = next(item for item in audits if item['action'] == 'supersede')
         assert supersede['outcome'] == 'succeeded'
         assert supersede['revision'] == 3
+
+
+def test_sqlite_configuration_repository_preserves_revisions_audits_approvals_and_idempotency(
+    tmp_path: Path,
+) -> None:
+    with _client() as client:
+        response = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('sqlite-repository-source'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Seed a durable configuration record.',
+            },
+        )
+    assert response.status_code == 201
+    record = response.json()
+    repository = SQLiteConfigurationRepository(str(tmp_path / 'configuration.sqlite3'))
+    saved_record = ConfigurationRecord.model_validate(record)
+    assert repository.create(saved_record) == saved_record
+    assert repository.get(saved_record.configuration_id) == saved_record
+    assert repository.get(saved_record.configuration_id, revision=1) == saved_record
+    assert repository.get('cfg_missing') is None
+    assert repository.list_configurations() == [saved_record]
+    assert repository.list_configurations('feature') == [saved_record]
+    assert repository.list_configurations('model') == []
+    updated = saved_record.model_copy(update={'revision': 2, 'reason': 'Updated durable record.'})
+    assert repository.save(updated, 1) == updated
+    assert repository.get(saved_record.configuration_id, revision=1) == saved_record
+    assert repository.get(saved_record.configuration_id) == updated
+    assert repository.active('feature') is None
+    with pytest.raises(ValueError, match='stale_revision'):
+        repository.save(updated.model_copy(update={'revision': 3}), 1)
+
+    timestamp = datetime(2026, 9, 7, tzinfo=UTC)
+    event = AuditEvent(
+        event_id='aud_sqlite',
+        configuration_id=saved_record.configuration_id,
+        revision=2,
+        previous_revision=1,
+        actor='adm_demo',
+        action='patch',
+        reason='Updated durable record.',
+        outcome='succeeded',
+        created_at=timestamp,
+    )
+    repository.add_audit(event)
+    assert repository.audits(saved_record.configuration_id) == [event]
+    approval = ConfigurationApprovalRecord(
+        approval_id='apr_sqlite',
+        configuration_id=saved_record.configuration_id,
+        configuration_revision=2,
+        reviewer='reviewer',
+        decision=ApprovalDecision.APPROVED,
+        reason='Independent check.',
+        created_at=timestamp,
+    )
+    repository.add_approval(approval)
+    assert repository.approvals(saved_record.configuration_id, 2) == [approval]
+    with pytest.raises(ValueError, match='approval_exists'):
+        repository.add_approval(approval)
+
+    idempotency = ConfigurationIdempotencyRecord(
+        actor='adm_demo',
+        route='POST /internal/v1/admin/configurations',
+        key='sqlite-key',
+        fingerprint='fingerprint',
+        response={'configuration_id': saved_record.configuration_id},
+        status_code=201,
+    )
+    repository.save_idempotency(idempotency)
+    assert repository.find_idempotency('adm_demo', idempotency.route, 'sqlite-key') == idempotency
+    repository.save_idempotency(idempotency)
+    with pytest.raises(ValueError, match='idempotency_conflict'):
+        repository.save_idempotency(replace(idempotency, fingerprint='other'))
 
 
 def test_normal_publication_write_failure_restores_previous_publication(
@@ -626,7 +868,11 @@ def test_admin_post_requires_idempotency_and_if_match_is_conflict() -> None:
         missing_key = client.post(
             '/internal/v1/admin/configurations',
             headers=_headers(),
-            json={'domain': 'feature', 'reason': 'Missing key.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Missing key.',
+            },
         )
         assert missing_key.status_code == 400
         assert missing_key.json()['error']['code'] == 'VALIDATION_ERROR'
@@ -634,7 +880,11 @@ def test_admin_post_requires_idempotency_and_if_match_is_conflict() -> None:
         created = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('if-match-create'),
-            json={'domain': 'feature', 'reason': 'Create draft.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Create draft.',
+            },
         ).json()
         missing_revision = client.post(
             f'/internal/v1/admin/configurations/{created["configuration_id"]}/validate',
@@ -657,7 +907,11 @@ def test_failed_validation_and_transition_are_audited() -> None:
         created = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('failure-create'),
-            json={'domain': 'agent_rule', 'reason': 'Failure test.'},
+            json={
+                'domain': 'agent_rule',
+                'values': _controlled_rule_values(),
+                'reason': 'Failure test.',
+            },
         ).json()
         configuration_id = created['configuration_id']
         failed = client.post(
@@ -688,24 +942,158 @@ def test_failed_validation_and_transition_are_audited() -> None:
         assert audits[-1]['outcome'] == 'rejected'
 
 
+def test_configuration_withdrawal_and_rollback_reject_invalid_transitions() -> None:
+    with _client() as client:
+        draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('withdraw-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Create a draft for withdrawal.',
+            },
+        ).json()
+        configuration_id = draft['configuration_id']
+
+        withdrawn = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-draft', 1),
+            json={'reason': 'Remove the unused draft.'},
+        )
+        assert withdrawn.status_code == 200
+        assert withdrawn.json()['state'] == 'withdrawn'
+
+        stale = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-stale', 1),
+            json={'reason': 'Stale withdrawal.'},
+        )
+        assert stale.status_code == 409
+        assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+
+        invalid_state = client.post(
+            f'/internal/v1/admin/configurations/{configuration_id}/withdraw',
+            headers=_post_headers('withdraw-invalid-state', 2),
+            json={'reason': 'Withdraw it again.'},
+        )
+        assert invalid_state.status_code == 400
+        assert invalid_state.json()['error']['code'] == 'INVALID_CONFIGURATION_TRANSITION'
+
+        published = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('rollback-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(False),
+                'reason': 'Create a publication for rollback validation.',
+            },
+        ).json()
+        published_id = published['configuration_id']
+        validated = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/validate',
+            headers=_post_headers('rollback-validate', 1),
+            json={
+                'scenario_results': [
+                    {'scenario_id': 'rollback', 'outcome': 'passed', 'evidence': 'passed'}
+                ]
+            },
+        )
+        assert validated.status_code == 200
+        missing_target = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/rollback',
+            headers=_post_headers('rollback-missing-target', 2),
+            json={'reason': 'No target supplied.'},
+        )
+        assert missing_target.status_code == 400
+        assert missing_target.json()['error']['code'] == 'ROLLBACK_TARGET_REQUIRED'
+
+        invalid_target = client.post(
+            f'/internal/v1/admin/configurations/{published_id}/rollback',
+            headers=_post_headers('rollback-invalid-target', 2),
+            json={'reason': 'Draft is not a rollback target.', 'rollback_target': configuration_id},
+        )
+        assert invalid_target.status_code == 400
+        assert invalid_target.json()['error']['code'] == 'INVALID_ROLLBACK_TARGET'
+
+
+@pytest.mark.parametrize(
+    ('domain', 'values', 'code'),
+    [
+        ('agent_rule', {}, 'AGENT_CONFIGURATION_INVALID'),
+        ('model', {}, 'PROVIDER_CONFIGURATION_INVALID'),
+        ('access', {}, 'ACCESS_POLICY_INVALID'),
+        ('operational', {}, 'OPERATIONAL_CONFIGURATION_INVALID'),
+        ('integration', {}, 'INTEGRATION_CONFIGURATION_INVALID'),
+        ('data_profile', {}, 'PROVIDER_CONFIGURATION_INVALID'),
+    ],
+)
+def test_provider_configuration_validator_rejects_incomplete_domains(
+    domain: str, values: dict[str, object], code: str
+) -> None:
+    from backend.core.errors import ApiError
+
+    with pytest.raises(ApiError) as error:
+        _validate_configuration_values(domain, values, for_validation=False)
+    assert error.value.code == code
+
+
+def test_provider_configuration_validator_enforces_secret_references_and_model_binding() -> None:
+    from backend.core.errors import ApiError
+    from backend.domain.configuration import ModelRuntimeBinding
+
+    with pytest.raises(ApiError) as plaintext:
+        _reject_plaintext_secrets({'api_key': 'never-store'})
+    assert plaintext.value.code == 'SECRET_VALUE_FORBIDDEN'
+
+    with pytest.raises(ApiError) as invalid_reference:
+        _validate_secret_references({'api_key': 'plain-text'})
+    assert invalid_reference.value.code == 'SECRET_REFERENCE_INVALID'
+
+    assert (
+        _configuration_key('integration', {'service_id': 'assessor_service'}) == 'assessor_service'
+    )
+    assert _configuration_key('feature', {}) == 'default'
+
+    with pytest.raises(ApiError) as mismatch:
+        _validate_configuration_values(
+            'model',
+            _model_values(),
+            for_validation=True,
+            model_runtime_binding=ModelRuntimeBinding(
+                protocol='openai_compatible',
+                base_url='https://different.example/v1',
+                credential_environment_variable='NORTHWIND_MODEL_API_KEY',
+                purpose='agent_turn',
+                privacy_class='synthetic_fnol',
+                prompt_version='northwind-fnol-motor-claimant-v4',
+                structured_output=True,
+            ),
+        )
+    assert mismatch.value.code == 'PROVIDER_CONFIGURATION_UNAVAILABLE'
+
+
 def test_idempotent_create_replays_and_conflicts() -> None:
     with _client() as client:
         first = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('replay-create'),
-            json={'domain': 'feature', 'reason': 'Replay.'},
+            json={'domain': 'feature', 'values': _feature_values(True), 'reason': 'Replay.'},
         )
         replay = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('replay-create'),
-            json={'domain': 'feature', 'reason': 'Replay.'},
+            json={'domain': 'feature', 'values': _feature_values(True), 'reason': 'Replay.'},
         )
         assert first.status_code == replay.status_code == 201
         assert first.json() == replay.json()
         conflict = client.post(
             '/internal/v1/admin/configurations',
             headers=_post_headers('replay-create'),
-            json={'domain': 'feature', 'reason': 'Different request.'},
+            json={
+                'domain': 'feature',
+                'values': _feature_values(False),
+                'reason': 'Different request.',
+            },
         )
         assert conflict.status_code == 409
         assert conflict.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'

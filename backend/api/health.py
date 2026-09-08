@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from backend.adapters.handoff_dispatch import HandoffDispatchAdapter
 from backend.core.runtime_profiles import DataRuntimeBundle
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 
 router = APIRouter(tags=['health'])
 
@@ -37,6 +38,20 @@ def readiness(request: Request) -> ReadinessResponse:
     status: Literal['degraded', 'unavailable'] = (
         'unavailable' if 'unavailable' in data_checks.values() else 'degraded'
     )
+    resolver = getattr(request.app.state, 'runtime_configuration_resolver', None)
+    if resolver is None:
+        release_check = 'not_configured'
+        domain_check = 'not_configured'
+    else:
+        try:
+            runtime_snapshot = resolver.snapshot()
+        except RuntimeConfigurationResolutionError:
+            release_check = 'unavailable'
+            domain_check = 'unavailable'
+            status = 'unavailable'
+        else:
+            release_check = runtime_snapshot.release_set_id or 'none'
+            domain_check = ','.join(sorted(runtime_snapshot.configurations)) or 'none'
     return ReadinessResponse(
         status=status,
         checks={
@@ -44,6 +59,8 @@ def readiness(request: Request) -> ReadinessResponse:
             'data_runtime_profile': data_runtime.profile.value,
             'object_storage_adapter': request.app.state.settings.object_storage_adapter.value,
             'agent': agent_runtime_status,
+            'control_plane_release_set': release_check,
+            'control_plane_domains': domain_check,
             'aws_policy_history': 'pending_confirmation',
             'claims_service': 'using_fixture',
             'aws_claims_service': 'pending_confirmation',

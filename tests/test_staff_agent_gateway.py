@@ -10,8 +10,11 @@ from backend.domain.model_gateway import (
     ModelGatewayError,
     ModelRequest,
     ModelResponse,
+    ModelUsage,
 )
 from backend.domain.staff_agent import StaffAgentModelOutput
+from backend.repositories.operations import OperationRepository
+from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.staff_agent import (
     GatewayStaffAgent,
     StaffAgentContext,
@@ -51,16 +54,24 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
             structured_output=output.model_dump(mode='json'),
             provider_model='gpt54-mini',
             provider_request_id='req-1',
+            usage=ModelUsage(input_tokens=20, output_tokens=5, total_tokens=25),
         )
     )
+    operations = OperationRepository()
 
-    result = GatewayStaffAgent(gateway).respond(_context())
+    result = GatewayStaffAgent(gateway, ModelOperationsRecorder(operations)).respond(_context())
 
     assert result.output.answer == 'Check the evidence trail.'
     assert result.provider_model == 'gpt54-mini'
     request = gateway.requests[0]
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
     assert request.messages[1].content.startswith('{"question":"What should I check next?"')
+    operation = operations.metrics_records()[0]
+    assert operation.kind.value == 'model_invocation'
+    assert operation.state.value == 'succeeded'
+    assert operation.result is not None
+    assert operation.result['total_tokens'] == 25
+    assert operation.result['provider_model'] == 'gpt54-mini'
 
 
 @pytest.mark.parametrize(
@@ -71,8 +82,12 @@ def test_gateway_staff_agent_fails_for_incomplete_or_refused_response(
     status: ModelCompletionStatus,
 ) -> None:
     gateway = StubGateway(ModelResponse(completion_status=status))
+    operations = OperationRepository()
     with pytest.raises(ModelGatewayError):
-        GatewayStaffAgent(gateway).respond(_context())
+        GatewayStaffAgent(gateway, ModelOperationsRecorder(operations)).respond(_context())
+    record = operations.metrics_records()[0]
+    assert record.state.value == 'failed'
+    assert record.error_code in {'MODEL_INCOMPLETE_RESPONSE', 'MODEL_REFUSED_RESPONSE'}
 
 
 def test_gateway_staff_agent_fails_for_unknown_or_malformed_response() -> None:

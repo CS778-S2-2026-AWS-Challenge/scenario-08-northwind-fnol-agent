@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from backend.domain.intake import (
     CONTROLLED_INTAKE_FIELDS,
@@ -30,6 +32,10 @@ from backend.domain.support_intent import (
     detect_support_intent,
     support_need_for_intent,
 )
+
+if TYPE_CHECKING:
+    from backend.services.runtime_agent_policy import RuntimeAgentPolicySnapshot
+    from backend.services.runtime_configuration import RuntimeConfigurationSnapshot
 
 HIGH_IMPACT_ACTIONS = frozenset(
     {
@@ -162,6 +168,8 @@ class AgentTurnContext:
     knowledge_results: tuple[KnowledgeChunk, ...] = ()
     knowledge_status: str = 'not_requested'
     knowledge_limitations: tuple[str, ...] = ()
+    runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
+    runtime_policy: RuntimeAgentPolicySnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -644,6 +652,20 @@ class InvariantGuardedAgent:
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
         interrupt = deterministic_interrupt_proposal(context)
         return interrupt if interrupt is not None else self._provider.propose_turn(context)
+
+
+class FeatureControlledAgent:
+    """Select model-assisted or deterministic turns from a published feature setting."""
+
+    def __init__(self, primary: AgentTurnProvider, fallback: AgentTurnProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        policy = context.runtime_policy
+        if policy is not None and not policy.features.model_assisted_turns:
+            return self._fallback.propose_turn(context)
+        return self._primary.propose_turn(context)
 
 
 class ControlledAgent:

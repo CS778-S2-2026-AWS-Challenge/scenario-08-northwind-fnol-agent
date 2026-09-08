@@ -50,6 +50,7 @@ authorisation.
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
 | `customer/` | React and Vite claimant experience |
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
+| `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
 | `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
@@ -80,6 +81,7 @@ Use Python 3.12 and Node.js 22. On Windows, install dependencies from the reposi
 py -3.12 -m pip install -r backend/requirements-dev.txt
 npm ci --prefix customer
 npm ci --prefix workbench
+npm ci --prefix admin
 ```
 
 Start the backend:
@@ -144,6 +146,17 @@ Configure the initial normal-mode staff account as documented in
 their still-valid capabilities have been migrated and verified; do not add new product behaviour
 to that client.
 
+Start the Control Plane console separately when administrator access is required:
+
+```powershell
+npm run dev --prefix admin
+```
+
+The Admin Console uses `/internal/v1/admin` projections only. It does not connect directly to a
+database, object store, model endpoint, or secret manager; sign in with an administrator bearer
+token and inspect server-owned configuration, knowledge, evaluation, operation, integration, and
+account state.
+
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
 Developer mode uses separate synthetic administrator and release-approver tokens. The
@@ -155,8 +168,8 @@ must not be used as a production approval mechanism.
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests, PR policy, GitHub automation, documentation, and both claimant and Workbench
-clients for every pull request. Backend pull requests use impact-scoped tests selected by
+linting, types, tests, PR policy, GitHub automation, documentation, and claimant, Workbench, and
+Control Plane clients for every pull request. Backend pull requests use impact-scoped tests selected by
 `scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
 suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
 only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.

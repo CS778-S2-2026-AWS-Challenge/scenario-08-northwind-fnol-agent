@@ -9,7 +9,20 @@ from backend.adapters.handoff_dispatch import (
 )
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.domain.configuration import (
+    ConfigurationImpact,
+    ConfigurationRecord,
+    ConfigurationState,
+    now_utc,
+)
+from backend.domain.release import (
+    ConfigurationReference,
+    ReleaseSetRecord,
+    ReleaseSetState,
+)
+from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
+from backend.repositories.release_set import ReleaseSetRepository
 
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
@@ -82,6 +95,67 @@ def test_support_request_notifies_the_staff_queue_service(
     assert response.status_code == 201
     assert response.json()['delivery'] == {'state': 'delivered', 'limitations': []}
     assert response.json()['revision'] == 2
+    assert entry is not None
+
+
+def test_disabled_dispatch_preserves_handoff_and_uses_the_local_queue() -> None:
+    configurations = ConfigurationRepository()
+    releases = ReleaseSetRepository()
+    timestamp = now_utc()
+    dispatch_configuration = ConfigurationRecord(
+        configuration_id='cfg_disabled_dispatch',
+        domain='integration',
+        configuration_key='handoff_dispatch',
+        revision=1,
+        state=ConfigurationState.PUBLISHED,
+        impact=ConfigurationImpact.NORMAL,
+        values={
+            'service_id': 'handoff_dispatch',
+            'capability': 'handoff_dispatch',
+            'source': 'fixture',
+            'enabled': False,
+        },
+        author='adm_demo',
+        reason='Disable external handoff notification.',
+        validation_evidence={'result': 'passed'},
+        effective_time=timestamp,
+        updated_at=timestamp,
+    )
+    configurations.create(dispatch_configuration)
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel_disabled_dispatch',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={},
+            integration_refs={
+                'handoff_dispatch': ConfigurationReference(
+                    configuration_id=dispatch_configuration.configuration_id,
+                    revision=dispatch_configuration.revision,
+                )
+            },
+            author='adm_demo',
+            reason='Exercise disabled dispatch fallback.',
+            effective_time=timestamp,
+            updated_at=timestamp,
+        )
+    )
+    app = create_app(
+        Settings(environment='test', identity_mode=IdentityMode.DEVELOPER),
+        FixtureRepository(),
+        configuration_repository=configurations,
+        release_set_repository=releases,
+    )
+
+    with TestClient(app) as client:
+        claim_id = create_claim(client, 'disabled-dispatch-claim')
+        response = request_support(client, claim_id, 'disabled-dispatch-support')
+        entry = staff_queue_entry(client, claim_id)
+
+    assert response.status_code == 201
+    assert response.json()['delivery']['state'] == 'queued_locally'
     assert entry is not None
 
 
