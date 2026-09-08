@@ -608,7 +608,8 @@ function App() {
       attempt.evidenceId = requested.evidence_id
       setClaim((current) => current ? { ...current, revision: requested.revision } : current)
       await uploadEvidenceContent({ upload: requested.upload, file })
-      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+      const fileBytes = new Uint8Array(await file.arrayBuffer())
+      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', fileBytes)
       const checksum = `sha256:${Array.from(new Uint8Array(checksumBuffer), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
       const completed = await completeEvidenceUpload({
         claimId: activeClaim.claim_id,
