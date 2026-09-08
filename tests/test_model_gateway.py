@@ -1281,12 +1281,14 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'knowledge_status',
         'knowledge_citations',
         'knowledge_limitations',
+        'provenance_messages',
     }
     assert model_context['branch'] is None
     assert model_context['evidence_reference_count'] == 1
     assert model_context['knowledge_status'] == 'not_requested'
     assert model_context['knowledge_citations'] == []
     assert model_context['knowledge_limitations'] == []
+    assert model_context['provenance_messages'] == []
     assert set(model_context['claim']) == {
         'channel',
         'locale',
@@ -1309,7 +1311,11 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
         'status',
         'needed_for',
         'confidence',
+        'resolution_state',
+        'precision',
+        'source_refs',
     }
+    assert model_context['claim']['form']['incident.description']['source_refs'] == []
     serialised_context = json.dumps(model_context)
     for private_value in (
         'clm_private_gateway',

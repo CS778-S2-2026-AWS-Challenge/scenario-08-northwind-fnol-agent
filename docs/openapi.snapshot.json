@@ -1300,6 +1300,18 @@
         "title": "ApprovalRequest",
         "type": "object"
       },
+      "AssertionRelation": {
+        "enum": [
+          "initial",
+          "equivalent",
+          "refinement",
+          "correction",
+          "material_conflict",
+          "irrelevant"
+        ],
+        "title": "AssertionRelation",
+        "type": "string"
+      },
       "AssessorLocation": {
         "additionalProperties": false,
         "properties": {
@@ -5273,6 +5285,87 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "FactAssertion": {
+        "additionalProperties": false,
+        "description": "One source-linked statement that contributed to a structured field.",
+        "properties": {
+          "assertion_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assertion Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "normalized_value": {
+            "title": "Normalized Value"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/AssertionRelation",
+            "default": "initial"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus",
+            "default": "proposed"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "normalized_value",
+          "created_at"
+        ],
+        "title": "FactAssertion",
+        "type": "object"
+      },
+      "FactPrecision": {
+        "enum": [
+          "exact",
+          "approximate",
+          "range",
+          "partial",
+          "unknown"
+        ],
+        "title": "FactPrecision",
+        "type": "string"
+      },
+      "FactResolutionState": {
+        "description": "Resolution of a structured fact independent from its storage status.",
+        "enum": [
+          "resolved",
+          "needs_confirmation",
+          "clarification_required",
+          "unavailable",
+          "superseded"
+        ],
+        "title": "FactResolutionState",
+        "type": "string"
+      },
       "FieldSelectionResult": {
         "additionalProperties": false,
         "description": "Selection state kept separate from a field's stored value state.",
@@ -5470,7 +5563,9 @@
           "confirmed",
           "disputed",
           "missing",
-          "pending_generation"
+          "pending_generation",
+          "unavailable",
+          "superseded"
         ],
         "title": "FormStatus",
         "type": "string"
@@ -7756,6 +7851,54 @@
         "title": "ProfilePatchRequest",
         "type": "object"
       },
+      "QuestionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "asked_at": {
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "field_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Field Codes",
+            "type": "array"
+          },
+          "purpose": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "question_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Question Id",
+            "type": "string"
+          },
+          "repeated": {
+            "default": false,
+            "title": "Repeated",
+            "type": "boolean"
+          },
+          "trigger_message_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Trigger Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "trigger_message_id",
+          "purpose",
+          "asked_at"
+        ],
+        "title": "QuestionRecord",
+        "type": "object"
+      },
       "RateLimitMetrics": {
         "additionalProperties": false,
         "properties": {
@@ -8257,12 +8400,47 @@
             "title": "Pending Items",
             "type": "array"
           },
+          "post_session_follow_up_required": {
+            "default": false,
+            "title": "Post Session Follow Up Required",
+            "type": "boolean"
+          },
           "prior_commitments": {
             "items": {
               "type": "string"
             },
             "title": "Prior Commitments",
             "type": "array"
+          },
+          "question_budget": {
+            "default": 9,
+            "minimum": 1.0,
+            "title": "Question Budget",
+            "type": "integer"
+          },
+          "question_turn_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Question Turn Count",
+            "type": "integer"
+          },
+          "remaining_question_budget": {
+            "default": 9,
+            "minimum": 0.0,
+            "title": "Remaining Question Budget",
+            "type": "integer"
+          },
+          "repeated_question_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Repeated Question Count",
+            "type": "integer"
+          },
+          "requested_fact_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Requested Fact Count",
+            "type": "integer"
           },
           "summary": {
             "anyOf": [
@@ -9297,6 +9475,13 @@
       "StructuredFormField-Input": {
         "additionalProperties": false,
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/FactAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -9310,8 +9495,34 @@
             ],
             "title": "Confidence"
           },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
+          },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/FormSource"
@@ -9352,6 +9563,13 @@
       "StructuredFormField-Output": {
         "additionalProperties": false,
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/FactAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -9365,8 +9583,34 @@
             ],
             "title": "Confidence"
           },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
+          },
           "needed_for": {
             "$ref": "#/components/schemas/NeededFor"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/FactPrecision",
+            "default": "exact"
+          },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/FormSource"
@@ -11907,12 +12151,54 @@
             "title": "Pending Items",
             "type": "array"
           },
+          "post_session_follow_up_required": {
+            "default": false,
+            "title": "Post Session Follow Up Required",
+            "type": "boolean"
+          },
           "prior_commitments": {
             "items": {
               "type": "string"
             },
             "title": "Prior Commitments",
             "type": "array"
+          },
+          "question_budget": {
+            "default": 9,
+            "minimum": 1.0,
+            "title": "Question Budget",
+            "type": "integer"
+          },
+          "question_history": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionRecord"
+            },
+            "title": "Question History",
+            "type": "array"
+          },
+          "question_turn_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Question Turn Count",
+            "type": "integer"
+          },
+          "remaining_question_budget": {
+            "default": 9,
+            "minimum": 0.0,
+            "title": "Remaining Question Budget",
+            "type": "integer"
+          },
+          "repeated_question_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Repeated Question Count",
+            "type": "integer"
+          },
+          "requested_fact_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Requested Fact Count",
+            "type": "integer"
           },
           "session_id": {
             "title": "Session Id",

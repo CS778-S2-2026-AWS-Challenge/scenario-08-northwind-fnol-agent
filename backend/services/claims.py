@@ -12,6 +12,7 @@ from backend.domain.models import (
     ActorReference,
     ActorType,
     AgentAction,
+    AssertionRelation,
     ClaimantClaim,
     ClaimantContentsItem,
     ClaimantHandoff,
@@ -30,6 +31,7 @@ from backend.domain.models import (
     FormStatus,
     NeededFor,
     PageInfo,
+    ProposedFormChange,
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
@@ -52,6 +54,7 @@ from backend.services.branching import (
 )
 from backend.services.evidence_visibility import claimant_visible_evidence
 from backend.services.external_services import claimant_assessor_action
+from backend.services.fact_resolution import confirm_form_field, resolve_form_change
 from backend.services.handoffs import claimant_handoff
 from backend.services.support import (
     decode_cursor,
@@ -144,10 +147,30 @@ def _claimant_form(
         if field_code in CLAIMANT_HIDDEN_FIELDS:
             continue
         visible_refs = [ref for ref in fact.source_refs if ref not in internal_refs]
-        projected[field_code] = (
-            fact
-            if len(visible_refs) == len(fact.source_refs)
-            else fact.model_copy(update={'source_refs': visible_refs})
+        visible_assertions = [
+            assertion.model_copy(
+                update={
+                    'source_refs': [
+                        ref for ref in assertion.source_refs if ref not in internal_refs
+                    ]
+                }
+            )
+            for assertion in fact.assertions
+            if any(ref not in internal_refs for ref in assertion.source_refs)
+        ]
+        projected[field_code] = fact.model_copy(
+            update={
+                'source_refs': visible_refs,
+                'assertions': visible_assertions,
+                'current_assertion_id': (
+                    fact.current_assertion_id
+                    if any(
+                        assertion.assertion_id == fact.current_assertion_id
+                        for assertion in visible_assertions
+                    )
+                    else None
+                ),
+            }
         )
     return projected
 
@@ -245,6 +268,12 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
             unresolved_questions=session.unresolved_questions,
             pending_items=session.pending_items,
             prior_commitments=session.prior_commitments,
+            question_budget=session.question_budget,
+            question_turn_count=session.question_turn_count,
+            requested_fact_count=session.requested_fact_count,
+            repeated_question_count=session.repeated_question_count,
+            remaining_question_budget=max(0, session.question_budget - session.question_turn_count),
+            post_session_follow_up_required=session.post_session_follow_up_required,
             customer_next_step=next_step,
         ),
         started_at=session.started_at,
@@ -481,6 +510,24 @@ def start_session(
             prior_commitments=(
                 list(resume_source.prior_commitments) if resume_source is not None else []
             ),
+            question_budget=(resume_source.question_budget if resume_source is not None else 9),
+            question_turn_count=(
+                resume_source.question_turn_count if resume_source is not None else 0
+            ),
+            requested_fact_count=(
+                resume_source.requested_fact_count if resume_source is not None else 0
+            ),
+            repeated_question_count=(
+                resume_source.repeated_question_count if resume_source is not None else 0
+            ),
+            post_session_follow_up_required=(
+                resume_source.post_session_follow_up_required
+                if resume_source is not None
+                else False
+            ),
+            question_history=(
+                list(resume_source.question_history) if resume_source is not None else []
+            ),
             context_revision=claim.revision,
             started_at=timestamp,
             last_active_at=timestamp,
@@ -600,6 +647,29 @@ def update_form(
             ) from error
         existing = claim.form.get(update.field_code)
         if (
+            update.field_code == 'claim.product_family'
+            and update.status is FormStatus.CONFIRMED
+            and isinstance(update.value, str)
+            and (
+                claim.external_claim is not None
+                or claim.claim_state.workflow_state is WorkflowState.CREATED
+            )
+            and claim.incident_type != update.value.strip().lower()
+        ):
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message=(
+                    'A created claim cannot change product family through the ordinary form flow.'
+                ),
+                details=[
+                    ErrorDetail(
+                        field='claim.product_family',
+                        reason='Use the approved correction or professional-review path.',
+                    )
+                ],
+            )
+        if (
             existing is not None
             and existing.status.value == 'confirmed'
             and existing.value != update.value
@@ -616,16 +686,27 @@ def update_form(
                     )
                 ],
             )
-        updated_fields[update.field_code] = StructuredFormField(
-            value=update.value,
-            source=FormSource.CLAIMANT,
-            source_refs=[
+        updated_fields[update.field_code] = resolve_form_change(
+            field_code=update.field_code,
+            existing=existing,
+            proposal=ProposedFormChange(
+                field_code=update.field_code,
+                value=update.value,
+                source=FormSource.CLAIMANT,
+                status=update.status,
+                needed_for=NeededFor.CURRENT_ACTION,
+                relation=(AssertionRelation.CORRECTION if update.correction_reason else None),
+            ),
+            source_ref=(
                 f'claim:{claim.claim_id}:revision:{claim.revision + 1}:field:{update.field_code}'
-            ],
-            status=update.status,
-            needed_for=NeededFor.CURRENT_ACTION,
-            updated_at=timestamp,
-            updated_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id=principal.subject),
+            ),
+            message_text=update.correction_reason,
+            timestamp=timestamp,
+            accepted_status=update.status,
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT,
+                actor_id=principal.subject,
+            ),
         )
 
     incident_type = _apply_product_family_transition(claim, updated_fields)
@@ -729,16 +810,13 @@ def confirm_form_fields(
 
     timestamp = now_utc()
     confirmed_fields = {
-        field_code: claim.form[field_code].model_copy(
-            update={
-                'status': FormStatus.CONFIRMED,
-                'confidence': 1.0,
-                'updated_at': timestamp,
-                'updated_by': ActorReference(
-                    actor_type=ActorType.CLAIMANT,
-                    actor_id=principal.subject,
-                ),
-            }
+        field_code: confirm_form_field(
+            claim.form[field_code],
+            timestamp=timestamp,
+            updated_by=ActorReference(
+                actor_type=ActorType.CLAIMANT,
+                actor_id=principal.subject,
+            ),
         )
         for field_code in payload.field_codes
     }

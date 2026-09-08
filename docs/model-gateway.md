@@ -42,15 +42,24 @@ is allow-listed. Policy numbers, contact preferences, incident and property addr
 parties, police references, emergency-service records, vehicle registrations, and every
 unregistered field remain outside routine model context.
 
-The projection also excludes Claim, Customer, Session, Message, and Evidence identifiers;
-source references and actor identities; internal fraud, coverage, and severity signals;
+The projection also excludes Claim, Customer, Session, and Evidence identifiers; routine source
+references and actor identities; internal fraud, coverage, and severity signals;
 provider fingerprints; routes; timestamps; and external Claim or assessor results.
 For current-action fields whose values are intentionally excluded, `known_field_codes` tells the
 model that the field already exists without disclosing its value. This supports non-repetition
 without widening the routine model-data projection.
 
+Each included form field now carries its resolution state and precision. Source references remain
+empty for resolved fields. Only while a field is `clarification_required` may the context include
+that field's message references and the corresponding full, claimant-visible message text in
+`provenance_messages`. The Runtime resolves `message_id` through authorised Claim/session access;
+the model cannot request unrelated history, and a source span is never treated as a substitute for
+the immutable full message.
+
 The model-facing proposal schema can suggest a form field, value, purpose, and confidence,
-but it cannot set fact provenance or confirmation state. The server converts every accepted
+but it cannot set fact provenance, assertion relation, temporal precision, or confirmation state.
+Runtime derives equivalent repetition, refinement, explicit correction, and material conflict
+from the persisted field and current claimant message. The server converts every accepted
 model form suggestion to `source: inference` and `status: proposed`. Claimant, staff, policy,
 or document provenance and confirmed state require their existing trusted server-side paths.
 The resulting field actor is `model_gateway`, not `controlled_agent`.

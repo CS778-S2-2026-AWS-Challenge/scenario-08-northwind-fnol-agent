@@ -28,6 +28,7 @@ from backend.domain.model_gateway import (
     ModelGatewayErrorCode,
     ModelKnowledgeCitation,
     ModelMessage,
+    ModelProvenanceMessage,
     ModelRequest,
     ModelResponse,
     ModelRole,
@@ -35,6 +36,7 @@ from backend.domain.model_gateway import (
 )
 from backend.domain.models import (
     AgentProposalSource,
+    FactResolutionState,
     FormSource,
     FormStatus,
     ModelDecisionProvenance,
@@ -113,6 +115,15 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                     status=field.status,
                     needed_for=field.needed_for,
                     confidence=field.confidence,
+                    resolution_state=(
+                        field.resolution_state.value if field.resolution_state is not None else None
+                    ),
+                    precision=field.precision,
+                    source_refs=(
+                        field.source_refs
+                        if field.resolution_state is FactResolutionState.CLARIFICATION_REQUIRED
+                        else []
+                    ),
                 )
                 for field_code, field in claim.form.items()
                 if field_code in _MODEL_CONTEXT_FIELD_CODES
@@ -129,6 +140,14 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
         professional_review_required=context.professional_review_required,
+        provenance_messages=[
+            ModelProvenanceMessage(
+                message_id=message.message_id,
+                content=str(message.content.get('text', '')),
+            )
+            for message in context.provenance_messages
+            if isinstance(message.content.get('text'), str)
+        ],
         branch=(
             ModelBranchContext(
                 field_registry_version=branch.field_registry_version,

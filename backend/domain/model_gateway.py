@@ -10,6 +10,7 @@ from backend.domain.models import (
     CustomerSupport,
     EvidenceState,
     EvidenceSummary,
+    FactPrecision,
     FieldSelectionState,
     FormSource,
     FormStatus,
@@ -136,6 +137,9 @@ class ModelFormFieldContext(ModelContract):
     status: FormStatus
     needed_for: NeededFor
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    resolution_state: str | None = None
+    precision: FactPrecision = FactPrecision.EXACT
+    source_refs: list[str] = Field(default_factory=list)
 
 
 class ModelClaimContext(ModelContract):
@@ -175,6 +179,7 @@ class ModelTurnContext(ModelContract):
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
+    provenance_messages: list['ModelProvenanceMessage'] = Field(default_factory=list)
     branch: ModelBranchContext | None = None
     knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
         'not_requested'
@@ -192,6 +197,11 @@ class ModelKnowledgeCitation(ModelContract):
     version: str
     checksum: str
     text: str
+
+
+class ModelProvenanceMessage(ModelContract):
+    message_id: str
+    content: str
 
 
 class ModelProposedFormChange(ModelContract):

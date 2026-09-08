@@ -15,6 +15,7 @@ from backend.domain.models import (
     AgentAction,
     AgentDecisionRecord,
     AgentProposalSource,
+    AssertionRelation,
     AuthorityOutcome,
     BranchEvaluationRecord,
     BranchEvaluationResult,
@@ -24,6 +25,7 @@ from backend.domain.models import (
     Coverage,
     CreateMessageRequest,
     CustomerNextStep,
+    DiscrepancyCandidate,
     EvidenceFileStatus,
     EvidenceRecord,
     EvidenceSource,
@@ -39,7 +41,9 @@ from backend.domain.models import (
     MessageVisibility,
     NeededFor,
     ProposedFormChange,
+    QuestionRecord,
     ResponsibleParty,
+    SessionRecord,
     StructuredFormField,
     SupportNeed,
     WorkflowState,
@@ -68,6 +72,10 @@ from backend.services.agent import (
 from backend.services.branching import (
     claimant_dynamic_form_projection,
     latest_applied_branch_evaluation,
+)
+from backend.services.fact_resolution import (
+    provenance_messages_for_fields,
+    resolve_form_change,
 )
 from backend.services.handoffs import (
     build_handoff,
@@ -391,6 +399,8 @@ def _build_form_changes(
         )
 
     for proposal in normalised_proposals:
+        if proposal.relation is AssertionRelation.IRRELEVANT:
+            continue
         if proposal.field_code not in REGISTERED_FIELD_CODES:
             raise ApiError(
                 status_code=500,
@@ -429,27 +439,97 @@ def _build_form_changes(
                     message='The Agent proposed a field outside the active form branches.',
                 )
         existing_field = existing_form.get(proposal.field_code)
-        if existing_field is not None and existing_field.status is FormStatus.CONFIRMED:
-            continue
-        form_changes[proposal.field_code] = StructuredFormField(
-            value=proposal.value,
-            source=proposal.source,
-            source_refs=[claimant_message.message_id],
-            status=(
-                proposal.status
-                if authority_outcome is AuthorityOutcome.AUTHORISED
-                and proposal.source is FormSource.CLAIMANT
-                else FormStatus.PROPOSED
-            ),
-            needed_for=proposal.needed_for,
-            confidence=proposal.confidence,
-            updated_at=timestamp,
+        accepted_status = (
+            proposal.status
+            if authority_outcome is AuthorityOutcome.AUTHORISED
+            and proposal.source is FormSource.CLAIMANT
+            else FormStatus.PROPOSED
+        )
+        form_changes[proposal.field_code] = resolve_form_change(
+            field_code=proposal.field_code,
+            existing=existing_field,
+            # A model relation is only a suggestion. Runtime derives the
+            # applied relation from persisted facts and claimant wording.
+            proposal=proposal.model_copy(update={'relation': None}),
+            source_ref=claimant_message.message_id,
+            message_text=str(claimant_message.content.get('text', '')) or None,
+            timestamp=timestamp,
+            accepted_status=accepted_status,
             updated_by=ActorReference(
                 actor_type=ActorType.AGENT,
                 actor_id=proposal_source.value,
             ),
         )
     return form_changes
+
+
+def _question_fields(proposal: AgentProposal, next_step: CustomerNextStep) -> list[str]:
+    values = [*next_step.required_items, *proposal.next_action_requirements]
+    fields = []
+    for value in values:
+        field_code = value.removeprefix('confirm:')
+        if field_code in REGISTERED_FIELD_CODES and field_code not in fields:
+            fields.append(field_code)
+    return fields
+
+
+def _apply_question_accounting(
+    session: SessionRecord,
+    proposal: AgentProposal,
+    next_step: CustomerNextStep,
+    response_text: str,
+    trigger_message_id: str,
+    timestamp: datetime,
+) -> tuple[SessionRecord, CustomerNextStep, str]:
+    asks_question = (
+        proposal.action
+        in {
+            AgentAction.ASK,
+            AgentAction.CLARIFY,
+            AgentAction.CONFIRM,
+        }
+        or next_step.status == 'clarification_needed'
+    )
+    if not asks_question:
+        return session, next_step, response_text
+    if session.question_turn_count >= session.question_budget:
+        paused_step = CustomerNextStep(
+            status='question_budget_reached',
+            summary='Your report is saved. Northwind may follow up on the remaining information.',
+            responsible_party=ResponsibleParty.CLAIMS_PROFESSIONAL,
+            required_items=list(next_step.required_items),
+        )
+        return (
+            session.model_copy(update={'post_session_follow_up_required': True}),
+            paused_step,
+            'I have saved what you shared. Northwind may follow up on the remaining information.',
+        )
+
+    fields = _question_fields(proposal, next_step)
+    previously_requested = {
+        field_code for item in session.question_history for field_code in item.field_codes
+    }
+    repeated = bool(fields) and all(field_code in previously_requested for field_code in fields)
+    record = QuestionRecord(
+        question_id=new_id('qst'),
+        trigger_message_id=trigger_message_id,
+        field_codes=fields,
+        purpose=proposal.action.value.lower(),
+        repeated=repeated,
+        asked_at=timestamp,
+    )
+    return (
+        session.model_copy(
+            update={
+                'question_turn_count': session.question_turn_count + 1,
+                'requested_fact_count': session.requested_fact_count + len(fields),
+                'repeated_question_count': session.repeated_question_count + int(repeated),
+                'question_history': [*session.question_history, record],
+            }
+        ),
+        next_step,
+        response_text,
+    )
 
 
 def _policy_search_tool(proposal: AgentProposal) -> dict[str, object] | None:
@@ -890,6 +970,14 @@ def submit_message(
                 runtime_policy.runtime_snapshot if runtime_policy is not None else None
             ),
             runtime_policy=runtime_policy,
+            provenance_messages=tuple(
+                provenance_messages_for_fields(
+                    repository,
+                    claim_id=claim_id,
+                    customer_id=principal.subject,
+                    fields=claim.form.values(),
+                )
+            ),
         )
     )
     if runtime_policy is not None:
@@ -918,6 +1006,44 @@ def submit_message(
         authority.outcome,
         proposal.proposal_source,
         branch_evaluation,
+    )
+    conflicting_fields = [
+        field_code
+        for field_code, field in form_changes.items()
+        if field.status is FormStatus.DISPUTED
+    ]
+    if conflicting_fields:
+        effective_customer_reason = 'A material incident detail needs clarification.'
+        effective_customer_response = (
+            'I have two different versions of an incident detail. Which version should '
+            'Northwind use?'
+        )
+        effective_next_step = CustomerNextStep(
+            status='clarification_needed',
+            summary='Clarify the conflicting incident detail.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            required_items=conflicting_fields,
+        )
+    discrepancy_candidates = [
+        DiscrepancyCandidate(
+            candidate_id=new_id('dsc'),
+            field_code=field_code,
+            source_refs=form_changes[field_code].source_refs,
+            created_at=timestamp,
+        )
+        for field_code in conflicting_fields
+        if len(form_changes[field_code].source_refs) >= 2
+    ]
+
+    session_after_questions, effective_next_step, effective_customer_response = (
+        _apply_question_accounting(
+            session,
+            proposal,
+            effective_next_step,
+            effective_customer_response,
+            claimant_message.message_id,
+            timestamp,
+        )
     )
     pending_evidence = _pending_evidence_for_proposal(
         claim_id,
@@ -1067,7 +1193,7 @@ def submit_message(
             }
         )
     resulting_revision = updated_claim.revision
-    updated_session = session.model_copy(
+    updated_session = session_after_questions.model_copy(
         update={
             'last_active_at': timestamp,
             'context_revision': resulting_revision,
@@ -1106,6 +1232,7 @@ def submit_message(
         form_changes=form_changes,
         resulting_revision=resulting_revision,
         created_at=timestamp,
+        discrepancy_candidates=discrepancy_candidates,
     )
     idempotency = IdempotencyRecord(
         actor_id=principal.subject,
