@@ -107,6 +107,36 @@ def _approve(client: TestClient, configuration_id: str, revision: int, key: str)
     assert response.json()['decision'] == 'approved'
 
 
+def _assert_rejected_update(
+    client: TestClient,
+    configuration_id: str,
+    response: Any,
+    expected_code: str,
+    original: dict[str, Any],
+) -> None:
+    assert response.json()['error']['code'] == expected_code
+    stored = client.get(
+        f'/internal/v1/admin/configurations/{configuration_id}', headers=_headers()
+    ).json()
+    assert stored['revision'] == original['revision']
+    assert stored['state'] == original['state']
+    assert stored['values'] == original['values']
+    assert stored['secret_references'] == original['secret_references']
+
+    audits = client.get(
+        f'/internal/v1/admin/configurations/{configuration_id}/audit', headers=_headers()
+    ).json()['items']
+    rejected = audits[-1]
+    assert rejected['action'] == 'update_draft'
+    assert rejected['outcome'] == 'rejected'
+    assert rejected['actor'] == 'adm_demo'
+    assert rejected['revision'] == original['revision']
+    assert rejected['previous_revision'] is None
+    assert rejected['reason'] == response.json()['error']['message']
+    assert rejected['changed_fields'] == []
+    assert rejected['created_at']
+
+
 def test_admin_configuration_lifecycle_and_audit() -> None:
     with _client() as client:
         created = client.post(
@@ -329,6 +359,149 @@ def test_admin_boundary_and_revision_errors() -> None:
         )
         assert stale.status_code == 409
         assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+
+
+def test_stale_draft_update_records_rejected_audit_without_mutating_state() -> None:
+    with _client() as client:
+        original = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('stale-audit-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Create a feature draft.',
+            },
+        ).json()
+
+        response = client.patch(
+            f'/internal/v1/admin/configurations/{original["configuration_id"]}',
+            headers=_post_headers('stale-audit-patch', 99),
+            json={'reason': 'Attempt a stale update.'},
+        )
+
+        assert response.status_code == 409
+        _assert_rejected_update(
+            client,
+            original['configuration_id'],
+            response,
+            'REVISION_CONFLICT',
+            original,
+        )
+
+
+def test_non_draft_update_records_rejected_audit_without_mutating_state() -> None:
+    with _client() as client:
+        draft = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers('published-audit-create'),
+            json={
+                'domain': 'feature',
+                'values': _feature_values(True),
+                'reason': 'Create a feature draft.',
+            },
+        ).json()
+        published = client.post(
+            f'/internal/v1/admin/configurations/{draft["configuration_id"]}/validate',
+            headers=_post_headers('published-audit-validate', 1),
+            json={
+                'scenario_results': [
+                    {
+                        'scenario_id': 'feature-publication',
+                        'outcome': 'passed',
+                        'evidence': 'The feature configuration is valid.',
+                    }
+                ]
+            },
+        ).json()
+
+        response = client.patch(
+            f'/internal/v1/admin/configurations/{published["configuration_id"]}',
+            headers=_post_headers('published-audit-patch', published['revision']),
+            json={'reason': 'Attempt to change a published configuration.'},
+        )
+
+        assert response.status_code == 400
+        _assert_rejected_update(
+            client,
+            published['configuration_id'],
+            response,
+            'INVALID_CONFIGURATION_TRANSITION',
+            published,
+        )
+
+
+@pytest.mark.parametrize(
+    ('patch_body', 'expected_code'),
+    [
+        (
+            {
+                'values': {
+                    'data_runtime_profile': 'fixture',
+                    'object_storage_adapter': 'fixture',
+                    'api_key': 'must-not-be-stored',
+                },
+                'reason': 'Reject a plaintext secret.',
+            },
+            'SECRET_VALUE_FORBIDDEN',
+        ),
+        (
+            {
+                'secret_references': {'provider': 'unprotected-value'},
+                'reason': 'Reject an invalid secret reference.',
+            },
+            'SECRET_REFERENCE_INVALID',
+        ),
+        (
+            {
+                'values': {
+                    'data_runtime_profile': 'local_mvp',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Reject an incompatible provider bundle.',
+            },
+            'PROVIDER_CONFIGURATION_INVALID',
+        ),
+    ],
+    ids=['plaintext-secret', 'invalid-secret-reference', 'invalid-domain-configuration'],
+)
+def test_invalid_draft_updates_record_rejected_audit_without_mutating_state(
+    patch_body: dict[str, object], expected_code: str
+) -> None:
+    with _client() as client:
+        original = client.post(
+            '/internal/v1/admin/configurations',
+            headers=_post_headers(f'{expected_code}-create'),
+            json={
+                'domain': 'data_profile',
+                'values': {
+                    'data_runtime_profile': 'fixture',
+                    'object_storage_adapter': 'fixture',
+                },
+                'reason': 'Create a valid data profile.',
+            },
+        ).json()
+
+        response = client.patch(
+            f'/internal/v1/admin/configurations/{original["configuration_id"]}',
+            headers=_post_headers(f'{expected_code}-patch', original['revision']),
+            json=patch_body,
+        )
+
+        assert response.status_code == 422
+        _assert_rejected_update(
+            client,
+            original['configuration_id'],
+            response,
+            expected_code,
+            original,
+        )
+        assert (
+            'must-not-be-stored'
+            not in client.get(
+                f'/internal/v1/admin/configurations/{original["configuration_id"]}/audit',
+                headers=_headers(),
+            ).text
+        )
 
 
 def test_draft_update_records_version_actor_time_and_changed_fields() -> None:
