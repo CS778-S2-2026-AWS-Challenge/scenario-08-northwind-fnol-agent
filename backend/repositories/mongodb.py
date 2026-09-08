@@ -19,11 +19,14 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
+    ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    ExternalTaskResult,
     assert_disclosure_within_consent,
     assert_request_matches_task,
+    assert_result_advance_is_permitted,
 )
 from backend.domain.models import (
     ActorType,
@@ -1458,6 +1461,95 @@ class MongoDBRepository:
             ):
                 raise IdempotencyConflict(link.evidence_id) from error
 
+    def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
+        """Ingest one returned result, or advance its verification, after validating it.
+
+        Args:
+            result: Returned-result state to ingest or advance to a checked verification.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, the result-bearing task, or a named evidence link is
+                unavailable.
+            IdempotencyConflict: The write changes an ingestion fact, contradicts a
+                recorded verification, or adds a second result to one task.
+        """
+        if not self._claim_owned(result.claim_id, customer_id):
+            raise KeyError(result.claim_id)
+        task = self._get(
+            'external_task',
+            result.task_id,
+            ExternalTaskRecord,
+            customer_id=customer_id,
+        )
+        if task is None or task.claim_id != result.claim_id:
+            raise KeyError(result.task_id)
+        # Only a request that reached the provider can have produced an answer. An
+        # acknowledgement of routing is not an answer, so an unsubmitted task carries no
+        # result at all.
+        if task.delivery is not ExternalTaskDelivery.SUBMITTED:
+            raise KeyError(result.task_id)
+        for evidence_id in result.evidence_ids:
+            link = self._get(
+                'external_task_evidence_link',
+                f'{result.claim_id}:{evidence_id}',
+                ExternalTaskEvidenceLink,
+                customer_id=customer_id,
+            )
+            if link is None or link.task_id != result.task_id:
+                raise KeyError(evidence_id)
+            if self.get_evidence(result.claim_id, evidence_id, customer_id) is None:
+                raise KeyError(evidence_id)
+
+        held = next(
+            iter(
+                self._list(
+                    'external_task_result',
+                    ExternalTaskResult,
+                    {'claim_id': result.claim_id, 'task_id': result.task_id},
+                    'received_at',
+                )
+            ),
+            None,
+        )
+        if held is not None:
+            try:
+                assert_result_advance_is_permitted(held, result)
+            except ValueError as conflict:
+                raise IdempotencyConflict(result.result_id) from conflict
+            if held == result:
+                return
+
+        record_id = self._record_id('external_task_result', result.result_id)
+        document = {
+            **result.model_dump(mode='json'),
+            '_id': record_id,
+            'record_type': 'external_task_result',
+            'customer_id': customer_id,
+            'claim_id': result.claim_id,
+        }
+        if held is None:
+            try:
+                self._collection.insert_one(document)
+                return
+            except DuplicateKeyError as error:
+                raise IdempotencyConflict(result.result_id) from error
+        replaced = self._collection.replace_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_result',
+                'customer_id': customer_id,
+                'claim_id': result.claim_id,
+                'verification': held.verification.value,
+            },
+            document,
+        )
+        if replaced.matched_count == 0:
+            raise IdempotencyConflict(result.result_id)
+
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records for an already-authorised internal claim read.
 
@@ -1475,6 +1567,25 @@ class MongoDBRepository:
             ExternalTaskRecord,
             {'claim_id': claim_id},
             'created_at',
+        )
+
+    def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
+        """List returned results for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose external task results are requested.
+
+        Returns:
+            Result records, oldest ingestion first.
+
+        Raises:
+            RuntimeError: MongoDB cannot complete the read.
+        """
+        return self._list(
+            'external_task_result',
+            ExternalTaskResult,
+            {'claim_id': claim_id},
+            'received_at',
         )
 
     def list_external_task_evidence_links_internal(

@@ -5,11 +5,14 @@ from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
 from backend.domain.external_services import (
+    ExternalTaskDelivery,
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    ExternalTaskResult,
     assert_disclosure_within_consent,
     assert_request_matches_task,
+    assert_result_advance_is_permitted,
 )
 from backend.domain.models import (
     ActorType,
@@ -59,6 +62,7 @@ class FixtureRepository(PersistenceRepository):
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
+        self._external_task_results: dict[str, ExternalTaskResult] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
         self._staff_actions: dict[str, StaffActionRecord] = {}
@@ -1255,6 +1259,53 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(link.evidence_id)
         self._external_task_evidence_links[key] = deepcopy(link)
 
+    def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
+        """Ingest one returned result, or advance its verification, after validating it.
+
+        Args:
+            result: Returned-result state to ingest or advance to a checked verification.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, the result-bearing task, or a named evidence link is
+                unavailable.
+            IdempotencyConflict: The write changes an ingestion fact, contradicts a
+                recorded verification, or adds a second result to one task.
+        """
+        if self.get_claim(result.claim_id, customer_id) is None:
+            raise KeyError(result.claim_id)
+        task = self._external_tasks.get(result.task_id)
+        if task is None or task.claim_id != result.claim_id:
+            raise KeyError(result.task_id)
+        # Only a request that reached the provider can have produced an answer. An
+        # acknowledgement of routing is not an answer, so an unsubmitted task carries no
+        # result at all.
+        if task.delivery is not ExternalTaskDelivery.SUBMITTED:
+            raise KeyError(result.task_id)
+        for evidence_id in result.evidence_ids:
+            link = self._external_task_evidence_links.get((result.claim_id, evidence_id))
+            if link is None or link.task_id != result.task_id:
+                raise KeyError(evidence_id)
+            if self.get_evidence(result.claim_id, evidence_id, customer_id) is None:
+                raise KeyError(evidence_id)
+        held = next(
+            (
+                stored
+                for stored in self._external_task_results.values()
+                if stored.task_id == result.task_id
+            ),
+            None,
+        )
+        if held is not None:
+            try:
+                assert_result_advance_is_permitted(held, result)
+            except ValueError as conflict:
+                raise IdempotencyConflict(result.result_id) from conflict
+        self._external_task_results[result.result_id] = deepcopy(result)
+
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records for an already-authorised internal claim read.
 
@@ -1271,6 +1322,26 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
         ]
         return sorted(tasks, key=lambda task: (task.created_at, task.task_id))
+
+    def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
+        """List returned results for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose external task results are requested.
+
+        Returns:
+            Deep-copied result records, oldest ingestion first.
+
+        Raises:
+            RuntimeError: The in-memory fixture cannot complete the read.
+        """
+        results = [
+            deepcopy(result)
+            for result in self._external_task_results.values()
+            if result.claim_id == claim_id
+        ]
+        results.sort(key=lambda item: (item.received_at, item.result_id))
+        return results
 
     def list_external_task_evidence_links_internal(
         self,

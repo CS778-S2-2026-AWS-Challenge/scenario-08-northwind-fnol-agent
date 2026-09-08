@@ -7,6 +7,7 @@ from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    ExternalTaskResult,
 )
 from backend.domain.models import (
     AgentDecisionRecord,
@@ -506,6 +507,41 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """
         raise NotImplementedError
 
+    def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
+        """Record what a third party returned for one task, or check an existing record.
+
+        A task carries at most one canonical result. Everything that describes what
+        arrived is fixed at ingestion: the result identity, its task and claim
+        association, its source, its summary, its evidence identifiers, and the time it
+        was received. `received_at` is an ingestion fact and never an advancing update
+        stamp, so a later write cannot move it.
+
+        The single permitted change is the one transition from `UNVERIFIED` to a checked
+        verification state, which the verification operation makes. Writing the identical
+        record again succeeds and changes nothing; writing a different one fails closed
+        rather than overwriting what is stored.
+
+        A result may only be recorded against a task whose request actually reached the
+        provider, which `ExternalTaskDelivery.SUBMITTED` is the record of. Nothing reached
+        a provider otherwise, so no provider answer can exist to record, and a routing or
+        request acknowledgement is not an answer.
+
+        Args:
+            result: Returned-result state to ingest or advance to a checked verification.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim is unavailable, the named task is not on that claim or
+                never reached the provider, or a named evidence record does not exist or
+                is not linked to that same task.
+            IdempotencyConflict: The write changes an ingestion fact, contradicts a
+                verification already recorded, or adds a second result to a task.
+        """
+        raise NotImplementedError
+
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records after an internal caller authorises the claim read.
 
@@ -514,6 +550,20 @@ class PersistenceRepository(ClaimRepository, Protocol):
 
         Returns:
             Task records in stable creation order.
+
+        Raises:
+            RuntimeError: A configured persistence provider cannot complete the read.
+        """
+        raise NotImplementedError
+
+    def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
+        """List returned results for an authorised internal projection.
+
+        Args:
+            claim_id: Working Claim whose external task results are requested.
+
+        Returns:
+            Result records in a stable order, oldest ingestion first.
 
         Raises:
             RuntimeError: A configured persistence provider cannot complete the read.
