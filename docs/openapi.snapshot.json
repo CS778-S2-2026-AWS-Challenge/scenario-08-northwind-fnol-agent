@@ -2832,14 +2832,20 @@
               "$ref": "#/components/schemas/EvidenceFactProposal"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Facts",
             "type": "array"
+          },
+          "outcome": {
+            "default": "ready",
+            "enum": [
+              "ready",
+              "failed",
+              "retry"
+            ],
+            "title": "Outcome",
+            "type": "string"
           }
         },
-        "required": [
-          "facts"
-        ],
         "title": "CompleteEvidenceProcessingRequest",
         "type": "object"
       },
@@ -5403,6 +5409,17 @@
         ],
         "title": "ExternalTaskRequest",
         "type": "object"
+      },
+      "ExternalTaskResultVerification": {
+        "description": "How far a provider result has been checked against the claim.\n\nThere is deliberately no value meaning \"this is now a confirmed claim fact\".\nA provider answer is evidence about the claim, never the claim's own record\nof what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts\nproposed until the claim's own confirmation path accepts them. Promotion to a\nconfirmed fact is a claim-level decision made elsewhere, so this enum cannot\nexpress it and no caller can shortcut to it.",
+        "enum": [
+          "unverified",
+          "consistent",
+          "inconsistent",
+          "review_required"
+        ],
+        "title": "ExternalTaskResultVerification",
+        "type": "string"
       },
       "FactAssertion": {
         "additionalProperties": false,
@@ -11070,6 +11087,17 @@
           "pending_owner": {
             "$ref": "#/components/schemas/WorkbenchResponsibility"
           },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
           "request_type": {
             "title": "Request Type",
             "type": "string"
@@ -11084,6 +11112,76 @@
               }
             ],
             "title": "Result"
+          },
+          "result_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchExternalResultEvidence"
+            },
+            "title": "Result Evidence",
+            "type": "array"
+          },
+          "result_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Result Evidence Ids",
+            "type": "array"
+          },
+          "result_received_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Received At"
+          },
+          "result_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetrievalSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_verification_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskResultVerification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_verified_against_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Verified Against Revision"
+          },
+          "result_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Verified At"
           },
           "service": {
             "title": "Service",
@@ -11147,6 +11245,28 @@
           "lifecycle"
         ],
         "title": "WorkbenchExternalRequest",
+        "type": "object"
+      },
+      "WorkbenchExternalResultEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "file_status": {
+            "$ref": "#/components/schemas/EvidenceFileStatus"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "status",
+          "file_status"
+        ],
+        "title": "WorkbenchExternalResultEvidence",
         "type": "object"
       },
       "WorkbenchFieldItem": {

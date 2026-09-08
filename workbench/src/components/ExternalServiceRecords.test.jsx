@@ -14,7 +14,7 @@ const request = {
     delivery: 'submitted',
     delivery_evidence: 'provider-receipt-1',
     failure_code: 'timeout',
-    provider_reference: null,
+    provider_reference: 'provider-acknowledgement-1',
     created_at: '2026-09-03T01:00:00Z',
     updated_at: '2026-09-03T01:10:00Z',
   },
@@ -43,7 +43,15 @@ const request = {
     pending_owner: 'claims_professional',
     status_label: 'Outcome not confirmed',
     status_detail: 'Submission may have occurred; the result remains unknown.',
+    provider_reference: 'provider-acknowledgement-1',
     result: null,
+    result_source: null,
+    result_verification_state: null,
+    result_received_at: null,
+    result_verified_at: null,
+    result_verified_against_revision: null,
+    result_evidence_ids: [],
+    result_evidence: [],
     limitation: 'Synthetic fixture record; no production provider completion is verified.',
     next_action: 'Reconcile by operation or provider reference before any retry.',
     needs_attention: true,
@@ -83,6 +91,78 @@ describe('ExternalServiceRecords', () => {
     expect(screen.getByText(/Completion not confirmed/)).toBeInTheDocument()
     expect(screen.getByText(/Synthetic fixture record; no production provider completion is verified/)).toBeInTheDocument()
     expect(screen.queryByText(/complete$/i)).not.toBeInTheDocument()
+  })
+
+  it('shows an accepted provider acknowledgement separately from an absent result', async () => {
+    const user = userEvent.setup()
+    render(<ExternalServiceRecords records={[{
+      ...request,
+      task: { ...request.task, status: 'accepted', failure_code: null },
+      lifecycle: { ...request.lifecycle, status_label: 'Completion not confirmed', verification_state: 'pending_verification', pending_owner: 'external_party', needs_attention: false },
+    }]} />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    expect(screen.getByText('provider-acknowledgement-1')).toBeVisible()
+    expect(screen.getByText('No verified result recorded')).toBeVisible()
+    expect(screen.getByText('No result to verify')).toBeVisible()
+  })
+
+  it('shows an unverified returned result with provenance and evidence status', async () => {
+    const user = userEvent.setup()
+    render(<ExternalServiceRecords records={[{
+      ...request,
+      task: { ...request.task, status: 'accepted', failure_code: null },
+      lifecycle: {
+        ...request.lifecycle,
+        status_label: 'Result awaiting verification',
+        status_detail: 'A provider result is recorded but has not been checked against the Claim.',
+        verification_state: 'unverified',
+        pending_owner: 'claims_professional',
+        result: 'The assessor returned a repairability report.',
+        result_source: { system: 'controlled_assessment_fixture', reference: 'report/assessment-002', retrieved_at: '2026-09-03T01:11:00Z' },
+        result_verification_state: 'unverified',
+        result_received_at: '2026-09-03T01:11:00Z',
+        result_evidence_ids: ['evd_1'],
+        result_evidence: [{ evidence_id: 'evd_1', status: 'received', file_status: 'ready' }],
+        next_action: 'Verify the returned result against its evidence and the current Claim.',
+      },
+    }]} />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    expect(screen.getByText('The assessor returned a repairability report.')).toBeVisible()
+    expect(screen.getByText('Controlled Assessment Fixture · report/assessment-002')).toBeVisible()
+    expect(screen.getAllByText('Unverified')).toHaveLength(2)
+    expect(screen.getByText('evd_1 — Received / Ready')).toBeVisible()
+    expect(screen.getByText('Not verified')).toBeVisible()
+  })
+
+  it.each([
+    ['review_required', 'Result requires review', 'Review Required'],
+    ['inconsistent', 'Result conflicts with Claim', 'Inconsistent'],
+  ])('shows a %s result as pending professional work', async (verification, label, verificationLabel) => {
+    const user = userEvent.setup()
+    render(<ExternalServiceRecords records={[{
+      ...request,
+      task: { ...request.task, status: 'accepted', failure_code: null },
+      lifecycle: {
+        ...request.lifecycle,
+        status_label: label,
+        verification_state: verification,
+        result: 'The assessor returned a checked report.',
+        result_source: { system: 'controlled_assessment_fixture', reference: 'report/checked', retrieved_at: '2026-09-03T01:11:00Z' },
+        result_verification_state: verification,
+        result_received_at: '2026-09-03T01:11:00Z',
+        result_verified_at: '2026-09-03T01:12:00Z',
+        result_verified_against_revision: 4,
+        next_action: 'Review the returned result before continuing.',
+        needs_attention: true,
+      },
+    }]} />)
+
+    await user.click(screen.getByText('Vehicle Damage Assessor'))
+    expect(screen.getAllByText(verificationLabel)).toHaveLength(2)
+    expect(screen.getByText('4')).toBeVisible()
+    expect(screen.getByText('The assessor returned a checked report.')).toBeVisible()
   })
 
   it.each([

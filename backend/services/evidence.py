@@ -5,7 +5,7 @@ from backend.adapters.evidence_storage import (
     EvidenceUploadTooLarge,
     UnsupportedEvidenceMediaType,
 )
-from backend.core.auth import Principal
+from backend.core.auth import Principal, require_durable_claimant
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.branch_registry import validate_registered_field_value
 from backend.domain.evidence import evidence_state_for, evidence_summary_for
@@ -223,6 +223,7 @@ def register_evidence(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> EvidenceMutationResponse:
+    require_durable_claimant(principal)
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence'
@@ -308,6 +309,7 @@ def request_upload(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> EvidenceUploadResponse:
+    require_durable_claimant(principal)
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence/uploads'
@@ -466,6 +468,7 @@ def complete_upload(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> EvidenceCompleteResponse:
+    require_durable_claimant(principal)
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete'
@@ -623,6 +626,57 @@ def complete_evidence_processing(
     evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
     if evidence is None:
         raise _evidence_not_found()
+    if payload.outcome == 'retry':
+        if evidence.file_status is not EvidenceFileStatus.FAILED:
+            raise ApiError(
+                status_code=409,
+                code='INVALID_STATE_TRANSITION',
+                message='Only failed evidence can be retried.',
+            )
+        timestamp = now_utc()
+        retried = evidence.model_copy(
+            update={
+                'file_status': EvidenceFileStatus.PROCESSING,
+                'context_summary': 'Northwind is processing the retried evidence upload.',
+                'provenance': _with_transition(
+                    {**evidence.provenance, 'processing_state': 'queued'},
+                    _transition_entry(
+                        field_code=None,
+                        from_state=EvidenceFileStatus.FAILED.value,
+                        to_state=EvidenceFileStatus.PROCESSING.value,
+                        source=evidence.source.value,
+                        at=timestamp.isoformat(),
+                        actor_type=ActorType.SYSTEM.value,
+                        actor_id='mock_evidence_processor',
+                    ),
+                ),
+                'updated_at': timestamp,
+            }
+        )
+        updated_claim = _updated_claim(claim, _records_with(repository, claim, retried))
+        response = EvidenceProcessingResponse(
+            evidence_id=evidence_id,
+            revision=updated_claim.revision,
+            file_status=retried.file_status,
+            proposed_fields={},
+        )
+        _persist(
+            repository,
+            updated_claim,
+            expected_revision,
+            retried,
+            IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route=route,
+                key=key,
+                request_fingerprint=fingerprint,
+                claim_id=claim_id,
+                session_id=claim.active_session_id or '',
+                response_payload=response.model_dump(mode='json'),
+            ),
+        )
+        return response
+
     if evidence.file_status is not EvidenceFileStatus.PROCESSING:
         raise ApiError(
             status_code=409,
@@ -635,6 +689,51 @@ def complete_evidence_processing(
             code='INVALID_STATE_TRANSITION',
             message='The evidence media type is unavailable.',
         )
+
+    if payload.outcome == 'failed':
+        timestamp = now_utc()
+        failed = evidence.model_copy(
+            update={
+                'file_status': EvidenceFileStatus.FAILED,
+                'context_summary': 'Northwind could not process this evidence upload.',
+                'provenance': _with_transition(
+                    {**evidence.provenance, 'processing_state': 'failed'},
+                    _transition_entry(
+                        field_code=None,
+                        from_state=EvidenceFileStatus.PROCESSING.value,
+                        to_state=EvidenceFileStatus.FAILED.value,
+                        source=evidence.source.value,
+                        at=timestamp.isoformat(),
+                        actor_type=ActorType.SYSTEM.value,
+                        actor_id='mock_evidence_processor',
+                    ),
+                ),
+                'updated_at': timestamp,
+            }
+        )
+        updated_claim = _updated_claim(claim, _records_with(repository, claim, failed))
+        response = EvidenceProcessingResponse(
+            evidence_id=evidence_id,
+            revision=updated_claim.revision,
+            file_status=failed.file_status,
+            proposed_fields={},
+        )
+        _persist(
+            repository,
+            updated_claim,
+            expected_revision,
+            failed,
+            IdempotencyRecord(
+                actor_id=claim.customer_id,
+                route=route,
+                key=key,
+                request_fingerprint=fingerprint,
+                claim_id=claim_id,
+                session_id=claim.active_session_id or '',
+                response_payload=response.model_dump(mode='json'),
+            ),
+        )
+        return response
 
     field_codes = [fact.field_code for fact in payload.facts]
     invalid_codes = [code for code in field_codes if code not in REGISTERED_FIELD_CODES]
@@ -781,6 +880,7 @@ def decide_evidence_facts(
     idempotency_key: str | None,
     if_match: str | None,
 ) -> EvidenceFactDecisionResponse:
+    require_durable_claimant(principal)
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/fact-decisions'

@@ -8,9 +8,12 @@ from backend.core.auth import Principal
 from backend.core.errors import ApiError
 from backend.domain.external_services import (
     ExternalTaskDelivery,
+    ExternalTaskEvidenceLink,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
+    ExternalTaskResult,
+    ExternalTaskResultVerification,
 )
 from backend.domain.models import (
     ActorReference,
@@ -24,6 +27,8 @@ from backend.domain.models import (
     ContentsOwnership,
     CustomerNextStep,
     EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
     EvidenceStatus,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
@@ -36,6 +41,7 @@ from backend.domain.models import (
     StructuredFormField,
     WorkflowState,
 )
+from backend.domain.retrieval import RetrievalSource
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_access import (
     ClaimStaffAccess,
@@ -485,13 +491,21 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
 
 
 @pytest.mark.parametrize(
-    ('status', 'delivery', 'failure_code', 'expected_verification', 'attention'),
+    (
+        'status',
+        'delivery',
+        'failure_code',
+        'expected_verification',
+        'attention',
+        'with_historical_result',
+    ),
     [
         (
             ExternalTaskOperationStatus.PREPARED,
             ExternalTaskDelivery.NOT_SUBMITTED,
             None,
             'not_started',
+            False,
             False,
         ),
         (
@@ -500,12 +514,14 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
             None,
             'pending_verification',
             False,
+            False,
         ),
         (
             ExternalTaskOperationStatus.RETRYABLE_FAILURE,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskFailureCode.UNAVAILABLE,
             'failed_unverified',
+            True,
             True,
         ),
         (
@@ -514,12 +530,14 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
             ExternalTaskFailureCode.TIMEOUT,
             'reconciliation_required',
             True,
+            False,
         ),
         (
             ExternalTaskOperationStatus.TERMINAL_FAILURE,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskFailureCode.MALFORMED,
             'review_required',
+            True,
             True,
         ),
     ],
@@ -530,6 +548,7 @@ def test_external_lifecycle_projection_covers_each_delivery_outcome(
     failure_code: ExternalTaskFailureCode | None,
     expected_verification: str,
     attention: bool,
+    with_historical_result: bool,
 ) -> None:
     timestamp = now_utc()
     task = ExternalTaskRecord(
@@ -548,13 +567,295 @@ def test_external_lifecycle_projection_covers_each_delivery_outcome(
         updated_at=timestamp,
     )
 
-    projection = _external_lifecycle(task, None)
+    result = (
+        ExternalTaskResult(
+            result_id=f'res-historical-{status.value}',
+            task_id=task.task_id,
+            claim_id=task.claim_id,
+            source=RetrievalSource(
+                system='historical_import',
+                reference=f'result/{status.value}',
+                retrieved_at=timestamp,
+            ),
+            summary='A historical result was imported for the failed task.',
+            verification=ExternalTaskResultVerification.CONSISTENT,
+            verified_at=timestamp,
+            verified_against_revision=1,
+            received_at=timestamp,
+        )
+        if with_historical_result
+        else None
+    )
+
+    projection = _external_lifecycle(task, None, result)
 
     assert projection.verification_state == expected_verification
     assert projection.needs_attention is attention
     assert projection.authority_state == 'not_recorded'
     assert projection.consent_state == 'not_recorded'
     assert projection.limitation
+    if result is not None:
+        assert projection.status_label == 'Failed'
+        assert projection.result == result.summary
+        assert projection.result_verification_state is ExternalTaskResultVerification.CONSISTENT
+
+
+def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='accepted-without-result'
+    )
+    recorded_at = now_utc()
+    repository.save_external_task(
+        ExternalTaskRecord(
+            task_id='tsk_accepted_without_result',
+            claim_id=claim_id,
+            service_identity='damage_assessment',
+            requested_action='request_assessment',
+            integration_source=IntegrationSource.FIXTURE,
+            status=ExternalTaskOperationStatus.ACCEPTED,
+            delivery=ExternalTaskDelivery.SUBMITTED,
+            delivery_evidence='fixture acknowledgement',
+            provider_reference='provider_ack_001',
+            created_at=recorded_at,
+            updated_at=recorded_at,
+        ),
+        'cus_demo',
+    )
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    lifecycle = response.json()['items'][0]['lifecycle']
+    assert lifecycle['provider_reference'] == 'provider_ack_001'
+    assert lifecycle['result'] is None
+    assert lifecycle['result_verification_state'] is None
+    assert lifecycle['status_label'] == 'Completion not confirmed'
+
+
+@pytest.mark.parametrize(
+    ('task_status', 'verification', 'expected_lifecycle_verification', 'expected_label'),
+    [
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskResultVerification.UNVERIFIED,
+            'unverified',
+            'Result awaiting verification',
+        ),
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskResultVerification.REVIEW_REQUIRED,
+            'review_required',
+            'Result requires review',
+        ),
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskResultVerification.INCONSISTENT,
+            'inconsistent',
+            'Result conflicts with Claim',
+        ),
+        (
+            ExternalTaskOperationStatus.ACCEPTED,
+            ExternalTaskResultVerification.CONSISTENT,
+            'consistent',
+            'Result checked',
+        ),
+        (
+            ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+            ExternalTaskResultVerification.UNVERIFIED,
+            'reconciliation_required',
+            'Outcome not confirmed',
+        ),
+    ],
+)
+def test_workbench_projects_formal_external_results_without_settling_claim_state(
+    task_status: ExternalTaskOperationStatus,
+    verification: ExternalTaskResultVerification,
+    expected_lifecycle_verification: str,
+    expected_label: str,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    suffix = f'{task_status.value}-{verification.value}'
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix=f'external-result-{suffix}'
+    )
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    received_at = now_utc()
+    checked = verification is not ExternalTaskResultVerification.UNVERIFIED
+    task_id = f'tsk_{suffix}'
+    repository.save_external_task(
+        ExternalTaskRecord(
+            task_id=task_id,
+            claim_id=claim_id,
+            service_identity='damage_assessment',
+            requested_action='request_assessment',
+            integration_source=IntegrationSource.FIXTURE,
+            status=task_status,
+            delivery=ExternalTaskDelivery.SUBMITTED,
+            delivery_evidence='fixture acknowledgement',
+            failure_code=(
+                ExternalTaskFailureCode.TIMEOUT
+                if task_status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+                else None
+            ),
+            provider_reference='provider_ack_002',
+            created_at=received_at,
+            updated_at=received_at,
+        ),
+        claim.customer_id,
+    )
+    evidence_id = f'evd_{suffix}'
+    repository.save_evidence(
+        EvidenceRecord(
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            kind='assessment_report',
+            status=EvidenceStatus.RECEIVED,
+            file_status=EvidenceFileStatus.READY,
+            source=EvidenceSource.EXTERNAL_SYSTEM,
+            created_at=received_at,
+            updated_at=received_at,
+        ),
+        claim.customer_id,
+    )
+    repository.save_external_task_evidence_link(
+        ExternalTaskEvidenceLink(
+            task_id=task_id,
+            evidence_id=evidence_id,
+            claim_id=claim_id,
+            linked_at=received_at,
+        ),
+        claim.customer_id,
+    )
+    result = ExternalTaskResult(
+        result_id=f'res_{suffix}',
+        task_id=task_id,
+        claim_id=claim_id,
+        source=RetrievalSource(
+            system='controlled_assessment_fixture',
+            reference='report/assessment-002',
+            retrieved_at=received_at,
+        ),
+        summary='The assessor returned a repairability report.',
+        evidence_ids=[evidence_id],
+        received_at=received_at,
+    )
+    repository.save_external_task_result(result, claim.customer_id)
+    if checked:
+        repository.save_external_task_result(
+            result.model_copy(
+                update={
+                    'verification': verification,
+                    'verified_at': received_at + timedelta(minutes=1),
+                    'verified_against_revision': claim.revision,
+                }
+            ),
+            claim.customer_id,
+        )
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}/external-requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    lifecycle = response.json()['items'][0]['lifecycle']
+    assert lifecycle['provider_reference'] == 'provider_ack_002'
+    assert lifecycle['result'] == 'The assessor returned a repairability report.'
+    assert lifecycle['result_source']['reference'] == 'report/assessment-002'
+    assert lifecycle['result_verification_state'] == verification.value
+    assert lifecycle['result_received_at'] is not None
+    if checked:
+        assert lifecycle['result_verified_at'] is not None
+    else:
+        assert lifecycle['result_verified_at'] is None
+    assert lifecycle['result_verified_against_revision'] == (claim.revision if checked else None)
+    assert lifecycle['result_evidence_ids'] == [evidence_id]
+    assert lifecycle['result_evidence'] == [
+        {'evidence_id': evidence_id, 'status': 'received', 'file_status': 'ready'}
+    ]
+    assert lifecycle['verification_state'] == expected_lifecycle_verification
+    assert lifecycle['status_label'] == expected_label
+
+
+def test_external_wait_count_matches_the_named_pending_task_projection(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _ = _create_claim_with_context(
+        client, auth_headers, repository, key_suffix='external-wait-count'
+    )
+    recorded_at = now_utc()
+    cases = [
+        (
+            'prepared',
+            ExternalTaskOperationStatus.PREPARED,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            None,
+        ),
+        ('accepted', ExternalTaskOperationStatus.ACCEPTED, ExternalTaskDelivery.SUBMITTED, None),
+        (
+            'retryable',
+            ExternalTaskOperationStatus.RETRYABLE_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.UNAVAILABLE,
+        ),
+        (
+            'unknown',
+            ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
+            ExternalTaskDelivery.SUBMITTED,
+            ExternalTaskFailureCode.TIMEOUT,
+        ),
+        (
+            'terminal',
+            ExternalTaskOperationStatus.TERMINAL_FAILURE,
+            ExternalTaskDelivery.NOT_SUBMITTED,
+            ExternalTaskFailureCode.MALFORMED,
+        ),
+    ]
+    for suffix, status, delivery, failure_code in cases:
+        submitted = delivery is ExternalTaskDelivery.SUBMITTED
+        repository.save_external_task(
+            ExternalTaskRecord(
+                task_id=f'tsk_wait_{suffix}',
+                claim_id=claim_id,
+                service_identity='damage_assessment',
+                requested_action='request_assessment',
+                integration_source=IntegrationSource.FIXTURE,
+                status=status,
+                delivery=delivery,
+                delivery_evidence='fixture acknowledgement' if submitted else None,
+                failure_code=failure_code,
+                provider_reference=f'provider_{suffix}' if submitted else None,
+                created_at=recorded_at,
+                updated_at=recorded_at,
+            ),
+            'cus_demo',
+        )
+
+    detail = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers).json()
+
+    waiting = detail['integration_summary']['waiting_external_services']
+    assert detail['work_summary']['external_wait_count'] == len(waiting) == 4
+    assert {item['status'] for item in waiting} == {
+        'prepared',
+        'accepted',
+        'retryable_failure',
+        'unknown_outcome',
+    }
 
 
 def test_staff_primary_action_pair_resolves_to_the_exact_non_blocked_action(
