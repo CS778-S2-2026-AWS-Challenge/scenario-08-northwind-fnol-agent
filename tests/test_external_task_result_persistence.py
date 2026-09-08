@@ -364,3 +364,36 @@ def test_results_read_back_in_a_stable_order(
 
     stored = repository.list_external_task_results_internal(CLAIM)
     assert [item.result_id for item in stored] == ['res_result_001', 'res_late']
+
+
+def test_the_same_verification_cannot_be_restated_with_a_different_check(
+    repository: PersistenceRepository,
+) -> None:
+    _seed(repository)
+    repository.save_external_task_result(_result(), CUSTOMER)
+    checked = _result(
+        verification=ExternalTaskResultVerification.CONSISTENT,
+        verified_at=BASE + timedelta(minutes=5),
+        verified_against_revision=1,
+    )
+    repository.save_external_task_result(checked, CUSTOMER)
+
+    with pytest.raises(IdempotencyConflict):
+        repository.save_external_task_result(
+            checked.model_copy(update={'verified_at': BASE + timedelta(minutes=30)}),
+            CUSTOMER,
+        )
+
+    stored = repository.list_external_task_results_internal(CLAIM)
+    assert stored[0].verified_at == BASE + timedelta(minutes=5)
+
+
+def test_a_result_cannot_name_a_task_that_is_not_on_this_claim(
+    repository: PersistenceRepository,
+) -> None:
+    _seed(repository)
+
+    with pytest.raises(KeyError):
+        repository.save_external_task_result(_result(task_id='tsk_absent'), CUSTOMER)
+
+    assert repository.list_external_task_results_internal(CLAIM) == []
