@@ -1862,7 +1862,7 @@ def _external_lifecycle(
         owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
         next_action = 'Review the failure before another request is attempted.'
         attention = True
-    if result is not None and status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+    if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
         verification = result.verification.value
         owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
         if result.verification is ExternalTaskResultVerification.UNVERIFIED:

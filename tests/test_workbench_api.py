@@ -491,13 +491,21 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
 
 
 @pytest.mark.parametrize(
-    ('status', 'delivery', 'failure_code', 'expected_verification', 'attention'),
+    (
+        'status',
+        'delivery',
+        'failure_code',
+        'expected_verification',
+        'attention',
+        'with_historical_result',
+    ),
     [
         (
             ExternalTaskOperationStatus.PREPARED,
             ExternalTaskDelivery.NOT_SUBMITTED,
             None,
             'not_started',
+            False,
             False,
         ),
         (
@@ -506,12 +514,14 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
             None,
             'pending_verification',
             False,
+            False,
         ),
         (
             ExternalTaskOperationStatus.RETRYABLE_FAILURE,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskFailureCode.UNAVAILABLE,
             'failed_unverified',
+            True,
             True,
         ),
         (
@@ -520,12 +530,14 @@ def test_staff_detail_preserves_unknown_external_outcome_as_an_uncertain_gap(
             ExternalTaskFailureCode.TIMEOUT,
             'reconciliation_required',
             True,
+            False,
         ),
         (
             ExternalTaskOperationStatus.TERMINAL_FAILURE,
             ExternalTaskDelivery.NOT_SUBMITTED,
             ExternalTaskFailureCode.MALFORMED,
             'review_required',
+            True,
             True,
         ),
     ],
@@ -536,6 +548,7 @@ def test_external_lifecycle_projection_covers_each_delivery_outcome(
     failure_code: ExternalTaskFailureCode | None,
     expected_verification: str,
     attention: bool,
+    with_historical_result: bool,
 ) -> None:
     timestamp = now_utc()
     task = ExternalTaskRecord(
@@ -554,13 +567,37 @@ def test_external_lifecycle_projection_covers_each_delivery_outcome(
         updated_at=timestamp,
     )
 
-    projection = _external_lifecycle(task, None)
+    result = (
+        ExternalTaskResult(
+            result_id=f'res-historical-{status.value}',
+            task_id=task.task_id,
+            claim_id=task.claim_id,
+            source=RetrievalSource(
+                system='historical_import',
+                reference=f'result/{status.value}',
+                retrieved_at=timestamp,
+            ),
+            summary='A historical result was imported for the failed task.',
+            verification=ExternalTaskResultVerification.CONSISTENT,
+            verified_at=timestamp,
+            verified_against_revision=1,
+            received_at=timestamp,
+        )
+        if with_historical_result
+        else None
+    )
+
+    projection = _external_lifecycle(task, None, result)
 
     assert projection.verification_state == expected_verification
     assert projection.needs_attention is attention
     assert projection.authority_state == 'not_recorded'
     assert projection.consent_state == 'not_recorded'
     assert projection.limitation
+    if result is not None:
+        assert projection.status_label == 'Failed'
+        assert projection.result == result.summary
+        assert projection.result_verification_state is ExternalTaskResultVerification.CONSISTENT
 
 
 def test_workbench_keeps_provider_reference_separate_when_no_result_exists(
