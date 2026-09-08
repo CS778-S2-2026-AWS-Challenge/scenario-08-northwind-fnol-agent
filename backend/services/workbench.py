@@ -10,6 +10,8 @@ from backend.domain.external_services import (
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
+    ExternalTaskResult,
+    ExternalTaskResultVerification,
 )
 from backend.domain.models import (
     ClaimCollaborationRequest,
@@ -74,6 +76,7 @@ from backend.domain.workbench import (
     WorkbenchExternalLifecycle,
     WorkbenchExternalRequest,
     WorkbenchExternalRequestsResponse,
+    WorkbenchExternalResultEvidence,
     WorkbenchFieldItem,
     WorkbenchFieldsResponse,
     WorkbenchFilterOption,
@@ -749,6 +752,7 @@ def _integration_summary(
         if item.status
         in {
             ExternalTaskOperationStatus.PREPARED,
+            ExternalTaskOperationStatus.ACCEPTED,
             ExternalTaskOperationStatus.UNKNOWN_OUTCOME,
             ExternalTaskOperationStatus.RETRYABLE_FAILURE,
         }
@@ -1372,6 +1376,7 @@ def _build_projection(
     actions = repository.list_staff_actions(claim.claim_id)
     projected_risk_signals = risk_signals(repository, claim)
     external_tasks, external_limitation = _external_tasks(repository, claim.claim_id)
+    integration_summary = _integration_summary(claim, external_tasks)
     computed_at = now_utc()
     collaboration_requests = repository.list_collaboration_requests(claim.claim_id)
     ownership = _ownership(repository, claim, principal, active_handoffs)
@@ -1421,7 +1426,7 @@ def _build_projection(
         last_claimant_activity_at=(
             max(item.created_at for item in claimant_messages) if claimant_messages else None
         ),
-        external_wait_count=len(external_tasks),
+        external_wait_count=len(integration_summary.waiting_external_services),
     )
     tags = project_staff_tags(
         claim,
@@ -1446,7 +1451,7 @@ def _build_projection(
         ownership=ownership,
         priority_projection=_priority(claim, active_handoffs, computed_at),
         work_summary=work_summary,
-        integration_summary=_integration_summary(claim, external_tasks),
+        integration_summary=integration_summary,
         tags=tags,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
@@ -1818,6 +1823,8 @@ def list_workbench_customer_updates(
 def _external_lifecycle(
     task: ExternalTaskRecord,
     request: Any | None,
+    result: ExternalTaskResult | None = None,
+    result_evidence: Sequence[EvidenceRecord] = (),
 ) -> WorkbenchExternalLifecycle:
     status = task.status
     if status is ExternalTaskOperationStatus.PREPARED:
@@ -1855,6 +1862,31 @@ def _external_lifecycle(
         owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
         next_action = 'Review the failure before another request is attempted.'
         attention = True
+    if result is not None and status is ExternalTaskOperationStatus.ACCEPTED:
+        verification = result.verification.value
+        owner = WorkbenchResponsibility.CLAIMS_PROFESSIONAL
+        if result.verification is ExternalTaskResultVerification.UNVERIFIED:
+            label = 'Result awaiting verification'
+            detail = 'A provider result is recorded but has not been checked against the Claim.'
+            next_action = 'Verify the returned result against its evidence and the current Claim.'
+            attention = True
+        elif result.verification is ExternalTaskResultVerification.CONSISTENT:
+            label = 'Result checked'
+            detail = (
+                'The returned result was checked as consistent evidence; it is not Claim State.'
+            )
+            next_action = 'Use the checked result only through an authorised Claim decision.'
+            attention = False
+        elif result.verification is ExternalTaskResultVerification.INCONSISTENT:
+            label = 'Result conflicts with Claim'
+            detail = 'The returned result was checked and conflicts with the Claim.'
+            next_action = 'Review the conflicting result and cited evidence before continuing.'
+            attention = True
+        else:
+            label = 'Result requires review'
+            detail = 'The returned result needs professional review before it can be used.'
+            next_action = 'Review the result, evidence, and checked Claim revision.'
+            attention = True
     fixture = task.integration_source.value == 'fixture'
     limitation = (
         'Synthetic fixture record; no production provider completion is verified.'
@@ -1876,7 +1908,24 @@ def _external_lifecycle(
         pending_owner=owner,
         status_label=label,
         status_detail=detail,
-        result=task.provider_reference,
+        provider_reference=task.provider_reference,
+        result=result.summary if result is not None else None,
+        result_source=result.source if result is not None else None,
+        result_verification_state=result.verification if result is not None else None,
+        result_received_at=result.received_at if result is not None else None,
+        result_verified_at=result.verified_at if result is not None else None,
+        result_verified_against_revision=(
+            result.verified_against_revision if result is not None else None
+        ),
+        result_evidence_ids=result.evidence_ids if result is not None else [],
+        result_evidence=[
+            WorkbenchExternalResultEvidence(
+                evidence_id=item.evidence_id,
+                status=item.status,
+                file_status=item.file_status,
+            )
+            for item in result_evidence
+        ],
         limitation=limitation,
         next_action=next_action,
         needs_attention=attention,
@@ -1890,10 +1939,12 @@ def list_workbench_external_requests(
     limit: int,
     cursor: str | None,
 ) -> WorkbenchExternalRequestsResponse:
-    _authorised_claim(repository, principal, claim_id)
+    claim = _authorised_claim(repository, principal, claim_id)
     try:
         tasks = repository.list_external_tasks_internal(claim_id)
         requests = repository.list_external_task_requests_internal(claim_id)
+        results = repository.list_external_task_results_internal(claim_id)
+        evidence = repository.list_evidence(claim_id, claim.customer_id)
     except RuntimeError:
         return WorkbenchResourcePage(
             items=[],
@@ -1902,14 +1953,28 @@ def list_workbench_external_requests(
             limitation='External-service records are temporarily unavailable.',
         )
     by_task = {item.task_id: item for item in requests}
+    results_by_task = {item.task_id: item for item in results}
+    evidence_by_id = {item.evidence_id: item for item in evidence}
     items = []
     for task in tasks:
         external_request = by_task.get(task.task_id)
+        result = results_by_task.get(task.task_id)
         items.append(
             WorkbenchExternalRequest(
                 request=external_request,
                 task=task,
-                lifecycle=_external_lifecycle(task, external_request),
+                lifecycle=_external_lifecycle(
+                    task,
+                    external_request,
+                    result,
+                    [
+                        evidence_by_id[evidence_id]
+                        for evidence_id in result.evidence_ids
+                        if evidence_id in evidence_by_id
+                    ]
+                    if result is not None
+                    else [],
+                ),
             )
         )
     items.sort(key=lambda item: (item.task.created_at, item.task.task_id))
