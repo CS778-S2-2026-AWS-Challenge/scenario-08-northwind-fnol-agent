@@ -8,8 +8,13 @@ from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    ExternalTaskResult,
+    ExternalTaskResultVerification,
     assert_disclosure_within_consent,
     assert_request_matches_task,
+    assert_result_advance_is_permitted,
+    assert_result_evidence_is_linked,
+    assert_result_matches_task,
 )
 from backend.domain.models import (
     ActorType,
@@ -60,6 +65,7 @@ class FixtureRepository(PersistenceRepository):
         self._external_tasks: dict[str, ExternalTaskRecord] = {}
         self._external_task_requests: dict[str, ExternalTaskRequest] = {}
         self._external_task_evidence_links: dict[tuple[str, str], ExternalTaskEvidenceLink] = {}
+        self._external_task_results: dict[str, ExternalTaskResult] = {}
         self._retrievals: dict[str, RetrievalRecord] = {}
         self._review_signals: dict[str, ReviewSignalRecord] = {}
         self._staff_actions: dict[str, StaffActionRecord] = {}
@@ -103,6 +109,7 @@ class FixtureRepository(PersistenceRepository):
             'external_tasks': len(self._external_tasks),
             'external_task_requests': len(self._external_task_requests),
             'external_task_evidence_links': len(self._external_task_evidence_links),
+            'external_task_results': len(self._external_task_results),
             'retrievals': len(self._retrievals),
             'review_signals': len(self._review_signals),
             'staff_actions': len(self._staff_actions),
@@ -127,6 +134,7 @@ class FixtureRepository(PersistenceRepository):
         self._external_tasks.clear()
         self._external_task_requests.clear()
         self._external_task_evidence_links.clear()
+        self._external_task_results.clear()
         self._retrievals.clear()
         self._review_signals.clear()
         self._staff_actions.clear()
@@ -1302,6 +1310,71 @@ class FixtureRepository(PersistenceRepository):
             raise IdempotencyConflict(link.evidence_id)
         self._external_task_evidence_links[key] = deepcopy(link)
 
+    def save_external_task_result(self, result: ExternalTaskResult, customer_id: str) -> None:
+        """Ingest one returned result, or advance its verification, after validating it.
+
+        Args:
+            result: Returned-result state to ingest or advance to a checked verification.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim, the result-bearing task, or a named evidence link is
+                unavailable.
+            IdempotencyConflict: The write changes an ingestion fact, contradicts a
+                recorded verification, or adds a second result to one task.
+        """
+        if self.get_claim(result.claim_id, customer_id) is None:
+            raise KeyError(result.claim_id)
+        task = self._external_tasks.get(result.task_id)
+        if task is None:
+            raise KeyError(result.task_id)
+        # The domain already decides which task states can carry an answer and how a
+        # result reaches its material. Re-deciding either here would be a second,
+        # quietly different rule.
+        try:
+            assert_result_matches_task(result, task)
+            assert_result_evidence_is_linked(
+                result,
+                [
+                    link
+                    for link in self._external_task_evidence_links.values()
+                    if link.evidence_id in result.evidence_ids
+                ],
+            )
+        except ValueError as mismatch:
+            raise KeyError(result.task_id) from mismatch
+        for evidence_id in result.evidence_ids:
+            if self.get_evidence(result.claim_id, evidence_id, customer_id) is None:
+                raise KeyError(evidence_id)
+
+        held = next(
+            (
+                stored
+                for stored in self._external_task_results.values()
+                if stored.task_id == result.task_id
+            ),
+            None,
+        )
+        # A result identity belongs to one task for good, so a reused identifier is a
+        # conflict even when the task it now names holds nothing.
+        by_identity = self._external_task_results.get(result.result_id)
+        if by_identity is not None and by_identity.task_id != result.task_id:
+            raise IdempotencyConflict(result.result_id)
+        if held is None:
+            # Only the verification operation may record a check, so an answer arrives
+            # unverified or not at all.
+            if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
+                raise IdempotencyConflict(result.result_id)
+        else:
+            try:
+                assert_result_advance_is_permitted(held, result)
+            except ValueError as conflict:
+                raise IdempotencyConflict(result.result_id) from conflict
+        self._external_task_results[result.result_id] = deepcopy(result)
+
     def list_external_tasks_internal(self, claim_id: str) -> list[ExternalTaskRecord]:
         """List task records for an already-authorised internal claim read.
 
@@ -1318,6 +1391,26 @@ class FixtureRepository(PersistenceRepository):
             deepcopy(task) for task in self._external_tasks.values() if task.claim_id == claim_id
         ]
         return sorted(tasks, key=lambda task: (task.created_at, task.task_id))
+
+    def list_external_task_results_internal(self, claim_id: str) -> list[ExternalTaskResult]:
+        """List returned results for an already-authorised internal claim read.
+
+        Args:
+            claim_id: Working Claim whose external task results are requested.
+
+        Returns:
+            Deep-copied result records, oldest ingestion first.
+
+        Raises:
+            RuntimeError: The in-memory fixture cannot complete the read.
+        """
+        results = [
+            deepcopy(result)
+            for result in self._external_task_results.values()
+            if result.claim_id == claim_id
+        ]
+        results.sort(key=lambda item: (item.received_at, item.result_id))
+        return results
 
     def list_external_task_evidence_links_internal(
         self,
