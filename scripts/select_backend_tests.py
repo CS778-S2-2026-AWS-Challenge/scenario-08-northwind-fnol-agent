@@ -77,6 +77,8 @@ def select_tests(changed_paths: Sequence[str], *, full: bool = False) -> TestSel
             backend_changed = True
         if path_text.startswith('tests/') and path_text.endswith('.py'):
             selected.add(path_text)
+            if path_text == 'tests/test_branch_registry.py':
+                shared_change = True
         if path_text == 'tests/conftest.py' or path_text.startswith(
             ('tests/fixtures/', 'tests/helpers/', 'tests/support/')
         ):
