@@ -1582,6 +1582,11 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        if required_staff_id is not None and required_staff_revision is not None:
+            assert presence is not None
+            self._staff_presence[required_staff_id] = deepcopy(
+                presence.model_copy(update={'revision': presence.revision + 1})
+            )
         if existing_message is not None:
             raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)

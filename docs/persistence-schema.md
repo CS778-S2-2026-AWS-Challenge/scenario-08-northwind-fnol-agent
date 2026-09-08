@@ -592,7 +592,9 @@ staff ID. It contains `online`, `available`, server-owned `last_seen_at`, `expir
 and `updated_at`. Presence is a short-lived eligibility lease, not account enablement and not
 Claim State. Fixture and MongoDB adapters implement the same optimistic-revision read/write
 contract. Claim acceptance continues to use the existing atomic Claim/handoff/idempotency
-mutation, so presence does not introduce a second assignment or ownership truth.
+mutation, so presence does not introduce a second assignment or ownership truth. The acceptance
+guard advances the accepted staff presence revision in both Fixture and MongoDB adapters; this
+provider-neutral lease revision is the transaction conflict point.
 
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed

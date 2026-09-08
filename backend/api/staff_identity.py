@@ -1,3 +1,4 @@
+import logging
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
@@ -20,6 +21,8 @@ from backend.services.staff_identity import (
     staff_session_projection,
 )
 from backend.services.staff_presence import mark_staff_online, update_presence
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/v1/staff', tags=['staff identity'])
 
@@ -73,16 +76,24 @@ def delete_staff_auth_session(
     principal: Principal = Depends(require_staff),
 ) -> Response:
     token = (authorization or '').removeprefix('Bearer ').strip()
-    update_presence(
-        cast(PersistenceRepository, request.app.state.claim_repository),
-        principal,
-        StaffPresenceUpdate(online=False, available=False, lease_seconds=15),
-    )
+    presence_error: Exception | None = None
+    try:
+        update_presence(
+            cast(PersistenceRepository, request.app.state.claim_repository),
+            principal,
+            StaffPresenceUpdate(online=False, available=False, lease_seconds=15),
+        )
+    except Exception as error:
+        presence_error = error
     if not repository_for(request).revoke_session(hash_staff_access_token(token)):
         raise ApiError(
             status_code=401,
             code='AUTHENTICATION_REQUIRED',
             message='The staff session is no longer active.',
+        )
+    if presence_error is not None:
+        logger.warning(
+            'Staff presence cleanup failed during logout: %s', type(presence_error).__name__
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

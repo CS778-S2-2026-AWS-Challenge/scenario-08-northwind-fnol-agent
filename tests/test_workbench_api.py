@@ -1620,6 +1620,24 @@ def test_staff_logout_removes_authenticated_staff_from_online_pool(
     assert presence.available is False
 
 
+def test_staff_logout_revokes_session_when_presence_cleanup_fails(
+    app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, headers = _provision_staff(
+        app, client, email='logout-presence-failure@example.test', display_name='Logout Failure'
+    )
+
+    def fail_presence(*args: object, **kwargs: object) -> None:
+        raise RuntimeError('presence store unavailable')
+
+    monkeypatch.setattr(app.state.claim_repository, 'save_staff_presence', fail_presence)
+    response = client.delete('/api/v1/staff/auth/session', headers=headers)
+    assert response.status_code == 204
+    assert client.get('/api/v1/staff/auth/session', headers=headers).status_code == 401
+
+
 def test_staff_login_revokes_session_when_presence_cannot_be_established(
     app: FastAPI,
     client: TestClient,
