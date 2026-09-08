@@ -1371,7 +1371,7 @@ def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
         'NORTHWIND_MONGODB_TEST_URI',
         'mongodb://localhost:27017/?replicaSet=rs0',
     )
-    client = MongoClient(uri, serverSelectionTimeoutMS=750)
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
     database_name = 'northwind_staff_presence_race'
     connected = False
     try:
