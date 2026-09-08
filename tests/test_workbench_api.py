@@ -41,8 +41,8 @@ from backend.domain.models import (
     StructuredFormField,
     WorkflowState,
 )
-from backend.domain.staff_identity import StaffPresenceUpdate
 from backend.domain.retrieval import RetrievalSource
+from backend.domain.staff_identity import StaffPresenceUpdate
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_access import (
     ClaimStaffAccess,
