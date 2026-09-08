@@ -184,7 +184,6 @@ class MongoDBRepository:
     ) -> None:
         self._client = client
         self._collection: Collection[dict[str, Any]] = client[database_name][collection_name]
-        self._collection.create_index([('record_type', 1), ('claim_id', 1), ('created_at', 1)])
         self._collection.create_index(
             [
                 ('record_type', 1),

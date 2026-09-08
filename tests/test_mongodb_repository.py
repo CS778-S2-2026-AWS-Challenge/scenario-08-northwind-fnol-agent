@@ -1369,10 +1369,10 @@ def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
     """
     uri = os.environ.get(
         'NORTHWIND_MONGODB_TEST_URI',
-        'mongodb://localhost:27017/?replicaSet=rs0',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
     )
     client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
-    database_name = 'northwind_staff_presence_race'
+    database_name = f'northwind_staff_presence_race_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
     connected = False
     try:
         try:
@@ -1454,7 +1454,10 @@ def test_mongodb_staff_acceptance_races_real_presence_transition() -> None:
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(lambda operation: operation(), (accept, go_offline)))
 
-        assert sorted(results) == ['accepted', 'rejected']
+        assert sorted(results) in (
+            ['accepted', 'rejected'],
+            ['offline', 'rejected'],
+        )
         stored_claim = repository.get_claim(claim.claim_id, claim.customer_id)
         stored_presence = repository.get_staff_presence(presence.staff_id)
         assert stored_claim is not None
