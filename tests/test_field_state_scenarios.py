@@ -175,6 +175,56 @@ def test_branch_incompatible_form_update_is_rejected_without_claim_mutation(
     assert repository.list_branch_evaluations(claim_id, 'cus_demo') == evaluations_before
 
 
+def test_atomic_family_transition_allows_the_new_family_field(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'field-state-atomic-family'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201, created.text
+    claim_id = created.json()['claim']['claim_id']
+    before = repository.get_claim(claim_id, 'cus_demo')
+    assert before is not None
+    evaluations_before = repository.list_branch_evaluations(claim_id, 'cus_demo')
+
+    response = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(before.revision)},
+        json={
+            'updates': [
+                {
+                    'field_code': 'claim.product_family',
+                    'value': 'home',
+                    'status': 'confirmed',
+                },
+                {
+                    'field_code': 'property.address',
+                    'value': '14 Synthetic Lane, Auckland',
+                    'status': 'confirmed',
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()['revision'] == before.revision + 1
+    assert set(response.json()['updated_fields']) == {
+        'claim.product_family',
+        'property.address',
+    }
+    updated = repository.get_claim(claim_id, 'cus_demo')
+    assert updated is not None
+    assert updated.incident_type == 'home'
+    assert updated.form['property.address'].value == '14 Synthetic Lane, Auckland'
+    evaluations_after = repository.list_branch_evaluations(claim_id, 'cus_demo')
+    assert len(evaluations_after) == len(evaluations_before) + 1
+    assert evaluations_after[-1].resulting_claim_revision == updated.revision
+
+
 def test_field_state_examples_reject_unknown_and_invalid_values() -> None:
     with pytest.raises(ValueError, match='Unknown registered field'):
         validate_registered_field_value('contents.items', 'flattened')
