@@ -374,7 +374,84 @@ def test_confirm_action_uses_the_agent_action_enum_contract() -> None:
         for item in result.field_selection
         if item.selection_state.value == 'required_now'
     }
-    assert required == {'incident.description', 'incident.location', 'incident.occurred_at'}
+    assert required == {
+        'incident.description',
+        'incident.injury_or_danger',
+        'incident.location',
+        'incident.occurred_at',
+        'loss.description',
+        'property.address',
+        'property.affected_areas',
+        'property.ongoing_risk',
+        'property.habitable',
+    }
+
+
+@pytest.mark.parametrize(
+    ('family', 'family_required'),
+    [
+        ('motor', {'vehicle.damage_description', 'vehicle.drivable'}),
+        (
+            'home',
+            {
+                'property.address',
+                'property.affected_areas',
+                'property.ongoing_risk',
+                'property.habitable',
+            },
+        ),
+        ('contents', {'contents.items'}),
+    ],
+)
+def test_vp_family_requirements_are_complete_and_become_ready_only_when_satisfied(
+    family: str,
+    family_required: set[str],
+) -> None:
+    shared_required = {
+        'incident.description',
+        'incident.injury_or_danger',
+        'incident.occurred_at',
+        'incident.location',
+        'loss.description',
+    }
+    claim = make_claim(incident_type=family)
+
+    initial = BranchRuleEvaluator().evaluate(claim)
+
+    assert set(initial.requirements.missing_required_now) == shared_required | family_required
+    assert initial.requirements.ready is False
+
+    values: dict[str, object] = {
+        'incident.description': 'A complete synthetic incident description.',
+        'incident.injury_or_danger': False,
+        'incident.occurred_at': '2026-09-02T08:00:00+12:00',
+        'incident.location': '1 Synthetic Street, Auckland',
+        'loss.description': 'The insured property was damaged.',
+        'vehicle.damage_description': 'Rear panel damage.',
+        'vehicle.drivable': True,
+        'property.address': '1 Synthetic Street, Auckland',
+        'property.affected_areas': ['kitchen'],
+        'property.ongoing_risk': 'none',
+        'property.habitable': True,
+    }
+    complete_claim = claim.model_copy(
+        update={
+            'form': {
+                field_code: field(values[field_code])
+                for field_code in shared_required | (family_required - {'contents.items'})
+            },
+            'contents_items': (
+                [contents_item().model_copy(update={'status': FormStatus.CONFIRMED})]
+                if family == 'contents'
+                else []
+            ),
+        }
+    )
+
+    complete = BranchRuleEvaluator().evaluate(complete_claim)
+
+    assert complete.requirements.missing_required_now == []
+    assert complete.requirements.ready is True
 
 
 def test_runtime_registry_excludes_design_only_and_separate_record_codes() -> None:
@@ -607,7 +684,7 @@ def test_non_support_wording_does_not_enter_handoff_boundary(message: str) -> No
     assert result.interruption_result == {'control': 'continue'}
 
 
-def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None:
+def test_claimant_projection_excludes_inactive_and_supplied_system_owned_fields() -> None:
     claim = make_claim().model_copy(update={'form': {'claim.product_family': field('motor')}})
     evaluation = evaluation_record(claim)
 
@@ -619,13 +696,27 @@ def test_claimant_projection_excludes_inactive_and_system_owned_fields() -> None
         if item.field_code == 'claimant.client_number'
     )
 
-    assert client_number.selection_state is FieldSelectionState.SYSTEM_OWNED
+    assert client_number.selection_state is FieldSelectionState.INACTIVE
     assert (
         build_default_registry().field_by_code['claimant.client_number'].claimant_visible is False
     )
     assert 'vehicle.registration' in projected_codes
     assert 'property.address' not in projected_codes
     assert 'claimant.client_number' not in projected_codes
+
+    supplied_claim = claim.model_copy(
+        update={
+            'form': {
+                **claim.form,
+                'claimant.client_number': field('synthetic-client-number'),
+            }
+        }
+    )
+    supplied = BranchRuleEvaluator().evaluate(supplied_claim)
+    supplied_client_number = next(
+        item for item in supplied.field_selection if item.field_code == 'claimant.client_number'
+    )
+    assert supplied_client_number.selection_state is FieldSelectionState.SYSTEM_OWNED
 
 
 def test_selection_state_is_separate_from_value_state_and_pending_evidence() -> None:

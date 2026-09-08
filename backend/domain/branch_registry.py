@@ -15,6 +15,7 @@ from backend.domain.models import (
     FieldSelectionResult,
     FieldSelectionState,
     FormStatus,
+    RequirementResolution,
     TemporalFactValue,
     WorkingClaim,
 )
@@ -84,6 +85,48 @@ FAMILY_FIELDS = {
         }
     ),
     'contents': frozenset(),
+}
+
+# This order is a deterministic tie-breaker over the active requirement set.
+# It is not a questionnaire: inactive, satisfied, pending-later, or out-of-family
+# requirements never enter the set from which the next item is selected.
+REQUIREMENT_PRIORITY = (
+    'claim.product_family',
+    'incident.description',
+    'incident.injury_or_danger',
+    'incident.occurred_at',
+    'incident.location',
+    'loss.description',
+    'parties.other_parties',
+    'vehicle.damage_description',
+    'vehicle.drivable',
+    'property.address',
+    'property.affected_areas',
+    'property.ongoing_risk',
+    'property.habitable',
+    'contents.items',
+)
+COMMON_REQUIRED = frozenset(
+    {
+        'claim.product_family',
+        'incident.description',
+        'incident.injury_or_danger',
+        'incident.occurred_at',
+        'incident.location',
+        'loss.description',
+    }
+)
+FAMILY_REQUIRED = {
+    'motor': frozenset({'vehicle.damage_description', 'vehicle.drivable'}),
+    'home': frozenset(
+        {
+            'property.address',
+            'property.affected_areas',
+            'property.ongoing_risk',
+            'property.habitable',
+        }
+    ),
+    'contents': frozenset({'contents.items'}),
 }
 SYSTEM_OWNED_FIELDS = frozenset({'claimant.client_number'})
 CLAIMANT_HIDDEN_FIELDS = frozenset({'claimant.client_number'})
@@ -343,6 +386,13 @@ class BranchRuleEvaluator:
             )
             for definition in self.registry.fields
         ]
+        requirements = self._requirements(
+            claim,
+            selected_family=selected_family,
+            unresolved_family_conflict=unresolved_conflict,
+            selections=selections,
+            active_branches=active,
+        )
         return BranchEvaluationResult(
             claim_id=claim.claim_id,
             evaluated_against_claim_revision=claim.revision,
@@ -367,7 +417,14 @@ class BranchRuleEvaluator:
             integration_intents=[],
             interruption_result=self._interruption(claim, support_intent),
             permitted_actions=list(AgentAction),
-            permitted_tools=[],
+            permitted_tools=[
+                'knowledge_search',
+                'policy_history',
+                'claim_history',
+                'professional_review',
+                'evidence_registry',
+            ],
+            requirements=requirements,
             recomputation_reason=recomputation_reason,
         )
 
@@ -761,9 +818,12 @@ class BranchRuleEvaluator:
     ) -> FieldSelectionResult:
         stored = claim.form.get(definition.code)
         value_state = stored.status if stored is not None else FormStatus.MISSING
-        if definition.system_owned:
+        if definition.system_owned and stored is not None and stored.value is not None:
             selection_state = FieldSelectionState.SYSTEM_OWNED
             reason = 'The field is owned by an identity or workflow authority.'
+        elif definition.system_owned:
+            selection_state = FieldSelectionState.INACTIVE
+            reason = 'The field remains inactive until its system authority supplies a value.'
         elif definition.code not in permitted_fields or (
             definition.families
             and selected_family not in definition.families
@@ -774,12 +834,15 @@ class BranchRuleEvaluator:
         elif definition.code.endswith('police_report_reference') and self._police_pending(claim):
             selection_state = FieldSelectionState.PENDING_LATER
             reason = 'The required material is recorded as pending for a later action.'
-        elif value_state is not FormStatus.MISSING:
+        elif value_state is FormStatus.CONFIRMED:
             selection_state = FieldSelectionState.CANDIDATE_NOW
-            reason = 'A value exists and must not be requested again without a reason.'
-        elif self._required_now(definition.code, current_action):
+            reason = 'The current requirement is satisfied by an accepted Claim fact.'
+        elif self._required_now(definition.code, selected_family, claim):
             selection_state = FieldSelectionState.REQUIRED_NOW
-            reason = 'The field is missing and required for the current safe action.'
+            reason = (
+                'The field is missing, disputed, or awaiting confirmation for the current '
+                'safe action.'
+            )
         else:
             selection_state = FieldSelectionState.CANDIDATE_NOW
             reason = 'The field is relevant but does not block the current safe action.'
@@ -792,14 +855,73 @@ class BranchRuleEvaluator:
         )
 
     @staticmethod
-    def _required_now(code: str, action: AgentAction | str | None) -> bool:
-        raw = action.value if isinstance(action, AgentAction) else action
-        normalised = raw.upper() if isinstance(raw, str) else None
-        if normalised in {AgentAction.CREATE_CLAIM.value, AgentAction.CONFIRM.value}:
-            return code in {'incident.description', 'incident.occurred_at', 'incident.location'}
-        if normalised in {AgentAction.ASK.value, 'INTAKE'} or normalised is None:
-            return code == 'incident.description'
-        return False
+    def _required_now(code: str, family: str | None, claim: WorkingClaim) -> bool:
+        required = set(COMMON_REQUIRED)
+        if family is not None:
+            required.update(FAMILY_REQUIRED[family])
+        incident_type = claim.form.get('incident.type')
+        if (
+            family == 'motor'
+            and incident_type is not None
+            and incident_type.status is FormStatus.CONFIRMED
+            and incident_type.value == 'collision'
+        ):
+            required.add('parties.other_parties')
+        return code in required
+
+    @staticmethod
+    def _requirements(
+        claim: WorkingClaim,
+        *,
+        selected_family: str | None,
+        unresolved_family_conflict: list[str],
+        selections: Sequence[FieldSelectionResult],
+        active_branches: Sequence[str],
+    ) -> RequirementResolution:
+        required = set(COMMON_REQUIRED)
+        if selected_family is not None:
+            required.update(FAMILY_REQUIRED[selected_family])
+        if 'incident.collision' in active_branches:
+            required.add('parties.other_parties')
+
+        selection_by_code = {item.field_code: item for item in selections}
+        satisfied: list[str] = []
+        missing: list[str] = []
+        pending: list[str] = []
+        for requirement in REQUIREMENT_PRIORITY:
+            if requirement not in required:
+                continue
+            if requirement == 'claim.product_family' and selected_family is not None:
+                satisfied.append(requirement)
+                continue
+            if requirement == 'contents.items':
+                if any(item.status is FormStatus.CONFIRMED for item in claim.contents_items):
+                    satisfied.append(requirement)
+                else:
+                    missing.append(requirement)
+                continue
+            selection = selection_by_code.get(requirement)
+            if selection is None:
+                missing.append(requirement)
+            elif selection.selection_state is FieldSelectionState.PENDING_LATER:
+                pending.append(requirement)
+            elif selection.value_state is FormStatus.CONFIRMED:
+                satisfied.append(requirement)
+            else:
+                missing.append(requirement)
+
+        if selected_family is None and 'claim.product_family' not in missing:
+            missing.insert(0, 'claim.product_family')
+        ready = not missing and not unresolved_family_conflict and selected_family is not None
+        return RequirementResolution(
+            satisfied=satisfied,
+            missing_required_now=missing,
+            pending_later=pending,
+            next_required_item=missing[0] if missing else None,
+            ready=ready,
+            current_action_total=len(satisfied) + len(missing),
+            current_action_satisfied=len(satisfied),
+        )
 
     @staticmethod
     def _police_pending(claim: WorkingClaim) -> bool:

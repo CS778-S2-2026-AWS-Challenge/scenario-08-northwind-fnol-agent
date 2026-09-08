@@ -43,6 +43,13 @@ real result before creation is described to the claimant.
 ## Authority, Revision, and Idempotency
 
 - Required material facts and confirmations must satisfy the current controlled rule.
+- Motor, home, and contents use one deterministic requirement resolver over their mutually
+  exclusive registered family branch plus shared fields. Creation rejects any missing or
+  unconfirmed `required_now` item and routes accepted commands as `standard_motor_intake`,
+  `standard_home_intake`, or `standard_contents_intake`.
+- Typed contents items satisfy the contents collection requirement only when at least one current
+  item is confirmed. They are not flattened into the generic form or inferred from an empty
+  `contents.items` string.
 - Claim creation requires the current Working Claim revision and an authorised
   `claim.create` ActionEnvelope. During migration, the existing `CREATE_CLAIM` Agent
   Decision may satisfy this boundary only through an explicit, tested mapping to the new

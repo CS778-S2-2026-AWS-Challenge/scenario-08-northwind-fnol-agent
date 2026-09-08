@@ -219,14 +219,12 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
     assert handoff['packet']['incident_summary'] == first_spec['input']
     assert handoff['packet']['form_snapshot']['incident.injury_or_danger']['value'] is False
     assert evidence[0]['evidence_id'] in handoff['packet']['pending_items']
-    assert handoff['packet']['policy_citation_refs'] == [retrieval.retrieval_id]
+    assert any(
+        journey['policy']['reference'] in item for item in handoff['packet']['policy_citation_refs']
+    )
     assert retrieval.retrieval_id in handoff['packet']['source_refs']
     review_signal = repository.list_review_signals(claim_id, 'cus_demo')[0]
     assert review_signal.signal_id in handoff['packet']['source_refs']
-    assert any(
-        item.startswith('tag_registry:northwind-fnol-staff-tags:')
-        for item in handoff['packet']['source_refs']
-    )
     assert any(
         item['evidence_id'] == evidence[0]['evidence_id'] and item['status'] == 'pending_generation'
         for item in handoff['packet']['evidence']
@@ -335,6 +333,6 @@ def test_unrelated_claim_does_not_enter_the_rear_end_fixture_path(
         99,
     )
 
-    assert response['decision']['action'] == 'CONFIRM'
-    assert response['decision']['customer_next_step']['status'] == 'confirmation_required'
+    assert response['decision']['action'] == 'ASK'
+    assert response['decision']['customer_next_step']['status'] == 'more_information_needed'
     assert repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo') == []

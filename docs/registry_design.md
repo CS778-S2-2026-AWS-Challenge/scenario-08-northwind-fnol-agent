@@ -2,10 +2,10 @@
 
 ## Purpose
 
-This document describes how Northwind can implement a controlled Registry and a
-claim-specific internal FNOL information form. It is a design document, not a claim
-API contract and not evidence that the Registry or dynamic branch engine is already
-implemented.
+This document defines the controlled Registry and claim-specific First Notification of Loss
+(FNOL) information-form design. It also identifies the bounded Validation Prototype (VP)
+implementation; `docs/api.md`, `docs/persistence-schema.md`, and exact-head tests remain the
+implementation evidence and transport authority.
 
 The central rule is:
 
@@ -739,20 +739,21 @@ introduced.
 - Do not represent candidate fields as current runtime capability until their shared contract,
   consumers, and tests exist.
 
-### Stage 1: Static controlled catalogue
+### Implemented VP baseline
 
-- define and validate small published Field, Content Branch, Lifecycle, Action, Tool,
-  Staff Capability, Model Profile, and Error snapshots;
-- support motor, unknown, urgent, and human-support paths;
-- implement several conditional branches such as another party, injury, and pending
-  evidence;
-- map the legacy eight Agent actions explicitly to the new namespaced action model;
-- support one model profile and one provider adapter through the provider-neutral
-  ModelRequest and ModelResult boundary;
-- replace the current fixed four-field sequence with controlled selection; and
-- test irrelevant-question avoidance, required-now selection, and safe handoff.
+- The executable Field and Content Branch snapshots support mutually exclusive motor, home, and
+  contents families plus collision, participant, Police, pending-evidence, theft, safety,
+  mitigation, professional-review, and human-support conditions.
+- The deterministic evaluator produces versioned branch, field-selection, current-action
+  requirement, tool/action permission, and interruption results from authoritative Claim State.
+- Applied evaluations are persisted with form, confirmation, message, resume, evidence, handoff,
+  consent, and integration mutations and drive claimant Dynamic Form projections.
+- The Agent receives the bounded evaluation, may propose only registered fields and tools, and
+  cannot declare readiness or mutate Claim State directly.
+- Regression tests cover out-of-order facts, corrections, conflicts, pending evidence,
+  non-repetition, three-family claim creation, and role-safe projections.
 
-### Stage 2: Versioned runtime snapshot
+### Remaining target-runtime migration
 
 - persist Registry versions and the version used by each claim;
 - preserve branch, field, source, and selection-state history;
@@ -763,7 +764,7 @@ introduced.
 - validate snapshots before runtime activation; and
 - run the same contract tests against every supported provider profile.
 
-### Stage 3: Control Plane management
+### Control Plane management
 
 - provide editing and validation for fields, branches, tags, lifecycle states, follow-up,
   retention, and related rules;
@@ -774,13 +775,13 @@ introduced.
 
 ## Open Decisions
 
-- Which candidate fields enter the MVP registry for motor, home, and contents claims?
+- Which additional candidate fields enter the executable registry after the VP baseline?
 - What is the approved branch and tag catalogue?
 - What is the minimum approved Action, Tool, Staff Capability, Model Profile, and Error
   catalogue for the MVP?
 - Which rule conditions are sufficient for the first implementation?
 - Which explicit claimant statements may become confirmed without another turn?
-- What is the minimum field set for each safe next action and claim-creation route?
+- Which production-authorised requirement sets replace or extend the VP claim-creation baseline?
 - How are multi-product incidents and corrected claim-family classifications represented?
 - Which Registry changes may be published through the Control Plane without a code or
   persistence migration?

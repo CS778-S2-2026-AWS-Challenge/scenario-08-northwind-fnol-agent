@@ -13,6 +13,27 @@ def _fixture() -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(FIXTURE_PATH.read_text(encoding='utf-8')))
 
 
+def _complete_motor_requirements(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    claim_id: str,
+    revision: int,
+    *,
+    key: str,
+) -> dict[str, Any]:
+    response = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': key,
+            'If-Match': str(revision),
+        },
+        json={'updates': [{'field_code': 'vehicle.drivable', 'value': True}]},
+    )
+    assert response.status_code == 200, response.text
+    return cast(dict[str, Any], response.json())
+
+
 def test_at01_natural_intake_confirms_then_creates_mock_claim(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -70,7 +91,13 @@ def test_at01_natural_intake_confirms_then_creates_mock_claim(
         json={'field_codes': sorted(proposed)},
     )
     assert confirmed.status_code == 200
-    confirmed_body = confirmed.json()
+    confirmed_body = _complete_motor_requirements(
+        client,
+        auth_headers,
+        claim_id,
+        confirmed.json()['revision'],
+        key='at01-complete-vp-requirements',
+    )
     assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
 
     creation_headers = {
@@ -190,7 +217,13 @@ def test_clear_motor_intake_classifies_missing_incident_type_before_creation(
         json={'field_codes': sorted(proposed)},
     )
     assert confirmed.status_code == 200
-    confirmed_body = confirmed.json()
+    confirmed_body = _complete_motor_requirements(
+        client,
+        auth_headers,
+        claim['claim_id'],
+        confirmed.json()['revision'],
+        key='unclassified-complete-vp-requirements',
+    )
     assert confirmed_body['customer_next_step']['status'] == 'ready_to_create'
 
     claimant_view = client.get(f'/api/v1/claims/{claim["claim_id"]}', headers=auth_headers)
@@ -266,6 +299,13 @@ def test_pending_later_evidence_does_not_block_controlled_claim_creation(
         },
         json={'field_codes': journey['expected_proposed_fields']},
     ).json()
+    confirmation = _complete_motor_requirements(
+        client,
+        auth_headers,
+        claim_id,
+        confirmation['revision'],
+        key='pending-complete-vp-requirements',
+    )
     evidence_turn = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',
         headers={

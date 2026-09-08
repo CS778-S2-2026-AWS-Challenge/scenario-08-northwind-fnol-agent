@@ -35,7 +35,9 @@ AGENT_CONFIGURATION_DOMAINS = (
 )
 
 PROPOSAL_TOOL_ACTIONS = {
+    'knowledge_search': 'external.load_requirements',
     'policy_history': 'external.load_requirements',
+    'claim_history': 'external.load_requirements',
     'evidence_registry': 'claim.set_evidence_state',
     'professional_review': 'human.request_professional_review',
 }
