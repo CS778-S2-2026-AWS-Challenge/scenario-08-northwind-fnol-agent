@@ -1,12 +1,14 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import cast
+from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.intake import infer_controlled_product_family
 from backend.domain.knowledge import (
     KnowledgeRetrievalUnavailable,
     KnowledgeRetriever,
@@ -21,6 +23,7 @@ from backend.domain.model_gateway import (
     ModelClaimContext,
     ModelClaimStateContext,
     ModelCompletionStatus,
+    ModelContentsItemContext,
     ModelFieldSelectionContext,
     ModelFormFieldContext,
     ModelGateway,
@@ -28,7 +31,7 @@ from backend.domain.model_gateway import (
     ModelGatewayErrorCode,
     ModelKnowledgeCitation,
     ModelMessage,
-    ModelProvenanceMessage,
+    ModelProposedFormChange,
     ModelRequest,
     ModelResponse,
     ModelRole,
@@ -36,11 +39,11 @@ from backend.domain.model_gateway import (
 )
 from backend.domain.models import (
     AgentProposalSource,
-    FactResolutionState,
     FormSource,
     FormStatus,
     ModelDecisionProvenance,
     NeededFor,
+    ProposedContentsItem,
     ProposedFormChange,
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
@@ -55,6 +58,7 @@ from backend.services.runtime_configuration import (
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
+_CONTEXT_TOOL_NAMES = frozenset({'knowledge_search', 'policy_history', 'claim_history'})
 
 _MODEL_CONTEXT_FIELD_CODES = frozenset(
     {
@@ -96,6 +100,15 @@ def _knowledge_product(incident_type: str | None) -> str | None:
 def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
     claim = context.claim
     branch = context.branch_evaluation
+    model_field_codes = (
+        {
+            item.field_code
+            for item in branch.field_selection
+            if item.selection_state.value not in {'inactive', 'system_owned'}
+        }
+        if branch is not None
+        else _MODEL_CONTEXT_FIELD_CODES
+    )
     return ModelTurnContext(
         claim=ModelClaimContext(
             channel=claim.channel,
@@ -115,24 +128,33 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                     status=field.status,
                     needed_for=field.needed_for,
                     confidence=field.confidence,
-                    resolution_state=(
-                        field.resolution_state.value if field.resolution_state is not None else None
-                    ),
                     precision=field.precision,
-                    source_refs=(
-                        field.source_refs
-                        if field.resolution_state is FactResolutionState.CLARIFICATION_REQUIRED
-                        else []
-                    ),
+                    source_refs=field.source_refs,
                 )
                 for field_code, field in claim.form.items()
-                if field_code in _MODEL_CONTEXT_FIELD_CODES
-                and field.needed_for is NeededFor.CURRENT_ACTION
+                if field_code in model_field_codes and field.needed_for is NeededFor.CURRENT_ACTION
             },
+            contents_items=[
+                ModelContentsItemContext(
+                    item_id=item.item_id,
+                    description=item.description,
+                    category=item.category,
+                    quantity=item.quantity,
+                    loss_type=item.loss_type,
+                    ownership=item.ownership,
+                    estimated_value=item.estimated_value,
+                    source=item.source,
+                    source_refs=item.source_refs,
+                    status=item.status,
+                    resolution_state=item.resolution_state,
+                )
+                for item in claim.contents_items
+            ],
             known_field_codes=sorted(
                 field_code
                 for field_code, field in claim.form.items()
-                if field.needed_for is NeededFor.CURRENT_ACTION
+                if (branch is None or field_code in model_field_codes)
+                and field.needed_for is NeededFor.CURRENT_ACTION
             ),
             evidence_summary=claim.evidence_summary,
             customer_next_step=claim.customer_next_step,
@@ -140,14 +162,6 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         message_text=context.message_text,
         evidence_reference_count=len(context.evidence_refs),
         professional_review_required=context.professional_review_required,
-        provenance_messages=[
-            ModelProvenanceMessage(
-                message_id=message.message_id,
-                content=str(message.content.get('text', '')),
-            )
-            for message in context.provenance_messages
-            if isinstance(message.content.get('text'), str)
-        ],
         branch=(
             ModelBranchContext(
                 field_registry_version=branch.field_registry_version,
@@ -174,6 +188,11 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
                 interruption_result=branch.interruption_result,
                 permitted_actions=branch.permitted_actions,
                 permitted_tools=branch.permitted_tools,
+                satisfied_requirements=branch.requirements.satisfied,
+                missing_required_now=branch.requirements.missing_required_now,
+                pending_later=branch.requirements.pending_later,
+                next_required_item=branch.requirements.next_required_item,
+                ready=branch.requirements.ready,
             )
             if branch is not None
             else None
@@ -193,32 +212,103 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
             for chunk in context.knowledge_results
         ],
         knowledge_limitations=list(context.knowledge_limitations),
+        tool_results=list(context.tool_results),
+        provenance_messages=[
+            {
+                'message_id': message.message_id,
+                'content': message.content,
+                'created_at': message.created_at.isoformat(),
+            }
+            for message in context.provenance_messages
+        ],
     )
 
 
 def _agent_proposal(
     proposal: ModelAgentProposal,
     *,
+    message_text: str | None,
     provider_model: str | None,
     provider_request_id: str | None,
     prompt_id: str,
 ) -> AgentProposal:
+    normalized_message = ' '.join((message_text or '').split()).casefold()
+
+    def claimant_supports(change: ModelProposedFormChange) -> bool:
+        if not change.reported_text:
+            return False
+        quote = ' '.join(change.reported_text.split()).casefold()
+        if not quote or quote not in normalized_message:
+            return False
+        value: Any = change.value
+        if isinstance(value, str):
+            normalised_value = ' '.join(value.split()).casefold()
+            if normalised_value in quote:
+                return True
+            return (
+                change.field_code == 'claim.product_family'
+                and infer_controlled_product_family(change.reported_text) == normalised_value
+            )
+        if isinstance(value, list):
+            return all(
+                isinstance(item, str) and ' '.join(item.split()).casefold() in quote
+                for item in value
+            )
+        if not isinstance(value, bool):
+            return False
+        negative = bool(
+            re.search(r"\b(?:no|none|nobody|not|never|cannot|can't|isn't|wasn't|without)\b", quote)
+        )
+        markers = {
+            'incident.injury_or_danger': r'\b(?:injur(?:y|ed)|hurt|danger|unsafe|emergency)\b',
+            'parties.other_parties': r'\b(?:another|other|second|person|people|vehicle|party)\b',
+            'vehicle.drivable': r'\b(?:driv(?:e|en|able)|roadworthy|safe|unsafe)\b',
+            'property.ongoing_risk': r'\b(?:risk|leak|fire|flood|exposed|unsafe|danger)\b',
+            'property.habitable': r'\b(?:habitable|live|lived|safe|unsafe|uninhabitable)\b',
+        }
+        marker = markers.get(change.field_code)
+        return marker is not None and re.search(marker, quote) is not None and value is not negative
+
+    def source_for(change: ModelProposedFormChange) -> FormSource:
+        if claimant_supports(change):
+            return FormSource.CLAIMANT
+        return FormSource.INFERENCE
+
+    def form_change(change: ModelProposedFormChange) -> ProposedFormChange:
+        source = source_for(change)
+        return ProposedFormChange(
+            field_code=change.field_code,
+            value=change.value,
+            source=source,
+            status=(FormStatus.CONFIRMED if source is FormSource.CLAIMANT else FormStatus.PROPOSED),
+            needed_for=change.needed_for,
+            confidence=change.confidence,
+            precision=change.precision,
+            relation=change.relation,
+            reported_text=change.reported_text,
+        )
+
     return AgentProposal(
         action=proposal.action,
         reason_codes=proposal.reason_codes,
         customer_reason=proposal.customer_reason,
         customer_response=proposal.customer_response,
         customer_next_step=proposal.customer_next_step,
-        form_changes=[
-            ProposedFormChange(
-                field_code=change.field_code,
-                value=change.value,
-                source=FormSource.INFERENCE,
-                status=FormStatus.PROPOSED,
-                needed_for=change.needed_for,
-                confidence=change.confidence,
+        form_changes=[form_change(change) for change in proposal.form_changes],
+        contents_item_changes=[
+            ProposedContentsItem(
+                item_id=item.item_id,
+                description=item.description,
+                category=item.category,
+                quantity=item.quantity,
+                loss_type=item.loss_type,
+                ownership=item.ownership,
+                estimated_value=item.estimated_value,
+                confidence=item.confidence,
+                relation=item.relation,
+                reported_text=item.reported_text,
             )
-            for change in proposal.form_changes
+            for item in proposal.contents_item_changes
         ],
         state_changes=proposal.state_changes,
         proposed_signals=[],
@@ -304,10 +394,11 @@ class GatewayAgent:
                 proposal = _PROPOSAL_ADAPTER.validate_python(response.structured_output)
             except ValidationError:
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-            if response.tool_calls or proposal.required_tools:
+            if response.tool_calls:
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
             result = _agent_proposal(
                 proposal,
+                message_text=context.message_text,
                 provider_model=response.provider_model,
                 provider_request_id=response.provider_request_id,
                 prompt_id=prompt_version,
@@ -331,7 +422,7 @@ class GatewayAgent:
 
 
 class KnowledgeGroundedAgent:
-    """Retrieve scoped approved knowledge before delegating a model turn."""
+    """Execute one model-requested, application-scoped knowledge lookup."""
 
     def __init__(
         self,
@@ -346,25 +437,63 @@ class KnowledgeGroundedAgent:
         self._runtime_configuration_resolver = runtime_configuration_resolver
 
     def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
-        if not context.message_text or not context.message_text.strip():
-            return self._provider.propose_turn(context)
+        proposal = self._provider.propose_turn(context)
+        context_requests = [
+            item for item in proposal.required_tools if item.get('tool') in _CONTEXT_TOOL_NAMES
+        ]
+        if context.tool_results and context_requests:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        if len(context_requests) > 1:
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        request = next(
+            (
+                item
+                for item in proposal.required_tools
+                if item.get('tool') == 'knowledge_search' and item.get('operation') == 'search'
+            ),
+            None,
+        )
+        if request is None:
+            return proposal
+        if context.runtime_policy is not None and (
+            'knowledge_search' not in context.runtime_policy.tool_policy.allowed_tool_names
+        ):
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        if context.tool_results or context.knowledge_status != 'not_requested':
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
         if (
             context.runtime_policy is not None
             and not context.runtime_policy.features.knowledge_retrieval
         ):
-            return self._provider.propose_turn(
+            tool_result: dict[str, object] = {
+                'tool': 'knowledge_search',
+                'status': 'unavailable',
+                'source_refs': [],
+                'limitations': ['Knowledge retrieval is disabled by published configuration.'],
+            }
+            final = self._provider.propose_turn(
                 replace(
                     context,
-                    knowledge_results=(),
-                    knowledge_status='disabled',
+                    knowledge_status='unavailable',
                     knowledge_limitations=(
-                        'Knowledge retrieval is disabled by the active published feature setting.',
+                        'Knowledge retrieval is disabled by published configuration.',
                     ),
+                    tool_results=(tool_result,),
                 )
             )
+            return replace(final, tool_results=[tool_result])
         product = _knowledge_product(context.claim.incident_type)
         if product is None:
-            return self._provider.propose_turn(context)
+            tool_result = {
+                'tool': 'knowledge_search',
+                'status': 'no_evidence',
+                'source_refs': [],
+                'limitations': ['A confirmed product family is required for scoped search.'],
+            }
+            final = self._provider.propose_turn(
+                replace(context, knowledge_status='no_evidence', tool_results=(tool_result,))
+            )
+            return replace(final, tool_results=[tool_result])
         resolution_error = False
         if (
             context.runtime_configuration_snapshot is not None
@@ -395,19 +524,30 @@ class KnowledgeGroundedAgent:
             else ()
         )
         if resolution_error:
-            return self._provider.propose_turn(
+            tool_result = {
+                'tool': 'knowledge_search',
+                'status': status,
+                'source_refs': [],
+                'limitations': list(limitations),
+            }
+            final = self._provider.propose_turn(
                 replace(
                     context,
                     knowledge_results=(),
                     knowledge_status=status,
                     knowledge_limitations=limitations,
+                    tool_results=(tool_result,),
                 )
             )
+            return replace(final, tool_results=[tool_result])
+        query = request.get('query')
+        if not isinstance(query, str) or not query.strip() or len(query) > 500:
+            raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
         try:
             chunks = tuple(
                 self._retriever.search(
                     KnowledgeSearch(
-                        text=context.message_text,
+                        text=query.strip(),
                         jurisdiction='NZ',
                         visibility='customer_and_staff',
                         authority='northwind_synthetic_demo',
@@ -429,11 +569,21 @@ class KnowledgeGroundedAgent:
                 limitations = (
                     'No applicable approved knowledge was found for the supplied scope and date.',
                 )
-        return self._provider.propose_turn(
+        tool_result = {
+            'tool': 'knowledge_search',
+            'status': status,
+            'source_refs': [chunk.chunk_id for chunk in chunks],
+            'limitations': list(limitations),
+        }
+        final = self._provider.propose_turn(
             replace(
                 context,
                 knowledge_results=chunks,
                 knowledge_status=status,
                 knowledge_limitations=limitations,
+                tool_results=(tool_result,),
             )
         )
+        if any(item.get('tool') in _CONTEXT_TOOL_NAMES for item in final.required_tools):
+            raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+        return replace(final, tool_results=[tool_result])

@@ -2330,6 +2330,9 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "$ref": "#/components/schemas/FactResolutionState"
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -2358,6 +2361,7 @@
           "source",
           "status",
           "needed_for",
+          "resolution_state",
           "updated_at"
         ],
         "title": "ClaimantContentsItem",
@@ -2828,14 +2832,20 @@
               "$ref": "#/components/schemas/EvidenceFactProposal"
             },
             "maxItems": 50,
-            "minItems": 1,
             "title": "Facts",
             "type": "array"
+          },
+          "outcome": {
+            "default": "ready",
+            "enum": [
+              "ready",
+              "failed",
+              "retry"
+            ],
+            "title": "Outcome",
+            "type": "string"
           }
         },
-        "required": [
-          "facts"
-        ],
         "title": "CompleteEvidenceProcessingRequest",
         "type": "object"
       },
@@ -3152,6 +3162,13 @@
         "additionalProperties": false,
         "description": "One source-aware contents item; Evidence associations remain separate records.",
         "properties": {
+          "assertions": {
+            "items": {
+              "$ref": "#/components/schemas/ContentsItemAssertion"
+            },
+            "title": "Assertions",
+            "type": "array"
+          },
           "category": {
             "maxLength": 100,
             "minLength": 1,
@@ -3170,6 +3187,18 @@
               }
             ],
             "title": "Confidence"
+          },
+          "current_assertion_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Assertion Id"
           },
           "description": {
             "maxLength": 500,
@@ -3208,6 +3237,16 @@
             "title": "Quantity",
             "type": "integer"
           },
+          "resolution_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactResolutionState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "$ref": "#/components/schemas/FormSource"
           },
@@ -3243,6 +3282,93 @@
           "updated_by"
         ],
         "title": "ContentsItem",
+        "type": "object"
+      },
+      "ContentsItemAssertion": {
+        "additionalProperties": false,
+        "properties": {
+          "assertion_id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Assertion Id",
+            "type": "string"
+          },
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loss_type": {
+            "$ref": "#/components/schemas/ContentsLossType"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/ContentsOwnership"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/AssertionRelation",
+            "default": "initial"
+          },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FormStatus"
+          }
+        },
+        "required": [
+          "assertion_id",
+          "description",
+          "category",
+          "loss_type",
+          "ownership",
+          "status",
+          "created_at"
+        ],
+        "title": "ContentsItemAssertion",
         "type": "object"
       },
       "ContentsLossType": {
@@ -3982,6 +4108,9 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "requirements": {
+            "$ref": "#/components/schemas/RequirementResolution"
           },
           "selected_family": {
             "anyOf": [
@@ -5281,9 +5410,20 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "ExternalTaskResultVerification": {
+        "description": "How far a provider result has been checked against the claim.\n\nThere is deliberately no value meaning \"this is now a confirmed claim fact\".\nA provider answer is evidence about the claim, never the claim's own record\nof what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts\nproposed until the claim's own confirmation path accepts them. Promotion to a\nconfirmed fact is a claim-level decision made elsewhere, so this enum cannot\nexpress it and no caller can shortcut to it.",
+        "enum": [
+          "unverified",
+          "consistent",
+          "inconsistent",
+          "review_required"
+        ],
+        "title": "ExternalTaskResultVerification",
+        "type": "string"
+      },
       "FactAssertion": {
         "additionalProperties": false,
-        "description": "One source-linked statement that contributed to a structured field.",
+        "description": "One immutable source-linked assertion about a structured Claim fact.",
         "properties": {
           "assertion_id": {
             "maxLength": 120,
@@ -5319,6 +5459,18 @@
             "$ref": "#/components/schemas/AssertionRelation",
             "default": "initial"
           },
+          "reported_text": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Text"
+          },
           "source_refs": {
             "items": {
               "type": "string"
@@ -5351,7 +5503,6 @@
         "type": "string"
       },
       "FactResolutionState": {
-        "description": "Resolution of a structured fact independent from its storage status.",
         "enum": [
           "resolved",
           "needs_confirmation",
@@ -5456,6 +5607,13 @@
             "title": "Claim Id",
             "type": "string"
           },
+          "confirmed_contents_items": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Confirmed Contents Items",
+            "type": "array"
+          },
           "confirmed_fields": {
             "additionalProperties": {
               "$ref": "#/components/schemas/StructuredFormField-Output"
@@ -5470,6 +5628,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ClaimantDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
               },
               {
                 "type": "null"
@@ -5518,6 +5686,16 @@
           },
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
+          },
+          "dynamic_form": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DynamicFormProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "title": "Revision",
@@ -6969,6 +7147,13 @@
           "claimant_message": {
             "$ref": "#/components/schemas/ClaimantMessage"
           },
+          "contents_item_changes": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimantContentsItem"
+            },
+            "title": "Contents Item Changes",
+            "type": "array"
+          },
           "decision": {
             "anyOf": [
               {
@@ -8337,6 +8522,63 @@
           "reason"
         ],
         "title": "RequeueClaimRequest",
+        "type": "object"
+      },
+      "RequirementResolution": {
+        "additionalProperties": false,
+        "description": "Deterministic information needed for the current safe action.",
+        "properties": {
+          "current_action_satisfied": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Satisfied",
+            "type": "integer"
+          },
+          "current_action_total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Current Action Total",
+            "type": "integer"
+          },
+          "missing_required_now": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Required Now",
+            "type": "array"
+          },
+          "next_required_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Required Item"
+          },
+          "pending_later": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Later",
+            "type": "array"
+          },
+          "ready": {
+            "default": false,
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "satisfied": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Satisfied",
+            "type": "array"
+          }
+        },
+        "title": "RequirementResolution",
         "type": "object"
       },
       "ResolveHandoffRequest": {
@@ -10939,6 +11181,17 @@
           "pending_owner": {
             "$ref": "#/components/schemas/WorkbenchResponsibility"
           },
+          "provider_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reference"
+          },
           "request_type": {
             "title": "Request Type",
             "type": "string"
@@ -10953,6 +11206,76 @@
               }
             ],
             "title": "Result"
+          },
+          "result_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchExternalResultEvidence"
+            },
+            "title": "Result Evidence",
+            "type": "array"
+          },
+          "result_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Result Evidence Ids",
+            "type": "array"
+          },
+          "result_received_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Received At"
+          },
+          "result_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetrievalSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_verification_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalTaskResultVerification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_verified_against_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Verified Against Revision"
+          },
+          "result_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Verified At"
           },
           "service": {
             "title": "Service",
@@ -11016,6 +11339,28 @@
           "lifecycle"
         ],
         "title": "WorkbenchExternalRequest",
+        "type": "object"
+      },
+      "WorkbenchExternalResultEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "file_status": {
+            "$ref": "#/components/schemas/EvidenceFileStatus"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "status",
+          "file_status"
+        ],
+        "title": "WorkbenchExternalResultEvidence",
         "type": "object"
       },
       "WorkbenchFieldItem": {

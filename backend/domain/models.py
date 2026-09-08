@@ -150,8 +150,6 @@ class FormStatus(str, Enum):
 
 
 class FactResolutionState(str, Enum):
-    """Resolution of a structured fact independent from its storage status."""
-
     RESOLVED = 'resolved'
     NEEDS_CONFIRMATION = 'needs_confirmation'
     CLARIFICATION_REQUIRED = 'clarification_required'
@@ -323,7 +321,7 @@ class CustomerNextStep(ContractModel):
 
 
 class TemporalFactValue(ContractModel):
-    """A claimant time statement without inventing missing precision."""
+    """A claimant time statement without invented precision."""
 
     date: str | None = None
     time: str | None = None
@@ -343,9 +341,10 @@ class TemporalFactValue(ContractModel):
 
 
 class FactAssertion(ContractModel):
-    """One source-linked statement that contributed to a structured field."""
+    """One immutable source-linked assertion about a structured Claim fact."""
 
     assertion_id: str = Field(min_length=1, max_length=120)
+    reported_text: str | None = Field(default=None, max_length=5000)
     normalized_value: Any
     source_refs: list[str] = Field(default_factory=list)
     relation: AssertionRelation = AssertionRelation.INITIAL
@@ -371,15 +370,13 @@ class StructuredFormField(ContractModel):
 
     @model_validator(mode='after')
     def derive_resolution_state(self) -> 'StructuredFormField':
-        if self.resolution_state is not None:
-            return self
-        derived = {
-            FormStatus.CONFIRMED: FactResolutionState.RESOLVED,
-            FormStatus.DISPUTED: FactResolutionState.CLARIFICATION_REQUIRED,
-            FormStatus.UNAVAILABLE: FactResolutionState.UNAVAILABLE,
-            FormStatus.SUPERSEDED: FactResolutionState.SUPERSEDED,
-        }.get(self.status, FactResolutionState.NEEDS_CONFIRMATION)
-        self.resolution_state = derived
+        if self.resolution_state is None:
+            self.resolution_state = {
+                FormStatus.CONFIRMED: FactResolutionState.RESOLVED,
+                FormStatus.DISPUTED: FactResolutionState.CLARIFICATION_REQUIRED,
+                FormStatus.UNAVAILABLE: FactResolutionState.UNAVAILABLE,
+                FormStatus.SUPERSEDED: FactResolutionState.SUPERSEDED,
+            }.get(self.status, FactResolutionState.NEEDS_CONFIRMATION)
         return self
 
 
@@ -403,6 +400,34 @@ class MoneyAmount(ContractModel):
     currency: str = Field(min_length=3, max_length=3, pattern=r'^[A-Z]{3}$')
 
 
+class ProposedContentsItem(ContractModel):
+    item_id: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    category: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, ge=1)
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    relation: AssertionRelation | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
+
+
+class ContentsItemAssertion(ContractModel):
+    assertion_id: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=500)
+    category: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(default=1, ge=1)
+    loss_type: ContentsLossType
+    ownership: ContentsOwnership
+    estimated_value: MoneyAmount | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
+    source_refs: list[str] = Field(default_factory=list)
+    relation: AssertionRelation = AssertionRelation.INITIAL
+    status: FormStatus
+    created_at: datetime
+
+
 class ContentsItem(ContractModel):
     """One source-aware contents item; Evidence associations remain separate records."""
 
@@ -418,8 +443,22 @@ class ContentsItem(ContractModel):
     status: FormStatus
     needed_for: NeededFor
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    resolution_state: FactResolutionState | None = None
+    current_assertion_id: str | None = Field(default=None, max_length=120)
+    assertions: list[ContentsItemAssertion] = Field(default_factory=list)
     updated_at: datetime
     updated_by: ActorReference
+
+    @model_validator(mode='after')
+    def derive_legacy_resolution_state(self) -> 'ContentsItem':
+        if self.resolution_state is None:
+            self.resolution_state = {
+                FormStatus.CONFIRMED: FactResolutionState.RESOLVED,
+                FormStatus.DISPUTED: FactResolutionState.CLARIFICATION_REQUIRED,
+                FormStatus.UNAVAILABLE: FactResolutionState.UNAVAILABLE,
+                FormStatus.SUPERSEDED: FactResolutionState.SUPERSEDED,
+            }.get(self.status, FactResolutionState.NEEDS_CONFIRMATION)
+        return self
 
 
 class ClaimantContentsItem(ContractModel):
@@ -436,6 +475,7 @@ class ClaimantContentsItem(ContractModel):
     source_refs: list[str] = Field(default_factory=list)
     status: FormStatus
     needed_for: NeededFor
+    resolution_state: FactResolutionState
     updated_at: datetime
 
 
@@ -634,7 +674,7 @@ class StateChange(ContractModel):
 
 
 class DiscrepancyCandidate(ContractModel):
-    """Internal candidate only; it is not a fraud finding or ReviewSignalRecord."""
+    """Internal candidate only; it never constitutes a fraud decision."""
 
     candidate_id: str = Field(min_length=1, max_length=120)
     field_code: str = Field(min_length=1, max_length=100)
@@ -652,6 +692,7 @@ class ProposedFormChange(ContractModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     precision: FactPrecision = FactPrecision.EXACT
     relation: AssertionRelation | None = None
+    reported_text: str | None = Field(default=None, max_length=5000)
 
 
 class AgentAuthority(ContractModel):
@@ -700,6 +741,7 @@ class AgentDecisionRecord(ContractModel):
     state_changes: list[StateChange] = Field(default_factory=list)
     proposed_signals: list[dict[str, Any]] = Field(default_factory=list)
     required_tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
     next_action_requirements: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
     handoff_id: str | None = None
@@ -709,6 +751,7 @@ class AgentDecisionRecord(ContractModel):
     model_provenance: ModelDecisionProvenance | None = None
     runtime_configuration: RuntimeConfigurationProvenance | None = None
     form_changes: dict[str, StructuredFormField] = Field(default_factory=dict)
+    contents_item_changes: list[ContentsItem] = Field(default_factory=list)
     resulting_revision: int = Field(ge=1)
     created_at: datetime
     discrepancy_candidates: list[DiscrepancyCandidate] = Field(default_factory=list)
@@ -1185,7 +1228,16 @@ class EvidenceFactProposal(ContractModel):
 
 
 class CompleteEvidenceProcessingRequest(ContractModel):
-    facts: list[EvidenceFactProposal] = Field(min_length=1, max_length=50)
+    outcome: Literal['ready', 'failed', 'retry'] = 'ready'
+    facts: list[EvidenceFactProposal] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode='after')
+    def validate_outcome(self) -> 'CompleteEvidenceProcessingRequest':
+        if self.outcome == 'ready' and not self.facts:
+            raise ValueError('A ready processing result must contain at least one fact.')
+        if self.outcome != 'ready' and self.facts:
+            raise ValueError('Failed or retry processing results must not contain facts.')
+        return self
 
 
 class EvidenceFactDecisionRequest(ContractModel):
@@ -1394,6 +1446,7 @@ class FormPatchResponse(ContractModel):
     revision: int
     updated_fields: dict[str, StructuredFormField]
     customer_next_step: CustomerNextStep
+    dynamic_form: 'DynamicFormProjection | None' = None
 
 
 class ClaimantMessage(ContractModel):
@@ -1425,6 +1478,7 @@ class MessageTurnResponse(ContractModel):
     claimant_message: ClaimantMessage
     agent_message: ClaimantMessage | None = None
     form_changes: list[FormChange]
+    contents_item_changes: list[ClaimantContentsItem] = Field(default_factory=list)
     decision: ClaimantDecision | None = None
     handoff: ClaimantHandoff | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
@@ -1446,8 +1500,10 @@ class FormConfirmationResponse(ContractModel):
     claim_id: str
     revision: int
     confirmed_fields: dict[str, StructuredFormField]
+    confirmed_contents_items: list[ClaimantContentsItem] = Field(default_factory=list)
     decision: ClaimantDecision | None = None
     customer_next_step: CustomerNextStep
+    dynamic_form: 'DynamicFormProjection | None' = None
 
 
 class ClaimCreationResponse(ContractModel):
@@ -1508,6 +1564,18 @@ class FieldSelectionResult(ContractModel):
     reason: str
 
 
+class RequirementResolution(ContractModel):
+    """Deterministic information needed for the current safe action."""
+
+    satisfied: list[str] = Field(default_factory=list)
+    missing_required_now: list[str] = Field(default_factory=list)
+    pending_later: list[str] = Field(default_factory=list)
+    next_required_item: str | None = None
+    ready: bool = False
+    current_action_total: int = Field(default=0, ge=0)
+    current_action_satisfied: int = Field(default=0, ge=0)
+
+
 class BranchEvaluationResult(ContractModel):
     """Provider-neutral proposal produced by the branch evaluator."""
 
@@ -1531,6 +1599,7 @@ class BranchEvaluationResult(ContractModel):
     interruption_result: dict[str, Any] = Field(default_factory=dict)
     permitted_actions: list[AgentAction] = Field(default_factory=list)
     permitted_tools: list[str] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
     recomputation_reason: str = Field(min_length=1)
 
 
@@ -1557,6 +1626,7 @@ class BranchEvaluationRecord(ContractModel):
     interruption_result: dict[str, Any] = Field(default_factory=dict)
     permitted_actions: list[AgentAction] = Field(default_factory=list)
     permitted_tools: list[str] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
     recomputation_reason: str = Field(min_length=1)
     status: BranchEvaluationStatus = BranchEvaluationStatus.EVALUATED
     created_at: datetime
@@ -1583,6 +1653,7 @@ class DynamicFormProjection(ContractModel):
     selected_family: Literal['motor', 'home', 'contents'] | None = None
     active_branches: list[str] = Field(default_factory=list)
     fields: list[FieldSelectionResult] = Field(default_factory=list)
+    requirements: RequirementResolution = Field(default_factory=RequirementResolution)
 
 
 ClaimantClaim.model_rebuild()

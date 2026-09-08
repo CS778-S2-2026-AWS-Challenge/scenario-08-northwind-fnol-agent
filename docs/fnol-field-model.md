@@ -400,16 +400,16 @@ Lifecycle states, WorkItems, Evidence, Handoff, Review, Consent, and Integration
 remain separate data contracts. They must not be represented as ordinary claimant fields
 merely to make a Dynamic Form table appear complete.
 
-## Implementation gap table
+## Implementation boundary
 
 | Area | Current backend | Current API | Current persistence | Needed consumer | Owner candidate |
 | --- | --- | --- | --- | --- | --- |
-| Common subset | 13 executable registry codes; bounded form | Partial claim/form schemas | Generic `WorkingClaim.form` | Agent, claimant, staff | `liyang6620`; backend owner |
-| Motor extensions | Registration/damage/drivable only | No complete motor schema | Generic form | Dynamic Form, Agent, staff | `liyang6620` + Agent owner |
-| Home extensions | Address/areas plus ongoing-risk/habitability safety fields | Minimum home projection is available; broader home schema remains candidate | Generic form for registered fields | Dynamic Form, claimant, staff | `liyang6620` + backend owner |
-| Contents extensions | Typed `WorkingClaim.contents_items` and role-safe projections | Item API/immutable item-to-Evidence mapping remains later work | Embedded item records; no flattening into form | Dynamic Form, evidence, staff | `liyang6620` + backend owner |
-| Branch registry | Concepts documented, runtime incomplete | No branch endpoint | Branch history incomplete | Agent/runtime/projections | Agent owner + `liyang6620` |
-| Required-now projection | Partial current-action logic | No complete selection response | Selection history absent | Agent, Dynamic Form, UI | Agent + backend owners |
+| Common subset | 22 executable registered codes; bounded form | Claim, message-turn, form, confirmation, and Dynamic Form projections | Generic `WorkingClaim.form` with assertion history | Agent, claimant, staff | Implemented VP baseline |
+| Motor extensions | Registration, damage, drivable state, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
+| Home extensions | Address, affected areas, ongoing risk, habitability, and common fields | Role-safe Dynamic Form and Claim projections | Generic registered fields | Agent, claimant, staff | Implemented VP baseline |
+| Contents extensions | Typed source-aware item records plus common fields | Role-safe item, Dynamic Form, confirmation, and Claim projections | Embedded item and assertion records | Dynamic Form, claimant, staff | Implemented VP baseline; item-to-Evidence mapping remains open |
+| Branch registry | Mutually exclusive families plus registered conditional branches | Embedded versioned Dynamic Form projection; no standalone public branch endpoint | Immutable applied Branch Evaluation history | Agent/runtime/projections | Implemented VP baseline |
+| Required-now projection | Deterministic current-action requirements and next-item selection | `requirements` on Dynamic Form responses | Selection and requirement result retained in Branch Evaluation | Agent, Dynamic Form, UI | Implemented VP baseline |
 | Item/evidence provenance | Evidence API exists | Item links absent | New immutable mapping | Evidence, claimant, staff | `bdfa123` + `liyang6620` |
 | Consent/declaration | External consent exists; declaration absent | Route-specific only | Consent record; catalogue scopes absent | Agent/integrations/UI | `liyang6620` + backend owner |
 | Registry versioning | Constant exists | No publication API | Claim version not retained | Agent/audit/staff | `liyang6620` + Control Plane owner |
@@ -430,9 +430,9 @@ merely to make a Dynamic Form table appear complete.
 
 ## Open decisions
 
-1. Approve initial fields and enum values for each family.
+1. Approve additional catalogue candidates and enum values beyond the executable VP baseline.
 2. Confirm policy lookup and identity-match inputs without inventing provider schemas.
-3. Approve minimum `required_now` sets for intake, emergency support, evidence, and routing.
+3. Approve production `required_now` sets beyond the implemented VP claim-creation baseline.
 4. Approve retention/visibility for participant, Police, licence, serial, and value data.
 5. Decide whether contents uses one record per item, grouped records, or both with IDs.
 6. Define publication/rollback behavior for in-progress claims.
@@ -440,7 +440,9 @@ merely to make a Dynamic Form table appear complete.
 
 ## Current implementation statement
 
-The backend is a partial implementation, not a complete three-path schema. Contents
-coverage is largely absent from the current registry. This document is a design input for
-later field, branch, API, persistence, Dynamic Form, Agent, and projection work; no listed
-candidate is implemented until its contract, tests, and role projections exist.
+The backend implements a bounded VP baseline for motor, home, and contents. It includes the
+approved executable common and family fields, typed contents items, mutually exclusive family
+selection, conditional branches, deterministic current-action requirements, assertion history,
+role-safe projections, and claim creation for each family. The broader catalogue remains design
+input: a candidate is not implemented until its type, visibility, persistence boundary, Registry
+entry, consumers, and tests are approved together.

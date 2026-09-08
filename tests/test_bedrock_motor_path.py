@@ -111,12 +111,27 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
                             'confidence': 0.97,
                         },
                         {
+                            'field_code': 'incident.occurred_at',
+                            'value': 'this morning',
+                            'confidence': 0.99,
+                        },
+                        {
                             'field_code': 'incident.injury_or_danger',
                             'value': False,
                             'confidence': 0.99,
                         },
                         {
                             'field_code': 'loss.description',
+                            'value': 'Rear bumper damage',
+                            'confidence': 0.96,
+                        },
+                        {
+                            'field_code': 'parties.other_parties',
+                            'value': True,
+                            'confidence': 0.99,
+                        },
+                        {
+                            'field_code': 'vehicle.damage_description',
                             'value': 'Rear bumper damage',
                             'confidence': 0.96,
                         },
@@ -202,8 +217,11 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
             'claim.product_family',
             'incident.type',
             'incident.location',
+            'incident.occurred_at',
             'incident.injury_or_danger',
             'loss.description',
+            'parties.other_parties',
+            'vehicle.damage_description',
         }
         for change in first_body['form_changes']:
             assert change['field']['source_refs'] == [first_body['claimant_message']['message_id']]
@@ -227,12 +245,32 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
             'vehicle.drivable'
         ]
 
+        occurred = client.patch(
+            f'/api/v1/claims/{claim_id}/form',
+            headers={
+                **claimant_headers,
+                'Idempotency-Key': 'bedrock-motor-occurred-at',
+                'If-Match': str(second_body['claim_revision']),
+            },
+            json={
+                'updates': [
+                    {
+                        'field_code': 'incident.occurred_at',
+                        'value': '2026-09-08T09:00:00+12:00',
+                        'status': 'confirmed',
+                        'correction_reason': 'I am confirming the incident time.',
+                    }
+                ]
+            },
+        )
+        assert occurred.status_code == 200
+
         confirm = client.post(
             f'/api/v1/claims/{claim_id}/form/confirmations',
             headers={
                 **claimant_headers,
                 'Idempotency-Key': 'bedrock-motor-confirm',
-                'If-Match': str(second_body['claim_revision']),
+                'If-Match': str(occurred.json()['revision']),
             },
             json={
                 'field_codes': [
@@ -242,12 +280,14 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
                     'incident.location',
                     'incident.injury_or_danger',
                     'loss.description',
+                    'parties.other_parties',
+                    'vehicle.damage_description',
                     'vehicle.drivable',
                 ]
             },
         )
         assert confirm.status_code == 200
-        assert confirm.json()['customer_next_step']['status'] == 'ready_to_create'
+        assert confirm.json()['customer_next_step']['status'] == 'ready_to_create', confirm.json()
 
         external_claim = client.post(
             f'/api/v1/claims/{claim_id}/creation',
@@ -264,5 +304,5 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
     second_claim_context = cast(dict[str, object], request_contexts[1]['claim'])
     assert first_claim_context['incident_type'] is None
     assert 'incident.location' in cast(list[str], second_claim_context['known_field_codes'])
-    assert 'incident.location' not in cast(dict[str, object], second_claim_context['form'])
-    assert 'Queen Street' not in json.dumps(second_claim_context)
+    assert 'incident.location' in cast(dict[str, object], second_claim_context['form'])
+    assert 'Queen Street' in json.dumps(second_claim_context)

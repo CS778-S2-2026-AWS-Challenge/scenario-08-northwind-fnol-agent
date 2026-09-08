@@ -6,7 +6,11 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import Field
 
-from backend.domain.external_services import ExternalTaskRecord, ExternalTaskRequest
+from backend.domain.external_services import (
+    ExternalTaskRecord,
+    ExternalTaskRequest,
+    ExternalTaskResultVerification,
+)
 from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimState,
@@ -14,7 +18,9 @@ from backend.domain.models import (
     ContractModel,
     CustomerNextStep,
     CustomerUpdateRecord,
+    EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceStatus,
     MessageRecord,
     PageInfo,
     StaffActionRecord,
@@ -24,7 +30,7 @@ from backend.domain.models import (
     WorkbenchSession,
     WorkflowState,
 )
-from backend.domain.retrieval import RetrievalRecord
+from backend.domain.retrieval import RetrievalRecord, RetrievalSource
 from backend.domain.tag_registry import StaffTag
 
 
@@ -441,6 +447,12 @@ class WorkbenchSignalDetail(WorkbenchRiskSignal):
     created_at: datetime | None = None
 
 
+class WorkbenchExternalResultEvidence(ContractModel):
+    evidence_id: str
+    status: EvidenceStatus
+    file_status: EvidenceFileStatus
+
+
 class WorkbenchExternalLifecycle(ContractModel):
     stakeholder: str
     service: str
@@ -452,7 +464,15 @@ class WorkbenchExternalLifecycle(ContractModel):
     pending_owner: WorkbenchResponsibility
     status_label: str
     status_detail: str
+    provider_reference: str | None = None
     result: str | None = None
+    result_source: RetrievalSource | None = None
+    result_verification_state: ExternalTaskResultVerification | None = None
+    result_received_at: datetime | None = None
+    result_verified_at: datetime | None = None
+    result_verified_against_revision: int | None = Field(default=None, ge=1)
+    result_evidence_ids: list[str] = Field(default_factory=list)
+    result_evidence: list[WorkbenchExternalResultEvidence] = Field(default_factory=list)
     limitation: str | None = None
     next_action: str
     needs_attention: bool = False

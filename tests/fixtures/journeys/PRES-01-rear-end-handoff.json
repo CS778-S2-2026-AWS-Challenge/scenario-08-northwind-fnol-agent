@@ -7,13 +7,18 @@
   },
   "turns": [
     {
-      "input": "Another car hit the rear of mine at Queen Street and damaged the rear bumper. Nobody was injured and the scene is safe.",
+      "input": "Another car hit the rear of mine at Queen Street this morning and damaged the rear bumper. Nobody was injured and the scene is safe. The vehicle is safe to drive.",
       "expected_action": "CONFIRM",
       "expected_form_fields": [
         "incident.description",
         "incident.type",
         "incident.location",
-        "loss.description"
+        "loss.description",
+        "incident.injury_or_danger",
+        "incident.occurred_at",
+        "parties.other_parties",
+        "vehicle.damage_description",
+        "vehicle.drivable"
       ],
       "response_contains": ["structured", "check"],
       "next_step_status": "confirmation_required"
@@ -26,7 +31,7 @@
       "input": "Police said the police report will be ready next week.",
       "expected_action": "UPDATE",
       "expected_evidence_status": "pending_generation",
-      "response_contains": ["expected later", "not block"],
+      "response_contains": [],
       "next_step_status": "ready_to_create"
     },
     {

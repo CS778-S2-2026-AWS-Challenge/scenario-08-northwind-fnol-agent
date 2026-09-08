@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import at08ResumeFixture from '../../tests/fixtures/api/AT-08-resume-public.json'
+import { setClaimantAccessToken } from './api.js'
 
 const realtime = vi.hoisted(() => ({ streamClaimUpdates: vi.fn() }))
 
@@ -243,11 +244,13 @@ describe.skip('legacy claimant intake (migrate scenarios to the adaptive Agent j
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     holdRealtimeConnection()
+    setClaimantAccessToken(null)
     localStorage.clear()
     window.history.replaceState({}, '', '/')
   })
 
   afterEach(() => {
+    setClaimantAccessToken(null)
     vi.unstubAllGlobals()
   })
 
@@ -1575,12 +1578,249 @@ describe('adaptive claimant entry', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
     holdRealtimeConnection()
+    setClaimantAccessToken(null)
     localStorage.clear()
     window.history.replaceState({}, '', '/')
   })
 
   afterEach(() => {
+    setClaimantAccessToken(null)
+    vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  function evidenceRecord(fileStatus) {
+    return {
+      evidence_id: 'evd_test',
+      kind: 'incident_photo',
+      status: 'received',
+      file_status: fileStatus,
+      original_filename: 'damage.png',
+      media_type: 'image/png',
+      size_bytes: 3,
+      wait_type: fileStatus === 'processing' ? 'internal' : null,
+      responsible_party: fileStatus === 'processing' ? 'system' : 'claimant',
+      context_summary: fileStatus === 'failed'
+        ? 'Northwind could not process this evidence upload.'
+        : 'Northwind is processing the completed evidence upload.',
+    }
+  }
+
+  function installAuthenticatedEvidenceApi({ onEvidenceRead, completion = 'lost' }) {
+    setClaimantAccessToken('claimant-test-token')
+    const counts = { evidenceReads: 0, contentUploads: 0, completionAttempts: 0 }
+    fetch.mockImplementation((url, options = {}) => {
+      const method = options.method || 'GET'
+      if (url === '/api/v1/claims/capabilities') {
+        return jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] })
+      }
+      if (url === '/api/v1/account') {
+        return jsonResponse({
+          customer_id: 'cus_test',
+          development_identity: true,
+          profile: { display_name: 'Test Claimant', email: 'test@example.invalid', phone: '' },
+          preferences: { email: true, sms: false },
+        })
+      }
+      if (url === '/api/v1/claims' && method === 'POST') return jsonResponse(createdClaim(), 201)
+      if (url.endsWith('/evidence') && method === 'GET') {
+        counts.evidenceReads += 1
+        const result = onEvidenceRead(counts.evidenceReads)
+        if (result instanceof Error) return Promise.reject(result)
+        if (result && typeof result.then === 'function') return result.then(jsonResponse)
+        return jsonResponse(result)
+      }
+      if (url.endsWith('/sessions/ses_test/messages') && method === 'POST') {
+        return jsonResponse({ ...firstTurn(), claim_revision: 5 })
+      }
+      if (url.endsWith('/evidence/uploads') && method === 'POST') {
+        return jsonResponse({
+          evidence_id: 'evd_test',
+          revision: 2,
+          upload: {
+            method: 'PUT',
+            url: '/api/v1/claims/clm_test/evidence/evd_test/content',
+            headers: { 'Content-Type': 'image/png' },
+            expires_at: '2026-08-12T01:00:00Z',
+          },
+          constraints: { max_size_bytes: 10_000_000, allowed_media_types: ['image/png'] },
+          customer_next_step: nextStep,
+        }, 201)
+      }
+      if (url.endsWith('/content') && method === 'PUT') {
+        counts.contentUploads += 1
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+      if (url.endsWith('/complete') && method === 'POST') {
+        counts.completionAttempts += 1
+        if (completion === 'lost') return Promise.reject(new TypeError('connection lost'))
+        return jsonResponse({
+          evidence: evidenceRecord('processing'),
+          revision: 3,
+          status_url: '/api/v1/claims/clm_test/evidence',
+          customer_next_step: nextStep,
+        }, 202)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+    return counts
+  }
+
+  it('reconciles a lost completion response before retrying without another content upload', async () => {
+    const counts = installAuthenticatedEvidenceApi({
+      onEvidenceRead: (read) => read === 1
+        ? { items: [], revision: 1 }
+        : { items: [evidenceRecord('processing')], revision: 3 },
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    await user.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    expect((await screen.findAllByText('Processing')).length).toBeGreaterThan(0)
+    expect(counts.contentUploads).toBe(1)
+    expect(counts.completionAttempts).toBe(1)
+  })
+
+  it('keeps polling after a transient status failure and recovers to ready', async () => {
+    installAuthenticatedEvidenceApi({
+      completion: 'accepted',
+      onEvidenceRead: (read) => {
+        if (read === 1) return { items: [], revision: 1 }
+        if (read === 2) return new Error('temporary status outage')
+        return { items: [evidenceRecord('ready')], revision: 4 }
+      },
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    await waitFor(
+      () => expect(screen.getByRole('status')).toHaveTextContent(/keep trying to reconnect/i),
+      { timeout: 4000 },
+    )
+    await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0), { timeout: 5000 })
+  }, 10000)
+
+  it('does not let a delayed evidence poll roll the whole claim revision backwards', async () => {
+    let releaseDelayedPoll
+    let delayedPollStarted = false
+    installAuthenticatedEvidenceApi({
+      completion: 'accepted',
+      onEvidenceRead: (read) => {
+        if (read === 1) return { items: [], revision: 1 }
+        if (read === 2) return { items: [evidenceRecord('processing')], revision: 4 }
+        delayedPollStarted = true
+        return new Promise((resolve) => {
+          releaseDelayedPoll = () => resolve({ items: [evidenceRecord('processing')], revision: 4 })
+        })
+      },
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    await waitFor(() => expect(delayedPollStarted).toBe(true), { timeout: 5000 })
+    await user.type(screen.getByPlaceholderText('Write the details you know...'), 'The car was moved after the incident.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(fetch.mock.calls.some(([url, options = {}]) =>
+      url.endsWith('/sessions/ses_test/messages') && options.method === 'POST')).toBe(true))
+    expect(screen.getByText('Revision 5')).toBeVisible()
+
+    releaseDelayedPoll()
+    await waitFor(() => expect(screen.getByText('Revision 5')).toBeVisible())
+    expect(screen.getAllByText('Processing').length).toBeGreaterThan(0)
+  }, 10000)
+
+  it('presents processing failure with a status-check recovery action', async () => {
+    installAuthenticatedEvidenceApi({
+      completion: 'accepted',
+      onEvidenceRead: (read) => read === 1
+        ? { items: [], revision: 1 }
+        : { items: [evidenceRecord('failed')], revision: 4 },
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    await waitFor(() => expect(screen.getAllByText('Processing failed').length).toBeGreaterThan(0), { timeout: 4000 })
+    expect(screen.getByRole('button', { name: 'Check status' })).toBeVisible()
+  }, 10000)
+
+  it('promotes an anonymous claim before allowing the claimant to resume with an upload', async () => {
+    fetch.mockImplementation((url, options = {}) => {
+      const method = options.method || 'GET'
+      if (url === '/api/v1/claims/capabilities') {
+        return jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] })
+      }
+      if (url === '/api/v1/claims' && method === 'POST') return jsonResponse(createdClaim(), 201)
+      if (url.endsWith('/sessions/ses_test/messages') && method === 'POST') return jsonResponse(firstTurn())
+      if (url === '/api/v1/auth/sessions' && method === 'POST') {
+        return jsonResponse({ customer_id: 'cus_test', access_token: 'promoted-token', token_type: 'Bearer' }, 201)
+      }
+      if (url === '/api/v1/claims/clm_test/promote' && method === 'POST') {
+        return jsonResponse({ ...createdClaim().claim, revision: 2, form: { 'incident.description': firstTurn().form_changes[0].field } })
+      }
+      if (url === '/api/v1/account') {
+        return jsonResponse({
+          customer_id: 'cus_test',
+          development_identity: true,
+          profile: { display_name: 'Test Claimant', email: 'test@example.invalid', phone: '' },
+          preferences: { email: true, sms: false },
+        })
+      }
+      if (url.endsWith('/evidence') && method === 'GET') return jsonResponse({ items: [], revision: 2 })
+      if (url.endsWith('/evidence/uploads') && method === 'POST') {
+        return jsonResponse({
+          evidence_id: 'evd_test',
+          revision: 3,
+          upload: {
+            method: 'PUT',
+            url: '/api/v1/claims/clm_test/evidence/evd_test/content',
+            headers: { 'Content-Type': 'image/png' },
+            expires_at: '2026-08-12T01:00:00Z',
+          },
+          constraints: { max_size_bytes: 10_000_000, allowed_media_types: ['image/png'] },
+          customer_next_step: nextStep,
+        }, 201)
+      }
+      if (url.endsWith('/content') && method === 'PUT') return Promise.resolve(new Response(null, { status: 204 }))
+      if (url.endsWith('/complete') && method === 'POST') {
+        return jsonResponse({
+          evidence: evidenceRecord('processing'),
+          revision: 4,
+          status_url: '/api/v1/claims/clm_test/evidence',
+          customer_next_step: nextStep,
+        }, 202)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.type(screen.getByLabelText('Incident description'), 'A car hit mine.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByText('Please check the incident description.')).toBeVisible()
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/sign in before uploading/i)
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/evidence/uploads'))).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: /Log in to save your chat/ }))
+    await user.type(screen.getByLabelText('Email address'), 'test@example.invalid')
+    await user.type(screen.getByLabelText('Password'), 'test-password')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    expect(await screen.findByText('Please check the incident description.')).toBeVisible()
+
+    await user.upload(document.querySelector('input[type="file"]'), new File(['abc'], 'damage.png', { type: 'image/png' }))
+
+    expect((await screen.findAllByText('Processing')).length).toBeGreaterThan(0)
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/claims/clm_test/promote',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    const uploadRequest = fetch.mock.calls.find(([url]) => url.endsWith('/evidence/uploads'))
+    expect(uploadRequest[1].headers.Authorization).toBe('Bearer promoted-token')
   })
 
   it('presents the Agent as the single primary entry without legacy guided controls', () => {
@@ -1655,6 +1895,97 @@ describe('adaptive claimant entry', () => {
     expect(screen.getByText('The incident date is needed for the current safe action.')).toBeVisible()
     expect(screen.getAllByText('Not provided yet').length).toBeGreaterThan(0)
     expect(screen.queryByText('Internal identity field.')).not.toBeInTheDocument()
+  })
+
+  it('replaces a corrected contents item from the authoritative turn projection', async () => {
+    const contentsItem = {
+      item_id: 'itm_laptop',
+      description: 'Laptop computer',
+      category: 'electronics',
+      quantity: 1,
+      loss_type: 'damaged',
+      ownership: 'owned',
+      estimated_value: null,
+      source: 'claimant',
+      source_refs: ['msg_contents_initial'],
+      status: 'proposed',
+      needed_for: 'current_action',
+      resolution_state: 'needs_confirmation',
+      updated_at: '2026-09-08T00:00:00Z',
+    }
+    const dynamicForm = {
+      claim_id: 'clm_test',
+      claim_revision: 2,
+      field_registry_version: '5',
+      branch_rules_version: 'vp-dynamic-form-branch-rules-v1',
+      selected_family: 'contents',
+      active_branches: ['family.contents'],
+      fields: [],
+      requirements: {
+        satisfied: [],
+        missing_required_now: ['contents.items'],
+        pending_later: [],
+        next_required_item: 'contents.items',
+        ready: false,
+        current_action_satisfied: 0,
+        current_action_total: 6,
+      },
+    }
+    const initialTurn = {
+      ...firstTurn(),
+      claim_revision: 2,
+      form_changes: [],
+      contents_item_changes: [contentsItem],
+      dynamic_form: dynamicForm,
+      decision: {
+        ...firstTurn().decision,
+        customer_next_step: {
+          ...firstTurn().decision.customer_next_step,
+          required_items: ['contents.items'],
+        },
+      },
+    }
+    const correctedTurn = {
+      ...initialTurn,
+      claim_revision: 3,
+      claimant_message: {
+        ...initialTurn.claimant_message,
+        message_id: 'msg_contents_correction',
+        content: { type: 'text', text: 'Actually, the laptop was stolen.' },
+      },
+      agent_message: {
+        ...initialTurn.agent_message,
+        message_id: 'msg_contents_agent_correction',
+        in_reply_to: 'msg_contents_correction',
+      },
+      contents_item_changes: [{
+        ...contentsItem,
+        loss_type: 'stolen',
+        source_refs: ['msg_contents_correction'],
+        updated_at: '2026-09-08T00:01:00Z',
+      }],
+      dynamic_form: { ...dynamicForm, claim_revision: 3 },
+    }
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ claim_types: ['motor', 'home', 'contents'], models: [] }))
+      .mockResolvedValueOnce(jsonResponse(createdClaim(), 201))
+      .mockResolvedValueOnce(jsonResponse(initialTurn))
+      .mockResolvedValueOnce(jsonResponse({ items: [], revision: 2, page: { next_cursor: null } }))
+      .mockResolvedValueOnce(jsonResponse(correctedTurn))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText('Incident description'), 'My laptop was damaged.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    expect(await screen.findByText('1 × electronics · damaged')).toBeVisible()
+
+    await user.type(screen.getByLabelText('Add more information'), 'Actually, it was stolen.')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByText('1 × electronics · stolen')).toBeVisible()
+    expect(screen.queryByText('1 × electronics · damaged')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Laptop computer needs your review.')).toHaveLength(1)
+    expect(screen.getByText('Updated with revision 3')).toBeVisible()
   })
 
   it('starts an anonymous claim with a browser session header instead of an empty bearer token', async () => {
@@ -1833,7 +2164,7 @@ describe('adaptive claimant entry', () => {
     }))
 
     expect(await screen.findByText(staffMessage.content.text)).toBeVisible()
-    expect(screen.getByText('A Northwind staff member is now assisting you.')).toBeVisible()
+    expect(screen.getAllByText('A Northwind staff member is now assisting you.').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: 'Motor claim details' })).toBeVisible()
     expect(screen.getByText('Updated with revision 4')).toBeVisible()
     expect(realtime.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({

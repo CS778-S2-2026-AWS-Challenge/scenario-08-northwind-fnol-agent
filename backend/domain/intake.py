@@ -1,7 +1,14 @@
+"""Claimant-facing wording for deterministic Dynamic Form requirements."""
+
 import re
 from dataclasses import dataclass
 
-from backend.domain.models import CustomerNextStep, FormStatus, ResponsibleParty, WorkingClaim
+from backend.domain.models import (
+    BranchEvaluationResult,
+    CustomerNextStep,
+    RequirementResolution,
+    ResponsibleParty,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -9,76 +16,136 @@ class ControlledIntakeField:
     field_code: str
     prompt: str
     confirmation_prompt: str
-    status: str
 
 
-# This bounded sequence keeps the prototype repeatable until Northwind supplies
-# claim-type requirements and approved routing rules.
-CONTROLLED_INTAKE_FIELDS = (
-    ControlledIntakeField(
-        field_code='incident.description',
-        prompt='Tell me what happened in your own words.',
-        confirmation_prompt='Please check the incident description before I continue.',
-        status='describe_incident',
-    ),
-    ControlledIntakeField(
-        field_code='incident.location',
-        prompt='Where did the incident happen?',
-        confirmation_prompt='Please check the incident location before I continue.',
-        status='provide_incident_location',
-    ),
-    ControlledIntakeField(
-        field_code='loss.description',
-        prompt='What was damaged or lost?',
-        confirmation_prompt='Please check the damage or loss description before I continue.',
-        status='describe_loss',
-    ),
-)
+INTAKE_REQUIREMENTS = {
+    item.field_code: item
+    for item in (
+        ControlledIntakeField(
+            'claim.product_family',
+            'Is this a motor, home, or contents claim?',
+            'Please check the claim type before I continue.',
+        ),
+        ControlledIntakeField(
+            'incident.description',
+            'Tell me what happened in your own words.',
+            'Please check the incident description before I continue.',
+        ),
+        ControlledIntakeField(
+            'incident.injury_or_danger',
+            'Is anyone injured, or is there any immediate danger?',
+            'Please check the safety information before I continue.',
+        ),
+        ControlledIntakeField(
+            'incident.occurred_at',
+            'When did the incident happen?',
+            'Please check the incident time before I continue.',
+        ),
+        ControlledIntakeField(
+            'incident.location',
+            'Where did the incident happen?',
+            'Please check the incident location before I continue.',
+        ),
+        ControlledIntakeField(
+            'loss.description',
+            'What was damaged, lost, or stolen?',
+            'Please check the damage or loss description before I continue.',
+        ),
+        ControlledIntakeField(
+            'parties.other_parties',
+            'Was another person or vehicle involved?',
+            'Please check whether another party was involved.',
+        ),
+        ControlledIntakeField(
+            'vehicle.damage_description',
+            'What damage can you see on the vehicle?',
+            'Please check the vehicle damage description.',
+        ),
+        ControlledIntakeField(
+            'vehicle.drivable',
+            'Can the vehicle be driven safely?',
+            'Please check whether the vehicle is drivable.',
+        ),
+        ControlledIntakeField(
+            'property.address',
+            'What is the address of the affected property?',
+            'Please check the affected property address.',
+        ),
+        ControlledIntakeField(
+            'property.affected_areas',
+            'Which areas of the property are affected?',
+            'Please check the affected property areas.',
+        ),
+        ControlledIntakeField(
+            'property.ongoing_risk',
+            'Is there an ongoing risk such as an active leak, fire, or exposed area?',
+            'Please check the ongoing property risk.',
+        ),
+        ControlledIntakeField(
+            'property.habitable',
+            'Can the property still be lived in safely?',
+            'Please check whether the property is habitable.',
+        ),
+        ControlledIntakeField(
+            'contents.items',
+            'Tell me about one damaged, lost, or stolen item.',
+            'Please check the item details before I continue.',
+        ),
+    )
+}
 
-PRODUCT_FAMILY_INTAKE_FIELD = ControlledIntakeField(
-    field_code='claim.product_family',
-    prompt='Is this a motor, home, or contents claim?',
-    confirmation_prompt='Please check the claim type before I continue.',
-    status='identify_product_family',
-)
-
-MOTOR_INCIDENT_PATTERN = re.compile(
-    r'\b(?:car|vehicle|motorcycle|motorbike|truck|van|ute|bumper|windscreen)\b',
-    re.IGNORECASE,
-)
+_FAMILY_PATTERNS = {
+    'motor': re.compile(r'\b(car|vehicle|motor|collision|crash|road|traffic)\b', re.I),
+    'home': re.compile(r'\b(home|house|property|roof|room|building|pipe|flood)\b', re.I),
+    'contents': re.compile(r'\b(contents|belongings|laptop|phone|stolen|theft|lost)\b', re.I),
+}
 
 
 def infer_controlled_product_family(message_text: str) -> str | None:
-    """Classify only the explicit motor vocabulary supported by the prototype."""
-    if MOTOR_INCIDENT_PATTERN.search(message_text) is not None:
-        return 'motor'
-    return None
+    """Return one unambiguous supported family from explicit claimant vocabulary."""
+
+    matches = [
+        family for family, pattern in _FAMILY_PATTERNS.items() if pattern.search(message_text)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
-def next_controlled_intake_field(claim: WorkingClaim) -> ControlledIntakeField | None:
-    for intake_field in CONTROLLED_INTAKE_FIELDS:
-        field = claim.form.get(intake_field.field_code)
-        if field is None or field.status is not FormStatus.CONFIRMED:
-            return intake_field
-    product_family_field = claim.form.get(PRODUCT_FAMILY_INTAKE_FIELD.field_code)
-    if claim.incident_type is None and (
-        product_family_field is None or product_family_field.status is not FormStatus.CONFIRMED
-    ):
-        return PRODUCT_FAMILY_INTAKE_FIELD
-    return None
+def intake_field_for_requirement(requirement: str | None) -> ControlledIntakeField | None:
+    """Return claimant wording for one registered current-action requirement."""
+
+    return INTAKE_REQUIREMENTS.get(requirement or '')
 
 
-def next_controlled_intake_step(claim: WorkingClaim) -> CustomerNextStep:
-    intake_field = next_controlled_intake_field(claim)
+def next_requirement_field(
+    evaluation: BranchEvaluationResult | None,
+) -> ControlledIntakeField | None:
+    """Return wording for the evaluator-selected next requirement."""
+
+    if evaluation is None:
+        return INTAKE_REQUIREMENTS['incident.description']
+    return intake_field_for_requirement(evaluation.requirements.next_required_item)
+
+
+def next_requirement_step(requirements: RequirementResolution) -> CustomerNextStep:
+    """Project deterministic requirements into the existing claimant next-step contract."""
+
+    intake_field = intake_field_for_requirement(requirements.next_required_item)
     if intake_field is not None:
         return CustomerNextStep(
-            status=intake_field.status,
+            status='more_information_needed',
             summary=intake_field.prompt,
             responsible_party=ResponsibleParty.CLAIMANT,
             required_items=[intake_field.field_code],
         )
+    if requirements.ready:
+        return CustomerNextStep(
+            status='ready_to_create',
+            summary='Your confirmed report is ready for claim creation.',
+            responsible_party=ResponsibleParty.CLAIMANT,
+        )
     return CustomerNextStep(
-        status='ready_to_create',
-        summary='Your confirmed report is ready for controlled claim creation.',
+        status='clarification_needed',
+        summary='Please clarify the claim type before the report continues.',
         responsible_party=ResponsibleParty.CLAIMANT,
+        required_items=['claim.product_family'],
     )

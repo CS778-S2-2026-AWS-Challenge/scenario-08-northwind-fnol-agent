@@ -38,8 +38,18 @@ import ExternalServiceAction from './components/ExternalServiceAction.jsx'
 
 const FIELD_LABELS = {
   'incident.description': 'What happened',
+  'incident.injury_or_danger': 'Injury or immediate danger',
+  'incident.occurred_at': 'When it happened',
   'incident.location': 'Incident location',
   'loss.description': 'Damage or loss',
+  'parties.other_parties': 'Other people or vehicles involved',
+  'vehicle.damage_description': 'Vehicle damage',
+  'vehicle.drivable': 'Vehicle safe to drive',
+  'property.address': 'Affected property',
+  'property.affected_areas': 'Affected areas',
+  'property.ongoing_risk': 'Ongoing property risk',
+  'property.habitable': 'Property safe to live in',
+  'contents.items': 'Damaged, lost, or stolen items',
 }
 
 const INPUT_LABELS = {
@@ -115,6 +125,15 @@ function messageText(message) {
   return message?.content?.type === 'text' ? message.content.text : ''
 }
 
+function evidenceFileStatusLabel(fileStatus, status) {
+  if (fileStatus === 'awaiting_upload') return 'Upload incomplete'
+  if (fileStatus === 'processing') return 'Processing'
+  if (fileStatus === 'failed') return 'Processing failed'
+  if (fileStatus === 'ready') return 'Ready'
+  if (fileStatus) return fileStatus
+  return status === 'received' ? 'Received' : status
+}
+
 function mergeFields(current, changes) {
   return changes.reduce(
     (fields, change) => ({ ...fields, [change.field_code]: change.field }),
@@ -122,22 +141,25 @@ function mergeFields(current, changes) {
   )
 }
 
-function claimProgress(nextStep, form) {
-  const status = nextStep?.status
-  const stages = {
-    describe_incident: { current: 1, total: 3, label: 'Describe the incident' },
-    provide_incident_location: { current: 2, total: 3, label: 'Add the key details' },
-    confirmation_required: { current: 2, total: 3, label: 'Check the details' },
-    ready_to_create: { current: 3, total: 3, label: 'Ready to create' },
-    claim_created: { current: 3, total: 3, label: 'Claim submitted' },
-  }
-  const fallback = Object.keys(form).length > 0
-    ? { current: 2, total: 3, label: 'Add the key details' }
-    : stages.describe_incident
-  const stage = stages[status] || fallback
+function mergeContentsItems(current, changes) {
+  const incomingById = new Map(changes.map((item) => [item.item_id, item]))
+  const merged = current.map((item) => incomingById.get(item.item_id) || item)
+  const currentIds = new Set(current.map((item) => item.item_id))
+  return [
+    ...merged,
+    ...changes.filter((item) => !currentIds.has(item.item_id)),
+  ]
+}
+
+function claimProgress(nextStep, dynamicForm) {
+  const requirements = dynamicForm?.requirements
+  const total = requirements?.current_action_total || 0
+  const current = requirements?.current_action_satisfied || 0
   return {
-    ...stage,
-    saved: Object.values(form).filter((field) => field.status === 'confirmed').length,
+    current,
+    total,
+    label: requirements?.ready ? 'Ready to create' : nextStep?.summary || 'Describe the incident',
+    available: Boolean(requirements),
   }
 }
 
@@ -160,6 +182,7 @@ function App() {
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [form, setForm] = useState({})
+  const [contentsItems, setContentsItems] = useState([])
   const [dynamicForm, setDynamicForm] = useState(null)
   const [nextStep, setNextStep] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -175,6 +198,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
   const [evidenceItems, setEvidenceItems] = useState([])
+  const [evidenceSyncNotice, setEvidenceSyncNotice] = useState('')
+  const [evidencePollingKey, setEvidencePollingKey] = useState(0)
   const [resumeContext, setResumeContext] = useState(null)
   const [externalServiceInteraction, setExternalServiceInteraction] = useState({
     claimId: null,
@@ -189,6 +214,10 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const latestEvidenceRevision = useRef(0)
+  const latestEvidenceItems = useRef([])
+  const evidenceHasLocalMutation = useRef(false)
+  const evidenceClaimId = useRef(null)
   const hasStarted = claim !== null
 
   useEffect(() => {
@@ -281,12 +310,16 @@ function App() {
     () => Object.entries(form).filter(([, field]) => field.status === 'proposed'),
     [form],
   )
+  const proposedContentsItems = useMemo(
+    () => contentsItems.filter((item) => item.status === 'proposed'),
+    [contentsItems],
+  )
   const confirmedFields = useMemo(
     () => Object.entries(form).filter(([, field]) => field.status === 'confirmed'),
     [form],
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
-  const progress = useMemo(() => claimProgress(nextStep, form), [nextStep, form])
+  const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [nextStep, dynamicForm])
   const visibleDynamicFields = useMemo(
     () => (dynamicForm?.fields || []).filter(
       (field) => !['inactive', 'system_owned'].includes(field.selection_state),
@@ -298,6 +331,77 @@ function App() {
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
     ? externalServiceInteraction.error
     : null
+
+  function rememberClaimRevision(revision) {
+    const numericRevision = Number(revision || 0)
+    latestRevision.current = Math.max(latestRevision.current, numericRevision)
+    return numericRevision
+  }
+
+  function setClaimRevision(revision) {
+    const numericRevision = rememberClaimRevision(revision)
+    setClaim((current) => current
+      ? { ...current, revision: Math.max(Number(current.revision || 0), numericRevision) }
+      : current)
+  }
+
+  function attachmentForEvidence(evidence, current = {}) {
+    const fileStatus = evidence.file_status || evidence.status
+    const status = fileStatus === 'awaiting_upload'
+      ? 'failed'
+      : fileStatus === 'processing' || fileStatus === 'failed'
+        ? fileStatus
+        : 'uploaded'
+    const statusLabel = evidenceFileStatusLabel(fileStatus, evidence.status) || 'Uploaded'
+    const canCheckStatus = fileStatus === 'failed'
+      && current.retryFile
+      && current.retryAttempt
+    return {
+      ...current,
+      id: current.id || evidence.evidence_id,
+      evidenceId: evidence.evidence_id,
+      name: evidence.original_filename || evidence.kind,
+      status,
+      statusLabel,
+      ...(canCheckStatus
+        ? {
+          retry: () => handleFileSelected(current.retryFile, current.retryAttempt),
+          retryLabel: 'Check status',
+        }
+        : fileStatus === 'failed'
+          ? {}
+          : { retry: null, retryLabel: null }),
+    }
+  }
+
+  function syncEvidenceProjection(response) {
+    const responseRevision = Number(response.revision || 0)
+    const currentClaimRevision = Math.max(Number(claim?.revision || 0), latestRevision.current)
+    const minimumRevision = Math.max(latestEvidenceRevision.current, currentClaimRevision)
+    if (responseRevision < minimumRevision) return false
+    if (!response.items?.length && (latestEvidenceItems.current.length || evidenceHasLocalMutation.current)) return false
+    latestEvidenceRevision.current = Math.max(latestEvidenceRevision.current, responseRevision)
+    const items = response.items || []
+    latestEvidenceItems.current = items
+    setEvidenceItems(items)
+    setClaimRevision(responseRevision)
+    setAttachments((current) => {
+      const currentByEvidenceId = new Map(
+        current.filter((item) => item.evidenceId).map((item) => [item.evidenceId, item]),
+      )
+      if (items.length === 0 && current.some((item) => item.status === 'uploading' || item.retry || item.retryFile)) {
+        return current
+      }
+      if (current.some((item) => item.status === 'uploading')) {
+        return current.map((item) => {
+          const evidence = items.find((candidate) => candidate.evidence_id === item.evidenceId)
+          return evidence ? attachmentForEvidence(evidence, item) : item
+        })
+      }
+      return items.map((item) => attachmentForEvidence(item, currentByEvidenceId.get(item.evidence_id)))
+    })
+    return true
+  }
 
   function setServiceConsentChecked(consentChecked) {
     setExternalServiceInteraction((current) => ({
@@ -337,6 +441,7 @@ function App() {
       latestRevision.current = currentClaim.revision
       setClaim(currentClaim)
       setForm(currentClaim.form)
+      setContentsItems(currentClaim.contents_items || [])
       setDynamicForm(currentClaim.dynamic_form || null)
       setNextStep(currentClaim.customer_next_step)
       setHandoff(currentClaim.handoff || null)
@@ -404,71 +509,167 @@ function App() {
 
   useEffect(() => {
     if (!claim?.claim_id) {
+      evidenceClaimId.current = null
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
       setEvidenceItems([])
       setAttachments([])
+      setEvidencePollingKey(0)
       return undefined
+    }
+    if (evidenceClaimId.current !== claim.claim_id) {
+      evidenceClaimId.current = claim.claim_id
+      latestEvidenceRevision.current = 0
+      latestEvidenceItems.current = []
+      evidenceHasLocalMutation.current = false
     }
     let active = true
     getClaimEvidence(claim.claim_id)
       .then((response) => {
         if (active) {
-          setEvidenceItems(response.items || [])
-          setAttachments((current) => current.some((item) => item.status === 'uploading')
-            ? current
-            : (response.items || []).map((item) => ({
-              id: item.evidence_id,
-              evidenceId: item.evidence_id,
-              name: item.original_filename || item.kind,
-              status: item.file_status === 'awaiting_upload' ? 'failed' : 'uploaded',
-              statusLabel: item.file_status === 'awaiting_upload' ? 'Upload incomplete' : (item.file_status || 'Uploaded'),
-            })))
-          setClaim((current) => current ? { ...current, revision: response.revision } : current)
+          if (syncEvidenceProjection(response)) setEvidenceSyncNotice('')
+          if ((response.items || []).some((item) => item.file_status === 'processing')) {
+            setEvidencePollingKey((current) => current + 1)
+          }
         }
       })
       .catch(() => {})
     return () => { active = false }
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claim?.claim_id])
 
-  async function handleFileSelected(file) {
+  useEffect(() => {
+    if (!claim?.claim_id || !evidencePollingKey) {
+      return undefined
+    }
+    let active = true
+    let timer
+    let delay = 1500
+    const maxDelay = 12000
+    const schedule = () => {
+      timer = globalThis.setTimeout(sync, delay)
+    }
+    async function sync() {
+      try {
+        const response = await getClaimEvidence(claim.claim_id)
+        if (!active) return
+        const applied = syncEvidenceProjection(response)
+        if (applied) setEvidenceSyncNotice('')
+        delay = 1500
+        if (!applied || (response.items || []).some((item) => item.file_status === 'processing')) schedule()
+      } catch {
+        if (!active) return
+        setEvidenceSyncNotice('We could not check the latest file status because the connection was interrupted. We will keep trying to reconnect.')
+        delay = Math.min(delay * 2, maxDelay)
+        schedule()
+      }
+    }
+    schedule()
+    return () => {
+      active = false
+      globalThis.clearTimeout(timer)
+    }
+  // The projection updater only uses stable React setters and is intentionally local to this view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claim?.claim_id, evidencePollingKey])
+
+  async function handleFileSelected(file, existingAttempt = null) {
     if (isBusy) return
+    if (!hasClaimantAccessToken()) {
+      setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
+      setStatus('error')
+      return
+    }
     setError('')
-    const localId = requestId('file')
-    setAttachments((current) => [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+    const attempt = existingAttempt || {
+      localId: requestId('file'),
+      claimKey: requestId('claim'),
+      uploadKey: requestId('evidence-upload'),
+      completeKey: requestId('evidence-complete'),
+    }
+    const localId = attempt.localId
+    setAttachments((current) => existingAttempt
+      ? current.map((item) => item.id === localId
+        ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
+        : item)
+      : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
     try {
       let activeClaim = claim
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType })
+        const created = await createClaim({ idempotencyKey: attempt.claimKey, incidentType: claimType })
         activeClaim = created.claim
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
         setForm(activeClaim.form)
+        setContentsItems(activeClaim.contents_items || [])
         setDynamicForm(activeClaim.dynamic_form || null)
         setNextStep(activeClaim.customer_next_step)
+      }
+      if (existingAttempt) {
+        const authoritative = await getClaimEvidence(activeClaim.claim_id)
+        syncEvidenceProjection(authoritative)
+        setEvidenceSyncNotice('')
+        const observed = (authoritative.items || []).find(
+          (item) => item.evidence_id === attempt.evidenceId,
+        )
+        if (observed && observed.file_status !== 'awaiting_upload') {
+          if (observed.file_status === 'processing') {
+            setEvidencePollingKey((current) => current + 1)
+          }
+          setAttachments((current) => current.map((item) => item.id === localId
+            ? attachmentForEvidence(observed, {
+              ...item,
+              retry: observed.file_status === 'failed'
+                ? () => handleFileSelected(file, attempt)
+                : null,
+              retryLabel: observed.file_status === 'failed' ? 'Check status' : null,
+            })
+            : item))
+          setStatus('idle')
+          return
+        }
       }
       const requested = await requestEvidenceUpload({
         claimId: activeClaim.claim_id,
         revision: activeClaim.revision,
         file,
         kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
+        idempotencyKey: attempt.uploadKey,
       })
-      setClaim((current) => current ? { ...current, revision: requested.revision } : current)
+      evidenceHasLocalMutation.current = true
+      latestEvidenceRevision.current = requested.revision
+      attempt.evidenceId = requested.evidence_id
+      setClaimRevision(requested.revision)
       await uploadEvidenceContent({ upload: requested.upload, file })
-      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+      const fileBytes = new Uint8Array(await file.arrayBuffer())
+      const checksumBuffer = await globalThis.crypto.subtle.digest('SHA-256', fileBytes)
       const checksum = `sha256:${Array.from(new Uint8Array(checksumBuffer), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
       const completed = await completeEvidenceUpload({
         claimId: activeClaim.claim_id,
         evidenceId: requested.evidence_id,
         revision: requested.revision,
         checksum,
+        idempotencyKey: attempt.completeKey,
       })
-      setClaim((current) => current ? { ...current, revision: completed.revision } : current)
+      latestEvidenceRevision.current = completed.revision
+      attempt.evidenceId = completed.evidence.evidence_id
+      latestEvidenceItems.current = [completed.evidence]
+      setEvidencePollingKey((current) => current + 1)
+      setClaimRevision(completed.revision)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'uploaded', statusLabel: 'Uploaded', evidenceId: completed.evidence.evidence_id }
+        ? attachmentForEvidence(completed.evidence, {
+          ...item,
+          retryFile: file,
+          retryAttempt: attempt,
+        })
         : item))
+      setStatus('idle')
     } catch (requestError) {
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file) }
+        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
         : item))
       showError(requestError)
     }
@@ -479,6 +680,7 @@ function App() {
     const current = await getClaim(claim.claim_id)
     setClaim(current)
     setForm(current.form)
+    setContentsItems(current.contents_items || [])
     setDynamicForm(current.dynamic_form || null)
     setNextStep(current.customer_next_step)
   }
@@ -522,6 +724,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(activeSessionId)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
         messageWasSubmitted = true
@@ -541,8 +744,9 @@ function App() {
         ...(turn.agent_message ? [turn.agent_message] : []),
       ])
       setForm((current) => mergeFields(current, turn.form_changes))
+      setContentsItems((current) => mergeContentsItems(current, turn.contents_item_changes || []))
       setDynamicForm(turn.dynamic_form || null)
-      setClaim((current) => ({ ...current, revision: turn.claim_revision }))
+      setClaimRevision(turn.claim_revision)
       if (turn.decision) setNextStep(turn.decision.customer_next_step)
       if (turn.handoff) setHandoff(turn.handoff)
       setDraft('')
@@ -591,6 +795,7 @@ function App() {
         const refreshedClaim = await getClaim(claim.claim_id)
         setClaim(refreshedClaim)
         setForm(refreshedClaim.form)
+        setContentsItems(refreshedClaim.contents_items || [])
         setDynamicForm(refreshedClaim.dynamic_form || null)
         setNextStep(refreshedClaim.customer_next_step)
         setSessionId(session.session_id)
@@ -608,6 +813,7 @@ function App() {
       setSessionId(created.session.session_id)
       setMessages([])
       setForm(created.claim.form)
+      setContentsItems(created.claim.contents_items || [])
       setDynamicForm(created.claim.dynamic_form || null)
       setNextStep(created.claim.customer_next_step)
       setHandoff(null)
@@ -623,11 +829,14 @@ function App() {
   }
 
   async function confirmProposedFields() {
-    if (!claim || proposedFields.length === 0 || isBusy) return
+    if (!claim || (proposedFields.length === 0 && proposedContentsItems.length === 0) || isBusy) return
     setError('')
     setStatus('confirming')
     try {
-      const fieldCodes = proposedFields.map(([fieldCode]) => fieldCode)
+      const fieldCodes = [
+        ...proposedFields.map(([fieldCode]) => fieldCode),
+        ...(proposedContentsItems.length > 0 ? ['contents.items'] : []),
+      ]
       const fingerprint = `${claim.revision}:${fieldCodes.join(',')}`
       if (pendingConfirmation.current?.fingerprint !== fingerprint) {
         pendingConfirmation.current = {
@@ -642,7 +851,9 @@ function App() {
         idempotencyKey: pendingConfirmation.current.idempotencyKey,
       })
       setForm((current) => ({ ...current, ...response.confirmed_fields }))
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setContentsItems(response.confirmed_contents_items || contentsItems)
+      setDynamicForm(response.dynamic_form || null)
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       pendingConfirmation.current = null
       setStatus('idle')
@@ -679,6 +890,7 @@ function App() {
       let revision = update.revision
       let updatedForm = { ...form, ...update.updated_fields }
       let updatedNextStep = update.customer_next_step
+      let updatedDynamicForm = update.dynamic_form || null
 
       if (field.status === 'proposed') {
         const confirmation = await confirmClaimFields({
@@ -689,11 +901,13 @@ function App() {
         revision = confirmation.revision
         updatedForm = { ...updatedForm, ...confirmation.confirmed_fields }
         updatedNextStep = confirmation.customer_next_step
+        updatedDynamicForm = confirmation.dynamic_form || null
       }
 
       setForm(updatedForm)
-      setClaim((current) => ({ ...current, revision }))
+      setClaimRevision(revision)
       setNextStep(updatedNextStep)
+      setDynamicForm(updatedDynamicForm)
       setEditingField(null)
       setStatus('idle')
     } catch (requestError) {
@@ -714,7 +928,7 @@ function App() {
         revision: claim.revision,
         idempotencyKey: pendingSupportRequest.current.idempotencyKey,
       })
-      setClaim((current) => ({ ...current, revision: response.revision }))
+      setClaimRevision(response.revision)
       setNextStep(response.customer_next_step)
       setHandoff(response.handoff)
       pendingSupportRequest.current = null
@@ -807,6 +1021,7 @@ function App() {
         latestRevision.current = current.revision
         setClaim(current)
         setForm(current.form)
+        setContentsItems(current.contents_items || [])
         setDynamicForm(current.dynamic_form || null)
         setNextStep(current.customer_next_step)
         setHandoff(current.handoff || null)
@@ -879,6 +1094,7 @@ function App() {
       setSessionId(session.session_id)
       setMessages(conversation.items)
       setForm(current.form)
+      setContentsItems(current.contents_items || [])
       setDynamicForm(current.dynamic_form || null)
       setNextStep(current.customer_next_step)
       setHandoff(current.handoff || null)
@@ -905,6 +1121,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
@@ -917,6 +1134,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
@@ -950,6 +1168,7 @@ function App() {
           const promoted = await promoteAnonymousClaim(claim.claim_id)
           setClaim(promoted)
           setForm(promoted.form)
+          setContentsItems(promoted.contents_items || [])
           setDynamicForm(promoted.dynamic_form || null)
           setNextStep(promoted.customer_next_step)
         } catch (promotionError) {
@@ -962,6 +1181,7 @@ function App() {
         setClaim(created.claim)
         setSessionId(created.session.session_id)
         setForm(created.claim.form)
+        setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
         setNextStep(created.claim.customer_next_step)
       }
@@ -982,6 +1202,7 @@ function App() {
     setSessionId(null)
     setMessages([])
     setForm({})
+    setContentsItems([])
     setDynamicForm(null)
     setNextStep(null)
     setHandoff(null)
@@ -1275,7 +1496,7 @@ function App() {
                     {evidenceItems.map((item) => (
                       <li key={item.evidence_id} className="uploaded-file-row">
                         <div><strong>{item.original_filename || item.kind}</strong><span>{item.media_type || 'File'} · {item.file_status || item.status}</span></div>
-                        <span className="file-status">{item.file_status === 'processing' ? 'Processing' : item.status === 'received' ? 'Received' : item.file_status}</span>
+                        <span className="file-status">{evidenceFileStatusLabel(item.file_status, item.status)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1300,19 +1521,29 @@ function App() {
 
             <section
               className="journey-progress"
-              aria-label={`Claim progress: Step ${progress.current} of ${progress.total}, ${progress.label}`}
+              aria-label={progress.available
+                ? `Claim progress: ${progress.current} of ${progress.total} current details satisfied, ${progress.label}`
+                : `Claim progress: ${progress.label}`}
             >
               <div className="journey-progress-heading">
-                <span>Step {progress.current} of {progress.total}</span>
+                <span>{progress.available
+                  ? `${progress.current} of ${progress.total} needed now`
+                  : 'Start your report'}</span>
                 <strong>{progress.label}</strong>
               </div>
               <div className="progress-track" aria-hidden="true">
                 <span
                   className="progress-fill"
-                  style={{ '--progress-width': `${(progress.current / progress.total) * 100}%` }}
+                  style={{
+                    '--progress-width': progress.total > 0
+                      ? `${(progress.current / progress.total) * 100}%`
+                      : '0%',
+                  }}
                 />
               </div>
-              <p>{progress.saved} {progress.saved === 1 ? 'detail' : 'details'} saved from your conversation.</p>
+              <p>{progress.available
+                ? `${progress.current} ${progress.current === 1 ? 'requirement is' : 'requirements are'} satisfied for the current action.`
+                : 'Describe what happened and Northwind will identify what is needed next.'}</p>
             </section>
 
             <div className="message-list" aria-live="polite">
@@ -1452,13 +1683,20 @@ function App() {
               />
             )}
 
+            {evidenceSyncNotice && (
+              <p className="backend-status" role="status">
+                <span className="status-dot" />
+                <span>{evidenceSyncNotice}</span>
+              </p>
+            )}
+
             <MessageComposer
               draft={draft}
               setDraft={setDraft}
               onSubmit={sendMessage}
               inputLabel={inputLabel}
               busy={isBusy}
-              hint={proposedFields.length > 0
+              hint={proposedFields.length > 0 || proposedContentsItems.length > 0
                 ? 'You can keep describing the incident or correct a detail while these suggestions are waiting for review.'
                 : null}
               buttonLabel={status === 'sending' ? 'Sending...' : failedMessage ? 'Retry message' : 'Send'}
@@ -1512,7 +1750,17 @@ function App() {
                   </div>
                   <span className="dynamic-form-revision">Updated with revision {dynamicForm.claim_revision}</span>
                 </div>
-                {visibleDynamicFields.length === 0 ? (
+                {dynamicForm.requirements?.next_required_item && (
+                  <p className="dynamic-form-reason">
+                    Next needed: {fieldLabel(dynamicForm.requirements.next_required_item)}
+                  </p>
+                )}
+                {(dynamicForm.requirements?.pending_later || []).length > 0 && (
+                  <p className="dynamic-form-reason">
+                    Needed later: {dynamicForm.requirements.pending_later.map(fieldLabel).join(', ')}
+                  </p>
+                )}
+                {visibleDynamicFields.length === 0 && contentsItems.length === 0 ? (
                   <p className="dynamic-form-empty">No additional details are needed for the current step.</p>
                 ) : (
                   <ul className="dynamic-form-fields">
@@ -1537,6 +1785,20 @@ function App() {
                         </li>
                       )
                     })}
+                    {contentsItems.map((item) => (
+                      <li className="dynamic-form-field" key={item.item_id}>
+                        <div className="dynamic-form-field-heading">
+                          <span>{item.description}</span>
+                          <span className={`dynamic-selection dynamic-selection-${item.status === 'confirmed' ? 'candidate_now' : 'required_now'}`}>
+                            {item.status === 'confirmed' ? 'Confirmed item' : 'Needs your review'}
+                          </span>
+                        </div>
+                        <p className="dynamic-form-value">
+                          {item.quantity} × {item.category} · {item.loss_type}
+                        </p>
+                        <p className="dynamic-form-meta">{fieldSourceLabel(item.source)}</p>
+                      </li>
+                    ))}
                   </ul>
                 )}
               </section>
@@ -1599,13 +1861,16 @@ function App() {
               </div>
             )}
 
-            {proposedFields.length > 0 && editingField === null && (
+            {(proposedFields.length > 0 || proposedContentsItems.length > 0) && editingField === null && (
               <section className="confirmation-bar" aria-labelledby="confirmation-title">
                 <p className="confirmation-kicker">Review before we continue</p>
                 <h2 id="confirmation-title">Check these details</h2>
                 <ul className="confirmation-list">
                   {proposedFields.map(([fieldCode]) => (
                     <li key={fieldCode}>{fieldLabel(fieldCode)} needs your review.</li>
+                  ))}
+                  {proposedContentsItems.map((item) => (
+                    <li key={item.item_id}>{item.description} needs your review.</li>
                   ))}
                 </ul>
                 <p>Use the conversation to correct anything in your own words, or edit a detail here.</p>
@@ -1620,7 +1885,9 @@ function App() {
               </section>
             )}
 
-            {confirmedFields.length > 0 && proposedFields.length === 0 && (
+            {(confirmedFields.length > 0 || contentsItems.length > 0)
+              && proposedFields.length === 0
+              && proposedContentsItems.length === 0 && (
               <div className="next-step" role="status">
                 <span>Next</span>
                 <p>{nextStep?.summary}</p>

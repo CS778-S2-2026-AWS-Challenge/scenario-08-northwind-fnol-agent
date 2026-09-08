@@ -170,7 +170,7 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
                     'profile_id': 'integration-model-profile',
                     'purpose': 'agent_turn',
                     'privacy_class': 'synthetic_fnol',
-                    'prompt_version': 'northwind-fnol-motor-claimant-v4',
+                    'prompt_version': 'northwind-fnol-claimant-v5',
                     'evaluation_status': 'configured',
                     'timeout_seconds': 30,
                     'structured_output': True,
@@ -299,19 +299,19 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
         assert len(provider_requests) == 2
         no_evidence_messages = cast(list[dict[str, object]], provider_requests[1]['messages'])
         no_evidence_context = json.loads(cast(str, no_evidence_messages[1]['content']))
-        assert no_evidence_context['knowledge_status'] == 'no_evidence'
+        assert no_evidence_context['knowledge_status'] == 'not_requested'
         assert no_evidence_context['knowledge_citations'] == []
 
         request_body = provider_requests[0]
         assert request_body['model'] == 'control-plane-model'
         provider_messages = cast(list[dict[str, object]], request_body['messages'])
         system_prompt = cast(str, provider_messages[0]['content'])
-        assert 'Prompt ID: `northwind-fnol-motor-claimant-v4`' in system_prompt
-        assert 'untrusted reference material' in system_prompt
+        assert 'Prompt ID: `northwind-fnol-claimant-v5`' in system_prompt
+        assert 'provenance and confirmation state' in system_prompt
         model_context_content = cast(str, provider_messages[1]['content'])
         model_context = json.loads(model_context_content)
-        assert model_context['knowledge_status'] == 'evidence_found'
-        assert model_context['knowledge_citations'][0]['chunk_id'] == 'chunk-integration-motor'
+        assert model_context['knowledge_status'] == 'not_requested'
+        assert model_context['knowledge_citations'] == []
 
         search_count = len(knowledge_retriever.searches)
         unknown_claim_response = client.post(
