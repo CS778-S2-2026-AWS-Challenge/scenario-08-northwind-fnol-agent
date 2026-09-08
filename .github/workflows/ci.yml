@@ -79,7 +79,7 @@ jobs:
               python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
               ;;
             scoped)
-              python -m pytest --cov=backend --cov-report=json:coverage.json $(python scripts/select_backend_tests.py --tests)
+              python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $(python scripts/select_backend_tests.py --tests)
               python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
               ;;
             skip)
