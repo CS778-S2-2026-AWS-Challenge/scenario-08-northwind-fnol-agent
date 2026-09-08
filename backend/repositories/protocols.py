@@ -614,6 +614,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError

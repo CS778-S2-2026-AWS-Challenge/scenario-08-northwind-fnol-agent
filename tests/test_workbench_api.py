@@ -1530,7 +1530,7 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
     client: TestClient,
     staff_auth_headers: dict[str, str],
 ) -> None:
-    response = client.put(
+    response = client.patch(
         '/api/v1/workbench/staff/presence',
         headers=staff_auth_headers,
         json={'online': True, 'available': True, 'lease_seconds': 30},
@@ -1545,16 +1545,19 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
 
     online = client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers)
     assert online.status_code == 200
-    assert any(item['staff_id'] == 'stf_demo' for item in online.json())
+    assert any(item['staff_id'] == 'stf_demo' for item in online.json()['items'])
 
-    offline = client.put(
+    offline = client.patch(
         '/api/v1/workbench/staff/presence',
         headers=staff_auth_headers,
         json={'online': False, 'available': True, 'lease_seconds': 30},
     )
     assert offline.status_code == 200
     assert offline.json()['available'] is False
-    assert client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json() == []
+    assert (
+        client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json()['items']
+        == []
+    )
 
 
 def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_reads(
@@ -1604,7 +1607,7 @@ def test_staff_logout_removes_authenticated_staff_from_online_pool(
     )
     assert any(
         item['staff_id'] == staff_id
-        for item in client.get('/api/v1/workbench/staff/online', headers=headers).json()
+        for item in client.get('/api/v1/workbench/staff/online', headers=headers).json()['items']
     )
 
     response = client.delete('/api/v1/staff/auth/session', headers=headers)
@@ -1653,7 +1656,7 @@ def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
     claim_id, handoff_id, revision = _request_staff_support(
         client, auth_headers, repository, key_suffix='offline-staff'
     )
-    client.put(
+    client.patch(
         '/api/v1/workbench/staff/presence',
         headers=staff_auth_headers,
         json={'online': False, 'available': False, 'lease_seconds': 30},
@@ -1696,4 +1699,7 @@ def test_expired_presence_is_not_claimable(
         ),
         current.revision,
     )
-    assert client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json() == []
+    assert (
+        client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json()['items']
+        == []
+    )

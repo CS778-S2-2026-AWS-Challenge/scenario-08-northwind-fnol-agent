@@ -55,6 +55,11 @@ class StaffPresenceUpdate(BaseModel):
     lease_seconds: int = Field(default=60, ge=15, le=300)
 
 
+class StaffPresencePage(BaseModel):
+    items: list[StaffPresenceRecord]
+    page: PageInfo
+
+
 class StaffLoginRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

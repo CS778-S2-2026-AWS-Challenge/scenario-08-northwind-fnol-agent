@@ -1798,9 +1798,9 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/workbench/claims` | Query queue projections and filters |
-| `GET` | `/workbench/staff/online` | Read the currently claimable online staff pool |
+| `GET` | `/workbench/staff/online` | Read a paginated page of currently claimable online staff |
 | `GET` | `/workbench/staff/presence` | Read the authenticated staff member's presence lease |
-| `PUT` | `/workbench/staff/presence` | Heartbeat or change the authenticated staff member's presence |
+| `PATCH` | `/workbench/staff/presence` | Heartbeat or change the authenticated staff member's presence |
 | `GET` | `/workbench/claims/filter-metadata` | Read canonical staff queue filter options |
 | `GET` | `/workbench/claims/{claim_id}` | Read full authorised claim detail |
 | `GET` | `/workbench/claims/{claim_id}/evidence/{evidence_id}/content` | View completed evidence content as authorised staff |
@@ -2083,7 +2083,7 @@ Response `200` returns the new claim revision and assignment. Assignment does no
 
 ### Staff presence and Claim acceptance
 
-`PUT /api/v1/workbench/staff/presence` accepts `online`, `available`, and a bounded
+`PATCH /api/v1/workbench/staff/presence` accepts `online`, `available`, and a bounded
 `lease_seconds` value (15-300). The server records `last_seen_at` and `expires_at`; an expired
 lease is not claimable even when `online` and `available` are true. A successful staff login also
 starts a five-minute online lease. `GET /api/v1/workbench/staff/online` returns only unexpired
@@ -2907,6 +2907,8 @@ All errors use one envelope:
 | `INVALID_TAG_FILTER` | `400` | Workbench tag filter is unknown, unpublished, or not exposed as filterable by the backend Registry |
 | `REVISION_REQUIRED` | `409` | Required `If-Match` header absent |
 | `REVISION_CONFLICT` | `409` | Claim changed since the client read it |
+| `STAFF_NOT_AVAILABLE` | `409` | Staff presence is offline, unavailable, or its lease has expired |
+| `STAFF_PRESENCE_UNAVAILABLE` | `503` | Staff presence could not be persisted; retry after the dependency recovers |
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |

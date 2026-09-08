@@ -1773,6 +1773,7 @@ class MongoDBRepository:
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         supplied = (staff_action, customer_update, signal_decision, handoff, message)
         if (
@@ -1809,6 +1810,7 @@ class MongoDBRepository:
                 mongo_session,
                 records=records,
                 required_staff_id=required_staff_id,
+                required_staff_revision=required_staff_revision,
             )
         )
 
@@ -2035,6 +2037,7 @@ class MongoDBRepository:
         records: list[tuple[str, str, BaseModel]],
         session: SessionRecord | None = None,
         required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
         self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
@@ -2045,6 +2048,11 @@ class MongoDBRepository:
                     'record_type': 'staff_presence',
                     'online': True,
                     'available': True,
+                    **(
+                        {'revision': required_staff_revision}
+                        if required_staff_revision is not None
+                        else {}
+                    ),
                     'expires_at': {'$gt': datetime.now(UTC).isoformat()},
                 },
                 session=mongo_session,

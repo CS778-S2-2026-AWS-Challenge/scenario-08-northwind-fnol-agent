@@ -198,6 +198,7 @@ def accept_handoff(
     if replay is not None:
         return HandoffMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
+    presence = repository.get_staff_presence(principal.subject)
     require_claimable_staff(repository, principal)
     projected_action = require_workbench_action(
         repository, principal, claim, expected, 'human.accept_handoff', handoff_id
@@ -270,6 +271,7 @@ def accept_handoff(
         idempotency,
         handoff=accepted,
         required_staff_id=principal.subject,
+        required_staff_revision=presence.revision if presence is not None else None,
     )
     return response
 

@@ -1502,11 +1502,19 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         if required_staff_id is not None:
             presence = self._staff_presence.get(required_staff_id)
-            if presence is None or not presence.is_claimable(datetime.now(UTC)):
+            if (
+                presence is None
+                or not presence.is_claimable(datetime.now(UTC))
+                or (
+                    required_staff_revision is not None
+                    and presence.revision != required_staff_revision
+                )
+            ):
                 raise KeyError('staff_not_available')
         if not any((staff_action, customer_update, signal_decision, handoff, message)):
             raise KeyError(claim.claim_id)
