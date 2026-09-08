@@ -161,8 +161,8 @@ make their boundary explicit.
 | `property.fixture_damage` | Fixtures and built-ins | list/yes | C,E/y/y/y | safety/c/candidate | Registry/domain/API | C/S; privacy |
 | `property.cause_source` | Water, fire, weather, impact source | enum/scalar/no | C,E/y/y/y | safety/y/candidate | Registry; no coverage inference | C/S; safety |
 | `property.severity` | Bounded extent/severity | enum/no | C,E/y/y/y | safety/c/candidate | Deterministic rules required | C/S; review |
-| `property.ongoing_risk` | Leak, fire, collapse, exposure | enum/no | C/y/y/y | urgent/y/candidate | Emergency branch | C/S; safety |
-| `property.habitable` | Safe/usable to occupy | enum/no | C,S/y/y/y | support/y/candidate | Restricted field + review | C/S; safety/review |
+| `property.ongoing_risk` | Leak, fire, collapse, exposure | enum/no | C/y/y/y | urgent/y/registered | Registry + home family; may trigger emergency mitigation | C/S; safety |
+| `property.habitable` | Safe/usable to occupy | boolean/no | C,S/y/y/y | support/y/registered | Registry + home family; may trigger accommodation support | C/S; safety/review |
 | `property.utilities` | Power, gas, water, communications | object/no | C/y/y/y | safety/c/candidate | Structured value | C/S; safety |
 | `mitigation.emergency_action` | Emergency/mitigation taken | list/yes | C,S,E/y/y/y | safety/y/record | WorkItem/evidence + projection | C/S; consent |
 | `mitigation.temporary_repair` | Temporary repair details | object/yes | C,S,E/y/y/y | safety/pending/record | WorkItem/Integration record | S; consent |
@@ -179,19 +179,19 @@ coverage. Repeated item facts belong to item records, not a flat claim form.
 
 | Code | Meaning | Type/multi | src/NL/conf/infer | safe/now/status | Current implementation / needed boundary | vis/auth |
 | --- | --- | --- | --- | --- | --- | --- |
-| `contents.items` | Affected item collection | record/yes | C,E/y/y/y | evidence/y/record | New `ContentsItem` API/domain/persistence | C/S; privacy |
-| `contents.item.description` | Item description | scalar/no | C,E/y/y/y | evidence/y/candidate | Item schema/projection | C/S; privacy |
-| `contents.item.category` | Item category | enum/no | C,E/y/y/y | routing/c/candidate | Bounded enum registry | C/S; privacy |
-| `contents.item.quantity` | Count of similar items | scalar/no | C/y/y/y | evidence/c/candidate | Validation + grouping | C/S; privacy |
+| `contents.items` | Affected item collection | record/yes | C,E/y/y/y | evidence/y/record | Typed `ContentsItem` domain/API/persistence record | C/S; privacy |
+| `contents.item.description` | Item description | scalar/no | C,E/y/y/y | evidence/y/record | Typed item field and role-safe projection | C/S; privacy |
+| `contents.item.category` | Item category | scalar/no | C,E/y/y/y | routing/c/record | Opaque display category; bounded vocabulary remains a follow-up decision | C/S; privacy |
+| `contents.item.quantity` | Count of similar items | scalar/no | C/y/y/y | evidence/c/record | Typed item field with minimum-one validation | C/S; privacy |
 | `contents.item.brand` | Brand | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
 | `contents.item.model` | Model/style | scalar/no | C,E/y/y/y | n/c/candidate | Item schema | C/S; privacy |
 | `contents.item.serial_number` | Serial/unique identifier | scalar/no | C,E/y/y/y | evidence/pending/candidate | Masked restricted field | S; privacy |
-| `contents.item.ownership` | Owned, leased, borrowed, gifted | enum/no | C,E/y/y/y | authority/c/candidate | Enum + authority rule | C/S; privacy |
+| `contents.item.ownership` | Owned, leased, borrowed, gifted, other | enum/no | C,E/y/y/y | authority/c/record | Typed item enum; wider authority rules remain follow-up work | C/S; privacy |
 | `contents.item.purchase_date` | Approximate/exact purchase date | date-time/no | C,E/y/y/y | evidence/pending/candidate | Item schema | C/S; privacy |
 | `contents.item.purchase_source` | Retailer, private sale, gift | enum/scalar/no | C,E/y/y/y | evidence/pending/candidate | Bounded values | C/S; privacy |
-| `contents.item.estimated_value` | Claimant estimate, not settlement value | scalar/no | C,E/y/y/y | evidence/c/candidate | Money type + review boundary | C/S; review |
+| `contents.item.estimated_value` | Claimant estimate, not settlement value | money/no | C,E/y/y/y | evidence/c/record | Optional currency-qualified money value; not settlement authority | C/S; review |
 | `contents.item.replacement_need` | Replace, repair, substitute | enum/no | C/y/y/y | next action/c/candidate | Item rule + WorkItem | C/S; privacy |
-| `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/candidate | Enum + theft branch | C/S; authority |
+| `contents.item.loss_type` | Damaged, lost, stolen, destroyed | enum/no | C,E/y/y/y | routing/y/record | Typed item enum; theft conditional behavior remains a separate branch | C/S; authority |
 | `contents.discovery_at` | When loss was discovered | date-time/no | C/y/y/y | safety/c/candidate | Registry/domain field | C/S; privacy |
 | `theft.entry_context` | Forced entry/access/unknown | enum/scalar/no | C,E/y/y/y | authority/y/candidate | Restricted theft branch | C/S; authority/privacy |
 | `contents.receipt_availability` | Receipt/invoice status | enum/no | C,E/y/y/y | evidence/y/candidate | Evidence projection | C/S; privacy |
@@ -404,10 +404,10 @@ merely to make a Dynamic Form table appear complete.
 
 | Area | Current backend | Current API | Current persistence | Needed consumer | Owner candidate |
 | --- | --- | --- | --- | --- | --- |
-| Common subset | 19 registry codes; bounded form | Partial claim/form schemas | Generic `WorkingClaim.form` | Agent, claimant, staff | `liyang6620`; backend owner |
+| Common subset | 13 executable registry codes; bounded form | Partial claim/form schemas | Generic `WorkingClaim.form` | Agent, claimant, staff | `liyang6620`; backend owner |
 | Motor extensions | Registration/damage/drivable only | No complete motor schema | Generic form | Dynamic Form, Agent, staff | `liyang6620` + Agent owner |
-| Home extensions | Address/areas only | No complete home schema | Generic form | Dynamic Form, claimant, staff | `liyang6620` + backend owner |
-| Contents extensions | Dedicated fields absent | No item API | No item/group mapping | Dynamic Form, evidence, staff | `liyang6620` + backend owner |
+| Home extensions | Address/areas plus ongoing-risk/habitability safety fields | Minimum home projection is available; broader home schema remains candidate | Generic form for registered fields | Dynamic Form, claimant, staff | `liyang6620` + backend owner |
+| Contents extensions | Typed `WorkingClaim.contents_items` and role-safe projections | Item API/immutable item-to-Evidence mapping remains later work | Embedded item records; no flattening into form | Dynamic Form, evidence, staff | `liyang6620` + backend owner |
 | Branch registry | Concepts documented, runtime incomplete | No branch endpoint | Branch history incomplete | Agent/runtime/projections | Agent owner + `liyang6620` |
 | Required-now projection | Partial current-action logic | No complete selection response | Selection history absent | Agent, Dynamic Form, UI | Agent + backend owners |
 | Item/evidence provenance | Evidence API exists | Item links absent | New immutable mapping | Evidence, claimant, staff | `bdfa123` + `liyang6620` |

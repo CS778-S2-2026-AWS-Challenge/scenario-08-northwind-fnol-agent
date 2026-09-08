@@ -1,4 +1,6 @@
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 import mongomock
 import pytest
@@ -383,6 +385,22 @@ def test_runtime_registry_excludes_design_only_and_separate_record_codes() -> No
     assert 'contents.items' not in registry.field_codes
     assert 'other_party.contact' not in registry.field_codes
     assert 'motor.evidence_refs' not in registry.field_codes
+
+
+def test_vp_mapping_covers_registry_once_and_preserves_contents_boundary() -> None:
+    mapping_path = Path(__file__).parents[1] / 'docs' / 'vp-field-branch-mapping.md'
+    mapping = mapping_path.read_text(encoding='utf-8')
+    mapped_codes = re.findall(r'^\| `([^`]+)` \|', mapping, flags=re.MULTILINE)
+
+    assert len(mapped_codes) == len(set(mapped_codes)) == len(REGISTERED_FIELD_CODES)
+    assert set(mapped_codes) == set(REGISTERED_FIELD_CODES)
+    assert '| `contents` |' not in mapping
+    assert (
+        'The `contents` family activates the independent `WorkingClaim.contents_items` list'
+        in mapping
+    )
+    assert 'Contents-specific repeated facts are represented by the independent' in mapping
+    assert 'WorkingClaim.contents_items` record' in mapping
 
 
 def test_branch_results_retain_rule_and_source_coordinates() -> None:

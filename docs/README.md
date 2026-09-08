@@ -58,6 +58,7 @@ them:
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
+- [VP Field and Branch Mapping](vp-field-branch-mapping.md)
 - [Identity and Developer-Mode Contract](identity-and-developer-mode.md)
 - [MinIO Object-Storage Boundary](minio-object-storage.md)
 - [Provider-Neutral Model Gateway](model-gateway.md)
