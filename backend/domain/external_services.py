@@ -1526,3 +1526,93 @@ def continuation_for_failed_task(task: ExternalTaskRecord) -> ExternalTaskContin
         continuation=continuation,
         failure_permits_another_attempt=permits_attempt,
     )
+
+
+class ResultAdvanceNotPermittedError(ValueError):
+    """The stored result does not allow this write to replace it."""
+
+
+_RESULT_INGESTION_FACTS = (
+    'result_id',
+    'task_id',
+    'claim_id',
+    'source',
+    'summary',
+    'evidence_ids',
+    'received_at',
+)
+
+
+def assert_result_advance_is_permitted(
+    current: ExternalTaskResult,
+    proposed: ExternalTaskResult,
+) -> None:
+    """Check that a stored result may be replaced by the one proposed.
+
+    `ExternalTaskResult` validates one record against itself; nothing checked the
+    move between two of them. Without that check a recorded answer could be quietly
+    rewritten with a different summary or different evidence, and a completed
+    verification could be reset to `unverified`, with every individual record still
+    valid. A returned result is the record of what a third party said, so rewriting
+    it is not an update but a substitution.
+
+    **A task carries one canonical result.** Two results for the same task would
+    make "the result" ambiguous for every reader, so a second identity is refused
+    rather than stored alongside the first.
+
+    **What arrived is fixed at ingestion.** The identity, the task and claim it
+    belongs to, its source, its summary, its evidence identifiers, and the time it
+    was received cannot move. `received_at` in particular is an ingestion fact and
+    not an advancing update stamp: unlike a task record, a later write must not
+    push it forward, because it records when the answer arrived and not when the
+    row was last touched.
+
+    **Verification advances once and does not reverse.** A result is ingested
+    `unverified` and may make the single transition to a checked state. Writing the
+    identical record again is a no-op, which is what makes an ingestion retry safe.
+    Anything else — a different checked state, or a return to `unverified` — is a
+    contradiction of a check that has already been recorded and fails closed.
+
+    Args:
+        current: The result already stored for this task.
+        proposed: The result the caller would write.
+
+    Returns:
+        None. Nothing is written here; this raises or returns quietly.
+
+    Raises:
+        ResultAdvanceNotPermittedError: The write changes an ingestion fact, adds a
+            second result to one task, or contradicts a recorded verification.
+    """
+
+    if current.result_id != proposed.result_id:
+        raise ResultAdvanceNotPermittedError(
+            f'{current.task_id}: already holds result {current.result_id}, and a task carries '
+            f'one canonical result, so {proposed.result_id} cannot be added beside it.'
+        )
+    changed = [
+        name
+        for name in _RESULT_INGESTION_FACTS
+        if getattr(current, name) != getattr(proposed, name)
+    ]
+    if changed:
+        raise ResultAdvanceNotPermittedError(
+            f'{current.result_id}: {", ".join(changed)} '
+            f'{"were" if len(changed) > 1 else "was"} fixed when the answer was ingested and '
+            'cannot be rewritten.'
+        )
+    if current.verification is proposed.verification:
+        if (
+            current.verified_at != proposed.verified_at
+            or current.verified_against_revision != proposed.verified_against_revision
+        ):
+            raise ResultAdvanceNotPermittedError(
+                f'{current.result_id}: is already recorded as {current.verification.value} and '
+                'the check it names cannot be restated differently.'
+            )
+        return
+    if current.verification is not ExternalTaskResultVerification.UNVERIFIED:
+        raise ResultAdvanceNotPermittedError(
+            f'{current.result_id}: was checked as {current.verification.value}; moving it to '
+            f'{proposed.verification.value} would contradict a check already recorded.'
+        )
