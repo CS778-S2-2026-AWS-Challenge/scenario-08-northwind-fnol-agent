@@ -74,6 +74,16 @@ file is the media type the table declares, confirms the simulated-origin stateme
 confirms `materials.json` still matches the table. It needs no third-party package, so anyone can
 reproduce the acceptance evidence from the declared project dependencies.
 
-Writing the images needs Pillow, which is declared in `backend/requirements-dev.txt` as a
-development dependency. Nothing in the application or the test suite imports this module or needs
-Pillow to *use* the committed assets; only regenerating them does.
+Writing the images needs Pillow, which this repository deliberately does not declare. Nothing in the
+application or the test suite imports this module, and nothing needs Pillow to *use* the committed
+assets; only regenerating them does, which is why the write path resolves it with
+`importlib.import_module` instead of a static import. A static import would put an undeclared
+package into a tree that `mypy` type-checks and that CI installs from the declared requirements
+files, which is what `--check` is arranged to avoid needing.
+
+If you want to regenerate, install Pillow into your own environment:
+
+```bash
+python -m pip install pillow
+python backend/demo_data/materials/generate_materials.py
+```

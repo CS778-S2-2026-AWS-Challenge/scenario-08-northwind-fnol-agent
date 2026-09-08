@@ -20,14 +20,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib
 import json
 import pathlib
 import zlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime by --check
-    from PIL.Image import Image as PILImage
 
 HERE = pathlib.Path(__file__).resolve().parent
 MANIFEST = HERE / 'materials.json'
@@ -357,10 +354,22 @@ ASSETS: tuple[Asset, ...] = (
 # --- writing, which is the only path that needs Pillow -----------------------
 
 
-def _photo(asset: Asset) -> PILImage:
-    """A deliberately schematic stand-in, not an imitation photograph."""
+def _write_photo(asset: Asset, target: pathlib.Path) -> None:
+    """Render one deliberately schematic stand-in, not an imitation photograph.
 
-    from PIL import Image, ImageDraw
+    Pillow is loaded through ``importlib`` rather than a static import. This module
+    lives under ``backend/``, which ``mypy`` type-checks and which CI installs from
+    ``backend/requirements.txt`` and ``backend/requirements-dev.txt``. Pillow belongs
+    in neither: nothing in the application or the test suite reads it, and only
+    regenerating these assets needs it. A static import would put a package the
+    project does not declare into a type-checked tree, so the write path resolves it
+    at call time and ``--check`` never reaches this function at all.
+    """
+
+    image_module = importlib.import_module('PIL.Image')
+    draw_module = importlib.import_module('PIL.ImageDraw')
+    Image = image_module
+    ImageDraw = draw_module
 
     width, height = PHOTO_SIZE
     image = Image.new('RGB', PHOTO_SIZE, PAPER)
@@ -380,7 +389,9 @@ def _photo(asset: Asset) -> PILImage:
     draw.text((24, 84), f'{asset.family} / {asset.material_class} / {asset.condition}', fill=MUTED)
     for index, line in enumerate(asset.lines):
         draw.text((24, height - 96 + index * 20), f'- {line}', fill=INK)
-    return image
+    # The banner is drawn for a human reader; the comment segment carries the same
+    # statement where --check can read it back with the standard library alone.
+    image.save(target, 'JPEG', quality=82, comment=SIMULATED.encode('ascii'))
 
 
 def _pdf_bytes(asset: Asset) -> bytes:
@@ -483,9 +494,7 @@ def write_all() -> list[tuple[str, int]]:
         target = HERE / asset.path
         target.parent.mkdir(parents=True, exist_ok=True)
         if asset.kind == 'photo':
-            # The banner is drawn onto the image for a human reader; the comment
-            # segment carries the same statement where --check can read it back.
-            _photo(asset).save(target, 'JPEG', quality=82, comment=SIMULATED.encode('ascii'))
+            _write_photo(asset, target)
         else:
             target.write_bytes(_pdf_bytes(asset))
         written.append((asset.path, target.stat().st_size))

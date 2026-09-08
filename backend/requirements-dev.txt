@@ -5,7 +5,3 @@ pytest==8.3.5
 pytest-cov==6.0.0
 ruff==0.11.2
 mongomock==4.3.0
-# Regenerates and verifies the committed demonstration materials under
-# backend/demo_data/materials/. Development only: the application and the test
-# suite read the committed assets and never import this package.
-pillow==12.3.0

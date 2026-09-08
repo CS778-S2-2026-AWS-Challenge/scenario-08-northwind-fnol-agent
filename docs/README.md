@@ -56,7 +56,6 @@ them:
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
-- [Demonstration Materials: the produced set, its manifest, and how to verify it](../backend/demo_data/materials/README.md)
 - [Fixtures and Test Conventions](fixtures_convention.md)
 - [FNOL Information Model and Field Taxonomy](fnol-field-model.md)
 - [VP Field and Branch Mapping](vp-field-branch-mapping.md)
