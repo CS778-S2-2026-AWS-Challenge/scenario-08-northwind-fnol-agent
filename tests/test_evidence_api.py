@@ -309,6 +309,88 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert updated_claim.form == {}
     assert updated_claim.evidence_summary.received == 0
     assert updated_claim.evidence_summary.pending == 1
+    assert updated_claim.claim_state.evidence.value == 'incomplete'
+    assert listed.json()['revision'] == updated_claim.revision
+
+
+def test_processing_failure_is_claim_attention_and_retry_is_idempotent(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = create_claim(client, auth_headers, 'failed-processing-claim')
+    claim = created['claim']
+    assert isinstance(claim, dict)
+    claim_id = str(claim['claim_id'])
+    evidence_id = upload_evidence(client, auth_headers, claim_id, 'failed-processing-upload', 1)
+    checksum = f'sha256:{sha256(b"e" * 512).hexdigest()}'
+    completed = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/{evidence_id}/complete',
+        headers={**auth_headers, 'Idempotency-Key': 'failed-processing-complete', 'If-Match': '2'},
+        json={'upload_checksum': checksum},
+    )
+    assert completed.status_code == 202
+
+    failure_payload = {'outcome': 'failed'}
+    failure_headers = {
+        'Authorization': 'Bearer synthetic-integration',
+        'Idempotency-Key': 'failed-processing-result',
+        'If-Match': '3',
+    }
+    failed = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=failure_headers,
+        json=failure_payload,
+    )
+    replay = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers=failure_headers,
+        json=failure_payload,
+    )
+    claimant = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=auth_headers)
+    workbench = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers={'Authorization': 'Bearer synthetic-staff'},
+    )
+    claim = repository.get_claim(claim_id, 'cus_demo')
+    stored = repository.get_evidence(claim_id, evidence_id, 'cus_demo')
+
+    assert failed.status_code == 200
+    assert replay.json() == failed.json()
+    assert failed.json()['file_status'] == 'failed'
+    assert failed.json()['proposed_fields'] == {}
+    assert claimant.json()['items'][0]['file_status'] == 'failed'
+    assert 'processing_state' not in claimant.text
+    assert workbench.status_code == 200
+    assert workbench.json()['claim_state']['evidence'] == 'incomplete'
+    assert workbench.json()['section_summaries']['evidence']['needs_attention'] == 1
+    assert claim is not None
+    assert claim.claim_state.evidence.value == 'incomplete'
+    assert stored is not None
+    assert stored.file_status is EvidenceFileStatus.FAILED
+
+    retry_payload = {'outcome': 'retry'}
+    retried = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'failed-processing-retry',
+            'If-Match': '4',
+        },
+        json=retry_payload,
+    )
+    retry_replay = client.post(
+        f'/internal/v1/claims/{claim_id}/evidence/{evidence_id}/processing',
+        headers={
+            'Authorization': 'Bearer synthetic-integration',
+            'Idempotency-Key': 'failed-processing-retry',
+            'If-Match': '4',
+        },
+        json=retry_payload,
+    )
+    assert retried.status_code == 200
+    assert retried.json()['file_status'] == 'processing'
+    assert retry_replay.json() == retried.json()
 
 
 @pytest.mark.parametrize(
@@ -968,6 +1050,54 @@ def test_unknown_claim_evidence_routes_return_not_found(
     assert listed.status_code == 404
     assert uploaded.status_code == 404
     assert completed.status_code == 404
+
+
+def test_anonymous_sessions_can_continue_chat_but_cannot_persist_file_evidence(
+    client: TestClient,
+    repository: FixtureRepository,
+) -> None:
+    anonymous_session = '4c7f9f6e-0f31-4ce3-a5cc-5e3a4d8e4b10'
+    anonymous_headers = {'X-Northwind-Anonymous-Session': anonymous_session}
+    created = client.post(
+        '/api/v1/claims',
+        headers={**anonymous_headers, 'Idempotency-Key': 'anonymous-evidence-boundary'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+
+    registered = client.post(
+        f'/api/v1/claims/{claim_id}/evidence',
+        headers={**anonymous_headers, 'Idempotency-Key': 'anonymous-register', 'If-Match': '1'},
+        json={'kind': 'receipt', 'status': 'incomplete'},
+    )
+    requested = client.post(
+        f'/api/v1/claims/{claim_id}/evidence/uploads',
+        headers={
+            **anonymous_headers,
+            'Idempotency-Key': 'anonymous-upload',
+            'If-Match': '1',
+        },
+        json={
+            'kind': 'incident_image',
+            'original_filename': 'damage.jpg',
+            'media_type': 'image/jpeg',
+            'size_bytes': 10,
+        },
+    )
+    content = client.put(
+        f'/api/v1/claims/{claim_id}/evidence/evd_missing/content',
+        headers={**anonymous_headers, 'Content-Type': 'image/jpeg'},
+        content=b'0123456789',
+    )
+    listed = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=anonymous_headers)
+
+    assert registered.status_code == 401
+    assert requested.status_code == 401
+    assert content.status_code == 401
+    assert listed.status_code == 200
+    assert listed.json()['items'] == []
+    assert repository.list_evidence(claim_id, f'anonymous:{anonymous_session}') == []
 
 
 def test_mock_storage_validates_pending_object_identity() -> None:

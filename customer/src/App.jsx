@@ -429,15 +429,61 @@ function App() {
     return () => { active = false }
   }, [claim?.claim_id])
 
-  async function handleFileSelected(file) {
+  useEffect(() => {
+    if (!claim?.claim_id || !evidenceItems.some((item) => item.file_status === 'processing')) {
+      return undefined
+    }
+    let active = true
+    const timer = globalThis.setTimeout(() => {
+      getClaimEvidence(claim.claim_id)
+        .then((response) => {
+          if (!active) return
+          setEvidenceItems(response.items || [])
+          setClaim((current) => current ? { ...current, revision: response.revision } : current)
+          setAttachments((current) => current.map((item) => {
+            const evidence = (response.items || []).find((candidate) => candidate.evidence_id === item.evidenceId)
+            if (!evidence || item.status === 'uploading') return item
+            return {
+              ...item,
+              status: evidence.file_status,
+              statusLabel: evidence.file_status === 'processing'
+                ? 'Processing'
+                : evidence.file_status === 'failed' ? 'Processing failed' : 'Ready',
+            }
+          }))
+        })
+        .catch(() => {})
+    }, 1500)
+    return () => {
+      active = false
+      globalThis.clearTimeout(timer)
+    }
+  }, [claim?.claim_id, evidenceItems])
+
+  async function handleFileSelected(file, existingAttempt = null) {
     if (isBusy) return
+    if (!hasClaimantAccessToken()) {
+      setError('Sign in before uploading a file. Your anonymous conversation is still available, and you can resume it after signing in.')
+      setStatus('error')
+      return
+    }
     setError('')
-    const localId = requestId('file')
-    setAttachments((current) => [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
+    const attempt = existingAttempt || {
+      localId: requestId('file'),
+      claimKey: requestId('claim'),
+      uploadKey: requestId('evidence-upload'),
+      completeKey: requestId('evidence-complete'),
+    }
+    const localId = attempt.localId
+    setAttachments((current) => existingAttempt
+      ? current.map((item) => item.id === localId
+        ? { ...item, status: 'uploading', statusLabel: 'Uploading…', retry: null }
+        : item)
+      : [...current, { id: localId, name: file.name, status: 'uploading', statusLabel: 'Uploading…' }])
     try {
       let activeClaim = claim
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType })
+        const created = await createClaim({ idempotencyKey: attempt.claimKey, incidentType: claimType })
         activeClaim = created.claim
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
@@ -450,6 +496,7 @@ function App() {
         revision: activeClaim.revision,
         file,
         kind: file.type.startsWith('image/') ? 'incident_photo' : 'other_document',
+        idempotencyKey: attempt.uploadKey,
       })
       setClaim((current) => current ? { ...current, revision: requested.revision } : current)
       await uploadEvidenceContent({ upload: requested.upload, file })
@@ -460,6 +507,7 @@ function App() {
         evidenceId: requested.evidence_id,
         revision: requested.revision,
         checksum,
+        idempotencyKey: attempt.completeKey,
       })
       setClaim((current) => current ? { ...current, revision: completed.revision } : current)
       setEvidenceItems((current) => [...current.filter((item) => item.evidence_id !== completed.evidence.evidence_id), completed.evidence])
@@ -468,7 +516,7 @@ function App() {
         : item))
     } catch (requestError) {
       setAttachments((current) => current.map((item) => item.id === localId
-        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file) }
+        ? { ...item, status: 'failed', statusLabel: requestError.message || 'Upload failed', retry: () => handleFileSelected(file, attempt) }
         : item))
       showError(requestError)
     }

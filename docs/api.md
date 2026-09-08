@@ -1607,6 +1607,11 @@ The response contains `claim_id`, current `revision`, `items`, and
 `customer_next_step`. Evidence items deliberately omit storage keys, upload
 checksums, extraction state, and internal provenance.
 
+The `status_url` returned by upload completion is this Claim Evidence collection
+(`GET /api/v1/claims/{claim_id}/evidence`). It is the authoritative polling
+projection for the same Evidence record: clients reread it after `202` and do
+not manufacture `processing`, `ready`, `failed`, or retry state locally.
+
 ### `POST /api/v1/claims/{claim_id}/evidence`
 
 Registers evidence when no file is currently available.
@@ -1682,6 +1687,15 @@ capability expires MUST re-sign the same upload intent without creating another 
 record or advancing Claim revision. The adapter MAY use fixture
 storage or the active profile's object storage without changing the client
 contract.
+
+An anonymous browser session may continue its conversation and read its own
+Claim, but it cannot create a durable Evidence record or receive an upload
+capability. File selection is a temporary browser action until the claimant
+signs in; the server returns `401 AUTHENTICATION_REQUIRED` before checking the
+Claim or Evidence identifier. After sign-in, the existing anonymous Claim is
+promoted through the login/resume boundary and the claimant starts the upload
+with a new authenticated intent. An abandoned anonymous file selection leaves
+no Evidence record or protected object to clean up.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/{evidence_id}/complete`
 
@@ -2717,7 +2731,13 @@ Request:
 
 This service-to-service request requires integration credentials,
 `Idempotency-Key`, and `If-Match`. It moves the evidence file from `processing`
-to `ready` and writes registered extracted fields as `proposed`.
+to `ready` and writes registered extracted fields as `proposed`. The optional
+`outcome` is `ready`, `failed`, or `retry`; `failed` moves the existing file to
+the registered `failed` status without persisting a provider error payload, and
+`retry` moves that same Evidence record back to `processing`. Both outcomes
+use the same Claim revision and idempotency boundary. A failed or processing
+Evidence item remains attention-required and cannot satisfy a Claim evidence
+requirement; only `ready` Evidence is usable.
 
 Extraction may only fill a field the shared form does not hold yet. If any
 target field already exists — in any state, including `proposed`, `disputed`,

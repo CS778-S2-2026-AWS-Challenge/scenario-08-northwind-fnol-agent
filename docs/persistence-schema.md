@@ -373,7 +373,17 @@ the append-only audit collection through a bounded, filterable projection.
 - Extraction produces source-linked proposals; it does not confirm a claim fact.
 - Evidence lifecycle writes preserve ownership, checksum, provenance, and permitted
   visibility.
+- A `processing` or `failed` file remains pending or attention-required in the
+  authoritative Claim aggregation; only a `ready` file can contribute received
+  Evidence. Retry reuses the same Evidence identity and revision-checked
+  mutation rather than creating a duplicate record.
 - Pending, incomplete, unofficial, and not-yet-generated evidence remain distinct states.
+
+Anonymous browser sessions may own a temporary conversation Claim, but Evidence
+upload mutations require an authenticated claimant. Selecting a file before
+login is not a persistence operation; promotion transfers the existing Claim
+and its records only after authentication, and abandoned selections leave no
+Evidence record or protected object.
 
 ## Retrieval and Review Invariants
 

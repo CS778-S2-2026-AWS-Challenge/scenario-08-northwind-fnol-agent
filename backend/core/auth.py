@@ -282,6 +282,26 @@ def require_claimant_session(
     return principal
 
 
+def require_durable_claimant(principal: Principal) -> None:
+    """Reject anonymous browser sessions before durable claimant writes.
+
+    Args:
+        principal: Principal resolved by the claimant authentication boundary.
+
+    Returns:
+        None when the principal is an authenticated claimant.
+
+    Raises:
+        ApiError: If the request is still associated with an anonymous browser session.
+    """
+
+    if principal.auth_source == 'anonymous:browser_session':
+        raise _authentication_required(
+            'Sign in before uploading or saving file evidence. Your anonymous conversation '
+            'remains available to resume.'
+        )
+
+
 def require_staff(
     request: Request,
     authorization: str | None = Header(default=None),

@@ -1185,7 +1185,16 @@ class EvidenceFactProposal(ContractModel):
 
 
 class CompleteEvidenceProcessingRequest(ContractModel):
-    facts: list[EvidenceFactProposal] = Field(min_length=1, max_length=50)
+    outcome: Literal['ready', 'failed', 'retry'] = 'ready'
+    facts: list[EvidenceFactProposal] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode='after')
+    def validate_outcome(self) -> 'CompleteEvidenceProcessingRequest':
+        if self.outcome == 'ready' and not self.facts:
+            raise ValueError('A ready processing result must contain at least one fact.')
+        if self.outcome != 'ready' and self.facts:
+            raise ValueError('Failed or retry processing results must not contain facts.')
+        return self
 
 
 class EvidenceFactDecisionRequest(ContractModel):
