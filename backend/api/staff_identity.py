@@ -10,6 +10,7 @@ from backend.domain.staff_identity import (
     StaffLoginRequest,
     StaffProfileProjection,
 )
+from backend.repositories.protocols import PersistenceRepository
 from backend.repositories.staff_identity import StaffIdentityRepository
 from backend.services.staff_identity import (
     hash_staff_access_token,
@@ -17,6 +18,7 @@ from backend.services.staff_identity import (
     staff_profile_projection,
     staff_session_projection,
 )
+from backend.services.staff_presence import mark_staff_online
 
 router = APIRouter(prefix='/api/v1/staff', tags=['staff identity'])
 
@@ -34,12 +36,16 @@ def create_staff_auth_session(
     request: Request,
     payload: StaffLoginRequest,
 ) -> AuthenticatedStaffSession:
-    return login_staff(
+    result = login_staff(
         repository_for(request),
         payload,
         request.app.state.settings.staff_session_ttl_minutes,
         development_identity=request.app.state.settings.developer_mode,
     )
+    mark_staff_online(
+        cast(PersistenceRepository, request.app.state.claim_repository), result.staff_id
+    )
+    return result
 
 
 @router.get('/auth/session', response_model=CurrentStaffSession)

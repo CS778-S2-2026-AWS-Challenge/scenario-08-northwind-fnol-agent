@@ -40,6 +40,7 @@ from backend.api.integrations import router as integrations_router
 from backend.api.legacy import router as legacy_router
 from backend.api.staff_agent import router as staff_agent_router
 from backend.api.staff_identity import router as staff_identity_router
+from backend.api.staff_presence import router as staff_presence_router
 from backend.api.workbench import conversation_router as workbench_conversation_router
 from backend.api.workbench import router as workbench_router
 from backend.core.config import (
@@ -421,6 +422,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(identity_router)
     app.include_router(staff_identity_router)
+    app.include_router(staff_presence_router)
     app.include_router(staff_agent_router)
     app.include_router(legacy_router)
     app.include_router(capabilities_router)

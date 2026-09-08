@@ -587,6 +587,13 @@ approval records, and authenticated principal on every read. A cached or client-
 projection never grants mutation authority and cannot replace the endpoint's state, identity, and
 revision checks.
 
+Staff presence is stored as a provider-neutral `staff_presence` record keyed by the authoritative
+staff ID. It contains `online`, `available`, server-owned `last_seen_at`, `expires_at`, `revision`,
+and `updated_at`. Presence is a short-lived eligibility lease, not account enablement and not
+Claim State. Fixture and MongoDB adapters implement the same optimistic-revision read/write
+contract. Claim acceptance continues to use the existing atomic Claim/handoff/idempotency
+mutation, so presence does not introduce a second assignment or ownership truth.
+
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
   when no publication exists; drafts and unverified provider records are never runtime fallback.

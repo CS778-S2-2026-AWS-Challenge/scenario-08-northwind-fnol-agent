@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -1522,3 +1522,86 @@ def test_staff_access_projection_distinguishes_primary_and_read_only_claimants(
     assert claim_staff_access(repository, owner, outsider) is ClaimStaffAccess.READ_ONLY
     with pytest.raises(ApiError):
         require_claim_collaborator(repository, owner, outsider)
+
+
+def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.put(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': True, 'available': True, 'lease_seconds': 30},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body['staff_id'] == 'stf_demo'
+    assert body['expires_at'] > body['last_seen_at']
+
+    online = client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers)
+    assert online.status_code == 200
+    assert any(item['staff_id'] == 'stf_demo' for item in online.json())
+
+    offline = client.put(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': False, 'available': True, 'lease_seconds': 30},
+    )
+    assert offline.status_code == 200
+    assert offline.json()['available'] is False
+    assert client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json() == []
+
+
+def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, handoff_id, revision = _request_staff_support(
+        client, auth_headers, repository, key_suffix='offline-staff'
+    )
+    client.put(
+        '/api/v1/workbench/staff/presence',
+        headers=staff_auth_headers,
+        json={'online': False, 'available': False, 'lease_seconds': 30},
+    )
+    response = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'offline-staff-accept',
+            'If-Match': str(revision),
+        },
+        json={},
+    )
+    assert response.status_code == 409
+    assert response.json()['error']['code'] == 'STAFF_NOT_AVAILABLE'
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.revision == revision
+    assert stored.assignee_id is None
+
+
+def test_expired_presence_is_not_claimable(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    current = repository.get_staff_presence('stf_demo')
+    assert current is not None
+    now = datetime.now(UTC)
+    repository.save_staff_presence(
+        current.model_copy(
+            update={
+                'online': True,
+                'available': True,
+                'last_seen_at': now - timedelta(minutes=2),
+                'expires_at': now - timedelta(minutes=1),
+                'revision': current.revision + 1,
+                'updated_at': now,
+            }
+        ),
+        current.revision,
+    )
+    assert client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json() == []

@@ -25,6 +25,7 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.staff_identity import StaffPresenceRecord
 
 
 class RepositoryConflict(Exception):
@@ -563,6 +564,17 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def list_staff_actions(self, claim_id: str) -> list[StaffActionRecord]:
         raise NotImplementedError
 
+    def get_staff_presence(self, staff_id: str) -> StaffPresenceRecord | None:
+        raise NotImplementedError
+
+    def list_staff_presence(self) -> list[StaffPresenceRecord]:
+        raise NotImplementedError
+
+    def save_staff_presence(
+        self, presence: StaffPresenceRecord, expected_revision: int | None = None
+    ) -> None:
+        raise NotImplementedError
+
     def get_staff_action(self, claim_id: str, action_id: str) -> StaffActionRecord | None:
         raise NotImplementedError
 
@@ -601,6 +613,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         signal_decision: SignalDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
+        required_staff_id: str | None = None,
     ) -> None:
         """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError

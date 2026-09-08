@@ -57,6 +57,7 @@ from backend.domain.retrieval import (
     RetrievalSource,
     ReviewSignalRecord,
 )
+from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.mongodb import (
     MongoDBConfigurationError,
     MongoDBConnectionConfig,
@@ -1507,3 +1508,34 @@ def test_agent_turn_persists_linked_records_as_one_mutation(
         repository.get_agent_decision(claim.claim_id, decision.decision_id, claim.customer_id)
         == decision
     )
+
+
+def test_mongodb_staff_presence_has_provider_neutral_revision_and_expiry_contract(
+    repository: MongoDBRepository,
+) -> None:
+    now = datetime.now(UTC)
+    first = StaffPresenceRecord(
+        staff_id='stf_mongo_presence',
+        online=True,
+        available=True,
+        last_seen_at=now,
+        expires_at=now.replace(microsecond=0),
+        updated_at=now,
+    )
+    repository.save_staff_presence(first)
+    assert repository.get_staff_presence(first.staff_id) == first
+
+    updated = first.model_copy(
+        update={
+            'available': False,
+            'expires_at': now,
+            'revision': 2,
+            'updated_at': now,
+        }
+    )
+    repository.save_staff_presence(updated, expected_revision=1)
+    assert repository.list_staff_presence() == [updated]
+    with pytest.raises(RevisionConflict):
+        repository.save_staff_presence(
+            updated.model_copy(update={'revision': 3}), expected_revision=1
+        )
