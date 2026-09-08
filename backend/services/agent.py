@@ -20,6 +20,7 @@ from backend.domain.models import (
     CustomerNextStep,
     FormSource,
     FormStatus,
+    MessageRecord,
     ModelDecisionProvenance,
     NeededFor,
     ProposedFormChange,
@@ -168,6 +169,7 @@ class AgentTurnContext:
     knowledge_results: tuple[KnowledgeChunk, ...] = ()
     knowledge_status: str = 'not_requested'
     knowledge_limitations: tuple[str, ...] = ()
+    provenance_messages: tuple[MessageRecord, ...] = ()
     runtime_configuration_snapshot: RuntimeConfigurationSnapshot | None = None
     runtime_policy: RuntimeAgentPolicySnapshot | None = None
 
