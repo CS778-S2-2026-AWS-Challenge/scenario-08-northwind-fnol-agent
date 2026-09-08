@@ -36,12 +36,14 @@ from backend.domain.models import (
     StructuredFormField,
     WorkflowState,
 )
+from backend.domain.staff_identity import StaffPresenceUpdate
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_access import (
     ClaimStaffAccess,
     claim_staff_access,
     require_claim_collaborator,
 )
+from backend.services.staff_presence import list_online_staff, read_presence, update_presence
 from backend.services.support import now_utc
 from backend.services.workbench import _external_lifecycle
 
@@ -1537,6 +1539,9 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
     body = response.json()
     assert body['staff_id'] == 'stf_demo'
     assert body['expires_at'] > body['last_seen_at']
+    current = client.get('/api/v1/workbench/staff/presence', headers=staff_auth_headers)
+    assert current.status_code == 200
+    assert current.json()['staff_id'] == 'stf_demo'
 
     online = client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers)
     assert online.status_code == 200
@@ -1550,6 +1555,35 @@ def test_online_staff_presence_is_leased_and_visible_only_while_claimable(
     assert offline.status_code == 200
     assert offline.json()['available'] is False
     assert client.get('/api/v1/workbench/staff/online', headers=staff_auth_headers).json() == []
+
+
+def test_presence_projection_handles_unknown_staff_and_rejects_non_staff_pool_reads(
+    repository: FixtureRepository,
+) -> None:
+    unknown = read_presence(repository, Principal(subject='stf_unknown', actor_type='staff'))
+    assert unknown.online is False
+    assert unknown.available is False
+    with pytest.raises(ApiError) as error:
+        list_online_staff(repository, Principal(subject='cus_demo', actor_type='claimant'))
+    assert error.value.code == 'ACCESS_DENIED'
+
+
+def test_presence_update_maps_repository_revision_conflict(
+    repository: FixtureRepository,
+) -> None:
+    def stale_save(*args: object, **kwargs: object) -> None:
+        from backend.repositories.protocols import RevisionConflict
+
+        raise RevisionConflict(9)
+
+    repository.save_staff_presence = stale_save  # type: ignore[method-assign]
+    with pytest.raises(ApiError) as error:
+        update_presence(
+            repository,
+            Principal(subject='stf_demo', actor_type='staff'),
+            StaffPresenceUpdate(online=True, available=True),
+        )
+    assert error.value.code == 'REVISION_CONFLICT'
 
 
 def test_accept_handoff_rejects_offline_staff_without_claim_mutation(
