@@ -1,4 +1,6 @@
 const SESSION_KEY = 'northwind.workbench.session'
+const STAFF_MESSAGE_OPERATIONS_KEY = 'northwind.workbench.staff-message-operations.v2'
+let volatileStaffMessageOperations = {}
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'NETWORK_ERROR', details = [] } = {}) {
@@ -259,16 +261,27 @@ export const workbenchApi = {
       { token },
     )
   },
-  sendMessage(token, claimId, message, revision) {
-    return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/messages`, {
-      method: 'POST',
-      token,
-      headers: {
-        'Idempotency-Key': crypto.randomUUID(),
-        'If-Match': String(revision),
-      },
-      body: JSON.stringify({ content: { type: 'text', text: message } }),
-    })
+  async sendMessage(token, claimId, operation, revision) {
+    const { message, sessionId } = operation
+    const pendingOperation = pendingStaffMessageOperation(claimId, sessionId, message)
+    try {
+      const response = await request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/messages`, {
+        method: 'POST',
+        token,
+        headers: {
+          'Idempotency-Key': pendingOperation.key,
+          'If-Match': String(revision),
+        },
+        body: JSON.stringify({ content: { type: 'text', text: message } }),
+      })
+      clearPendingStaffMessageOperation(claimId)
+      return response
+    } catch (error) {
+      if (!ambiguousStaffMessageFailure(error)) {
+        clearPendingStaffMessageOperation(claimId)
+      }
+      throw error
+    }
   },
 }
 
@@ -297,4 +310,60 @@ function pagedWorkbenchResource(token, path, cursor, limit) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
   return request(`/api/v1/workbench/claims/${path}?${params}`, { token })
+}
+
+function pendingStaffMessageOperation(claimId, sessionId, message) {
+  const operations = readStaffMessageOperations()
+  const existing = operations[claimId]
+  if (existing) {
+    if (existing.sessionId !== sessionId || existing.message !== message) {
+      throw new ApiError(
+        'The previous claimant message has an unknown delivery outcome. Retry the unchanged message in the same conversation before starting another send.',
+        { code: 'MESSAGE_DELIVERY_UNKNOWN' },
+      )
+    }
+    return existing
+  }
+
+  const operation = {
+    sessionId,
+    message,
+    key: crypto.randomUUID(),
+  }
+  operations[claimId] = operation
+  writeStaffMessageOperations(operations)
+  return operation
+}
+
+function clearPendingStaffMessageOperation(claimId) {
+  const operations = readStaffMessageOperations()
+  if (!(claimId in operations)) return
+  delete operations[claimId]
+  writeStaffMessageOperations(operations)
+}
+
+function readStaffMessageOperations() {
+  try {
+    const operations = JSON.parse(sessionStorage.getItem(STAFF_MESSAGE_OPERATIONS_KEY) || '{}')
+    if (operations && typeof operations === 'object' && !Array.isArray(operations)) {
+      volatileStaffMessageOperations = { ...operations }
+      return operations
+    }
+  } catch {
+    // Fall through to the in-memory copy when browser storage is unavailable or malformed.
+  }
+  return { ...volatileStaffMessageOperations }
+}
+
+function writeStaffMessageOperations(operations) {
+  volatileStaffMessageOperations = { ...operations }
+  try {
+    sessionStorage.setItem(STAFF_MESSAGE_OPERATIONS_KEY, JSON.stringify(operations))
+  } catch {
+    // The in-memory copy still preserves retry identity for the current page lifetime.
+  }
+}
+
+function ambiguousStaffMessageFailure(error) {
+  return error?.code === 'NETWORK_ERROR' || error?.status === 0 || error?.status === 429 || error?.status >= 500
 }
