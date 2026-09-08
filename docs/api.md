@@ -2057,10 +2057,24 @@ claimant-safe projection.
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
 contains stakeholder and service labels, request type, authority, consent, delivery and verification
-states, pending owner, status label/detail, result, limitation, next action, and attention flag. The
-Workbench renders those fields and MUST NOT reconstruct lifecycle status or next steps from raw task
-status strings. Raw task/request objects remain available for identity, timing, failure, and source
-traceability.
+states, pending owner, status label/detail, provider reference, returned-result summary and
+provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
+next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
+identity and is never populated into `result`. `result` is null until a formal `ExternalTaskResult`
+record exists; its `result_verification_state` remains `unverified`, `consistent`, `inconsistent`, or
+`review_required` exactly as recorded, and an unverified result is not Claim State or provider
+completion. `result_received_at` records ingestion time, while `result_verified_at` and
+`result_verified_against_revision` are null until the separate verification operation records a
+check. `result_evidence_ids` is empty when the returned result has no linked evidence;
+`result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
+staff without exposing storage keys or provider payloads.
+
+The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
+`next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
+reconciliation even when a late result record exists; the Workbench does not infer completion from
+that result. The Workbench renders those fields and MUST NOT reconstruct lifecycle status or next
+steps from raw task status strings. Raw task/request objects remain available for identity, timing,
+failure, and source traceability.
 
 Access to policy excerpts, history evidence, fraud-review signals, and staff notes MAY be further restricted by role.
 
