@@ -19,6 +19,7 @@ from backend.domain.models import (
     ClaimantClaim,
     ClaimantContentsItem,
     ClaimantHandoff,
+    ClaimantIncompleteContext,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -27,6 +28,8 @@ from backend.domain.models import (
     CreateClaimResponse,
     CustomerNextStep,
     FieldSelectionState,
+    FollowUpRecord,
+    FollowUpStatus,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -35,10 +38,12 @@ from backend.domain.models import (
     FormStatus,
     NeededFor,
     PageInfo,
+    PauseSessionResponse,
     ProposedFormChange,
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
+    SessionRecoveryContext,
     SessionStatus,
     StartSessionRequest,
     StructuredFormField,
@@ -185,6 +190,48 @@ def _claimant_contents_items(
     return projected
 
 
+def _claimant_incomplete_context(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimantIncompleteContext | None:
+    if claim.active_session_id is not None:
+        return None
+    paused_sessions = [
+        session
+        for session in repository.list_sessions_for_claim(
+            claim.claim_id,
+            claim.customer_id,
+        )
+        if session.status is SessionStatus.PAUSED and session.recovery_context is not None
+    ]
+    if not paused_sessions:
+        return None
+    source = max(
+        paused_sessions,
+        key=lambda session: session.recovery_context.interrupted_at
+        if session.recovery_context is not None
+        else session.last_active_at,
+    )
+    recovery = source.recovery_context
+    if recovery is None:
+        return None
+    follow_ups = [
+        record
+        for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
+        if record.source_session_id == source.session_id
+    ]
+    if not follow_ups:
+        return None
+    follow_up = max(follow_ups, key=lambda record: (record.created_at, record.follow_up_id))
+    return ClaimantIncompleteContext(
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status,
+    )
+
+
 def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
@@ -212,13 +259,17 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         external_service_action=claimant_assessor_action(repository, claim),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=claim.customer_next_step,
+        incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )
 
 
-def _claim_list_item(claim: WorkingClaim) -> ClaimListItem:
+def _claim_list_item(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimListItem:
     return ClaimListItem(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -226,6 +277,7 @@ def _claim_list_item(claim: WorkingClaim) -> ClaimListItem:
         workflow_state=claim.claim_state.workflow_state,
         external_claim=claim.external_claim,
         customer_next_step=claim.customer_next_step,
+        incomplete_context=_claimant_incomplete_context(repository, claim),
         created_at=claim.created_at,
         updated_at=claim.updated_at,
         can_resume=claim.customer_next_step.can_resume,
@@ -257,6 +309,155 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
         last_active_at=session.last_active_at,
         closed_at=session.closed_at,
     )
+
+
+def pause_session(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> PauseSessionResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'
+    fingerprint = request_fingerprint({'operation': 'pause'})
+
+    existing = repository.find_idempotency(principal.subject, route, key)
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint or existing.response_payload is None:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key was already used for another request.',
+            )
+        return PauseSessionResponse.model_validate(existing.response_payload)
+
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    if claim.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this request was prepared.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+
+    session = repository.get_session(claim_id, session_id, principal.subject)
+    if session is None:
+        raise _session_not_found()
+    if claim.active_session_id != session_id or session.status is not SessionStatus.ACTIVE:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Only the current active claimant session can be paused.',
+        )
+
+    timestamp = now_utc()
+    claimant_messages = [
+        message
+        for message in repository.list_messages(
+            claim_id,
+            session_id,
+            principal.subject,
+        )
+        if message.actor is ActorType.CLAIMANT
+    ]
+    last_meaningful_activity_at = max(
+        (message.created_at for message in claimant_messages),
+        default=session.last_active_at,
+    )
+    resume_point = (session.summary or claim.customer_next_step.summary).strip()
+    recovery = SessionRecoveryContext(
+        interrupted_at=timestamp,
+        last_meaningful_activity_at=last_meaningful_activity_at,
+        resume_point=resume_point,
+    )
+    paused_session = session.model_copy(
+        update={
+            'status': SessionStatus.PAUSED,
+            'recovery_context': recovery,
+        }
+    )
+    updated_claim = claim.model_copy(
+        update={
+            'active_session_id': None,
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    follow_up = FollowUpRecord(
+        follow_up_id=new_id('fup'),
+        claim_id=claim_id,
+        source_session_id=session_id,
+        responsible_party=ResponsibleParty.SYSTEM,
+        attempt_count=0,
+        channel=None,
+        outcome=None,
+        status=FollowUpStatus.PENDING,
+        due_at=None,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    incomplete_context = ClaimantIncompleteContext(
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status,
+    )
+    claimant_before = _claimant_claim(repository, claim)
+    response = PauseSessionResponse(
+        claim=claimant_before.model_copy(
+            update={
+                'revision': updated_claim.revision,
+                'updated_at': updated_claim.updated_at,
+                'incomplete_context': incomplete_context,
+            }
+        ),
+        session=_claimant_session(
+            paused_session,
+            updated_claim.customer_next_step,
+        ),
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=session_id,
+        follow_up_id=follow_up.follow_up_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+
+    try:
+        repository.save_incomplete_checkpoint(
+            updated_claim,
+            expected_revision=expected_revision,
+            session=paused_session,
+            follow_up=follow_up,
+            idempotency=idempotency,
+        )
+    except RevisionConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed before the interruption checkpoint was saved.',
+            retryable=True,
+            current_revision=error.current_revision,
+        ) from error
+    except IdempotencyConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The interruption checkpoint conflicts with an existing request.',
+        ) from error
+
+    return response
 
 
 def start_claim(
@@ -364,7 +565,7 @@ def promote_anonymous_claim(
 
 
 def list_claims(
-    repository: ClaimRepository,
+    repository: PersistenceRepository,
     principal: Principal,
     *,
     limit: int,
@@ -396,7 +597,7 @@ def list_claims(
     next_offset = offset + len(page_claims)
     next_cursor = encode_cursor(next_offset) if next_offset < len(claims) else None
     return ClaimListResponse(
-        items=[_claim_list_item(claim) for claim in page_claims],
+        items=[_claim_list_item(repository, claim) for claim in page_claims],
         page=PageInfo(next_cursor=next_cursor),
     )
 

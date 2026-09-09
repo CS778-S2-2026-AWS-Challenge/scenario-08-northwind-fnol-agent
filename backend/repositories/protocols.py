@@ -17,6 +17,7 @@ from backend.domain.models import (
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    FollowUpRecord,
     HandoffRecord,
     MessageRecord,
     SessionRecord,
@@ -55,6 +56,7 @@ class IdempotencyRecord:
     agent_message_id: str | None = None
     decision_id: str | None = None
     handoff_id: str | None = None
+    follow_up_id: str | None = None
     action_registry_version: str | None = None
     action_code: str | None = None
     target_ref: str | None = None
@@ -126,6 +128,32 @@ class ClaimRepository(Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist a resumed session, claim revision, and retry metadata."""
+        raise NotImplementedError
+
+    def get_follow_up(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> FollowUpRecord | None:
+        raise NotImplementedError
+
+    def list_follow_ups(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[FollowUpRecord]:
+        raise NotImplementedError
+
+    def save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically pause a session, clear its active pointer, and create follow-up work."""
         raise NotImplementedError
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:

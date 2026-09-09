@@ -684,11 +684,15 @@ Session lifecycle transitions are server-controlled.
 
 A session MAY move from `active` to `paused` after claimant inactivity or when the current interaction is interrupted.
 
+`POST /api/v1/claims/{claim_id}/sessions/{session_id}/pause` is the explicit P17.1 interruption boundary. It requires the current Claim revision through `If-Match` plus an `Idempotency-Key`, atomically marks the current session `paused`, clears the Claim's active-session pointer, stores bounded recovery context, and creates exactly one Claim-scoped initial follow-up record. It does not create a second Claim State, send a follow-up, make an abandonment decision, or apply a retention transition.
+
+After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe initial follow-up state. The Workbench reads the same durable records rather than maintaining its own incomplete-Claim state.
+
 When a claimant resumes an existing working claim, the server starts a new interaction session using the current claim state and bounded resume context. A previously paused session MAY be closed when the new session is created.
 
 Only one active claimant session per claim is permitted.
 
-Messages MUST NOT be accepted for a closed session.
+Messages MUST NOT be accepted for a closed or paused session.
 
 ### Message
 
@@ -1072,6 +1076,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims` | List the authenticated claimant's reports |
 | `GET` | `/claims/{claim_id}` | Read the claimant-visible claim projection |
 | `POST` | `/claims/{claim_id}/sessions` | Start or resume a session |
+| `POST` | `/claims/{claim_id}/sessions/{session_id}/pause` | Persist an interruption checkpoint and initial follow-up task; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |

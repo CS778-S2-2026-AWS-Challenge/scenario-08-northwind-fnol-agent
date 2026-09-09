@@ -2055,6 +2055,16 @@
             ],
             "title": "Incident Type"
           },
+          "incomplete_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantIncompleteContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -2256,6 +2266,16 @@
               }
             ],
             "title": "Incident Type"
+          },
+          "incomplete_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantIncompleteContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "title": "Revision",
@@ -2658,6 +2678,48 @@
           "created_at"
         ],
         "title": "ClaimantHandoff",
+        "type": "object"
+      },
+      "ClaimantIncompleteContext": {
+        "additionalProperties": false,
+        "properties": {
+          "follow_up_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Due At"
+          },
+          "follow_up_status": {
+            "$ref": "#/components/schemas/FollowUpStatus"
+          },
+          "interrupted_at": {
+            "format": "date-time",
+            "title": "Interrupted At",
+            "type": "string"
+          },
+          "last_meaningful_activity_at": {
+            "format": "date-time",
+            "title": "Last Meaningful Activity At",
+            "type": "string"
+          },
+          "resume_point": {
+            "title": "Resume Point",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interrupted_at",
+          "last_meaningful_activity_at",
+          "resume_point",
+          "follow_up_status"
+        ],
+        "title": "ClaimantIncompleteContext",
         "type": "object"
       },
       "ClaimantMessage": {
@@ -5563,6 +5625,13 @@
         "title": "FieldSelectionState",
         "type": "string"
       },
+      "FollowUpStatus": {
+        "enum": [
+          "pending"
+        ],
+        "title": "FollowUpStatus",
+        "type": "string"
+      },
       "FormChange": {
         "additionalProperties": false,
         "properties": {
@@ -7683,6 +7752,23 @@
           }
         },
         "title": "PageInfo",
+        "type": "object"
+      },
+      "PauseSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "$ref": "#/components/schemas/ClaimantClaim"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ClaimantSession"
+          }
+        },
+        "required": [
+          "claim",
+          "session"
+        ],
+        "title": "PauseSessionResponse",
         "type": "object"
       },
       "PendingEvidenceReference": {
@@ -15663,6 +15749,121 @@
           }
         },
         "summary": "Create Message",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
+    "/api/v1/claims/{claim_id}/sessions/{session_id}/pause": {
+      "post": {
+        "operationId": "pause_claim_session_api_v1_claims__claim_id__sessions__session_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Claim Session",
         "tags": [
           "claimant"
         ]
