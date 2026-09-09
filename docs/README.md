@@ -67,6 +67,8 @@ them:
 - [RAG Knowledge Ingestion](rag-ingestion.md)
 - [Filtered RAG Retrieval](rag-retrieval.md)
 - [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
+- [Knowledge Source Coverage](knowledge-source-coverage.md)
+- [Privacy Governance](privacy-governance.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
 - [Staff Tag Registry](staff-tag-registry.md)
