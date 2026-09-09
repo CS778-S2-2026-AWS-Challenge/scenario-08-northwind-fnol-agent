@@ -1,9 +1,17 @@
 from dataclasses import dataclass, field
 
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.domain.model_gateway import (
+    ModelCapabilities,
+    ModelCompletionStatus,
+    ModelRequest,
+    ModelResponse,
+)
 from backend.domain.staff_agent import (
     StaffAgentDraft,
     StaffAgentDraftKind,
@@ -45,6 +53,27 @@ class RecordingStaffAgent(StaffAgentTurnProvider):
             ),
             provider_model='test-staff-model',
             provider_request_id='req_staff_test',
+        )
+
+
+@dataclass
+class RecordingModelGateway:
+    requests: list[ModelRequest] = field(default_factory=list)
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=False)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'answer': 'The configured Staff Agent is ready.',
+                'drafts': [],
+            },
+            provider_model='test-staff-model',
+            provider_request_id='req-staff-runtime',
         )
 
 
@@ -134,6 +163,121 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     body = response.json()
     assert body['default_model_profile_id'] == 'qwen-local'
     assert [item['id'] for item in body['models']] == ['qwen-local']
+
+
+def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    with TestClient(create_app(settings)) as client:
+        response = client.get(
+            '/api/v1/workbench/agent/capabilities',
+            headers=STAFF_HEADERS,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {'models': [], 'default_model_profile_id': None}
+
+
+def _model_gateway_runtime_client(
+    gateway: RecordingModelGateway,
+) -> TestClient:
+    registry = ModelGatewayRegistry()
+    registry.register('test_gateway', lambda _config: gateway)
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='test_gateway',
+        model_base_url='https://model.example.test/v1',
+        model_identifier='test-model',
+    )
+    return TestClient(
+        create_app(
+            settings,
+            repository=FixtureRepository(),
+            model_gateway_registry=registry,
+        )
+    )
+
+
+def test_staff_agent_builds_default_gateway_from_runtime_profile() -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Configured Staff Agent'},
+        )
+        assert session.status_code == 201
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'configured-staff-message',
+                'content': 'Summarise the current Claim context.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()['assistant_message']['content'] == (
+        'The configured Staff Agent is ready.'
+    )
+    assert len(gateway.requests) == 1
+
+
+def test_staff_agent_gateway_fails_closed_when_profile_resolution_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Configuration failure'},
+        )
+        monkeypatch.setattr(
+            'backend.app.model_configuration',
+            lambda _request, _profile_id: (_ for _ in ()).throw(ValueError('invalid profile')),
+        )
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'configuration-failure-message',
+                'content': 'Review this Claim.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert gateway.requests == []
+
+
+def test_staff_agent_gateway_fails_closed_when_profile_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Missing profile'},
+        )
+        monkeypatch.setattr('backend.app.model_configuration', lambda _request, _profile_id: None)
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'missing-profile-message',
+                'content': 'Review this Claim.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert gateway.requests == []
 
 
 def test_staff_agent_rejects_model_override_in_message_request() -> None:
