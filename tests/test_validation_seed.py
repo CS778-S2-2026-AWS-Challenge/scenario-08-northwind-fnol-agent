@@ -1,22 +1,75 @@
 import gc
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from typing import Any
 
 import mongomock
+import pytest
 from fastapi.testclient import TestClient
+from pymongo.errors import DuplicateKeyError
 
-from backend.adapters.identity import SQLiteIdentityRepository
+from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.adapters.staff_identity import FixtureStaffIdentityRepository
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.core.errors import ApiError
+from backend.domain.identity import CustomerAccountRecord
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBRepository
+from backend.repositories.protocols import (
+    DemoSeedConflict,
+    IdempotencyConflict,
+    IdempotencyRecord,
+    PersistenceRepository,
+    RevisionConflict,
+    ValidationSeedGraph,
+)
 from backend.repositories.scenario_loader import load_scenario
+from backend.services.demo_seed import (
+    VALIDATION_SEED_ROUTE,
+    _ensure_demo_claimant,
+    _validation_presence,
+    _validation_scenario,
+    seed_validation_scenarios,
+)
 
 STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_AUTH = {'Authorization': 'Bearer synthetic-claimant'}
 SEED_PATH = '/api/v1/workbench/demo/seed-validation'
 SETTINGS = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+
+
+def _validation_graph(repository: PersistenceRepository, key: str = 'graph') -> ValidationSeedGraph:
+    scenario = _validation_scenario(
+        load_scenario(Path('backend/demo_data/scenarios/AT-14-field-states-motor.json')),
+        customer_id='cus_demo',
+        staff_id='stf_demo',
+    )
+    presence, expected_presence_revision = _validation_presence(repository, 'stf_demo')
+    response_payload = {
+        'status': 'seeded',
+        'scenario_ids': ['AT-14-field-states-motor'],
+        'claim_ids': [scenario.claim.claim_id],
+    }
+    return ValidationSeedGraph(
+        claims=(scenario.claim,),
+        sessions=tuple(scenario.sessions),
+        messages=tuple(scenario.messages),
+        evidence=tuple(scenario.evidence),
+        staff_presence=presence,
+        expected_presence_revision=expected_presence_revision,
+        idempotency=IdempotencyRecord(
+            actor_id='stf_demo',
+            route=VALIDATION_SEED_ROUTE,
+            key=key,
+            request_fingerprint='validation-seed-v1',
+            claim_id=scenario.claim.claim_id,
+            session_id=scenario.claim.active_session_id or '',
+            response_payload=response_payload,
+        ),
+    )
 
 
 def test_validation_seed_creates_three_cross_role_graphs() -> None:
@@ -216,6 +269,260 @@ def test_validation_seed_uses_the_same_graph_boundary_for_mongodb() -> None:
         len(repository.list_evidence(claim.claim_id, claim.customer_id)) == 1
         for claim in repository.list_claims_internal()
     )
+
+
+def test_fixture_validation_seed_repository_guards_replay_conflict_and_graph_shape() -> None:
+    repository = FixtureRepository()
+    graph = _validation_graph(repository)
+
+    repository.seed_validation_graph(graph)
+    repository.seed_validation_graph(graph)
+    with pytest.raises(IdempotencyConflict):
+        repository.seed_validation_graph(
+            replace(
+                graph,
+                idempotency=replace(graph.idempotency, request_fingerprint='different'),
+            ),
+        )
+    with pytest.raises(DemoSeedConflict):
+        repository.seed_validation_graph(_validation_graph(repository, key='populated'))
+
+    for invalid_graph in (
+        replace(graph, claims=()),
+        replace(graph, sessions=(graph.sessions[0], graph.sessions[0])),
+        replace(graph, messages=(graph.messages[0], graph.messages[0])),
+        replace(graph, evidence=(graph.evidence[0], graph.evidence[0])),
+    ):
+        invalid_repository = FixtureRepository()
+        with pytest.raises(ValueError):
+            invalid_repository.seed_validation_graph(invalid_graph)
+
+    missing_active = graph.claims[0].model_copy(update={'active_session_id': 'ses_missing'})
+    with pytest.raises(ValueError):
+        FixtureRepository().seed_validation_graph(replace(graph, claims=(missing_active,)))
+
+    extra_session = graph.sessions[0].model_copy(update={'session_id': 'ses_extra'})
+    extra_graph = replace(
+        graph,
+        idempotency=replace(graph.idempotency, key='extra-session'),
+        sessions=(*graph.sessions, extra_session),
+    )
+    repository = FixtureRepository()
+    repository.seed_validation_graph(extra_graph)
+    assert (
+        repository.get_session(
+            graph.claims[0].claim_id,
+            'ses_extra',
+            graph.claims[0].customer_id,
+        )
+        is not None
+    )
+
+
+def test_mongodb_validation_seed_repository_guards_replay_conflict_and_graph_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_boundaries')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    graph = _validation_graph(repository)
+
+    repository.seed_validation_graph(graph)
+    repository.seed_validation_graph(graph)
+    with pytest.raises(IdempotencyConflict):
+        repository.seed_validation_graph(
+            replace(
+                graph,
+                idempotency=replace(graph.idempotency, request_fingerprint='different'),
+            ),
+        )
+    with pytest.raises(DemoSeedConflict):
+        repository.seed_validation_graph(_validation_graph(repository, key='populated'))
+
+    invalid_repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_invalid')
+    invalid_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    with pytest.raises(ValueError):
+        invalid_repository.seed_validation_graph(replace(graph, claims=()))
+
+    revision_repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_revision')
+    revision_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    mismatched_presence = replace(
+        _validation_graph(revision_repository, key='presence-mismatch'),
+        expected_presence_revision=99,
+    )
+    with pytest.raises(RevisionConflict):
+        revision_repository.seed_validation_graph(mismatched_presence)
+
+    invalid_initial_revision = replace(
+        _validation_graph(revision_repository, key='initial-revision'),
+        staff_presence=_validation_graph(revision_repository).staff_presence.model_copy(
+            update={'revision': 2},
+        ),
+        expected_presence_revision=None,
+    )
+    with pytest.raises(RevisionConflict):
+        revision_repository.seed_validation_graph(invalid_initial_revision)
+
+    wrong_revision_repository = MongoDBRepository(
+        mongomock.MongoClient(),
+        'validation_seed_wrong_revision',
+    )
+    wrong_revision_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    stored_graph = _validation_graph(wrong_revision_repository, key='stored-presence')
+    wrong_revision_repository.save_staff_presence(
+        stored_graph.staff_presence,
+        stored_graph.expected_presence_revision,
+    )
+    wrong_revision_graph = replace(
+        _validation_graph(wrong_revision_repository, key='wrong-presence-revision'),
+        staff_presence=stored_graph.staff_presence.model_copy(
+            update={'revision': stored_graph.staff_presence.revision + 2},
+        ),
+        expected_presence_revision=stored_graph.staff_presence.revision,
+    )
+    with pytest.raises(RevisionConflict):
+        wrong_revision_repository.seed_validation_graph(wrong_revision_graph)
+
+    missing_active_repository = MongoDBRepository(
+        mongomock.MongoClient(),
+        'validation_seed_missing_active',
+    )
+    missing_active_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    missing_active_graph = _validation_graph(missing_active_repository, key='missing-active')
+    missing_active_claim = missing_active_graph.claims[0].model_copy(
+        update={'active_session_id': 'ses_missing'},
+    )
+    with pytest.raises(ValueError):
+        missing_active_repository.seed_validation_graph(
+            replace(missing_active_graph, claims=(missing_active_claim,)),
+        )
+
+    duplicate_repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_race')
+    duplicate_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    duplicate_graph = _validation_graph(duplicate_repository)
+
+    def raise_duplicate(*args: Any, **kwargs: Any) -> None:
+        raise DuplicateKeyError('presence race')
+
+    monkeypatch.setattr(duplicate_repository._collection, 'insert_one', raise_duplicate)
+    with pytest.raises(RevisionConflict):
+        duplicate_repository.seed_validation_graph(duplicate_graph)
+
+    replace_repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_replace')
+    replace_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    replace_graph = _validation_graph(replace_repository)
+    replace_repository.save_staff_presence(
+        replace_graph.staff_presence,
+        replace_graph.expected_presence_revision,
+    )
+    next_graph = replace(
+        _validation_graph(replace_repository, key='replace-race'),
+        staff_presence=replace_graph.staff_presence.model_copy(
+            update={'revision': replace_graph.staff_presence.revision + 1},
+        ),
+        expected_presence_revision=replace_graph.staff_presence.revision,
+    )
+    monkeypatch.setattr(
+        replace_repository._collection,
+        'replace_one',
+        lambda *args, **kwargs: SimpleNamespace(matched_count=0),
+    )
+    with pytest.raises(RevisionConflict):
+        replace_repository.seed_validation_graph(next_graph)
+
+    extra_session = graph.sessions[0].model_copy(update={'session_id': 'ses_extra'})
+    extra_graph = replace(
+        graph,
+        idempotency=replace(graph.idempotency, key='extra-session'),
+        sessions=(*graph.sessions, extra_session),
+    )
+    extra_repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_extra')
+    extra_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    extra_repository.seed_validation_graph(extra_graph)
+    assert (
+        extra_repository.get_session(
+            graph.claims[0].claim_id,
+            'ses_extra',
+            graph.claims[0].customer_id,
+        )
+        is not None
+    )
+
+
+class _RacingIdentityRepository(FixtureIdentityRepository):
+    def create_account(
+        self,
+        email: str,
+        password: str,
+        display_name: str,
+        phone: str = '',
+    ) -> CustomerAccountRecord | None:
+        super().create_account(email, password, display_name, phone)
+        return None
+
+
+def test_validation_seed_handles_claimant_provision_race_and_unavailable_account() -> None:
+    racing_identity = _RacingIdentityRepository()
+    racing_identity._accounts.pop('cus_demo')
+    account = _ensure_demo_claimant(racing_identity)
+    assert account.email == 'claimant.one@example.invalid'
+
+    unavailable_identity = FixtureIdentityRepository()
+    unavailable_identity._accounts['cus_demo'].active = False
+    with pytest.raises(ApiError) as error:
+        _ensure_demo_claimant(unavailable_identity)
+    assert error.value.code == 'DEMO_CLAIMANT_UNAVAILABLE'
+
+
+def test_validation_seed_maps_existing_idempotency_conflict() -> None:
+    repository = FixtureRepository()
+    repository.save_idempotency(
+        IdempotencyRecord(
+            actor_id='stf_demo',
+            route=VALIDATION_SEED_ROUTE,
+            key='existing',
+            request_fingerprint='old',
+            claim_id='clm_existing',
+            session_id='ses_existing',
+        ),
+    )
+    with pytest.raises(ApiError) as error:
+        seed_validation_scenarios(
+            repository,
+            FixtureIdentityRepository(),
+            FixtureStaffIdentityRepository(),
+            'stf_demo',
+            'existing',
+        )
+    assert error.value.code == 'IDEMPOTENCY_CONFLICT'
+
+
+class _FailingValidationSeedRepository(FixtureRepository):
+    def __init__(self, failure: Exception) -> None:
+        super().__init__()
+        self.failure = failure
+
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> None:
+        raise self.failure
+
+
+@pytest.mark.parametrize(
+    ('failure', 'code'),
+    [
+        (DemoSeedConflict('queue'), 'DEMO_SEED_REQUIRES_EMPTY_QUEUE'),
+        (IdempotencyConflict('key'), 'IDEMPOTENCY_CONFLICT'),
+        (RevisionConflict(4), 'REVISION_CONFLICT'),
+    ],
+)
+def test_validation_seed_maps_repository_conflicts(failure: Exception, code: str) -> None:
+    with pytest.raises(ApiError) as error:
+        seed_validation_scenarios(
+            _FailingValidationSeedRepository(failure),
+            FixtureIdentityRepository(),
+            FixtureStaffIdentityRepository(),
+            'stf_demo',
+            f'failure-{code}',
+        )
+    assert error.value.code == code
 
 
 def test_validation_source_scenarios_remain_unchanged() -> None:
