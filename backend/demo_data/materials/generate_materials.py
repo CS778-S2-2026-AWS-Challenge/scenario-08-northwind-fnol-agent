@@ -237,6 +237,12 @@ class MaterialReference:
     resolution: str | None = None
 
     def as_manifest_entry(self) -> dict[str, str]:
+        """Return the reference in its generated-manifest shape.
+
+        Returns:
+            The relation, target, reason, and optional resolution fields.
+        """
+
         entry = {'relation': self.relation, 'target': self.target, 'reason': self.reason}
         if self.resolution is not None:
             entry['resolution'] = self.resolution
@@ -258,12 +264,22 @@ class Asset:
 
     @property
     def media_type(self) -> str | None:
-        """The produced file's type, or `None` for a material that holds no bytes."""
+        """Return the produced file's media type.
+
+        Returns:
+            The media type, or `None` for a material that holds no bytes.
+        """
 
         return MEDIA_TYPES.get(self.kind)
 
     @property
     def has_artefact(self) -> bool:
+        """Return whether this material is represented by produced bytes.
+
+        Returns:
+            `True` for a photo or document and `False` for a no-byte record.
+        """
+
         return self.kind != RECORD_KIND
 
 
@@ -1130,22 +1146,17 @@ def _pdf_bytes(asset: Asset) -> bytes:
 # check failure rather than something a reader has to notice. `R` there means the
 # condition must be *reachable* in that path's demonstration, not merely describable.
 #
-# Two kinds of cell, and the difference is not a convenience. Missing and Pending are
+# A required cell is reached by absence, artefact, or record. Missing and Pending are
 # reached by absence: nothing has been offered, or the wait is on someone, and there is
-# no artefact because nothing came back. Unavailable is different — section 7 says it
-# "must state why, and must not silently degrade into a claim of unavailability where
-# none was established". Establishing it produces a record: the issuer or assessor
-# answering that they cannot supply, and for what reason. That answer is a real material,
-# so Unavailable is reached by an artefact like every present condition.
+# no artefact because nothing came back. Present conditions are reached by the artefact
+# that demonstrates them. Unavailable uses the third form described below.
 REACHED_BY_ABSENCE = frozenset({'missing', 'pending'})
 
-# The third way a cell is reached. `missing` and `pending` are reached by absence: nothing
-# was offered, or the wait is on someone identifiable, and no artefact exists because
-# nothing came back. `unavailable` is a different kind of absence, because section 7
-# requires it to be *established* and forbids it degrading into a claim of unavailability
-# where none was. What establishes it is a received answer, which is its own material; the
-# unavailable thing is what that answer refuses, and it has no bytes of its own. So the
-# cell is reached by a record that cites the answer, never by the answer alone.
+# The third form. Section 7 requires `unavailable` to be *established* and forbids it
+# degrading into a claim of unavailability where none was. What establishes it is a
+# received answer, which is its own material; the unavailable thing is what that answer
+# refuses, and it has no bytes of its own. So the cell is reached by a record that cites
+# the answer, never by the answer alone and never by a record citing nothing.
 REACHED_BY_RECORD = frozenset({'unavailable'})
 
 REQUIRED_COVERAGE: tuple[tuple[str, str, str], ...] = (
@@ -1252,6 +1263,7 @@ def reference_failures(materials: list[dict[str, object]]) -> list[str]:
     """
 
     known = {str(material['path']) for material in materials}
+    held_as = {str(material['path']): str(material.get('held_as', '')) for material in materials}
     failures: list[str] = []
     for material in materials:
         path = str(material['path'])
@@ -1279,6 +1291,46 @@ def reference_failures(materials: list[dict[str, object]]) -> list[str]:
                 failures.append(f'{path}: {relation} names {target}, which is not a material')
             elif target == path:
                 failures.append(f'{path}: {relation} names itself')
+            elif relation == ESTABLISHED_BY and held_as.get(target) == RECORD_KIND:
+                failures.append(
+                    f'{path}: {relation} names {target}, which holds no bytes either; an '
+                    f'unavailability has to be established by something that arrived'
+                )
+    return failures
+
+
+def provenance_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report record and artefact provenance claims that contradict their representation.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per false or missing simulation-provenance claim.
+    """
+
+    failures: list[str] = []
+    for material in materials:
+        path = str(material['path'])
+        held_as = str(material.get('held_as', ''))
+        attributes = material.get('attributes')
+        provenance = (
+            attributes.get('provenance_and_verification', {})
+            if isinstance(attributes, dict)
+            else {}
+        )
+        provenance = provenance if isinstance(provenance, dict) else {}
+        if held_as == RECORD_KIND:
+            if 'stated_on_the_material' in provenance:
+                failures.append(
+                    f'{path}: record has no bytes on which a simulated-origin statement can appear'
+                )
+            if provenance.get('recorded_in_the_manifest') != SIMULATED:
+                failures.append(
+                    f'{path}: record does not carry its simulated origin in the manifest'
+                )
+        elif provenance.get('stated_on_the_material') != SIMULATED:
+            failures.append(f'{path}: produced material does not declare its simulated origin')
     return failures
 
 
@@ -1325,6 +1377,24 @@ def material_attributes(asset: Asset) -> dict[str, object]:
     profile = CLASS_PROFILE[asset.material_class]
     conditions = detail['conditions']
     assert isinstance(conditions, dict)
+    if asset.has_artefact:
+        provenance_and_verification = {
+            'origin': 'generated for the Validation Prototype; no real incident, authority, '
+            'retailer, or assessor is represented',
+            'stated_on_the_material': SIMULATED,
+            'checking_received': 'none beyond structural checks. That the file exists, is the '
+            'declared type, and carries its origin statement is not verification of its content.',
+        }
+    else:
+        provenance_and_verification = {
+            'origin': 'generated no-byte record for the Validation Prototype; no real incident, '
+            'authority, retailer, or assessor is represented',
+            'recorded_in_the_manifest': SIMULATED,
+            'checking_received': 'structural checks confirm that no file exists at this record '
+            'path and that its established_by reference resolves to the received answer. This '
+            'does not verify provider content or make the record a real external result.',
+        }
+
     return {
         'purpose': detail['purpose'],
         'applicable_paths_and_trigger': {
@@ -1345,13 +1415,7 @@ def material_attributes(asset: Asset) -> dict[str, object]:
             'usable': detail['media_usable'],
             'insufficient': detail['media_insufficient'],
         },
-        'provenance_and_verification': {
-            'origin': 'generated for the Validation Prototype; no real incident, authority, '
-            'retailer, or assessor is represented',
-            'stated_on_the_material': SIMULATED,
-            'checking_received': 'none beyond structural checks. That the file exists, is the '
-            'declared type, and carries its origin statement is not verification of its content.',
-        },
+        'provenance_and_verification': provenance_and_verification,
         'consent_and_visibility': profile['consent_and_visibility'],
         'linkage': {
             'attaches_to': detail['linkage'],
@@ -1487,6 +1551,9 @@ def check_all() -> tuple[list[str], list[str]]:
     A material held as a record has nothing to open, so the check is the opposite one: a
     file must *not* be there. An unavailable material that quietly acquired bytes would be
     the defect this whole shape exists to prevent, back again in the other direction.
+
+    Returns:
+        Human-readable reports for valid materials and all validation failures.
     """
 
     reports: list[str] = []
@@ -1577,6 +1644,7 @@ def check_all() -> tuple[list[str], list[str]]:
 
     failures.extend(coverage_failures(stored.get('materials', [])))
     failures.extend(reference_failures(stored.get('materials', [])))
+    failures.extend(provenance_failures(stored.get('materials', [])))
     return reports, failures
 
 
@@ -1610,10 +1678,11 @@ def main() -> int:
     records = len(ASSETS) - artefacts
     print(
         f'{len(reports)} materials verified: {artefacts} produced assets each open, are the '
-        f'declared media type and state their simulated origin, and {records} are held as '
-        'records with no bytes and an answer behind each; every material answers all '
-        f'{len(REQUIRED_ATTRIBUTES)} required attributes and names whatever second material its '
-        f'condition depends on; the manifest matches the asset table; all '
+        f'declared media type and state their simulated origin on their own face, and {records} '
+        'are held as records with no bytes, an arrived answer behind each, and their simulated '
+        'origin recorded in the manifest instead of claimed on a surface they do not have; every '
+        f'material answers all {len(REQUIRED_ATTRIBUTES)} required attributes and names whatever '
+        'second material its condition depends on; the manifest matches the asset table; all '
         f'{len(REQUIRED_COVERAGE)} conditions section 5.2 requires are reached'
     )
     return 0

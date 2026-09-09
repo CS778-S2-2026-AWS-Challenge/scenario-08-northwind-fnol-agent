@@ -97,7 +97,10 @@ claim record, a source, and a processing status is issue #602.
 Each entry also records `held_as` — `photo`, `document`, or `record` — and its `references`. A
 `record` entry has `media_type: null` and no file, which is not a gap in production: an unavailable
 material is exactly the one that does not exist, and the manifest has to be able to say so without
-inventing a file to say it with.
+inventing a file to say it with. Because a record has no face or bytes, its simulated-origin
+statement is recorded in the manifest and must remain visible in any projection derived from it.
+Its structural check confirms the absence of a file and resolves the received answer named by
+`established_by`; it never claims that a file exists or that provider content was verified.
 
 `generate_materials.py` writes it, and `--check` fails if any material omits a required attribute,
 if the manifest has drifted from the tables, if a material demonstrates a condition it does not

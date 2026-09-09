@@ -652,9 +652,9 @@
           "insufficient": "An unavailability asserted with no notice behind it, which section 7 forbids: it cannot be distinguished from a request nobody answered."
         },
         "provenance_and_verification": {
-          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
-          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
-          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+          "origin": "generated no-byte record for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "recorded_in_the_manifest": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "structural checks confirm that no file exists at this record path and that its established_by reference resolves to the received answer. This does not verify provider content or make the record a real external result."
         },
         "consent_and_visibility": {
           "disclosure_requires_consent": true,
@@ -1886,9 +1886,9 @@
           "insufficient": "An unavailability asserted with no notice behind it, which section 7 forbids: it cannot be distinguished from a request nobody answered."
         },
         "provenance_and_verification": {
-          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
-          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
-          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+          "origin": "generated no-byte record for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "recorded_in_the_manifest": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "structural checks confirm that no file exists at this record path and that its established_by reference resolves to the received answer. This does not verify provider content or make the record a real external result."
         },
         "consent_and_visibility": {
           "disclosure_requires_consent": true,
