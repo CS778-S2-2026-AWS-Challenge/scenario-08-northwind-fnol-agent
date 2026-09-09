@@ -1,15 +1,19 @@
 import gc
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
 import mongomock
 import pytest
 from fastapi.testclient import TestClient
-from pymongo.errors import DuplicateKeyError
+from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from backend.adapters.identity import FixtureIdentityRepository, SQLiteIdentityRepository
 from backend.adapters.staff_identity import FixtureStaffIdentityRepository
@@ -617,6 +621,59 @@ def test_validation_seed_reconciles_presence_race_to_committed_response() -> Non
     persisted = repository.find_idempotency('stf_demo', VALIDATION_SEED_ROUTE, 'presence-race')
     assert persisted is not None
     assert response.json() == persisted.response_payload
+
+
+def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
+    """Verify the first-seed transaction race against a real MongoDB primary."""
+    uri = os.environ.get(
+        'NORTHWIND_MONGODB_TEST_URI',
+        'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+    )
+    client: MongoClient[Any] = MongoClient(uri, serverSelectionTimeoutMS=750)
+    database_name = f'northwind_validation_seed_race_{datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")}'
+    connected = False
+    try:
+        try:
+            hello = client.admin.command('hello')
+            connected = True
+        except (PyMongoError, ValueError) as error:
+            pytest.skip(f'real MongoDB replica set unavailable: {type(error).__name__}')
+        if not hello.get('isWritablePrimary', False):
+            pytest.skip('real MongoDB replica set has no writable primary')
+
+        repository = MongoDBRepository(client, database_name)
+        identity = FixtureIdentityRepository()
+        staff_identity = FixtureStaffIdentityRepository()
+        _ensure_demo_claimant(identity)
+        barrier = Barrier(2)
+
+        def seed() -> dict[str, Any]:
+            barrier.wait(timeout=5)
+            return seed_validation_scenarios(
+                repository,
+                identity,
+                staff_identity,
+                'stf_demo',
+                'real-same-key-race',
+            ).model_dump(mode='json')
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(lambda operation: operation(), (seed, seed)))
+
+        assert responses[0] == responses[1]
+        persisted = repository.find_idempotency(
+            'stf_demo', VALIDATION_SEED_ROUTE, 'real-same-key-race'
+        )
+        assert persisted is not None
+        assert persisted.response_payload == responses[0]
+        assert all(
+            repository.get_claim(claim_id, 'cus_demo') is not None
+            for claim_id in responses[0]['claim_ids']
+        )
+    finally:
+        if connected:
+            client.drop_database(database_name)
+        client.close()
 
 
 @pytest.mark.parametrize(
