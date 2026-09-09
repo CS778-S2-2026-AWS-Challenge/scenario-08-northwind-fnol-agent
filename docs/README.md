@@ -71,6 +71,7 @@ them:
 - [Privacy Governance](privacy-governance.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
+- [Self-hosted Runner Deployment](../deploy/self-hosted-runner.md)
 - [Staff Tag Registry](staff-tag-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 

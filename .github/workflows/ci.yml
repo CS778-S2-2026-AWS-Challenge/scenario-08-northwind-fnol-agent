@@ -16,7 +16,9 @@ concurrency:
 jobs:
   backend-quality:
     name: Backend quality
-    runs-on: ubuntu-latest
+    # Set repository variable NORTHWIND_CI_RUNNER to northwind-ci after the
+    # trusted self-hosted runner is installed. Fork pull requests stay hosted.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || vars.NORTHWIND_CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     steps:
