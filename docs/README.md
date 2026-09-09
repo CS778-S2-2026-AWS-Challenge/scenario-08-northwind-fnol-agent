@@ -124,6 +124,7 @@ superseded when the implementation state changes.
 - [Existing Claims Fraud Controls and Verification](research/existing-claims-fraud-controls-and-verification.md)
 - [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
 - [Third-party Stakeholder and Service Independent Challenge Review](research/third-party-stakeholder-service-independent-challenge-review.md)
+- [Unified Third-party Service Catalogue and Implementation Brief](research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)
 - [Claimant Survey Response Export](research/claimant-survey-final-responses.csv)
