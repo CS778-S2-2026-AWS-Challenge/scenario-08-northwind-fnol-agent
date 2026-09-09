@@ -247,9 +247,13 @@ def create_session(
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> ClaimantSession:
-    payload = payload.model_copy(
-        update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
-    )
+    # A resume request must let the service derive the profile from the
+    # persisted session. Only new sessions, or explicit selections, go
+    # through the catalog default/validation path.
+    if payload.model_profile_id is not None or payload.intent == 'new':
+        payload = payload.model_copy(
+            update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
+        )
     return start_session_with_recovery(
         repository_for(request),
         principal,

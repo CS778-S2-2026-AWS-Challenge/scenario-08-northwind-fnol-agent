@@ -437,6 +437,38 @@ def start_session(
         raise _claim_not_found()
 
     active_session = repository.get_active_session(claim_id, principal.subject)
+    resume_source = active_session
+    if resume_source is None:
+        previous_sessions = repository.list_sessions_for_claim(
+            claim_id,
+            principal.subject,
+        )
+        if previous_sessions:
+            resume_source = max(
+                previous_sessions,
+                key=lambda item: (
+                    item.last_active_at,
+                    item.started_at,
+                    item.session_id,
+                ),
+            )
+    if (
+        payload.intent != 'new'
+        and resume_source is not None
+        and payload.model_profile_id is not None
+        and payload.model_profile_id != resume_source.model_profile_id
+    ):
+        raise ApiError(
+            status_code=409,
+            code='MODEL_PROFILE_CONFLICT',
+            message='The saved session is bound to a different model profile.',
+            details=[
+                ErrorDetail(
+                    field='model_profile_id',
+                    reason='Resume without overriding the persisted session model profile.',
+                )
+            ],
+        )
     if (
         payload.intent != 'new'
         and active_session is not None
@@ -461,29 +493,15 @@ def start_session(
                 message='The session resume request conflicted with an existing retry or session.',
             ) from conflict
     else:
-        previous_sessions = repository.list_sessions_for_claim(
-            claim_id,
-            principal.subject,
-        )
-        resume_source = active_session
-        if resume_source is None and previous_sessions:
-            resume_source = max(
-                previous_sessions,
-                key=lambda item: (
-                    item.last_active_at,
-                    item.started_at,
-                    item.session_id,
-                ),
-            )
-
         timestamp = now_utc()
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
             customer_id=principal.subject,
             model_profile_id=(
-                payload.model_profile_id
-                or (resume_source.model_profile_id if resume_source is not None else 'qwen-local')
+                resume_source.model_profile_id
+                if resume_source is not None and payload.intent != 'new'
+                else (payload.model_profile_id or 'qwen-local')
             ),
             summary=resume_source.summary if resume_source is not None else None,
             unresolved_questions=(

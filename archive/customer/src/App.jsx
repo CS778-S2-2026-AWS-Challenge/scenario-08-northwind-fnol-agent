@@ -505,12 +505,12 @@ function App() {
       .then((capabilities) => {
         if (!active) return
         setRuntimeCapabilities(capabilities)
-        setSelectedModel(
+        setSelectedModel((current) => current || (
           capabilities.default_model_profile_id
           || capabilities.models?.find((model) => model.id === 'qwen-local')?.id
           || capabilities.models?.[0]?.id
-          || 'qwen-local',
-        )
+          || 'qwen-local'
+        ))
       })
       .catch(() => {})
     return () => { active = false }
@@ -1099,7 +1099,7 @@ function App() {
     setError('')
     setStatus('resuming')
     try {
-      const session = await resumeClaimSession({ claimId, modelProfileId: selectedModel })
+      const session = await resumeClaimSession({ claimId })
       const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
       latestRevision.current = current.revision
