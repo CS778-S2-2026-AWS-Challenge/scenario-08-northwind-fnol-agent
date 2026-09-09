@@ -66,10 +66,15 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
-from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
+from backend.prompts import (
+    MOTOR_CLAIMANT_PROMPT_ID,
+    load_motor_claimant_prompt,
+    load_staff_assistant_prompt,
+)
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.operations import OperationRepository
+from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.agent import (
     AgentTurnContext,
     InvariantGuardedAgent,
@@ -937,6 +942,20 @@ class SequencedGateway:
         return self.responses[len(self.requests) - 1]
 
 
+class RuntimeSequenceGateway:
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        self.responses = responses
+        self.requests: list[ModelRequest] = []
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=True)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return self.responses.pop(0)
+
+
 class StaticKnowledgeRetriever:
     def __init__(self, chunks: list[KnowledgeChunk]) -> None:
         self.chunks = chunks
@@ -978,6 +997,23 @@ def model_turn_output(
             'handoff_priority': None,
         }
     )
+
+
+def _runtime_model_output() -> dict[str, object]:
+    return {
+        'action_code': 'conversation.answer',
+        'runtime_action_code': 'runtime.continue',
+        'reason_codes': ['CLAIM_CONTEXT_READ'],
+        'customer_reason': 'The current claim context was read.',
+        'customer_response': 'I have read the current claim context.',
+        'customer_next_step': {
+            'status': 'continue_current_report',
+            'summary': 'Continue the report when ready.',
+            'responsible_party': 'claimant',
+            'required_items': [],
+        },
+        'source_refs': [],
+    }
 
 
 class FailingGateway:
@@ -2595,6 +2631,56 @@ def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> N
     assert 'cannot become a positive fact or a readiness signal' in prompt
 
 
+def test_prompt_identifier_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class InvalidPromptResource:
+        def joinpath(self, _name: str) -> 'InvalidPromptResource':
+            return self
+
+        def read_text(self, **_kwargs: object) -> str:
+            return 'Prompt ID: invalid'
+
+    monkeypatch.setattr(
+        'backend.prompts.files',
+        lambda _package: InvalidPromptResource(),
+    )
+
+    with pytest.raises(RuntimeError, match='prompt ID does not match'):
+        load_motor_claimant_prompt()
+    with pytest.raises(RuntimeError, match='prompt ID does not match'):
+        load_staff_assistant_prompt()
+
+
+def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
+    gateway = ConfigurationBackedModelGateway(
+        Settings(
+            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_protocol_adapter='openai_compatible',
+            model_base_url='https://model.example.test/v1',
+            model_identifier='northwind-test-model',
+        ),
+        ConfigurationRepository(),
+        runtime_configuration_resolver=RuntimeConfigurationResolver(
+            ConfigurationRepository(),
+            ReleaseSetRepository(),
+            environment='test',
+            runtime_profile='fixture',
+        ),
+    )
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel-missing-model',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete_for_snapshot(ModelRequest(messages=[]), snapshot)
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
 def test_gateway_agent_requires_structured_output_at_composition() -> None:
     registry = ModelGatewayRegistry()
     registry.register(
@@ -2687,6 +2773,56 @@ def test_gateway_agent_uses_the_published_snapshot_completion_path() -> None:
     assert gateway.snapshot is snapshot
 
 
+def test_snapshot_tool_continuation_rejects_invalid_output() -> None:
+    class SnapshotRuntimeGateway(RuntimeSequenceGateway):
+        def complete(self, _request: ModelRequest) -> ModelResponse:
+            raise AssertionError('snapshot completion must be used for both calls')
+
+        def complete_for_snapshot(
+            self, request: ModelRequest, snapshot: RuntimeConfigurationSnapshot
+        ) -> ModelResponse:
+            self.requests.append(request)
+            self.snapshot = snapshot
+            return self.responses.pop(0)
+
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel-vp-runtime',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+    gateway = SnapshotRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={'not': 'a runtime proposal'},
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-snapshot-runtime',
+                trigger_message_id='msg-snapshot-runtime',
+                message_text='Read the current report.',
+                evidence_refs=[],
+                runtime_configuration_snapshot=snapshot,
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert len(gateway.requests) == 2
+    assert gateway.snapshot is snapshot
+
+
 @pytest.mark.parametrize(
     ('response', 'expected_code'),
     [
@@ -2731,6 +2867,95 @@ def test_gateway_agent_rejects_non_complete_or_unsafe_provider_results(
         )
 
     assert captured.value.code is expected_code
+
+
+@pytest.mark.parametrize(
+    ('first_response', 'continuation'),
+    [
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.COMPLETE),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='call-1', name='claim.read', arguments={}),
+                    ModelToolCall(call_id='call-2', name='claim.read', arguments={}),
+                ],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='unknown', arguments={})],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call-1', name='claim.read', arguments={'unexpected': True}
+                    )
+                ],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'action_code': 'legacy.update',
+                },
+            ),
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'runtime_action_code': 'runtime.execute',
+                },
+            ),
+        ),
+    ],
+)
+def test_runtime_gateway_rejects_tool_loop_contract_errors(
+    first_response: ModelResponse,
+    continuation: ModelResponse | None,
+) -> None:
+    responses = [first_response]
+    if continuation is not None:
+        responses.append(continuation)
+    gateway = RuntimeSequenceGateway(responses)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-runtime-error',
+                trigger_message_id='msg-runtime-error',
+                message_text='Read the current report.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code in {
+        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+    }
 
 
 def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:

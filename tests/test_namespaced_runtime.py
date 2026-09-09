@@ -1,11 +1,15 @@
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.core.errors import ApiError
+from backend.domain.agent_tool_registry import tool_contract
 from backend.domain.configuration import (
     ConfigurationImpact,
     ConfigurationRecord,
@@ -20,6 +24,15 @@ from backend.domain.model_gateway import (
 )
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
+from backend.services.model_profiles import (
+    _settings_configuration,
+    model_catalog,
+    select_model_profile,
+)
+from backend.services.runtime_configuration import (
+    RuntimeConfigurationResolutionError,
+    RuntimeConfigurationSnapshot,
+)
 
 
 class SequenceToolGateway:
@@ -262,3 +275,202 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         )
         assert unknown.status_code == 422
         assert unknown.json()['error']['code'] == 'MODEL_PROFILE_UNAVAILABLE'
+
+
+def test_model_catalog_filters_unpublished_and_invalid_profiles_before_bootstrap() -> None:
+    configurations = ConfigurationRepository()
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='openai_compatible',
+        model_base_url='http://model.example.test/v1',
+        model_identifier='qwen3.8-27b',
+        model_supports_tools=True,
+    )
+    configurations.create(
+        ConfigurationRecord(
+            configuration_id='cfg-draft',
+            domain='model',
+            configuration_key='draft',
+            revision=1,
+            state=ConfigurationState.DRAFT,
+            impact=ConfigurationImpact.HIGH,
+            values={},
+            author='test',
+            reason='Unpublished profile.',
+            updated_at=datetime.now(UTC),
+        )
+    )
+    configurations.create(
+        ConfigurationRecord(
+            configuration_id='cfg-invalid',
+            domain='model',
+            configuration_key='invalid',
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.HIGH,
+            values={'profile_id': 'invalid'},
+            author='test',
+            reason='Malformed profile.',
+            updated_at=datetime.now(UTC),
+        )
+    )
+    configurations.create(
+        ConfigurationRecord(
+            configuration_id='cfg-other-domain',
+            domain='feature',
+            configuration_key='feature',
+            revision=1,
+            state=ConfigurationState.PUBLISHED,
+            impact=ConfigurationImpact.NORMAL,
+            values={},
+            author='test',
+            reason='Non-model record.',
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+    with TestClient(
+        create_app(
+            settings,
+            repository=FixtureRepository(),
+            configuration_repository=configurations,
+        )
+    ) as client:
+        response = client.get(
+            '/api/v1/claims/capabilities',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+
+    assert response.status_code == 200
+    assert response.json()['models'][0]['id'] == 'qwen-local'
+    assert response.json()['default_model_profile_id'] == 'qwen-local'
+
+
+def test_capabilities_returns_no_model_catalog_for_controlled_runtime() -> None:
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
+    )
+
+    with TestClient(create_app(settings, repository=FixtureRepository())) as client:
+        response = client.get(
+            '/api/v1/claims/capabilities',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+
+    assert response.status_code == 200
+    assert response.json()['models'] == []
+    assert response.json()['default_model_profile_id'] is None
+
+
+def test_model_catalog_returns_empty_for_controlled_runtime_directly() -> None:
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=Settings(
+                    environment='test',
+                    identity_mode=IdentityMode.DEVELOPER,
+                    agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
+                )
+            )
+        )
+    )
+
+    assert model_catalog(request) == []
+    assert select_model_profile(request, 'requested-profile') == 'requested-profile'
+
+
+def test_model_catalog_raises_when_active_snapshot_is_unavailable() -> None:
+    class FailingResolver:
+        def snapshot(self) -> RuntimeConfigurationSnapshot:
+            raise RuntimeConfigurationResolutionError('invalid active release')
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=Settings(
+                    environment='test',
+                    identity_mode=IdentityMode.DEVELOPER,
+                    agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+                    model_base_url='http://model.example.test/v1',
+                    model_identifier='qwen3.8-27b',
+                ),
+                runtime_configuration_resolver=FailingResolver(),
+            )
+        )
+    )
+
+    with pytest.raises(ApiError, match='active Runtime configuration is unavailable'):
+        model_catalog(request)
+
+
+def test_model_catalog_reads_profiles_from_an_active_release_snapshot() -> None:
+    qwen = ConfigurationRecord(
+        configuration_id='cfg-qwen',
+        domain='model',
+        configuration_key='model:qwen-local',
+        revision=1,
+        state=ConfigurationState.PUBLISHED,
+        impact=ConfigurationImpact.HIGH,
+        values={
+            'protocol': 'openai_compatible',
+            'provider': 'qwen-local',
+            'model_identifier': 'qwen3.8-27b',
+            'base_url': 'http://model.example.test/v1',
+            'credential_environment_variable': None,
+            'profile_id': 'qwen-local',
+            'purpose': 'agent_turn',
+            'privacy_class': 'synthetic_fnol',
+            'prompt_version': 'northwind-fnol-motor-claimant-v4',
+            'evaluation_status': 'configured',
+            'timeout_seconds': 30.0,
+            'structured_output': True,
+            'tools': True,
+        },
+        author='test',
+        reason='Published snapshot profile.',
+        updated_at=datetime.now(UTC),
+    )
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='release-models',
+        configurations={'model:qwen-local': qwen},
+        integrations={},
+        knowledge={},
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=Settings(
+                    environment='test',
+                    identity_mode=IdentityMode.DEVELOPER,
+                    agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+                    model_base_url='http://model.example.test/v1',
+                    model_identifier='qwen3.8-27b',
+                ),
+                runtime_configuration_resolver=SimpleNamespace(snapshot=lambda: snapshot),
+            )
+        )
+    )
+
+    assert model_catalog(request) == [qwen]
+
+
+def test_model_catalog_does_not_bootstrap_when_model_settings_are_incomplete() -> None:
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
+        model_base_url=None,
+        model_identifier=None,
+    )
+    assert _settings_configuration(settings) is None
+
+
+def test_unknown_runtime_tool_contract_fails_closed() -> None:
+    with pytest.raises(ValueError, match='Unknown Agent tool'):
+        tool_contract('claim.write')

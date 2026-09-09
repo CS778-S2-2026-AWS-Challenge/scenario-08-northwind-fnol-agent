@@ -9,6 +9,7 @@ from backend.core.runtime_profiles import (
     build_data_runtime_bundle,
 )
 from backend.domain.configuration import (
+    REGISTERED_INTEGRATION_IDS,
     ConfigurationImpact,
     ConfigurationRecord,
     ConfigurationState,
@@ -84,6 +85,40 @@ def _knowledge(
         state=state,
         revision=1,
         author='test-admin',
+        updated_at=now_utc(),
+    )
+
+
+def _model_configuration(
+    configuration_id: str = 'cfg_qwen',
+    profile_id: str = 'qwen-local',
+    *,
+    configuration_key: str | None = None,
+) -> ConfigurationRecord:
+    return ConfigurationRecord(
+        configuration_id=configuration_id,
+        domain='model',
+        configuration_key=configuration_key or profile_id,
+        revision=1,
+        state=ConfigurationState.PUBLISHED,
+        impact=ConfigurationImpact.HIGH,
+        values={
+            'protocol': 'openai_compatible',
+            'provider': 'qwen-local',
+            'model_identifier': 'qwen3.8-27b',
+            'base_url': 'http://model.example/v1',
+            'credential_environment_variable': None,
+            'profile_id': profile_id,
+            'purpose': 'agent_turn',
+            'privacy_class': 'synthetic_fnol',
+            'prompt_version': 'northwind-fnol-motor-claimant-v4',
+            'evaluation_status': 'configured',
+            'timeout_seconds': 30.0,
+            'structured_output': True,
+            'tools': True,
+        },
+        author='test-admin',
+        reason='Test published model profile.',
         updated_at=now_utc(),
     )
 
@@ -430,3 +465,93 @@ def test_published_data_profile_must_match_process_runtime_profile() -> None:
             configuration_repository=configurations,
             release_set_repository=releases,
         )
+
+
+def test_snapshot_model_selects_profile_key_and_legacy_fallback() -> None:
+    qwen = _model_configuration()
+    snapshot = _resolver(ConfigurationRepository(), ReleaseSetRepository()).snapshot()
+
+    profile_snapshot = snapshot.__class__(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel-models',
+        configurations={'model:qwen-local': qwen},
+        integrations={},
+        knowledge={},
+    )
+
+    assert profile_snapshot.model('qwen-local') == qwen
+    assert profile_snapshot.model() == qwen
+    with pytest.raises(RuntimeConfigurationResolutionError):
+        profile_snapshot.model('missing-profile')
+    assert snapshot.model() is None
+    assert snapshot.model('missing-profile') is None
+
+
+def test_resolver_fallback_selects_profile_and_published_knowledge() -> None:
+    configurations = ConfigurationRepository()
+    qwen = _model_configuration()
+    default_model = _model_configuration(
+        configuration_id='cfg_default',
+        profile_id='default-model',
+        configuration_key='default',
+    )
+    configurations.create(qwen)
+    configurations.create(default_model)
+    knowledge = KnowledgeAdminRepository()
+    selected = _knowledge('knw_fallback', '2026.1')
+    knowledge.create(selected)
+    resolver = _resolver(configurations, ReleaseSetRepository(), knowledge)
+
+    assert resolver.resolve_model('qwen-local') == qwen
+    assert resolver.resolve_model() == default_model
+    assert resolver.resolve_knowledge('motor') == selected
+    assert _resolver(configurations, ReleaseSetRepository()).resolve_knowledge('motor') is None
+
+
+def test_release_snapshot_rejects_missing_knowledge_repository_and_invalid_records() -> None:
+    releases = ReleaseSetRepository()
+    releases.create(
+        ReleaseSetRecord(
+            release_set_id='rel-invalid-knowledge',
+            environment='test',
+            runtime_profile='fixture',
+            revision=1,
+            state=ReleaseSetState.PUBLISHED,
+            configuration_refs={},
+            knowledge_refs={'motor': KnowledgeReference(knowledge_id='missing', revision=1)},
+            author='test-admin',
+            reason='Exercise invalid knowledge references.',
+            effective_time=now_utc(),
+            updated_at=now_utc(),
+        )
+    )
+
+    with pytest.raises(RuntimeConfigurationResolutionError, match='no knowledge repository'):
+        _resolver(ConfigurationRepository(), releases).snapshot()
+
+    knowledge = KnowledgeAdminRepository()
+    knowledge.create(_knowledge('knw_draft', '2026.1', state=KnowledgeVersionState.DRAFT))
+    with pytest.raises(RuntimeConfigurationResolutionError, match='published knowledge'):
+        _resolver(ConfigurationRepository(), releases, knowledge).snapshot()
+
+
+def test_resolver_fallback_and_release_integrations_are_explicit() -> None:
+    configurations = ConfigurationRepository()
+    integration = ConfigurationRecord(
+        configuration_id='cfg_assessor',
+        domain='integration',
+        configuration_key=REGISTERED_INTEGRATION_IDS[0],
+        revision=1,
+        state=ConfigurationState.PUBLISHED,
+        impact=ConfigurationImpact.NORMAL,
+        values={'service_id': REGISTERED_INTEGRATION_IDS[0]},
+        author='test-admin',
+        reason='Test fallback integration.',
+        updated_at=now_utc(),
+    )
+    configurations.create(integration)
+
+    resolver = _resolver(configurations, ReleaseSetRepository())
+
+    assert resolver.resolve_integrations() == (integration,)
