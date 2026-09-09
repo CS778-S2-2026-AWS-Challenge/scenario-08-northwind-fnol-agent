@@ -240,6 +240,13 @@ def seed_validation_scenarios(
             message='The Idempotency-Key was already used for a different request.',
         ) from error
     except RevisionConflict as error:
+        replayed = repository.find_idempotency(staff_id, VALIDATION_SEED_ROUTE, key)
+        if (
+            replayed is not None
+            and replayed.request_fingerprint == fingerprint
+            and replayed.response_payload is not None
+        ):
+            return DemoSeedResponse.model_validate(replayed.response_payload)
         raise ApiError(
             status_code=409,
             code='REVISION_CONFLICT',

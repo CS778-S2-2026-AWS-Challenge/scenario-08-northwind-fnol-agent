@@ -587,6 +587,12 @@ class _RaceReplayValidationSeedRepository(FixtureRepository):
         raise IdempotencyConflict(graph.idempotency.key)
 
 
+class _RaceRevisionValidationSeedRepository(FixtureRepository):
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        self.save_idempotency(graph.idempotency)
+        raise RevisionConflict(1)
+
+
 def test_validation_seed_reconciles_idempotency_conflict_to_committed_response() -> None:
     repository = _RaceReplayValidationSeedRepository()
 
@@ -595,6 +601,20 @@ def test_validation_seed_reconciles_idempotency_conflict_to_committed_response()
 
     assert response.status_code == 200
     persisted = repository.find_idempotency('stf_demo', VALIDATION_SEED_ROUTE, 'race-replay')
+    assert persisted is not None
+    assert response.json() == persisted.response_payload
+
+
+def test_validation_seed_reconciles_presence_race_to_committed_response() -> None:
+    repository = _RaceRevisionValidationSeedRepository()
+
+    with TestClient(create_app(SETTINGS, repository)) as client:
+        response = client.post(
+            SEED_PATH, headers={**STAFF_AUTH, 'Idempotency-Key': 'presence-race'}
+        )
+
+    assert response.status_code == 200
+    persisted = repository.find_idempotency('stf_demo', VALIDATION_SEED_ROUTE, 'presence-race')
     assert persisted is not None
     assert response.json() == persisted.response_payload
 
