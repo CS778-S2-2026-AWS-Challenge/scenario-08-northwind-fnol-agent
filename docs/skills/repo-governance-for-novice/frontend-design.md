@@ -2,8 +2,8 @@
 
 These rules are written for this repository's actual frontend stack: React 19 +
 Vite + plain JSX (no TypeScript) + hand-written CSS, with no UI component
-library; two frontends, `customer/` (the claimant side) and `employee/` (the
-staff Workbench). Overall principles: mobile adaptation and accessibility come
+library; historical frontend sources are preserved under `archive/` while the
+current runtime entry points are governed separately. Overall principles: mobile adaptation and accessibility come
 first; default information density should not be high (deliberately dense
 layouts are decided per section 11.7 rule 4).
 
