@@ -43,7 +43,9 @@ def test_validation_seed_creates_three_cross_role_graphs() -> None:
             assert staff_claim.status_code == 200
             assert claimant_claim.status_code == 200
             assert claimant_evidence.status_code == 200
-            assert repository.get_claim_internal(claim_id).assignee_id == 'stf_demo'
+            stored_claim = repository.get_claim_internal(claim_id)
+            assert stored_claim is not None
+            assert stored_claim.assignee_id == 'stf_demo'
             assert claimant_claim.json()['claim_id'] == claim_id
 
             staff_sessions = client.get(
@@ -135,7 +137,9 @@ def test_validation_seed_rolls_back_when_a_child_write_fails() -> None:
 
     assert response.status_code == 500
     assert repository.list_claims_internal() == []
-    assert repository.get_staff_presence('stf_demo').revision == 1
+    presence = repository.get_staff_presence('stf_demo')
+    assert presence is not None
+    assert presence.revision == 1
     assert (
         repository.find_idempotency(
             'stf_demo',
