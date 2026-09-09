@@ -43,6 +43,7 @@ def _context() -> StaffAgentContext:
         conversation=(),
         knowledge=(),
         knowledge_status='no_evidence',
+        model_profile_id='nowcoding-gpt54mini',
     )
 
 
@@ -64,6 +65,7 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     assert result.output.answer == 'Check the evidence trail.'
     assert result.provider_model == 'gpt54-mini'
     request = gateway.requests[0]
+    assert request.model_profile_id == 'nowcoding-gpt54mini'
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
     message_content = request.messages[1].content
     assert message_content is not None

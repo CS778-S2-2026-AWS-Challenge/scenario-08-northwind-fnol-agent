@@ -44,6 +44,9 @@ commit under review.
 | `TurnResult` and failure recovery | specified/partial error boundary | `docs/api.md` and `docs/model-gateway.md` | Complete target result persistence and unknown external-outcome reconciliation remain. |
 | Independent `WorkItem` lifecycle | specified | `SPEC/04-claim-state-and-data.md` and `docs/persistence-schema.md` | Current persistence must migrate before this is claimed as an implemented runtime record. |
 | Bounded staff `@Agent` assistance | specified | `SPEC/05-workbench-and-handoff.md`, issues #259 and #269 | Connected suggestion, accept/ignore, and claimant-send proof remains required. |
+| Claimant/staff context contract | implemented | `docs/agent-context-contract.md`, issue #596, and context/API tests | Runtime context remains bounded by the selected profile; complete target TurnPlan persistence is separate work. |
+| Six behaviour/action brief | implemented | `docs/agent-behaviour-action-brief.md`, issue #597, and action/authority tests | The brief feeds prompts and validation; additional target action handlers still require their own delivery. |
+| Staff session-bound model selection | implemented | `backend/domain/staff_agent.py`, `backend/services/staff_agent.py`, and Staff Agent API tests | Published profile availability and provider connectivity remain deployment concerns. |
 
 ## Required Evidence Entry
 
