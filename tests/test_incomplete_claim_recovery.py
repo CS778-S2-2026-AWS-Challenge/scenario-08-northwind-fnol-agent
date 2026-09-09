@@ -78,6 +78,24 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     assert len(follow_ups) == 1
     assert follow_ups[0].source_session_id == session_id
     assert follow_ups[0].attempt_count == 0
+    assert (
+        repository.get_follow_up(
+            claim_id,
+            follow_ups[0].follow_up_id,
+            'cus_demo',
+        )
+        == follow_ups[0]
+    )
+    assert repository.get_follow_up(claim_id, 'fup_missing', 'cus_demo') is None
+    assert (
+        repository.get_follow_up(
+            claim_id,
+            follow_ups[0].follow_up_id,
+            'cus_other',
+        )
+        is None
+    )
+    assert repository.list_follow_ups(claim_id, 'cus_other') == []
 
     replay = client.post(
         f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
@@ -273,6 +291,31 @@ def test_mongodb_persists_incomplete_checkpoint_with_fixture_equivalent_shape() 
         == paused_session
     )
     assert repository.list_follow_ups(claim.claim_id, claim.customer_id) == [follow_up]
+    assert (
+        repository.get_follow_up(
+            claim.claim_id,
+            follow_up.follow_up_id,
+            claim.customer_id,
+        )
+        == follow_up
+    )
+    assert (
+        repository.get_follow_up(
+            claim.claim_id,
+            'fup_missing',
+            claim.customer_id,
+        )
+        is None
+    )
+    assert (
+        repository.get_follow_up(
+            claim.claim_id,
+            follow_up.follow_up_id,
+            'cus_other',
+        )
+        is None
+    )
+    assert repository.list_follow_ups(claim.claim_id, 'cus_other') == []
     assert (
         repository.find_idempotency(
             claim.customer_id,
