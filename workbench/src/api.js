@@ -96,11 +96,14 @@ export const workbenchApi = {
   staffAgentSessions(token) {
     return request('/api/v1/workbench/agent/sessions', { token })
   },
-  createStaffAgentSession(token, title = 'New Staff Agent session') {
+  staffAgentCapabilities(token) {
+    return request('/api/v1/workbench/agent/capabilities', { token })
+  },
+  createStaffAgentSession(token, title = 'New Staff Agent session', modelProfileId) {
     return request('/api/v1/workbench/agent/sessions', {
       method: 'POST',
       token,
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, ...(modelProfileId ? { model_profile_id: modelProfileId } : {}) }),
     })
   },
   staffAgentMessages(token, sessionId) {
