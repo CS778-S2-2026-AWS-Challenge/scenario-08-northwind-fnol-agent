@@ -66,6 +66,7 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_validation_seed_session,
 )
 
 ModelT = TypeVar('ModelT', bound=BaseModel)
@@ -611,6 +612,7 @@ class MongoDBRepository:
             ]
             if len(active) != 1:
                 raise ValueError('Every validation seed claim needs one active session.')
+            validate_validation_seed_session(claim, active[0])
             self._create_claim(claim, active[0], mongo_session)
         for session in graph.sessions:
             if session.session_id != claims_by_id[session.claim_id].active_session_id:
