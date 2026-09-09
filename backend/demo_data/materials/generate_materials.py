@@ -44,6 +44,29 @@ ACCENT = (176, 92, 68)
 
 MEDIA_TYPES = {'photo': 'image/jpeg', 'document': 'application/pdf'}
 
+# A material that is catalogued but holds no bytes of its own. `unavailable` is the
+# condition that needs one: what is unavailable is the material that never arrived, and
+# the document recording why it will not arrive is a different material that did.
+RECORD_KIND = 'record'
+
+ESTABLISHED_BY = 'established_by'
+SUPERSEDED_BY = 'superseded_by'
+CONFLICTS_WITH = 'conflicts_with'
+
+# Which conditions cannot be stated on their own. Section 7 requires unavailability to be
+# established rather than inferred; supersession is meaningless without the issue that
+# replaced this one; and a conflict that does not name its other side cannot be shown to
+# either surface, because neither can say what is contested.
+REFERENCE_REQUIRED_BY_CONDITION = {
+    'unavailable': ESTABLISHED_BY,
+    'superseded': SUPERSEDED_BY,
+    'disputed': CONFLICTS_WITH,
+}
+
+# A conflict target may be a stated claim fact rather than another material, which is the
+# `motor` case section 5.2 requires: incident evidence against something the claimant said.
+FIELD_TARGET_PREFIX = 'field:'
+
 
 def _unresolved(question: str, blocked_on: str) -> dict[str, str]:
     """Record a catalogue section 9 decision rather than inventing an answer.
@@ -152,6 +175,61 @@ CLASS_PROFILE: dict[str, dict[str, object]] = {
     },
 }
 
+# A no-byte record describes an expected material that never arrived. It therefore cannot
+# inherit a class profile that says an artefact was issued, provided, or can be opened. The
+# external party remains the expected source, while Northwind records the established absence
+# after the separately received answer named by `established_by`.
+RECORD_REPRESENTATION_PROFILE: dict[str, dict[str, object]] = {
+    'Authority or official report': {
+        'source_and_stakeholder': {
+            'provided_by': 'none',
+            'expected_from': 'external_party',
+            'recorded_by': 'northwind',
+            'detail': 'No investigation outcome report was provided. Northwind holds this '
+            'no-byte record only after the separately received authority answer cited by '
+            'established_by establishes that the expected report is not held.',
+            'stakeholder': _unresolved(
+                'Which stakeholder would issue this report, and what access exists', 'P3'
+            ),
+        },
+        'consent_and_visibility': {
+            'disclosure_requires_consent': True,
+            'claimant_can_open_artefact': False,
+            'staff_can_open_artefact': False,
+            'claimant_sees': 'That the requested report cannot be obtained, the established '
+            'reason, and the next step. No report artefact is available to open.',
+            'staff_sees': 'The unavailable record, the separately received authority answer '
+            'cited by established_by, the reason, and the request authorisation. No report '
+            'artefact is available to open.',
+            'copy_and_scope': _unresolved(CONSENT_COPY_PENDING, 'P5'),
+        },
+    },
+    'Assessment or estimate': {
+        'source_and_stakeholder': {
+            'provided_by': 'none',
+            'expected_from': 'external_party',
+            'recorded_by': 'northwind',
+            'detail': 'No assessment was provided. Northwind holds this no-byte record only '
+            'after the separately received assessor answer cited by established_by establishes '
+            'that the expected assessment cannot be obtained.',
+            'stakeholder': _unresolved(
+                'Which stakeholder would issue this assessment, and what access exists', 'P3'
+            ),
+        },
+        'consent_and_visibility': {
+            'disclosure_requires_consent': True,
+            'claimant_can_open_artefact': False,
+            'staff_can_open_artefact': False,
+            'claimant_sees': 'That the requested assessment cannot be obtained, the established '
+            'reason, and the next step. No assessment artefact is available to open.',
+            'staff_sees': 'The unavailable record, the separately received assessor answer '
+            'cited by established_by, the reason, and the request authorisation. No assessment '
+            'artefact is available to open.',
+            'copy_and_scope': _unresolved(CONSENT_COPY_PENDING, 'P5'),
+        },
+    },
+}
+
 # What each catalogue condition requires a surface to show, from section 7. Behaviour
 # when a material is not usable is a property of the condition, not of one asset.
 CONDITION_BEHAVIOUR: dict[str, dict[str, str]] = {
@@ -195,6 +273,38 @@ CONDITION_BEHAVIOUR: dict[str, dict[str, str]] = {
 
 
 @dataclass(frozen=True, slots=True)
+class MaterialReference:
+    """A typed pointer from one material to another, and why it is there.
+
+    Conditions that describe a relationship cannot be carried by a status word alone.
+    `unavailable`, `superseded`, and `disputed` each say something about a *second*
+    thing, and a reader who is only told the condition cannot find that second thing.
+    So the relation is named, the target is named, and the reason is stated.
+
+    `resolution` applies to a conflict alone. An unavailability that has been established
+    and a supersession that has happened are both settled; a conflict is not settled until
+    someone decides it, and the demonstration has to be able to show one that nobody has.
+    """
+
+    relation: str
+    target: str
+    reason: str
+    resolution: str | None = None
+
+    def as_manifest_entry(self) -> dict[str, str]:
+        """Return the reference in its generated-manifest shape.
+
+        Returns:
+            The relation, target, reason, and optional resolution fields.
+        """
+
+        entry = {'relation': self.relation, 'target': self.target, 'reason': self.reason}
+        if self.resolution is not None:
+            entry['resolution'] = self.resolution
+        return entry
+
+
+@dataclass(frozen=True, slots=True)
 class Asset:
     """One material to produce, described in the catalogue's own vocabulary."""
 
@@ -204,11 +314,28 @@ class Asset:
     condition: str
     title: str
     lines: tuple[str, ...]
-    kind: str  # 'photo' or 'document'
+    kind: str  # 'photo', 'document', or 'record'
+    references: tuple[MaterialReference, ...] = ()
 
     @property
-    def media_type(self) -> str:
-        return MEDIA_TYPES[self.kind]
+    def media_type(self) -> str | None:
+        """Return the produced file's media type.
+
+        Returns:
+            The media type, or `None` for a material that holds no bytes.
+        """
+
+        return MEDIA_TYPES.get(self.kind)
+
+    @property
+    def has_artefact(self) -> bool:
+        """Return whether this material is represented by produced bytes.
+
+        Returns:
+            `True` for a photo or document and `False` for a no-byte record.
+        """
+
+        return self.kind != RECORD_KIND
 
 
 REGISTERED_FIELD_PENDING = 'Which registered field this material class links to'
@@ -295,36 +422,73 @@ ASSET_DETAIL: dict[str, dict[str, object]] = {
         'attaches to the authority request that sought it.',
     },
     'motor/motor-assessment-unavailable-notice.pdf': {
-        'purpose': 'Establishes that the assessment was sought and cannot be obtained, so staff '
-        'act on a recorded reason rather than on an assumption that the wait continues.',
+        'purpose': 'Records the assessor answer itself, so staff act on a stated reason rather '
+        'than on an assumption that the wait continues. This document arrived; what it says '
+        'cannot be produced is a different material.',
         'trigger': 'When an authorised assessment request comes back unfulfilled rather than late.',
         'conditions': {
             'pending': 'The request is out and the wait is on the assessor.',
-            'unavailable': 'The assessor has answered that no assessment can be produced, and the '
-            'reason is on the record.',
+            'received': 'The assessor answer has arrived and states its reason.',
+            'invalid': 'A refusal arrived, but without a reason it establishes nothing.',
         },
         'media_usable': 'The assessor reference and the stated reason the assessment cannot be '
         'produced are both legible.',
         'media_insufficient': 'A refusal with no reason, which cannot be distinguished from a '
         'request that was never answered.',
-        'linkage': 'Attaches to the vehicle damage assessment request it answers, and leaves the '
-        'claim fact it would have supported unsettled.',
+        'linkage': 'Attaches to the third-party vehicle assessment request it answers, and is '
+        'what establishes that assessment as unavailable.',
+    },
+    'motor/motor-assessment-not-obtainable': {
+        'purpose': 'Carries the unavailability itself, so the claim records that an assessment was '
+        'sought and will not arrive rather than leaving a silent gap that reads as a wait '
+        'nobody is servicing.',
+        'trigger': 'When the assessor answer establishing non-availability has been received.',
+        'conditions': {
+            'pending': 'Before the answer arrives, the wait is on the assessor.',
+            'unavailable': 'The answer has arrived and establishes that no assessment can be '
+            'produced. The reason is on the notice this record cites, never on this record '
+            'alone.',
+        },
+        'media_usable': 'No artefact of its own. What has to be legible is the notice it cites, '
+        'which carries the assessor reference and the reason.',
+        'media_insufficient': 'An unavailability asserted with no notice behind it, which '
+        'section 7 forbids: it cannot be distinguished from a request nobody answered.',
+        'linkage': 'Stands in the place the third-party vehicle assessment would have occupied, '
+        'and leaves the claim fact it would have supported unsettled.',
     },
     'contents/contents-authority-unavailable-notice.pdf': {
-        'purpose': 'Establishes that the official report was sought and cannot be issued, so the '
-        'claim can proceed on what is known rather than waiting indefinitely.',
+        'purpose': 'Records the authority answer itself, so the claim can proceed on what is known '
+        'rather than waiting indefinitely. This document arrived; the outcome report it says '
+        'is not held is a different material.',
         'trigger': 'When an authority request comes back unfulfilled rather than late.',
         'conditions': {
             'pending': 'The request is out and the wait is on the issuing authority.',
-            'unavailable': 'The authority has answered that no report is held, and the reason is '
-            'on the record.',
+            'received': 'The authority answer has arrived and states its reason.',
+            'invalid': 'A refusal arrived, but without a reason it establishes nothing.',
         },
         'media_usable': 'The event reference and the stated reason no report can be issued are '
         'both legible.',
         'media_insufficient': 'A refusal with no reason, which cannot be distinguished from a '
         'request that was never answered.',
-        'linkage': 'Attaches to the authority request it answers, and leaves the claim fact it '
-        'would have supported unsettled.',
+        'linkage': 'Attaches to the investigation outcome request it answers, and is what '
+        'establishes that outcome report as unavailable.',
+    },
+    'contents/contents-authority-outcome-not-held': {
+        'purpose': 'Carries the unavailability itself, so the claim records that an outcome report '
+        'was sought and is not held rather than leaving a silent gap that reads as a wait '
+        'nobody is servicing.',
+        'trigger': 'When the authority answer establishing non-availability has been received.',
+        'conditions': {
+            'pending': 'Before the answer arrives, the wait is on the issuing authority.',
+            'unavailable': 'The answer has arrived and establishes that no outcome report is held. '
+            'The reason is on the notice this record cites, never on this record alone.',
+        },
+        'media_usable': 'No artefact of its own. What has to be legible is the notice it cites, '
+        'which carries the event reference and the reason.',
+        'media_insufficient': 'An unavailability asserted with no notice behind it, which '
+        'section 7 forbids: it cannot be distinguished from a request nobody answered.',
+        'linkage': 'Stands in the place the investigation outcome report would have occupied, and '
+        'leaves the claim fact it would have supported unsettled.',
     },
     'motor/motor-assessment-v1.pdf': {
         'purpose': 'The input to any cost conversation, and the output of a third-party service '
@@ -601,6 +765,15 @@ ASSETS: tuple[Asset, ...] = (
             'Neither side resolved; staff decision required',
         ),
         'photo',
+        (
+            MaterialReference(
+                CONFLICTS_WITH,
+                FIELD_TARGET_PREFIX + 'vehicle.damage_description',
+                'The photograph shows a damaged area the confirmed damage description does not '
+                'name.',
+                'unresolved',
+            ),
+        ),
     ),
     Asset(
         'motor/motor-police-event-report.pdf',
@@ -619,14 +792,34 @@ ASSETS: tuple[Asset, ...] = (
         'motor/motor-assessment-unavailable-notice.pdf',
         'motor',
         'Assessment or estimate',
-        'unavailable',
-        'Assessment cannot be provided',
+        'received',
+        'Third-party vehicle assessment cannot be provided',
         (
             'Assessor reference: SIMULATED',
-            'The vehicle was not accessible at the recorded location within the window',
-            'Sought and cannot currently be obtained; the reason is recorded, not inferred',
+            'The other party vehicle was not accessible at the recorded location',
+            'A received answer to the assessment request, not the assessment itself',
         ),
         'document',
+    ),
+    Asset(
+        'motor/motor-assessment-not-obtainable',
+        'motor',
+        'Assessment or estimate',
+        'unavailable',
+        'Third-party vehicle assessment, not obtainable',
+        (
+            'No assessment of the other party vehicle exists',
+            'The assessor answered that one cannot be produced',
+            'Sought and cannot currently be obtained; the reason is on the notice, not inferred',
+        ),
+        RECORD_KIND,
+        (
+            MaterialReference(
+                ESTABLISHED_BY,
+                'motor/motor-assessment-unavailable-notice.pdf',
+                'The assessor answer recording why the third-party vehicle could not be assessed.',
+            ),
+        ),
     ),
     Asset(
         'motor/motor-assessment-v1.pdf',
@@ -640,6 +833,13 @@ ASSETS: tuple[Asset, ...] = (
             'Replaced by a later assessment; retained in the record',
         ),
         'document',
+        (
+            MaterialReference(
+                SUPERSEDED_BY,
+                'motor/motor-assessment-v2.pdf',
+                'The revised assessment issued against the same assessor reference.',
+            ),
+        ),
     ),
     Asset(
         'motor/motor-assessment-v2.pdf',
@@ -777,14 +977,34 @@ ASSETS: tuple[Asset, ...] = (
         'contents/contents-authority-unavailable-notice.pdf',
         'contents',
         'Authority or official report',
-        'unavailable',
-        'Official report cannot be issued',
+        'received',
+        'Investigation outcome cannot be issued',
         (
             'Event reference: SIMULATED',
-            'No report is held against the reference supplied',
-            'Sought and cannot currently be obtained; the reason is recorded, not inferred',
+            'The theft was recorded; no investigation outcome is held against this reference',
+            'A received answer to the request, not the outcome report itself',
         ),
         'document',
+    ),
+    Asset(
+        'contents/contents-authority-outcome-not-held',
+        'contents',
+        'Authority or official report',
+        'unavailable',
+        'Investigation outcome report, not held',
+        (
+            'No investigation outcome exists against the event reference',
+            'The authority answered that none is held',
+            'Sought and cannot currently be obtained; the reason is on the notice, not inferred',
+        ),
+        RECORD_KIND,
+        (
+            MaterialReference(
+                ESTABLISHED_BY,
+                'contents/contents-authority-unavailable-notice.pdf',
+                'The authority answer recording that no outcome is held against this reference.',
+            ),
+        ),
     ),
     Asset(
         'contents/contents-purchase-receipt.pdf',
@@ -833,6 +1053,14 @@ ASSETS: tuple[Asset, ...] = (
             'Neither side resolved; staff decision required',
         ),
         'document',
+        (
+            MaterialReference(
+                CONFLICTS_WITH,
+                'contents/contents-purchase-receipt.pdf',
+                'The two ownership records give different purchase dates for the same item.',
+                'unresolved',
+            ),
+        ),
     ),
     Asset(
         'contents/contents-replacement-assessment.pdf',
@@ -973,14 +1201,18 @@ def _pdf_bytes(asset: Asset) -> bytes:
 # check failure rather than something a reader has to notice. `R` there means the
 # condition must be *reachable* in that path's demonstration, not merely describable.
 #
-# Two kinds of cell, and the difference is not a convenience. Missing and Pending are
+# A required cell is reached by absence, artefact, or record. Missing and Pending are
 # reached by absence: nothing has been offered, or the wait is on someone, and there is
-# no artefact because nothing came back. Unavailable is different — section 7 says it
-# "must state why, and must not silently degrade into a claim of unavailability where
-# none was established". Establishing it produces a record: the issuer or assessor
-# answering that they cannot supply, and for what reason. That answer is a real material,
-# so Unavailable is reached by an artefact like every present condition.
+# no artefact because nothing came back. Present conditions are reached by the artefact
+# that demonstrates them. Unavailable uses the third form described below.
 REACHED_BY_ABSENCE = frozenset({'missing', 'pending'})
+
+# The third form. Section 7 requires `unavailable` to be *established* and forbids it
+# degrading into a claim of unavailability where none was. What establishes it is a
+# received answer, which is its own material; the unavailable thing is what that answer
+# refuses, and it has no bytes of its own. So the cell is reached by a record that cites
+# the answer, never by the answer alone and never by a record citing nothing.
+REACHED_BY_RECORD = frozenset({'unavailable'})
 
 REQUIRED_COVERAGE: tuple[tuple[str, str, str], ...] = (
     # condition, claim path, material class ('*' means any class on that path)
@@ -1018,20 +1250,30 @@ def coverage_failures(materials: list[dict[str, object]]) -> list[str]:
 
     demonstrated: set[tuple[str, str, str]] = set()
     occupiable: set[tuple[str, str, str]] = set()
+    witnessed: set[tuple[str, str, str]] = set()
     for material in materials:
         path = str(material['claim_path'])
         material_class = str(material['material_class'])
-        demonstrated.add((str(material['demonstrates_condition']), path, material_class))
+        condition = str(material['demonstrates_condition'])
+        cell = (condition, path, material_class)
+        demonstrated.add(cell)
+        if _relation_target(material, ESTABLISHED_BY) is not None:
+            witnessed.add(cell)
         attributes = material.get('attributes')
         conditions = (
             attributes.get('conditions_it_can_occupy', {}) if isinstance(attributes, dict) else {}
         )
-        for condition in conditions:
-            occupiable.add((str(condition), path, material_class))
+        for name in conditions:
+            occupiable.add((str(name), path, material_class))
 
     failures: list[str] = []
     for condition, path, material_class in REQUIRED_COVERAGE:
-        reached = occupiable if condition in REACHED_BY_ABSENCE else demonstrated
+        if condition in REACHED_BY_ABSENCE:
+            reached, how = occupiable, 'recorded as occupiable'
+        elif condition in REACHED_BY_RECORD:
+            reached, how = witnessed, 'recorded against the answer that established'
+        else:
+            reached, how = demonstrated, 'demonstrated'
         if material_class == '*':
             satisfied = any(cell[0] == condition and cell[1] == path for cell in reached)
             where = 'any class'
@@ -1039,10 +1281,149 @@ def coverage_failures(materials: list[dict[str, object]]) -> list[str]:
             satisfied = (condition, path, material_class) in reached
             where = material_class
         if not satisfied:
-            how = 'recorded as occupiable' if condition in REACHED_BY_ABSENCE else 'demonstrated'
             failures.append(
                 f'catalogue section 5.2: {path} does not reach {condition} on {where}; '
                 f'no material {how} it'
+            )
+    return failures
+
+
+def _relation_target(material: dict[str, object], relation: str) -> str | None:
+    """Return the target of one relation on a manifest entry, or `None` if absent."""
+
+    references = material.get('references')
+    if not isinstance(references, list):
+        return None
+    for reference in references:
+        if isinstance(reference, dict) and reference.get('relation') == relation:
+            target = reference.get('target')
+            return str(target) if target is not None else None
+    return None
+
+
+def reference_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report every material whose condition names a second thing it does not name.
+
+    `unavailable`, `superseded`, and `disputed` are all statements about a relationship.
+    A manifest that records one without saying what the other side is describes a
+    situation neither surface can show: staff cannot see what is contested, and the
+    claimant cannot be told what replaced what. This is section 7's honesty requirement
+    checked rather than assumed.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per missing or unresolvable reference, empty when all are sound.
+    """
+
+    known = {str(material['path']) for material in materials}
+    held_as = {str(material['path']): str(material.get('held_as', '')) for material in materials}
+    failures: list[str] = []
+    for material in materials:
+        path = str(material['path'])
+        condition = str(material['demonstrates_condition'])
+        references = material.get('references')
+        references = references if isinstance(references, list) else []
+        required = REFERENCE_REQUIRED_BY_CONDITION.get(condition)
+        if required is not None and _relation_target(material, required) is None:
+            failures.append(
+                f'{path}: demonstrates {condition} but names no {required} reference; '
+                f'the condition names a second thing the manifest does not'
+            )
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            target = str(reference.get('target', ''))
+            relation = str(reference.get('relation', ''))
+            if target.startswith(FIELD_TARGET_PREFIX):
+                if relation != CONFLICTS_WITH:
+                    failures.append(
+                        f'{path}: {relation} names a claim field; only {CONFLICTS_WITH} may'
+                    )
+                continue
+            if target not in known:
+                failures.append(f'{path}: {relation} names {target}, which is not a material')
+            elif target == path:
+                failures.append(f'{path}: {relation} names itself')
+            elif relation == ESTABLISHED_BY and held_as.get(target) == RECORD_KIND:
+                failures.append(
+                    f'{path}: {relation} names {target}, which holds no bytes either; an '
+                    f'unavailability has to be established by something that arrived'
+                )
+    return failures
+
+
+def provenance_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report record and artefact provenance claims that contradict their representation.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per false or missing simulation-provenance claim.
+    """
+
+    failures: list[str] = []
+    for material in materials:
+        path = str(material['path'])
+        held_as = str(material.get('held_as', ''))
+        attributes = material.get('attributes')
+        provenance = (
+            attributes.get('provenance_and_verification', {})
+            if isinstance(attributes, dict)
+            else {}
+        )
+        provenance = provenance if isinstance(provenance, dict) else {}
+        if held_as == RECORD_KIND:
+            if 'stated_on_the_material' in provenance:
+                failures.append(
+                    f'{path}: record has no bytes on which a simulated-origin statement can appear'
+                )
+            if provenance.get('recorded_in_the_manifest') != SIMULATED:
+                failures.append(
+                    f'{path}: record does not carry its simulated origin in the manifest'
+                )
+        elif provenance.get('stated_on_the_material') != SIMULATED:
+            failures.append(f'{path}: produced material does not declare its simulated origin')
+    return failures
+
+
+def _representation_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report no-byte records that claim artefact-only source or visibility semantics.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per false or missing record-representation field.
+    """
+
+    failures: list[str] = []
+    for material in materials:
+        if material.get('held_as') != RECORD_KIND:
+            continue
+        path = str(material['path'])
+        attributes = material.get('attributes')
+        attributes = attributes if isinstance(attributes, dict) else {}
+        source = attributes.get('source_and_stakeholder')
+        source = source if isinstance(source, dict) else {}
+        visibility = attributes.get('consent_and_visibility')
+        visibility = visibility if isinstance(visibility, dict) else {}
+
+        if source.get('provided_by') != 'none':
+            failures.append(f'{path}: no-byte record must not claim an artefact was provided')
+        if source.get('expected_from') != 'external_party':
+            failures.append(f'{path}: no-byte record must name the expected external source')
+        if source.get('recorded_by') != 'northwind':
+            failures.append(f'{path}: no-byte record must name Northwind as its recorder')
+        if visibility.get('claimant_can_open_artefact') is not False:
+            failures.append(f'{path}: claimant must not be offered a nonexistent artefact')
+        if visibility.get('staff_can_open_artefact') is not False:
+            failures.append(f'{path}: staff must not be offered a nonexistent artefact')
+        if visibility.get('disclosure_requires_consent') is not True:
+            failures.append(
+                f'{path}: no-byte record must retain the authorisation boundary for disclosure'
             )
     return failures
 
@@ -1088,15 +1469,36 @@ def material_attributes(asset: Asset) -> dict[str, object]:
 
     detail = ASSET_DETAIL[asset.path]
     profile = CLASS_PROFILE[asset.material_class]
+    representation_profile = (
+        profile if asset.has_artefact else RECORD_REPRESENTATION_PROFILE[asset.material_class]
+    )
     conditions = detail['conditions']
     assert isinstance(conditions, dict)
+    if asset.has_artefact:
+        provenance_and_verification = {
+            'origin': 'generated for the Validation Prototype; no real incident, authority, '
+            'retailer, or assessor is represented',
+            'stated_on_the_material': SIMULATED,
+            'checking_received': 'none beyond structural checks. That the file exists, is the '
+            'declared type, and carries its origin statement is not verification of its content.',
+        }
+    else:
+        provenance_and_verification = {
+            'origin': 'generated no-byte record for the Validation Prototype; no real incident, '
+            'authority, retailer, or assessor is represented',
+            'recorded_in_the_manifest': SIMULATED,
+            'checking_received': 'structural checks confirm that no file exists at this record '
+            'path and that its established_by reference resolves to the received answer. This '
+            'does not verify provider content or make the record a real external result.',
+        }
+
     return {
         'purpose': detail['purpose'],
         'applicable_paths_and_trigger': {
             'paths': [asset.family],
             'trigger': detail['trigger'],
         },
-        'source_and_stakeholder': profile['source_and_stakeholder'],
+        'source_and_stakeholder': representation_profile['source_and_stakeholder'],
         'conditions_it_can_occupy': {
             name: {
                 'means_for_this_material': meaning,
@@ -1110,14 +1512,8 @@ def material_attributes(asset: Asset) -> dict[str, object]:
             'usable': detail['media_usable'],
             'insufficient': detail['media_insufficient'],
         },
-        'provenance_and_verification': {
-            'origin': 'generated for the Validation Prototype; no real incident, authority, '
-            'retailer, or assessor is represented',
-            'stated_on_the_material': SIMULATED,
-            'checking_received': 'none beyond structural checks. That the file exists, is the '
-            'declared type, and carries its origin statement is not verification of its content.',
-        },
-        'consent_and_visibility': profile['consent_and_visibility'],
+        'provenance_and_verification': provenance_and_verification,
+        'consent_and_visibility': representation_profile['consent_and_visibility'],
         'linkage': {
             'attaches_to': detail['linkage'],
             'registered_field': _unresolved(REGISTERED_FIELD_PENDING, 'P2'),
@@ -1134,9 +1530,14 @@ def manifest_document() -> dict[str, object]:
 
     This describes the materials themselves: what each one is, which claim path it
     belongs to, which catalogue condition it currently demonstrates, every attribute
-    section 3 requires of it, and that its origin is simulated. It deliberately carries
-    no Claim, Evidence, or storage reference; the association of a material with a claim
-    record is issue #602.
+    section 3 requires of it, what other material its condition depends on, and that its
+    origin is simulated. It deliberately carries no Claim, Evidence, or storage reference;
+    the association of a material with a claim record is issue #602.
+
+    `media_type` is `null` and `held_as` is `record` for a material with no bytes of its
+    own. Those entries are not gaps in production: an unavailable material is precisely
+    the one that does not exist, and the manifest has to be able to say so without
+    inventing a file to say it with.
 
     Returns:
         The manifest as it should be written to `materials.json`.
@@ -1155,9 +1556,11 @@ def manifest_document() -> dict[str, object]:
                 'claim_path': asset.family,
                 'material_class': asset.material_class,
                 'demonstrates_condition': asset.condition,
+                'held_as': asset.kind if asset.has_artefact else RECORD_KIND,
                 'media_type': asset.media_type,
                 'title': asset.title,
                 'described_as': list(asset.lines),
+                'references': [reference.as_manifest_entry() for reference in asset.references],
                 'simulated': True,
                 'attributes': material_attributes(asset),
             }
@@ -1169,6 +1572,8 @@ def manifest_document() -> dict[str, object]:
 def write_all() -> list[tuple[str, int]]:
     written: list[tuple[str, int]] = []
     for asset in ASSETS:
+        if not asset.has_artefact:
+            continue
         target = HERE / asset.path
         target.parent.mkdir(parents=True, exist_ok=True)
         if asset.kind == 'photo':
@@ -1238,12 +1643,35 @@ def pdf_page_text(data: bytes) -> str:
 
 
 def check_all() -> tuple[list[str], list[str]]:
-    """Verify every asset exists, is the declared type, and states its simulated origin."""
+    """Verify every asset exists, is the declared type, and states its simulated origin.
+
+    A material held as a record has nothing to open, so the check is the opposite one: a
+    file must *not* be there. An unavailable material that quietly acquired bytes would be
+    the defect this whole shape exists to prevent, back again in the other direction.
+
+    Returns:
+        Human-readable reports for valid materials and all validation failures.
+    """
 
     reports: list[str] = []
     failures: list[str] = []
     for asset in ASSETS:
         target = HERE / asset.path
+        if not asset.has_artefact:
+            if target.exists():
+                failures.append(f'{asset.path}: held as a record but a file exists at its path')
+                continue
+            established_by = next(
+                (
+                    reference.target
+                    for reference in asset.references
+                    if reference.relation == ESTABLISHED_BY
+                ),
+                None,
+            )
+            reports.append(f'{"record":>7}    {"(no bytes)":<16} {asset.path}')
+            reports[-1] += f'  established by {established_by}'
+            continue
         if not target.exists() or target.stat().st_size == 0:
             failures.append(f'{asset.path}: missing or empty')
             continue
@@ -1267,7 +1695,7 @@ def check_all() -> tuple[list[str], list[str]]:
         except ValueError as error:
             failures.append(f'{asset.path}: {error}')
             continue
-        reports.append(f'{target.stat().st_size:>7} B  {asset.media_type:<16} {asset.path}')
+        reports.append(f'{target.stat().st_size:>7} B  {asset.media_type or "":<16} {asset.path}')
         reports[-1] += f'  {detail}'
 
     # Every asset must answer section 3 in the tables, not only in the written manifest,
@@ -1277,6 +1705,10 @@ def check_all() -> tuple[list[str], list[str]]:
             failures.append(f'{asset.path}: has no entry in ASSET_DETAIL')
         if asset.material_class not in CLASS_PROFILE:
             failures.append(f'{asset.path}: class {asset.material_class} has no CLASS_PROFILE')
+        if not asset.has_artefact and asset.material_class not in RECORD_REPRESENTATION_PROFILE:
+            failures.append(
+                f'{asset.path}: class {asset.material_class} has no record representation profile'
+            )
     for path in ASSET_DETAIL:
         if path not in {asset.path for asset in ASSETS}:
             failures.append(f'{path}: ASSET_DETAIL describes a material that is not produced')
@@ -1312,6 +1744,9 @@ def check_all() -> tuple[list[str], list[str]]:
             )
 
     failures.extend(coverage_failures(stored.get('materials', [])))
+    failures.extend(reference_failures(stored.get('materials', [])))
+    failures.extend(provenance_failures(stored.get('materials', [])))
+    failures.extend(_representation_failures(stored.get('materials', [])))
     return reports, failures
 
 
@@ -1320,9 +1755,10 @@ def main() -> int:
     parser.add_argument(
         '--check',
         action='store_true',
-        help='verify each asset opens, is the declared type, states its simulated origin, '
-        'answers every attribute the catalogue requires, and reaches every condition '
-        'the catalogue requires of its path',
+        help='verify each produced asset opens, is the declared type, states its simulated '
+        'origin, answers every attribute the catalogue requires, names whatever second '
+        'material its condition depends on, and reaches every condition the catalogue '
+        'requires of its path',
     )
     args = parser.parse_args()
 
@@ -1340,11 +1776,16 @@ def main() -> int:
         for line in failures:
             print(f'  {line}')
         return 1
+    artefacts = sum(1 for asset in ASSETS if asset.has_artefact)
+    records = len(ASSETS) - artefacts
     print(
-        f'{len(reports)} assets verified: each opens, is the declared media type, states its '
-        f'simulated origin, and answers all {len(REQUIRED_ATTRIBUTES)} required attributes; '
-        f'the manifest matches the asset table; all {len(REQUIRED_COVERAGE)} conditions '
-        'section 5.2 requires are reached'
+        f'{len(reports)} materials verified: {artefacts} produced assets each open, are the '
+        f'declared media type and state their simulated origin on their own face, and {records} '
+        'are held as records with no bytes, an arrived answer behind each, and their simulated '
+        'origin recorded in the manifest instead of claimed on a surface they do not have; every '
+        f'material answers all {len(REQUIRED_ATTRIBUTES)} required attributes and names whatever '
+        'second material its condition depends on; the manifest matches the asset table; all '
+        f'{len(REQUIRED_COVERAGE)} conditions section 5.2 requires are reached'
     )
     return 0
 

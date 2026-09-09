@@ -48,14 +48,15 @@ authorisation.
 | Path | Purpose |
 | --- | --- |
 | `backend/` | FastAPI transport, application services, domain rules, persistence ports, and replaceable adapters |
-| `customer/` | React and Vite claimant experience |
-| `workbench/` | React and Vite Claims Workbench with independent staff authentication |
-| `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
-| `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
+| `archive/customer/` | Archived React/Vite claimant implementation; not a current runtime entry point |
+| `archive/workbench/` | Archived React/Vite Claims Workbench implementation; not a current runtime entry point |
+| `archive/admin/` | Archived React/Vite Control Plane implementation; not a current runtime entry point |
+| `archive/` | Historical frontend source preserved for reference and excluded from product CI |
+| `employee/` | Deprecated redirect shell and legacy migration inventory; not a current product entry point |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
-| `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
+| `.circleci/` | External backend, PR-policy, documentation, and GitHub-automation quality jobs |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
 | `docs/` | Product direction, API contract, engineering conventions, and research material |
@@ -75,13 +76,14 @@ Route handlers must not define private domain enums or access a provider SDK dir
 
 ## Local Development
 
-Use Python 3.12 and Node.js 22. On Windows, install dependencies from the repository root with:
+Use Python 3.12 for the current backend and repository tooling. The former claimant, Workbench,
+and Control Plane packages are preserved under `archive/` for historical reference and are not
+installed or started as current product entry points.
+
+On Windows, install the backend development dependencies from the repository root with:
 
 ```powershell
 py -3.12 -m pip install -r backend/requirements-dev.txt
-npm ci --prefix customer
-npm ci --prefix workbench
-npm ci --prefix admin
 ```
 
 Start the backend:
@@ -128,34 +130,8 @@ meet the existing 90% total coverage floor. The diff check requires at least 85%
 lines added or modified under `backend/` to be covered by the current test run. Deleted lines,
 non-Python files, and non-executable lines are not part of the diff denominator.
 
-In another terminal, start the claimant client:
-
-```powershell
-npm run dev --prefix customer
-```
-
-The Vite development server proxies `/api` requests to the local backend. Start the componentised
-Claims Workbench separately:
-
-```powershell
-npm run dev --prefix workbench
-```
-
-Configure the initial normal-mode staff account as documented in
-[workbench/README.md](workbench/README.md). The legacy files under `employee/` remain only until
-their still-valid capabilities have been migrated and verified; do not add new product behaviour
-to that client.
-
-Start the Control Plane console separately when administrator access is required:
-
-```powershell
-npm run dev --prefix admin
-```
-
-The Admin Console uses `/internal/v1/admin` projections only. It does not connect directly to a
-database, object store, model endpoint, or secret manager; sign in with an administrator bearer
-token and inspect server-owned configuration, knowledge, evaluation, operation, integration, and
-account state.
+The archived frontend packages are not supported local entry points. Do not add new product
+behaviour to `archive/` or the compatibility-only files under `employee/`.
 
 Copy the non-secret values from `.env.example` into the process environment when overrides are needed. Local development permits any CORS origin by default and does not enable credentialed cross-origin requests.
 
@@ -168,8 +144,8 @@ must not be used as a production approval mechanism.
 ## Verification
 
 CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests, PR policy, GitHub automation, documentation, and claimant, Workbench, and
-Control Plane clients for every pull request. Backend pull requests use impact-scoped tests selected by
+linting, types, tests, PR policy, GitHub automation, and documentation for every pull request.
+The archived frontend source is not a CI target. Backend pull requests use impact-scoped tests selected by
 `scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
 suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
 only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.
@@ -184,9 +160,8 @@ py -3.12 -m mypy backend tests
 py -3.12 -m pytest
 ```
 
-The claimant and GitHub automation packages retain their own `npm` verification commands. Local
-focused checks shorten feedback time but do not replace the exact-head CircleCI result required for
-review and merge.
+The GitHub automation package retains its own `npm` verification commands. Local focused checks
+shorten feedback time but do not replace the exact-head CircleCI result required for review and merge.
 
 Run the synthetic integration fixtures from the repository root with:
 

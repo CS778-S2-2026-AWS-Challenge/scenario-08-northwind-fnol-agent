@@ -81,8 +81,8 @@ class Settings:
     data_runtime_profile: DataRuntimeProfile = DataRuntimeProfile.FIXTURE
     agent_runtime_profile: AgentRuntimeProfile = AgentRuntimeProfile.CONTROLLED
     model_protocol_adapter: str = 'openai_compatible'
-    model_profile_id: str = 'default'
-    model_provider: str = 'unconfigured'
+    model_profile_id: str = 'qwen-local'
+    model_provider: str = 'qwen-local'
     model_purpose: str = 'agent_turn'
     model_privacy_class: str = 'synthetic_fnol'
     model_prompt_version: str = 'northwind-fnol-claimant-v5'
@@ -251,8 +251,8 @@ class Settings:
             data_runtime_profile=data_runtime_profile,
             agent_runtime_profile=agent_runtime_profile,
             model_protocol_adapter=os.getenv('MODEL_PROTOCOL_ADAPTER', 'openai_compatible').strip(),
-            model_profile_id=os.getenv('MODEL_PROFILE_ID', 'default').strip(),
-            model_provider=os.getenv('MODEL_PROVIDER', 'unconfigured').strip(),
+            model_profile_id=os.getenv('MODEL_PROFILE_ID', 'qwen-local').strip(),
+            model_provider=os.getenv('MODEL_PROVIDER', 'qwen-local').strip(),
             model_purpose=os.getenv('MODEL_PURPOSE', 'agent_turn').strip(),
             model_privacy_class=os.getenv('MODEL_PRIVACY_CLASS', 'synthetic_fnol').strip(),
             model_prompt_version=os.getenv(

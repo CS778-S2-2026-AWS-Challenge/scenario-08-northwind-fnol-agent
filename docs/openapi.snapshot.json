@@ -2373,6 +2373,18 @@
           "action": {
             "$ref": "#/components/schemas/AgentAction"
           },
+          "action_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z]+\\.[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Code"
+          },
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
@@ -2729,6 +2741,13 @@
           "last_active_at": {
             "format": "date-time",
             "title": "Last Active At",
+            "type": "string"
+          },
+          "model_profile_id": {
+            "default": "qwen-local",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Model Profile Id",
             "type": "string"
           },
           "resume": {
@@ -3460,6 +3479,19 @@
             "minLength": 2,
             "title": "Locale",
             "type": "string"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
           }
         },
         "title": "CreateClaimRequest",
@@ -8847,6 +8879,17 @@
             "title": "Claim Types",
             "type": "array"
           },
+          "default_model_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Profile Id"
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/ModelCapability"
@@ -9778,6 +9821,19 @@
             "minLength": 1,
             "title": "Intent",
             "type": "string"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
           }
         },
         "title": "StartSessionRequest",

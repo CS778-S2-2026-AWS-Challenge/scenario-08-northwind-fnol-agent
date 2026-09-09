@@ -127,6 +127,7 @@ class ModelRuntimeBinding(BaseModel):
     privacy_class: str = Field(min_length=1, max_length=100)
     prompt_version: str = Field(min_length=1, max_length=100)
     structured_output: bool
+    tools: bool = False
 
 
 class ModelCostRate(BaseModel):
