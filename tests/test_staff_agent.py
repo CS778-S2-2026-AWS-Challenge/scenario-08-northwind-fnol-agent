@@ -97,6 +97,9 @@ def test_staff_agent_session_persists_selected_model_profile() -> None:
         assert response.status_code == 201
         session_id = response.json()['session_id']
         assert response.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        assert listed.status_code == 200
+        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt54mini'
 
         message = client.post(
             f'/api/v1/workbench/agent/sessions/{session_id}/messages',
