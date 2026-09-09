@@ -53,12 +53,12 @@ The enabling candidates are challenged separately because technical capability i
 
 The independent review rejects or narrows the following interpretations before they reach P3.3:
 
-1. **Roadside assistance is not collision recovery.** S04-S05 support distinct post-accident and breakdown pathways; membership in a roadside product does not prove collision recovery eligibility or insurer dispatch.
-2. **NHC is not a generic contents service.** S12-S14 support residential building and land NHCover and insurer-mediated handling; the broader contents interpretation is not supported.
-3. **Technical access is not business authority.** S16-S27 establish generic platform capabilities only. They do not establish Northwind procurement, credentials, approved data use, disclosure authority, or production readiness.
-4. **Evidence is not a claim decision.** Police, FENZ, weather, assessment, repair, contents evidence, document extraction, and damage analysis may contribute evidence but do not independently establish coverage, liability, fraud, acceptance, rejection, or settlement.
-5. **Authentication is not action authority.** Identity evidence can establish who an actor is without establishing permission to submit a report, request a record, appoint a provider, disclose claim data, or decide a claim.
-6. **An acknowledgement is not completion.** Request acknowledgement, accepted external work, received evidence, verified result, and Northwind claim decision must remain distinguishable in P3.3.
+- **Roadside assistance is not collision recovery.** S04-S05 support distinct post-accident and breakdown pathways; membership in a roadside product does not prove collision recovery eligibility or insurer dispatch.
+- **NHC is not a generic contents service.** S12-S14 support residential building and land NHCover and insurer-mediated handling; the broader contents interpretation is not supported.
+- **Technical access is not business authority.** S16-S27 establish generic platform capabilities only. They do not establish Northwind procurement, credentials, approved data use, disclosure authority, or production readiness.
+- **Evidence is not a claim decision.** Police, FENZ, weather, assessment, repair, contents evidence, document extraction, and damage analysis may contribute evidence but do not independently establish coverage, liability, fraud, acceptance, rejection, or settlement.
+- **Authentication is not action authority.** Identity evidence can establish who an actor is without establishing permission to submit a report, request a record, appoint a provider, disclose claim data, or decide a claim.
+- **An acknowledgement is not completion.** Request acknowledgement, accepted external work, received evidence, verified result, and Northwind claim decision must remain distinguishable in P3.3.
 
 ## Challenge the source register
 
