@@ -1,4 +1,4 @@
-import { Info } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 
 const CATEGORY_LABELS = {
   claim_type: 'Claim type',
@@ -46,11 +46,25 @@ export function TagList({ tags = [], limit, grouped = false }) {
 }
 
 function Tag({ tag, expanded = false }) {
-  const title = `${tag.description}\nBasis: ${tag.basis}\nSources: ${tag.source_refs.join(', ')}`
   return (
-    <span className={`tag tag--${tag.category}`} title={title}>
-      {tag.label}
-      {expanded && <Info size={13} aria-label={`Source details for ${tag.label}`} />}
-    </span>
+    <details className={`tag-disclosure tag-disclosure--${tag.category}`} open={expanded}>
+      <summary className={`tag tag--${tag.category}`}>
+        <span>{tag.label}</span>
+        {tag.attention_level && <span className="tag__attention">{tag.attention_level}</span>}
+        <ChevronDown className="tag__chevron" size={13} aria-hidden="true" />
+      </summary>
+      <div className="tag-details">
+        <p>{tag.description}</p>
+        <dl>
+          <div><dt>Basis</dt><dd>{tag.basis}</dd></div>
+          <div><dt>Source actor</dt><dd>{tag.source_actor || 'system'}</dd></div>
+          <div><dt>Freshness</dt><dd>{tag.freshness || 'current'}</dd></div>
+          <div><dt>Status</dt><dd>{tag.status}</dd></div>
+          {tag.attention_level && <div><dt>Attention</dt><dd>{tag.attention_level}</dd></div>}
+          <div><dt>Activated</dt><dd>{tag.activated_at}</dd></div>
+          <div><dt>Sources</dt><dd>{tag.source_refs.join(', ')}</dd></div>
+        </dl>
+      </div>
+    </details>
   )
 }

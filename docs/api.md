@@ -1929,13 +1929,17 @@ text. Each tag has this shape:
 {
   "tag_instance_id": "clm_01J4Y7Q2AW:impact.vehicle_not_drivable",
   "code": "impact.vehicle_not_drivable",
-  "registry_version": "0.2",
+  "registry_version": "0.3",
   "label": "Vehicle not drivable",
   "description": "Summarises the reported practical impact: Vehicle not drivable.",
   "category": "impact",
   "status": "active",
-  "visibility": "safe_summary_only",
+  "visibility": "staff_only",
   "basis": "reported",
+  "source_actor": "claimant",
+  "freshness": "current",
+  "projection_mode": "deterministic",
+  "attention_level": null,
   "source_refs": ["msg_01J4Y7RPN8", "field:vehicle.drivable"],
   "activated_at": "2026-08-10T03:45:00Z",
   "display_weight": 30
@@ -1943,7 +1947,8 @@ text. Each tag has this shape:
 ```
 
 Stable codes are an API concern; staff interfaces display the natural-language `label` and make
-the basis and sources available through progressive disclosure. Tags classify a Claim for staff
+the basis, source actor, freshness, status, attention level, activation time, and sources available
+through progressive disclosure. Tags classify a Claim for staff
 and do not independently determine queue priority. Staff cannot directly edit a tag: a correction,
 Signal decision, handoff, Evidence change, WorkItem transition, or authorised business action
 changes the source record and the backend recomputes the projection. Claimant routes MUST NOT
