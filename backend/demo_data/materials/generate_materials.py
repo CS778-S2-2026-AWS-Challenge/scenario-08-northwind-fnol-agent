@@ -175,6 +175,61 @@ CLASS_PROFILE: dict[str, dict[str, object]] = {
     },
 }
 
+# A no-byte record describes an expected material that never arrived. It therefore cannot
+# inherit a class profile that says an artefact was issued, provided, or can be opened. The
+# external party remains the expected source, while Northwind records the established absence
+# after the separately received answer named by `established_by`.
+RECORD_REPRESENTATION_PROFILE: dict[str, dict[str, object]] = {
+    'Authority or official report': {
+        'source_and_stakeholder': {
+            'provided_by': 'none',
+            'expected_from': 'external_party',
+            'recorded_by': 'northwind',
+            'detail': 'No investigation outcome report was provided. Northwind holds this '
+            'no-byte record only after the separately received authority answer cited by '
+            'established_by establishes that the expected report is not held.',
+            'stakeholder': _unresolved(
+                'Which stakeholder would issue this report, and what access exists', 'P3'
+            ),
+        },
+        'consent_and_visibility': {
+            'disclosure_requires_consent': True,
+            'claimant_can_open_artefact': False,
+            'staff_can_open_artefact': False,
+            'claimant_sees': 'That the requested report cannot be obtained, the established '
+            'reason, and the next step. No report artefact is available to open.',
+            'staff_sees': 'The unavailable record, the separately received authority answer '
+            'cited by established_by, the reason, and the request authorisation. No report '
+            'artefact is available to open.',
+            'copy_and_scope': _unresolved(CONSENT_COPY_PENDING, 'P5'),
+        },
+    },
+    'Assessment or estimate': {
+        'source_and_stakeholder': {
+            'provided_by': 'none',
+            'expected_from': 'external_party',
+            'recorded_by': 'northwind',
+            'detail': 'No assessment was provided. Northwind holds this no-byte record only '
+            'after the separately received assessor answer cited by established_by establishes '
+            'that the expected assessment cannot be obtained.',
+            'stakeholder': _unresolved(
+                'Which stakeholder would issue this assessment, and what access exists', 'P3'
+            ),
+        },
+        'consent_and_visibility': {
+            'disclosure_requires_consent': True,
+            'claimant_can_open_artefact': False,
+            'staff_can_open_artefact': False,
+            'claimant_sees': 'That the requested assessment cannot be obtained, the established '
+            'reason, and the next step. No assessment artefact is available to open.',
+            'staff_sees': 'The unavailable record, the separately received assessor answer '
+            'cited by established_by, the reason, and the request authorisation. No assessment '
+            'artefact is available to open.',
+            'copy_and_scope': _unresolved(CONSENT_COPY_PENDING, 'P5'),
+        },
+    },
+}
+
 # What each catalogue condition requires a surface to show, from section 7. Behaviour
 # when a material is not usable is a property of the condition, not of one asset.
 CONDITION_BEHAVIOUR: dict[str, dict[str, str]] = {
@@ -1334,6 +1389,45 @@ def provenance_failures(materials: list[dict[str, object]]) -> list[str]:
     return failures
 
 
+def _representation_failures(materials: list[dict[str, object]]) -> list[str]:
+    """Report no-byte records that claim artefact-only source or visibility semantics.
+
+    Args:
+        materials: The manifest's material entries.
+
+    Returns:
+        One message per false or missing record-representation field.
+    """
+
+    failures: list[str] = []
+    for material in materials:
+        if material.get('held_as') != RECORD_KIND:
+            continue
+        path = str(material['path'])
+        attributes = material.get('attributes')
+        attributes = attributes if isinstance(attributes, dict) else {}
+        source = attributes.get('source_and_stakeholder')
+        source = source if isinstance(source, dict) else {}
+        visibility = attributes.get('consent_and_visibility')
+        visibility = visibility if isinstance(visibility, dict) else {}
+
+        if source.get('provided_by') != 'none':
+            failures.append(f'{path}: no-byte record must not claim an artefact was provided')
+        if source.get('expected_from') != 'external_party':
+            failures.append(f'{path}: no-byte record must name the expected external source')
+        if source.get('recorded_by') != 'northwind':
+            failures.append(f'{path}: no-byte record must name Northwind as its recorder')
+        if visibility.get('claimant_can_open_artefact') is not False:
+            failures.append(f'{path}: claimant must not be offered a nonexistent artefact')
+        if visibility.get('staff_can_open_artefact') is not False:
+            failures.append(f'{path}: staff must not be offered a nonexistent artefact')
+        if visibility.get('disclosure_requires_consent') is not True:
+            failures.append(
+                f'{path}: no-byte record must retain the authorisation boundary for disclosure'
+            )
+    return failures
+
+
 REQUIRED_ATTRIBUTES = (
     'purpose',
     'applicable_paths_and_trigger',
@@ -1375,6 +1469,9 @@ def material_attributes(asset: Asset) -> dict[str, object]:
 
     detail = ASSET_DETAIL[asset.path]
     profile = CLASS_PROFILE[asset.material_class]
+    representation_profile = (
+        profile if asset.has_artefact else RECORD_REPRESENTATION_PROFILE[asset.material_class]
+    )
     conditions = detail['conditions']
     assert isinstance(conditions, dict)
     if asset.has_artefact:
@@ -1401,7 +1498,7 @@ def material_attributes(asset: Asset) -> dict[str, object]:
             'paths': [asset.family],
             'trigger': detail['trigger'],
         },
-        'source_and_stakeholder': profile['source_and_stakeholder'],
+        'source_and_stakeholder': representation_profile['source_and_stakeholder'],
         'conditions_it_can_occupy': {
             name: {
                 'means_for_this_material': meaning,
@@ -1416,7 +1513,7 @@ def material_attributes(asset: Asset) -> dict[str, object]:
             'insufficient': detail['media_insufficient'],
         },
         'provenance_and_verification': provenance_and_verification,
-        'consent_and_visibility': profile['consent_and_visibility'],
+        'consent_and_visibility': representation_profile['consent_and_visibility'],
         'linkage': {
             'attaches_to': detail['linkage'],
             'registered_field': _unresolved(REGISTERED_FIELD_PENDING, 'P2'),
@@ -1608,6 +1705,10 @@ def check_all() -> tuple[list[str], list[str]]:
             failures.append(f'{asset.path}: has no entry in ASSET_DETAIL')
         if asset.material_class not in CLASS_PROFILE:
             failures.append(f'{asset.path}: class {asset.material_class} has no CLASS_PROFILE')
+        if not asset.has_artefact and asset.material_class not in RECORD_REPRESENTATION_PROFILE:
+            failures.append(
+                f'{asset.path}: class {asset.material_class} has no record representation profile'
+            )
     for path in ASSET_DETAIL:
         if path not in {asset.path for asset in ASSETS}:
             failures.append(f'{path}: ASSET_DETAIL describes a material that is not produced')
@@ -1645,6 +1746,7 @@ def check_all() -> tuple[list[str], list[str]]:
     failures.extend(coverage_failures(stored.get('materials', [])))
     failures.extend(reference_failures(stored.get('materials', [])))
     failures.extend(provenance_failures(stored.get('materials', [])))
+    failures.extend(_representation_failures(stored.get('materials', [])))
     return reports, failures
 
 

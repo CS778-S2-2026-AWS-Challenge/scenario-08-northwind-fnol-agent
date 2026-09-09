@@ -61,6 +61,13 @@ an open decision, recorded in section 9, not a blank to be filled in during prod
 | **Behaviour when not usable** | What the claimant and staff interfaces must show in each condition from section 4.2 that applies |
 | **Retention** | For a class marked Elevated in section 2, what is kept and for how long, once section 9's open decision is resolved |
 
+For a no-byte `Unavailable` record, **Source and stakeholder** must distinguish three things: nobody
+provided the absent material, an external party was expected to provide it, and Northwind records
+the established absence after a separate answer arrives. **Consent and visibility** must likewise
+distinguish the record and that received answer from the nonexistent artefact. Claimant and staff
+may see the unavailable condition, reason, next step, and permitted source detail, but neither
+surface may claim that the absent artefact was issued, provided, or available to open.
+
 ## 4. Condition model
 
 Conditions are the second axis. They apply across classes: any class can be missing, any received

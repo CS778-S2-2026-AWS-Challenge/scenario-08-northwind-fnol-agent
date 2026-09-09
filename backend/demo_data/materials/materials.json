@@ -624,10 +624,12 @@
           "trigger": "When the assessor answer establishing non-availability has been received."
         },
         "source_and_stakeholder": {
-          "provided_by": "external_party",
-          "detail": "The output of a third-party service request authorised by Northwind and by the claimant.",
+          "provided_by": "none",
+          "expected_from": "external_party",
+          "recorded_by": "northwind",
+          "detail": "No assessment was provided. Northwind holds this no-byte record only after the separately received assessor answer cited by established_by establishes that the expected assessment cannot be obtained.",
           "stakeholder": {
-            "unresolved": "Which stakeholder issues this assessment, and what access exists",
+            "unresolved": "Which stakeholder would issue this assessment, and what access exists",
             "blocked_on": "P3"
           }
         },
@@ -658,8 +660,10 @@
         },
         "consent_and_visibility": {
           "disclosure_requires_consent": true,
-          "claimant_sees": "That an assessment was requested, its condition, and the next step.",
-          "staff_sees": "The assessment, its provenance, whether it has been checked, and the authorisation that permitted the disclosure.",
+          "claimant_can_open_artefact": false,
+          "staff_can_open_artefact": false,
+          "claimant_sees": "That the requested assessment cannot be obtained, the established reason, and the next step. No assessment artefact is available to open.",
+          "staff_sees": "The unavailable record, the separately received assessor answer cited by established_by, the reason, and the request authorisation. No assessment artefact is available to open.",
           "copy_and_scope": {
             "unresolved": "What consent copy and disclosure scope this class requires",
             "blocked_on": "P5"
@@ -1858,10 +1862,12 @@
           "trigger": "When the authority answer establishing non-availability has been received."
         },
         "source_and_stakeholder": {
-          "provided_by": "external_party",
-          "detail": "Issued by a body outside Northwind and outside the claimant, and arriving on the issuer timetable.",
+          "provided_by": "none",
+          "expected_from": "external_party",
+          "recorded_by": "northwind",
+          "detail": "No investigation outcome report was provided. Northwind holds this no-byte record only after the separately received authority answer cited by established_by establishes that the expected report is not held.",
           "stakeholder": {
-            "unresolved": "Which stakeholder issues this report, and what access exists",
+            "unresolved": "Which stakeholder would issue this report, and what access exists",
             "blocked_on": "P3"
           }
         },
@@ -1892,8 +1898,10 @@
         },
         "consent_and_visibility": {
           "disclosure_requires_consent": true,
-          "claimant_sees": "That it is awaited or has arrived, and who is being waited on.",
-          "staff_sees": "The report, its issuer, and the authorisation that permitted the request.",
+          "claimant_can_open_artefact": false,
+          "staff_can_open_artefact": false,
+          "claimant_sees": "That the requested report cannot be obtained, the established reason, and the next step. No report artefact is available to open.",
+          "staff_sees": "The unavailable record, the separately received authority answer cited by established_by, the reason, and the request authorisation. No report artefact is available to open.",
           "copy_and_scope": {
             "unresolved": "What consent copy and disclosure scope this class requires",
             "blocked_on": "P5"

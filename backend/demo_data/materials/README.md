@@ -86,10 +86,13 @@ registered fields, P3 for issuing stakeholders, P5 for consent copy and disclosu
 review for the retention rule of the Elevated classes, and backend contract work for how a condition
 maps onto persisted status values.
 
-Answers that belong to a material class rather than one asset — who provides it, what disclosure
-requires, how long it is kept — are held once in `CLASS_PROFILE` and merged in. Behaviour when a
-material is not usable is a property of the condition, from section 7, and is merged from
-`CONDITION_BEHAVIOUR`.
+Answers that belong to an artefact's material class rather than one asset — who provides it, what
+disclosure requires, how long it is kept — are held once in `CLASS_PROFILE` and merged in. A
+no-byte record uses `RECORD_REPRESENTATION_PROFILE` instead for source and visibility: nobody
+provided the absent artefact, the external party remains its expected source, Northwind records
+the established absence, and neither claimant nor staff is offered a file that does not exist.
+Retention still follows the material class. Behaviour when a material is not usable is a property
+of the condition, from section 7, and is merged from `CONDITION_BEHAVIOUR`.
 
 It deliberately carries **no Claim, Evidence, or storage reference**. Associating a material with a
 claim record, a source, and a processing status is issue #602.
@@ -100,16 +103,20 @@ material is exactly the one that does not exist, and the manifest has to be able
 inventing a file to say it with. Because a record has no face or bytes, its simulated-origin
 statement is recorded in the manifest and must remain visible in any projection derived from it.
 Its structural check confirms the absence of a file and resolves the received answer named by
-`established_by`; it never claims that a file exists or that provider content was verified.
+`established_by`; it never claims that a file exists, was provided, can be opened, or contains
+provider-verified content. The record still requires claimant consent if it is disclosed outside
+Northwind, even though the absent artefact itself cannot be shared.
 
 `generate_materials.py` writes it, and `--check` fails if any material omits a required attribute,
 if the manifest has drifted from the tables, if a material demonstrates a condition it does not
 record itself as able to occupy, if a condition that names a second thing does not name it, if a
 reference points at a material that is not in the set or at itself, if a material held as a record
-has acquired a file, or if any cell section 5.2 marks `R` is not reached. The coverage check reads
-`REQUIRED_COVERAGE`, which is section 5.2 transcribed as a table so an unreached cell is a failure
-rather than something a reader has to notice, and it distinguishes the three ways a cell is reached:
-by absence, by artefact, or by a record citing the answer that established it.
+has acquired a file, if a record claims an artefact was provided or can be opened, if a record loses
+its expected source, recorder, or disclosure-authorisation boundary, or if any cell section 5.2 marks
+`R` is not reached. The coverage check reads `REQUIRED_COVERAGE`, which is section 5.2 transcribed as
+a table so an unreached cell is a failure rather than something a reader has to notice, and it
+distinguishes the three ways a cell is reached: by absence, by artefact, or by a record citing the
+answer that established it.
 
 ## Byte exactness
 
