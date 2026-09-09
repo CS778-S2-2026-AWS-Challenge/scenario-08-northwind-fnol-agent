@@ -55,7 +55,11 @@ from backend.domain.staff_agent import (
 )
 from backend.domain.workbench_action_registry import WORKBENCH_ACTION_REGISTRY
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID, load_staff_assistant_prompt
-from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.repositories.protocols import (
+    IdempotencyConflict,
+    PersistenceRepository,
+    StaffAgentDraftSource,
+)
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.ownership import (
@@ -657,6 +661,11 @@ def execute_staff_agent_draft(
     action_code = draft.action_code
     request_payload = payload.payload or draft.payload
     key = require_idempotency_key(idempotency_key)
+    source = StaffAgentDraftSource(
+        session_id=session_id,
+        message_id=message_id,
+        draft_id=draft_id,
+    )
 
     result: ContractModel
     try:
@@ -669,6 +678,7 @@ def execute_staff_agent_draft(
                 AcceptHandoffRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'conversation.send_claimant_message':
             claim = repository.get_claim_internal(claim_id)
@@ -685,6 +695,7 @@ def execute_staff_agent_draft(
                 CreateStaffMessageRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'human.resolve_handoff':
             result = resolve_handoff(
@@ -695,6 +706,7 @@ def execute_staff_agent_draft(
                 ResolveHandoffRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'signal.record_decision':
             result = decide_review_signal(
@@ -705,6 +717,7 @@ def execute_staff_agent_draft(
                 SignalDecisionRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'work_item.create':
             result = create_staff_action(
@@ -714,6 +727,7 @@ def execute_staff_agent_draft(
                 CreateStaffActionRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'work_item.update':
             result = update_staff_action(
@@ -724,6 +738,7 @@ def execute_staff_agent_draft(
                 UpdateStaffActionRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code in {'ownership.request_cowork', 'ownership.invite_cowork'}:
             result = create_cowork_request(
@@ -733,6 +748,7 @@ def execute_staff_agent_draft(
                 CreateCoworkRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'ownership.request_transfer':
             result = create_transfer_request(
@@ -742,6 +758,7 @@ def execute_staff_agent_draft(
                 CreateTransferRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code in {'ownership.decide_cowork', 'ownership.decide_transfer'}:
             result = decide_collaboration_request(
@@ -752,6 +769,7 @@ def execute_staff_agent_draft(
                 DecideCollaborationRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         elif action_code == 'ownership.requeue':
             result = requeue_claim(
@@ -761,6 +779,7 @@ def execute_staff_agent_draft(
                 RequeueClaimRequest.model_validate(request_payload),
                 key,
                 if_match,
+                source=source,
             )
         else:
             raise ApiError(

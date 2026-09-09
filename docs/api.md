@@ -2000,6 +2000,12 @@ Claim State unchanged. Model unavailability, malformed output, or an out-of-scop
 complete turn before either message is persisted. When no Staff Agent model profile is configured,
 message submission returns `503 DEPENDENCY_UNAVAILABLE`.
 
+When execution succeeds, the underlying Workbench idempotency record stores the originating Staff
+Agent `session_id`, assistant `message_id`, and `draft_id` alongside the registered action and
+resulting Claim revision. This durable source link is written in the same mutation boundary as the
+action result. Reusing the idempotency key with another draft or through a non-Agent route returns
+`409 IDEMPOTENCY_CONFLICT`; an execution response alone is not the audit record.
+
 The execution request is deliberately small because the saved draft carries the candidate action:
 
 ```json

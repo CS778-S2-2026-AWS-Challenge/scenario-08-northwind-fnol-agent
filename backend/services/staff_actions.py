@@ -45,6 +45,9 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    StaffAgentDraftSource,
+    idempotency_source_matches,
+    with_staff_agent_source,
 )
 from backend.services.staff_access import ClaimStaffAccess, require_claim_collaborator
 from backend.services.staff_presence import require_claimable_staff
@@ -116,12 +119,17 @@ def _staff_claim(
 
 
 def _retry(
-    repository: PersistenceRepository, actor: str, route: str, key: str, fingerprint: str
+    repository: PersistenceRepository,
+    actor: str,
+    route: str,
+    key: str,
+    fingerprint: str,
+    source: StaffAgentDraftSource | None = None,
 ) -> dict[str, Any] | None:
     record = repository.find_idempotency(actor, route, key)
     if record is None:
         return None
-    if record.request_fingerprint != fingerprint:
+    if record.request_fingerprint != fingerprint or not idempotency_source_matches(record, source):
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
@@ -142,10 +150,16 @@ def _save(
     claim: WorkingClaim,
     expected_revision: int,
     idempotency: IdempotencyRecord,
+    source: StaffAgentDraftSource | None = None,
     **records: Any,
 ) -> None:
     try:
-        repository.save_staff_mutation(claim, expected_revision, idempotency, **records)
+        repository.save_staff_mutation(
+            claim,
+            expected_revision,
+            with_staff_agent_source(idempotency, source),
+            **records,
+        )
     except RevisionConflict as conflict:
         raise ApiError(
             status_code=409,
@@ -189,12 +203,13 @@ def accept_handoff(
     payload: AcceptHandoffRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> HandoffMutationResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return HandoffMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -272,6 +287,7 @@ def accept_handoff(
         handoff=accepted,
         required_staff_id=principal.subject,
         required_staff_revision=presence.revision if presence is not None else None,
+        source=source,
     )
     return response
 
@@ -283,12 +299,13 @@ def send_staff_message(
     payload: CreateStaffMessageRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> StaffMessageResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/messages'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return StaffMessageResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -377,7 +394,15 @@ def send_staff_message(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    _save(repository, updated, expected, idempotency, handoff=updated_handoff, message=message)
+    _save(
+        repository,
+        updated,
+        expected,
+        idempotency,
+        handoff=updated_handoff,
+        message=message,
+        source=source,
+    )
     return response
 
 
@@ -389,12 +414,13 @@ def resolve_handoff(
     payload: ResolveHandoffRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> HandoffMutationResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/resolve'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return HandoffMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -494,6 +520,7 @@ def resolve_handoff(
         handoff=resolved,
         staff_action=action,
         customer_update=customer_update,
+        source=source,
     )
     return response
 
@@ -505,12 +532,13 @@ def create_staff_action(
     payload: CreateStaffActionRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> StaffActionMutationResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/staff-actions'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return StaffActionMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -564,7 +592,7 @@ def create_staff_action(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    _save(repository, updated, expected, idem, staff_action=action)
+    _save(repository, updated, expected, idem, staff_action=action, source=source)
     return response
 
 
@@ -597,12 +625,13 @@ def update_staff_action(
     payload: UpdateStaffActionRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> StaffActionMutationResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/staff-actions/{action_id}'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return StaffActionMutationResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -685,6 +714,7 @@ def update_staff_action(
         idem,
         staff_action=updated_action,
         customer_update=customer_update,
+        source=source,
     )
     return response
 
@@ -697,12 +727,13 @@ def decide_signal(
     payload: SignalDecisionRequest,
     idempotency_key: str | None,
     if_match: str | None,
+    source: StaffAgentDraftSource | None = None,
 ) -> SignalDecisionResponse:
     key = require_idempotency_key(idempotency_key)
     expected = parse_if_match(if_match)
     route = f'/api/v1/workbench/claims/{claim_id}/signals/{signal_id}/decisions'
     fingerprint = request_fingerprint(payload.model_dump(mode='json'))
-    replay = _retry(repository, principal.subject, route, key, fingerprint)
+    replay = _retry(repository, principal.subject, route, key, fingerprint, source)
     if replay is not None:
         return SignalDecisionResponse.model_validate(replay)
     claim = _staff_claim(repository, principal, claim_id)
@@ -753,5 +784,5 @@ def decide_signal(
         target_ref=projected_action.target_ref,
         response_payload=response.model_dump(mode='json'),
     )
-    _save(repository, updated, expected, idem, signal_decision=decision)
+    _save(repository, updated, expected, idem, signal_decision=decision, source=source)
     return response

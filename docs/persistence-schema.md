@@ -234,6 +234,12 @@ the append-only audit collection through a bounded, filterable projection.
   `action_code`, and exact `target_ref` resolved before execution. These fields preserve the
   runtime authorization decision with the existing atomic Claim mutation; they do not create a
   second action-state record or concurrency token.
+- When a Workbench mutation originates from a confirmed Staff Agent draft, the same atomic
+  idempotency record additionally retains `staff_agent_session_id`, `staff_agent_message_id`, and
+  `staff_agent_draft_id`. The three identifiers form one immutable provenance link from the
+  persisted assistant proposal to the authoritative action result. Replaying with a different
+  draft, or reusing the key through a non-Agent entry point, is an idempotency conflict rather
+  than a second execution or attribution.
 - External-service consent records are claim-scoped and retain service identity, requested
   action, minimum permitted fields, grant or withdrawal state, actor, and timestamps. A
   consent change advances the Working Claim revision; an adapter result cannot invent or
@@ -346,6 +352,10 @@ the append-only audit collection through a bounded, filterable projection.
 - Advice and drafts are not business-state authority. Sending, assignment, Claim mutation,
   third-party contact, Signal decision, and other effects require a separate Runtime-authorised,
   revision-checked and audited operation.
+- A confirmed Staff Agent draft is passed as explicit source metadata to the existing Workbench
+  action handler. The handler persists that source metadata together with its normal action,
+  revision, idempotency, and audit boundary; an execution response alone is not considered durable
+  attribution.
 
 ## Claim Lifecycle, Follow-up, and Retention Invariants
 

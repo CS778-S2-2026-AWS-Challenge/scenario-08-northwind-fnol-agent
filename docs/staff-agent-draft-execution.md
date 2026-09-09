@@ -42,6 +42,12 @@ atomic Claim State persistence. A draft cannot bypass those checks or execute fr
 alone. The response contains the authoritative handler result and `outcome: executed` only after
 the handler succeeds.
 
+For a confirmed draft, the Workbench idempotency record also stores the originating Staff Agent
+`session_id`, assistant `message_id`, and stable `draft_id` in the same atomic mutation. This is
+the durable proposal-to-action link used for audit and later investigation. A retry is accepted
+only when the same source identifiers and request fingerprint are supplied; the same idempotency
+key cannot make a different draft or a non-Agent entry point appear to have executed.
+
 The endpoint reports the underlying bounded outcome for confirmation missing, malformed payload,
 unknown action, denied access, stale revision, idempotency conflict, unavailable dependency, or
 unknown external result. These outcomes do not advance Claim State unless the authoritative

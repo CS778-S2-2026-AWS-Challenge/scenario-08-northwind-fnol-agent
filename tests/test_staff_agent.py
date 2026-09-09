@@ -1,10 +1,15 @@
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.services.staff_agent as staff_agent_service
 from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
+from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
 from backend.domain.model_gateway import (
     ModelCapabilities,
@@ -13,9 +18,13 @@ from backend.domain.model_gateway import (
     ModelResponse,
 )
 from backend.domain.staff_agent import (
+    ExecuteStaffAgentDraftRequest,
     StaffAgentDraft,
     StaffAgentDraftKind,
+    StaffAgentMessage,
+    StaffAgentMessageRole,
     StaffAgentModelOutput,
+    StaffAgentSession,
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 from backend.repositories.fixture import FixtureRepository
@@ -520,6 +529,40 @@ def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_
         executed_claim = repository.get_claim_internal(claim_id)
         assert executed_claim is not None
         assert executed_claim.revision == 3
+        execution_record = repository.find_idempotency(
+            'stf_demo',
+            f'/api/v1/workbench/claims/{claim_id}/handoffs/{handoff_id}/accept',
+            'execute-staff-agent-draft',
+        )
+        assert execution_record is not None
+        assert execution_record.staff_agent_session_id == session_id
+        assert execution_record.staff_agent_message_id == assistant['message_id']
+        assert execution_record.staff_agent_draft_id == draft['draft_id']
+
+        second_turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'accept-draft-request-2',
+                'content': 'Prepare the same Claim acceptance action again.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert second_turn.status_code == 201, second_turn.text
+        second_assistant = second_turn.json()['assistant_message']
+        second_draft = second_assistant['drafts'][0]
+        conflicting_replay = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{second_assistant["message_id"]}/drafts/{second_draft["draft_id"]}/execute',
+            headers={
+                **STAFF_HEADERS,
+                'Idempotency-Key': 'execute-staff-agent-draft',
+                'If-Match': '3',
+            },
+            json={'confirmed': True},
+        )
+        assert conflicting_replay.status_code == 409
+        assert conflicting_replay.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
 
 
 def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
@@ -538,6 +581,101 @@ def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
 
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'DEPENDENCY_UNAVAILABLE'
+
+
+@pytest.mark.parametrize(
+    ('action_code', 'handler_name'),
+    [
+        ('human.accept_handoff', 'accept_handoff'),
+        ('conversation.send_claimant_message', 'send_staff_message'),
+        ('human.resolve_handoff', 'resolve_handoff'),
+        ('signal.record_decision', 'decide_review_signal'),
+        ('work_item.create', 'create_staff_action'),
+        ('work_item.update', 'update_staff_action'),
+        ('ownership.request_cowork', 'create_cowork_request'),
+        ('ownership.invite_cowork', 'create_cowork_request'),
+        ('ownership.request_transfer', 'create_transfer_request'),
+        ('ownership.decide_cowork', 'decide_collaboration_request'),
+        ('ownership.decide_transfer', 'decide_collaboration_request'),
+        ('ownership.requeue', 'requeue_claim'),
+    ],
+)
+def test_staff_agent_dispatches_each_registered_action_with_durable_source(
+    action_code: str,
+    handler_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every registered dispatch path receives the explicit draft provenance."""
+
+    class RequestStub:
+        @classmethod
+        def model_validate(cls, value: object) -> object:
+            return value
+
+    for request_name in (
+        'AcceptHandoffRequest',
+        'CreateStaffMessageRequest',
+        'ResolveHandoffRequest',
+        'SignalDecisionRequest',
+        'CreateStaffActionRequest',
+        'UpdateStaffActionRequest',
+        'CreateCoworkRequest',
+        'CreateTransferRequest',
+        'DecideCollaborationRequest',
+        'RequeueClaimRequest',
+    ):
+        monkeypatch.setattr(staff_agent_service, request_name, RequestStub)
+
+    handler = Mock(return_value=StaffAgentModelOutput(answer='Executed.', drafts=[]))
+    monkeypatch.setattr(staff_agent_service, handler_name, handler)
+    repository = Mock()
+    timestamp = datetime.now(UTC)
+    repository.get_staff_agent_session.return_value = StaffAgentSession(
+        session_id='sas_test',
+        staff_id='stf_demo',
+        title='Test',
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    repository.list_staff_agent_messages.return_value = [
+        StaffAgentMessage(
+            message_id='sam_test',
+            session_id='sas_test',
+            staff_id='stf_demo',
+            role=StaffAgentMessageRole.ASSISTANT,
+            content='Draft.',
+            claim_ids=['clm_test'],
+            drafts=[
+                StaffAgentDraft(
+                    draft_id='sdr_test',
+                    kind=StaffAgentDraftKind.INTERNAL_NOTE,
+                    title='Action',
+                    content='Execute.',
+                    claim_id='clm_test',
+                    action_code=action_code,
+                    target_ref='target_test',
+                )
+            ],
+            created_at=timestamp,
+        )
+    ]
+    repository.get_claim_internal.return_value = SimpleNamespace(active_session_id='target_test')
+
+    response = staff_agent_service.execute_staff_agent_draft(
+        repository,
+        Principal(subject='stf_demo', actor_type='staff'),
+        'sas_test',
+        'sam_test',
+        'sdr_test',
+        ExecuteStaffAgentDraftRequest(confirmed=True),
+        f'key-{action_code}',
+        '1',
+    )
+
+    assert response.outcome.value == 'executed'
+    assert handler.call_args.kwargs['source'].session_id == 'sas_test'
+    assert handler.call_args.kwargs['source'].message_id == 'sam_test'
+    assert handler.call_args.kwargs['source'].draft_id == 'sdr_test'
 
 
 def test_staff_agent_routes_require_staff_identity() -> None:

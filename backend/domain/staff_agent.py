@@ -28,7 +28,10 @@ class StaffAgentDraft(ContractModel):
     title: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=5000)
     claim_id: str | None = None
-    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    action_code: str | None = Field(
+        default=None,
+        pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$',
+    )
     target_ref: str | None = Field(default=None, min_length=1, max_length=200)
     payload: dict[str, Any] = Field(default_factory=dict)
 

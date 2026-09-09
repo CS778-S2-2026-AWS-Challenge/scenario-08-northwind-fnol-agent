@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -53,6 +53,15 @@ class DemoSeedConflict(RepositoryConflict):
 
 
 @dataclass(frozen=True)
+class StaffAgentDraftSource:
+    """Durable provenance of a Workbench action proposed by Staff Agent."""
+
+    session_id: str
+    message_id: str
+    draft_id: str
+
+
+@dataclass(frozen=True)
 class IdempotencyRecord:
     actor_id: str
     route: str
@@ -69,7 +78,39 @@ class IdempotencyRecord:
     action_registry_version: str | None = None
     action_code: str | None = None
     target_ref: str | None = None
+    staff_agent_session_id: str | None = None
+    staff_agent_message_id: str | None = None
+    staff_agent_draft_id: str | None = None
     response_payload: dict[str, Any] | None = None
+
+
+def with_staff_agent_source(
+    record: IdempotencyRecord,
+    source: StaffAgentDraftSource | None,
+) -> IdempotencyRecord:
+    """Attach explicit Staff Agent provenance before an atomic mutation."""
+
+    if source is None:
+        return record
+    return replace(
+        record,
+        staff_agent_session_id=source.session_id,
+        staff_agent_message_id=source.message_id,
+        staff_agent_draft_id=source.draft_id,
+    )
+
+
+def idempotency_source_matches(
+    record: IdempotencyRecord,
+    source: StaffAgentDraftSource | None,
+) -> bool:
+    """Require replay to use the same explicit source, including no source."""
+
+    return (
+        record.staff_agent_session_id == (source.session_id if source else None)
+        and record.staff_agent_message_id == (source.message_id if source else None)
+        and record.staff_agent_draft_id == (source.draft_id if source else None)
+    )
 
 
 @dataclass(frozen=True)

@@ -9710,7 +9710,7 @@
           "action_code": {
             "anyOf": [
               {
-                "pattern": "^[a-z]+\\.[a-z][a-z0-9_]*$",
+                "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
                 "type": "string"
               },
               {
