@@ -410,11 +410,17 @@ describe('WorkbenchPage staff takeover and write-back journey', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The message was not sent because the Claim changed.')
     expect(reply).toHaveValue(claimantQuestion)
-    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', claimantQuestion, 8)
+    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', {
+      message: claimantQuestion,
+      sessionId: 'ses_418',
+    }, 8)
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))
     await waitFor(() => expect(reply).toHaveValue(''))
-    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', claimantQuestion, 8)
+    expect(workbenchApi.sendMessage).toHaveBeenLastCalledWith('staff-token', 'clm_418', {
+      message: claimantQuestion,
+      sessionId: 'ses_418',
+    }, 8)
     expect(await screen.findByText(claimantQuestion)).toBeVisible()
     expect(screen.getByText('Revision 9')).toBeVisible()
     expect(screen.queryByText('Internal handoff reason: possible coverage concern.')).not.toBeInTheDocument()
