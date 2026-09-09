@@ -499,7 +499,9 @@ def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_
         unconfirmed = client.post(endpoint, headers=STAFF_HEADERS, json={'confirmed': False})
         assert unconfirmed.status_code == 409
         assert unconfirmed.json()['error']['code'] == 'CONFIRMATION_REQUIRED'
-        assert repository.get_claim_internal(claim_id).revision == 2
+        unconfirmed_claim = repository.get_claim_internal(claim_id)
+        assert unconfirmed_claim is not None
+        assert unconfirmed_claim.revision == 2
 
         headers = {
             **STAFF_HEADERS,
@@ -515,7 +517,9 @@ def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_
         assert executed.json()['action_code'] == 'human.accept_handoff'
         assert executed.json()['outcome'] == 'executed'
         assert executed.json()['result']['handoff']['status'] == 'accepted'
-        assert repository.get_claim_internal(claim_id).revision == 3
+        executed_claim = repository.get_claim_internal(claim_id)
+        assert executed_claim is not None
+        assert executed_claim.revision == 3
 
 
 def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:
