@@ -25,10 +25,26 @@ from backend.domain.model_gateway import (
     ModelRequest,
     ModelRole,
 )
-from backend.domain.models import WorkingClaim
+from backend.domain.models import (
+    AcceptHandoffRequest,
+    ContractModel,
+    CreateCoworkRequest,
+    CreateStaffActionRequest,
+    CreateStaffMessageRequest,
+    CreateTransferRequest,
+    DecideCollaborationRequest,
+    RequeueClaimRequest,
+    ResolveHandoffRequest,
+    SignalDecisionRequest,
+    UpdateStaffActionRequest,
+    WorkingClaim,
+)
 from backend.domain.staff_agent import (
     CreateStaffAgentMessageRequest,
     CreateStaffAgentSessionRequest,
+    ExecuteStaffAgentDraftRequest,
+    StaffAgentDraftExecutionOutcome,
+    StaffAgentDraftExecutionResponse,
     StaffAgentMessage,
     StaffAgentMessageRole,
     StaffAgentMessagesResponse,
@@ -37,12 +53,27 @@ from backend.domain.staff_agent import (
     StaffAgentSessionsResponse,
     StaffAgentTurnResponse,
 )
+from backend.domain.workbench_action_registry import WORKBENCH_ACTION_REGISTRY
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID, load_staff_assistant_prompt
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.ownership import (
+    create_cowork_request,
+    create_transfer_request,
+    decide_collaboration_request,
+    requeue_claim,
+)
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
-from backend.services.support import now_utc
+from backend.services.review_writeback import decide_review_signal
+from backend.services.staff_actions import (
+    accept_handoff,
+    create_staff_action,
+    resolve_handoff,
+    send_staff_message,
+    update_staff_action,
+)
+from backend.services.support import now_utc, require_idempotency_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +91,7 @@ class StaffAgentContext:
     customer_updates: tuple[Mapping[str, Any], ...] = ()
     external_services: tuple[Mapping[str, Any], ...] = ()
     context_limitations: tuple[str, ...] = ()
+    registered_actions: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +141,7 @@ class GatewayStaffAgent:
                             'customer_updates': list(context.customer_updates),
                             'external_services': list(context.external_services),
                             'context_limitations': list(context.context_limitations),
+                            'registered_actions': list(context.registered_actions),
                         },
                         separators=(',', ':'),
                     ),
@@ -475,6 +508,24 @@ def submit_staff_agent_message(
             item for context in claim_contexts for item in context['external_services']
         ),
         context_limitations=context_limitations,
+        registered_actions=tuple(
+            {
+                'action_code': definition.action_code,
+                'target_type': definition.target_type.value,
+                'label': definition.label,
+                'purpose': definition.purpose,
+                'confirmation_level': definition.confirmation_level.value,
+                'inputs': [
+                    {
+                        'field_code': item.field_code,
+                        'required': item.required,
+                        'choices': [choice[0] for choice in item.choices],
+                    }
+                    for item in definition.inputs
+                ],
+            }
+            for definition in WORKBENCH_ACTION_REGISTRY.values()
+        ),
     )
     result = provider.respond(agent_context)
     if any(
@@ -484,6 +535,10 @@ def submit_staff_agent_message(
         raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
 
     timestamp = now_utc()
+    persisted_drafts = [
+        draft.model_copy(update={'draft_id': draft.draft_id or new_id('sdr')})
+        for draft in result.output.drafts
+    ]
     staff_message = StaffAgentMessage(
         message_id=new_id('sam'),
         session_id=session_id,
@@ -501,7 +556,7 @@ def submit_staff_agent_message(
         role=StaffAgentMessageRole.ASSISTANT,
         content=result.output.answer,
         claim_ids=claim_ids,
-        drafts=result.output.drafts,
+        drafts=persisted_drafts,
         source_refs=[
             *(f'claim:{claim.claim_id}:revision:{claim.revision}' for claim in claims),
             *(f'knowledge:{item["chunk_id"]}' for item in knowledge),
@@ -536,4 +591,197 @@ def submit_staff_agent_message(
         session=updated_session,
         staff_message=staff_message,
         assistant_message=assistant_message,
+    )
+
+
+def execute_staff_agent_draft(
+    repository: PersistenceRepository,
+    principal: Principal,
+    session_id: str,
+    message_id: str,
+    draft_id: str,
+    payload: ExecuteStaffAgentDraftRequest,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> StaffAgentDraftExecutionResponse:
+    """Promote one saved Staff Agent draft through a registered Workbench action.
+
+    The Agent never receives mutation authority. This adapter only selects an existing
+    revision-checked Workbench route after explicit staff confirmation; those routes own
+    permission, idempotency, audit and Claim State persistence.
+    """
+
+    _require_staff(principal)
+    _session(repository, principal, session_id)
+    message = next(
+        (
+            item
+            for item in repository.list_staff_agent_messages(session_id, principal.subject)
+            if item.message_id == message_id
+        ),
+        None,
+    )
+    if message is None or message.role is not StaffAgentMessageRole.ASSISTANT:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The Staff Agent draft message was not found.',
+        )
+    draft = next((item for item in message.drafts if item.draft_id == draft_id), None)
+    if draft is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The Staff Agent draft was not found.',
+        )
+    if not payload.confirmed:
+        raise ApiError(
+            status_code=409,
+            code='CONFIRMATION_REQUIRED',
+            message='Staff confirmation is required before executing this draft.',
+        )
+    if draft.action_code is None:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='This draft is informational and has no registered business action.',
+        )
+    claim_id = draft.claim_id
+    if claim_id is None or claim_id not in message.claim_ids:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='An executable draft must name one Claim in the session scope.',
+        )
+    target_ref = draft.target_ref or claim_id
+    action_code = draft.action_code
+    request_payload = payload.payload or draft.payload
+    key = require_idempotency_key(idempotency_key)
+
+    result: ContractModel
+    try:
+        if action_code == 'human.accept_handoff':
+            result = accept_handoff(
+                repository,
+                principal,
+                claim_id,
+                target_ref,
+                AcceptHandoffRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'conversation.send_claimant_message':
+            claim = repository.get_claim_internal(claim_id)
+            if claim is None or claim.active_session_id != target_ref:
+                raise ApiError(
+                    status_code=422,
+                    code='VALIDATION_ERROR',
+                    message='The draft target is not the Claim active claimant session.',
+                )
+            result = send_staff_message(
+                repository,
+                principal,
+                claim_id,
+                CreateStaffMessageRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'human.resolve_handoff':
+            result = resolve_handoff(
+                repository,
+                principal,
+                claim_id,
+                target_ref,
+                ResolveHandoffRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'signal.record_decision':
+            result = decide_review_signal(
+                repository,
+                principal,
+                claim_id,
+                target_ref,
+                SignalDecisionRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'work_item.create':
+            result = create_staff_action(
+                repository,
+                principal,
+                claim_id,
+                CreateStaffActionRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'work_item.update':
+            result = update_staff_action(
+                repository,
+                principal,
+                claim_id,
+                target_ref,
+                UpdateStaffActionRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code in {'ownership.request_cowork', 'ownership.invite_cowork'}:
+            result = create_cowork_request(
+                repository,
+                principal,
+                claim_id,
+                CreateCoworkRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'ownership.request_transfer':
+            result = create_transfer_request(
+                repository,
+                principal,
+                claim_id,
+                CreateTransferRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code in {'ownership.decide_cowork', 'ownership.decide_transfer'}:
+            result = decide_collaboration_request(
+                repository,
+                principal,
+                claim_id,
+                target_ref,
+                DecideCollaborationRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        elif action_code == 'ownership.requeue':
+            result = requeue_claim(
+                repository,
+                principal,
+                claim_id,
+                RequeueClaimRequest.model_validate(request_payload),
+                key,
+                if_match,
+            )
+        else:
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='The draft action is not registered for Staff Workbench execution.',
+            )
+    except ValueError as error:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='The draft payload does not match the registered action contract.',
+        ) from error
+
+    return StaffAgentDraftExecutionResponse(
+        session_id=session_id,
+        message_id=message_id,
+        draft_id=draft_id,
+        claim_id=claim_id,
+        action_code=action_code,
+        target_ref=target_ref,
+        outcome=StaffAgentDraftExecutionOutcome.EXECUTED,
+        result=result.model_dump(mode='json'),
     )

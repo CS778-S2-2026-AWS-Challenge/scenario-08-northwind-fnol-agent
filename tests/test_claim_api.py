@@ -408,6 +408,10 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
     assert turn.status_code == 200, turn.text
     turn_body = turn.json()
     assert turn_body['dynamic_form']['selected_family'] == family
+    requirements = turn_body['dynamic_form']['requirements']
+    assert requirements['current_action_total'] > 0
+    assert 0 <= requirements['current_action_satisfied'] <= requirements['current_action_total']
+    assert turn_body['decision']['customer_next_step']['required_items']
     assert turn_body['decision']['customer_next_step']['status'] == 'confirmation_required'
     confirmation_items = [item['field_code'] for item in turn_body['form_changes']]
     if family == 'contents':

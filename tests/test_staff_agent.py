@@ -33,6 +33,10 @@ CLAIMANT_HEADERS = {'Authorization': 'Bearer synthetic-claimant'}
 @dataclass
 class RecordingStaffAgent(StaffAgentTurnProvider):
     draft_claim_id: str | None = None
+    draft_kind: StaffAgentDraftKind = StaffAgentDraftKind.INTERNAL_NOTE
+    draft_action_code: str | None = None
+    draft_target_ref: str | None = None
+    draft_payload: dict[str, object] = field(default_factory=dict)
     contexts: list[StaffAgentContext] = field(default_factory=list)
 
     def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
@@ -41,10 +45,13 @@ class RecordingStaffAgent(StaffAgentTurnProvider):
         if self.draft_claim_id is not None:
             drafts.append(
                 StaffAgentDraft(
-                    kind=StaffAgentDraftKind.INTERNAL_NOTE,
+                    kind=self.draft_kind,
                     title='Review note',
                     content='Check the source before taking action.',
                     claim_id=self.draft_claim_id,
+                    action_code=self.draft_action_code,
+                    target_ref=self.draft_target_ref,
+                    payload=self.draft_payload,
                 )
             )
         return StaffAgentProviderResult(
@@ -437,6 +444,78 @@ def test_staff_agent_rejects_an_out_of_scope_draft_without_saving_the_turn() -> 
     assert response.status_code == 502
     assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
     assert messages.json()['items'] == []
+
+
+def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_once() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        claim_id = _create_claim(client, 'staff-agent-draft-execution')
+        support = client.post(
+            f'/api/v1/claims/{claim_id}/support-requests',
+            headers={
+                **CLAIMANT_HEADERS,
+                'Idempotency-Key': 'staff-agent-support',
+                'If-Match': '1',
+            },
+            json={
+                'reason': 'I would like a staff member to help me.',
+                'support_need': 'human_requested',
+                'preferred_channel': 'in_app',
+            },
+        )
+        assert support.status_code == 201, support.text
+        handoff_id = support.json()['handoff']['handoff_id']
+        presence = client.patch(
+            '/api/v1/workbench/staff/presence',
+            headers=STAFF_HEADERS,
+            json={'online': True, 'available': True, 'lease_seconds': 60},
+        )
+        assert presence.status_code == 200, presence.text
+
+        provider.draft_claim_id = claim_id
+        provider.draft_action_code = 'human.accept_handoff'
+        provider.draft_target_ref = handoff_id
+        provider.draft_payload = {}
+        session_id = _create_session(client)
+        turn = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'accept-draft-request',
+                'content': 'Prepare the Claim acceptance action.',
+                'claim_ids': [claim_id],
+            },
+        )
+        assert turn.status_code == 201, turn.text
+        assistant = turn.json()['assistant_message']
+        draft = assistant['drafts'][0]
+        assert draft['draft_id'].startswith('sdr_')
+        endpoint = (
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages/'
+            f'{assistant["message_id"]}/drafts/{draft["draft_id"]}/execute'
+        )
+
+        unconfirmed = client.post(endpoint, headers=STAFF_HEADERS, json={'confirmed': False})
+        assert unconfirmed.status_code == 409
+        assert unconfirmed.json()['error']['code'] == 'CONFIRMATION_REQUIRED'
+        assert repository.get_claim_internal(claim_id).revision == 2
+
+        headers = {
+            **STAFF_HEADERS,
+            'Idempotency-Key': 'execute-staff-agent-draft',
+            'If-Match': '2',
+        }
+        executed = client.post(endpoint, headers=headers, json={'confirmed': True})
+        replay = client.post(endpoint, headers=headers, json={'confirmed': True})
+
+        assert executed.status_code == 200, executed.text
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == executed.json()
+        assert executed.json()['action_code'] == 'human.accept_handoff'
+        assert executed.json()['outcome'] == 'executed'
+        assert executed.json()['result']['handoff']['status'] == 'accepted'
+        assert repository.get_claim_internal(claim_id).revision == 3
 
 
 def test_staff_agent_fails_closed_when_no_model_profile_is_configured() -> None:

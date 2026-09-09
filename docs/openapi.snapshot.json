@@ -5271,6 +5271,23 @@
         "title": "EvidenceWaitType",
         "type": "string"
       },
+      "ExecuteStaffAgentDraftRequest": {
+        "additionalProperties": false,
+        "description": "Explicit staff confirmation and optional edits for one Agent draft.",
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "title": "ExecuteStaffAgentDraftRequest",
+        "type": "object"
+      },
       "ExternalClaimResult": {
         "additionalProperties": false,
         "properties": {
@@ -9690,6 +9707,18 @@
       "StaffAgentDraft": {
         "additionalProperties": false,
         "properties": {
+          "action_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z]+\\.[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Code"
+          },
           "claim_id": {
             "anyOf": [
               {
@@ -9707,8 +9736,38 @@
             "title": "Content",
             "type": "string"
           },
+          "draft_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
           "kind": {
             "$ref": "#/components/schemas/StaffAgentDraftKind"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "target_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Ref"
           },
           "title": {
             "maxLength": 200,
@@ -9723,6 +9782,61 @@
           "content"
         ],
         "title": "StaffAgentDraft",
+        "type": "object"
+      },
+      "StaffAgentDraftExecutionOutcome": {
+        "enum": [
+          "executed"
+        ],
+        "title": "StaffAgentDraftExecutionOutcome",
+        "type": "string"
+      },
+      "StaffAgentDraftExecutionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action_code": {
+            "title": "Action Code",
+            "type": "string"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/StaffAgentDraftExecutionOutcome"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "target_ref": {
+            "title": "Target Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "message_id",
+          "draft_id",
+          "claim_id",
+          "action_code",
+          "target_ref",
+          "outcome",
+          "result"
+        ],
+        "title": "StaffAgentDraftExecutionResponse",
         "type": "object"
       },
       "StaffAgentDraftKind": {
@@ -17072,6 +17186,124 @@
           }
         },
         "summary": "Create Message",
+        "tags": [
+          "workbench-agent"
+        ]
+      }
+    },
+    "/api/v1/workbench/agent/sessions/{session_id}/messages/{message_id}/drafts/{draft_id}/execute": {
+      "post": {
+        "operationId": "execute_draft_api_v1_workbench_agent_sessions__session_id__messages__message_id__drafts__draft_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteStaffAgentDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAgentDraftExecutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Draft",
         "tags": [
           "workbench-agent"
         ]

@@ -1943,6 +1943,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `GET` | `/workbench/agent/capabilities` | Read published Staff Agent model profiles |
 | `GET` | `/workbench/agent/sessions/{session_id}/messages` | Read one owned Staff Agent session |
 | `POST` | `/workbench/agent/sessions/{session_id}/messages` | Ask the Staff Agent with an explicit Claim scope |
+| `POST` | `/workbench/agent/sessions/{session_id}/messages/{message_id}/drafts/{draft_id}/execute` | Confirm one saved Staff Agent draft and run its registered Workbench action |
 | `GET` | `/workbench/conversations` | List accessible Claim conversations and owned Staff Agent sessions |
 | `GET` | `/operations/metrics` | Read aggregate operational metrics |
 
@@ -1982,16 +1983,35 @@ preserves source and availability limitations while building that context. It in
 `staff_assistant` model purpose under the
 `staff_internal_fnol` privacy class and prompt `northwind-fnol-staff-assistant-v1`. The response
 returns the saved session, the staff message and the assistant message. Each assistant message
-records the provider model used for the session profile. Assistant messages may
-include source references and editable drafts of `claimant_message`, `internal_note`, or
-`external_request` kind. A draft can name only a Claim in the request scope.
+records the provider model used for the session profile. Assistant messages may include source
+references and drafts of `claimant_message`, `internal_note`, or `external_request` kind. Every
+persisted draft receives a stable `draft_id`; an executable draft may additionally carry a
+registered Workbench `action_code`, its `target_ref`, and a candidate payload. A draft can name only
+a Claim in the request scope.
 
-The Staff Agent has no mutation authority. It cannot send a draft, change Claim State, decide a
-Signal, contact a third party, assign work, or perform another business action. A staff member must
-move an accepted draft into the applicable revision-checked business-action route, where Runtime
-performs permission, consent, idempotency and audit checks. Model unavailability, malformed output,
-or an out-of-scope draft fails the complete turn before either message is persisted. When no Staff
-Agent model profile is configured, message submission returns `503 DEPENDENCY_UNAVAILABLE`.
+The Staff Agent still has no mutation authority. A staff member must explicitly confirm a saved
+draft through the execution endpoint. That endpoint only adapts into an existing registered
+Workbench action route, which owns permission, consent, If-Match revision, idempotency, audit, and
+Claim State checks. The response is an authoritative action result, never a model claim that work
+was completed. A draft without a registered action, an external-request draft without an available
+provider action, missing confirmation, malformed payload, denied action, stale revision, or
+unavailable dependency is rejected with the bounded error from the underlying route and leaves
+Claim State unchanged. Model unavailability, malformed output, or an out-of-scope draft fails the
+complete turn before either message is persisted. When no Staff Agent model profile is configured,
+message submission returns `503 DEPENDENCY_UNAVAILABLE`.
+
+The execution request is deliberately small because the saved draft carries the candidate action:
+
+```json
+{
+  "confirmed": true,
+  "payload": {}
+}
+```
+
+`payload` may contain staff edits, but it is validated against the registered action before the
+existing handler runs. The request requires `Idempotency-Key`; Claim-mutating actions also require
+the current `If-Match` Claim revision.
 
 `GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
 catalog for Staff authentication.

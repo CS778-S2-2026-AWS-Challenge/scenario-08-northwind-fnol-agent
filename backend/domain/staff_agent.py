@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import Field
 
@@ -17,11 +18,19 @@ class StaffAgentDraftKind(StrEnum):
     EXTERNAL_REQUEST = 'external_request'
 
 
+class StaffAgentDraftExecutionOutcome(StrEnum):
+    EXECUTED = 'executed'
+
+
 class StaffAgentDraft(ContractModel):
+    draft_id: str | None = Field(default=None, min_length=1, max_length=120)
     kind: StaffAgentDraftKind
     title: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=5000)
     claim_id: str | None = None
+    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    target_ref: str | None = Field(default=None, min_length=1, max_length=200)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class StaffAgentSession(ContractModel):
@@ -60,10 +69,28 @@ class CreateStaffAgentMessageRequest(ContractModel):
     claim_ids: list[str] = Field(max_length=5)
 
 
+class ExecuteStaffAgentDraftRequest(ContractModel):
+    """Explicit staff confirmation and optional edits for one Agent draft."""
+
+    confirmed: bool = False
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class StaffAgentTurnResponse(ContractModel):
     session: StaffAgentSession
     staff_message: StaffAgentMessage
     assistant_message: StaffAgentMessage
+
+
+class StaffAgentDraftExecutionResponse(ContractModel):
+    session_id: str
+    message_id: str
+    draft_id: str
+    claim_id: str
+    action_code: str
+    target_ref: str
+    outcome: StaffAgentDraftExecutionOutcome
+    result: dict[str, Any]
 
 
 class StaffAgentSessionsResponse(ContractModel):

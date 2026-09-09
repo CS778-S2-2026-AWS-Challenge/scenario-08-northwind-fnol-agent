@@ -68,7 +68,7 @@ projections, fixtures, and transaction tests change together.
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
-| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
+| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and drafts with stable identity; executable drafts carry a registered action proposal but remain non-executing until staff confirmation | `staff_id`, `session_id`, `message_id`, and `draft_id`; Claim IDs are per-message scope only |
 | Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -175,7 +175,9 @@ the append-only audit collection through a bounded, filterable projection.
     another staff member's sessions.
 29. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
-    used for that turn.
+    used for that turn. Persist stable draft identities and route an explicitly confirmed draft
+    through the existing revision-checked Workbench action handler; do not grant the model direct
+    mutation authority.
 30. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
 31. Conditionally update approved Customer or Staff account fields by account revision; a stale
