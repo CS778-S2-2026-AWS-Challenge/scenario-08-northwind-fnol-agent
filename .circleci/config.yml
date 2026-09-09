@@ -1,192 +1,27 @@
 version: 2.1
+setup: true
 
-jobs:
-  backend-quality:
-    docker:
-      - image: cimg/python:3.12-node
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: Select backend impact
-          command: |
-            git fetch origin main
-            echo "export BACKEND_QUALITY_MODE=$(python scripts/select_backend_tests.py --mode)" >> "$BASH_ENV"
-            echo "export BACKEND_QUALITY_OPENAPI=$(python scripts/select_backend_tests.py --needs-openapi)" >> "$BASH_ENV"
-            echo "export BACKEND_QUALITY_AUDIT=$(python scripts/select_backend_tests.py --needs-audit-contract)" >> "$BASH_ENV"
-      - restore_cache:
-          keys:
-            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
-      - run:
-          name: Install backend dependencies
-          command: |
-            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then
-              echo "No backend behavior changed; Python dependencies skipped."
-              exit 0
-            fi
-            python -m pip install -r backend/requirements-dev.txt
-      - save_cache:
-          key: v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
-          paths:
-            - ~/.cache/pip
-      - run:
-          name: Check backend formatting
-          command: |
-            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m ruff format --check .
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff format --check
-            fi
-      - run:
-          name: Lint backend
-          command: |
-            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m ruff check .
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m ruff check
-            fi
-      - run:
-          name: Type-check backend
-          command: |
-            if [ "$BACKEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
-            if [ "$BACKEND_QUALITY_MODE" = "full" ]; then
-              python -m mypy backend tests
-            else
-              python scripts/select_backend_tests.py --python-files | xargs -r python -m mypy
-            fi
-      - run:
-          name: Test backend
-          command: |
-            mode="$BACKEND_QUALITY_MODE"
-            case "$mode" in
-              full)
-                python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests
-                python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
-                ;;
-              scoped)
-                python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $(python scripts/select_backend_tests.py --tests)
-                python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85
-                ;;
-              skip)
-                echo "No backend behavior changed; backend pytest skipped."
-                ;;
-              *)
-                echo "Unknown backend test selection mode: $mode"
-                exit 1
-                ;;
-            esac
-      - run:
-          name: Check OpenAPI snapshot drift
-          command: |
-            if [ "$BACKEND_QUALITY_OPENAPI" = "true" ]; then
-              python scripts/export_openapi.py --check
-            else
-              echo "OpenAPI contract unaffected; check skipped."
-            fi
-      - run:
-          name: Check AuditEvent contract snapshot drift
-          command: |
-            if [ "$BACKEND_QUALITY_AUDIT" = "true" ]; then
-              python scripts/export_audit_contract.py --check
-            else
-              echo "AuditEvent contract unaffected; check skipped."
-            fi
-
-  github-automation-quality:
-    docker:
-      - image: cimg/node:22.14
-    resource_class: small
-    steps:
-      - checkout
-      - restore_cache:
-          keys:
-            - v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
-      - run:
-          name: Install GitHub automation dependencies
-          command: npm ci
-          working_directory: automation/github-automation
-      - save_cache:
-          key: v1-automation-node-{{ arch }}-{{ checksum "automation/github-automation/package-lock.json" }}
-          paths:
-            - ~/.npm
-      - run:
-          name: Check GitHub automation Worker
-          command: npm run check
-          working_directory: automation/github-automation
-      - run:
-          name: Validate Worker bundle
-          command: npm run dry-run
-          working_directory: automation/github-automation
-
-  pr-policy:
-    docker:
-      - image: cimg/node:22.14
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: Test repository policy validators
-          command: >-
-            node --test
-            .github/scripts/pr_policy.test.cjs
-            .github/scripts/issue_policy.test.cjs
-            .github/scripts/review_policy.test.cjs
-            .github/scripts/governance_audit.test.cjs
-            .circleci/run-pr-policy.test.cjs
-      - run:
-          name: Validate commit message format
-          command: |
-            if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
-              echo "No associated pull request; skipping commit format check."
-              exit 0
-            fi
-            bash .github/scripts/check_commit_format.sh \
-              "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" \
-              "${CIRCLE_PULL_REQUEST##*/}"
-      - run:
-          name: Validate pull request
-          command: node .circleci/run-pr-policy.cjs
-
-  docs-quality:
-    docker:
-      - image: cimg/node:22.14
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: Lint changed markdown
-          command: |
-            git fetch origin main
-            base=$(git merge-base origin/main HEAD)
-            files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.md' | tr '\n' ' ')
-            if [ -z "${files// /}" ]; then
-              echo "No markdown changes."
-              exit 0
-            fi
-            printf '%s\n' $files | xargs npx --yes markdownlint-cli2
-      - run:
-          name: Check docs updated with API changes
-          command: |
-            git fetch origin main
-            base=$(git merge-base origin/main HEAD)
-            changed=$(git diff --name-only "$base" HEAD)
-            modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
-            if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
-              echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
-              exit 1
-            fi
-            if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
-              echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
-              exit 1
-            fi
-            echo "Path coupling satisfied."
+orbs:
+  path-filtering: circleci/path-filtering@3.0.0
 
 workflows:
-  quality:
+  setup:
     jobs:
-      - backend-quality
-      - github-automation-quality
-      - pr-policy
-      - docs-quality
+      - path-filtering/filter:
+          base-revision: main
+          config-path: .circleci/continue_config.yml
+          mapping: |
+            ^backend/.* backend_changed true
+            ^tests/(?!test_backend_(test_selection|quality_profiles)\.py$).* backend_changed true
+            ^scripts/(check_diff_coverage|export_openapi|export_audit_contract)\.py$ backend_changed true
+            ^scripts/select_backend_tests\.py$ ci_changed true
+            ^pyproject\.toml$ backend_changed true
+            ^backend/requirements-dev\.txt$ backend_changed true
+            ^docs/(openapi\.snapshot\.json|contracts/audit-event\.schema\.json)$ backend_changed true
+            ^automation/github-automation/.* automation_changed true
+            ^\.circleci/.* ci_changed true
+            ^\.github/workflows/.* ci_changed true
+            ^docs/.* docs_changed true
+            ^.*\.md$ docs_changed true
+            ^SPEC/.* docs_changed true
+            ^sprint/.* docs_changed true

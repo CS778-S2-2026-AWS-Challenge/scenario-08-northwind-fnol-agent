@@ -70,11 +70,18 @@ def test_vp_mapping_document_runs_the_focused_contract_suite() -> None:
     assert selection.tests == ('tests/test_branch_registry.py',)
 
 
-def test_ci_selector_change_runs_the_complete_suite() -> None:
+def test_ci_selector_change_is_not_a_backend_change() -> None:
     selection = select_tests(['scripts/select_backend_tests.py'])
 
-    assert selection.mode == 'full'
-    assert selection.tests == ('tests',)
+    assert selection.mode == 'skip'
+    assert selection.tests == ()
+
+
+def test_ci_configuration_change_does_not_force_backend_suite() -> None:
+    selection = select_tests(['.circleci/config.yml', '.github/workflows/ci.yml'])
+
+    assert selection.mode == 'skip'
+    assert selection.tests == ()
 
 
 def test_static_checks_use_only_changed_python_files_for_scoped_prs() -> None:

@@ -2,6 +2,18 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - "backend/**"
+      - "tests/**"
+      - "scripts/select_backend_tests.py"
+      - "scripts/check_diff_coverage.py"
+      - "scripts/export_openapi.py"
+      - "scripts/export_audit_contract.py"
+      - "pyproject.toml"
+      - "backend/requirements-dev.txt"
+      - "docs/openapi.snapshot.json"
+      - "docs/contracts/audit-event.schema.json"
+      - "docs/vp-field-branch-mapping.md"
   push:
     branches:
       - main
@@ -98,50 +110,3 @@ jobs:
       - name: Check AuditEvent contract snapshot drift
         if: steps.impact.outputs.audit == 'true'
         run: python scripts/export_audit_contract.py --check
-
-  docs-quality:
-    name: Docs quality
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Select changed markdown files
-        id: changed
-        run: |
-          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
-          files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.md' | tr '\n' ' ')
-          echo "files=$files" >> "$GITHUB_OUTPUT"
-
-      - name: Lint changed markdown
-        if: steps.changed.outputs.files != ''
-        run: |
-          printf '%s\n' ${{ steps.changed.outputs.files }} | xargs npx --yes markdownlint-cli2
-
-      - name: Check links in changed markdown
-        if: steps.changed.outputs.files != ''
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --offline --no-progress ${{ steps.changed.outputs.files }}
-          fail: true
-
-      - name: Check docs updated with API changes
-        run: |
-          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
-          changed=$(git diff --name-only "$base" HEAD)
-          modified=$(git diff --name-only --diff-filter=M "$base" HEAD)
-          if echo "$modified" | grep -qx 'docs/openapi.snapshot.json' && ! echo "$changed" | grep -qx 'docs/api.md'; then
-            echo "The OpenAPI snapshot changed but docs/api.md was not updated in the same PR."
-            echo "Update docs/api.md together with the API change (see ci-checks.md in the governance skill)."
-            exit 1
-          fi
-          if echo "$modified" | grep -qx 'docs/contracts/audit-event.schema.json' && ! echo "$changed" | grep -qx 'docs/persistence-schema.md'; then
-            echo "The AuditEvent snapshot changed but docs/persistence-schema.md was not updated in the same PR."
-            exit 1
-          fi
-          echo "Path coupling satisfied."
