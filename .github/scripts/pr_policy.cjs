@@ -1,4 +1,4 @@
-const REQUIRED_READY_SECTIONS = [
+const REQUIRED_SECTIONS = [
   'Summary',
   'Acceptance evidence',
   'Local validation',
@@ -8,6 +8,45 @@ const REQUIRED_READY_SECTIONS = [
   'Failure-path analysis',
   'Dependencies and risks',
 ];
+
+const REQUIRED_FIELDS = {
+  Summary: ['Primary owner', 'Owned behavior', 'Non-goals', 'Scope changed since issue'],
+  'Local validation': ['Command', 'Result'],
+  'Contract and data impact': [
+    'API contract',
+    'Persistence schema',
+    'Fixtures and tests',
+    'Claimant and staff projections',
+  ],
+  'Ownership and overlap': [
+    'Expected impact area',
+    'Cross-owner impact',
+    'Overlapping issues or PRs',
+    'Owner agreement',
+  ],
+  'Base and delivery topology': [
+    'Base reviewed against',
+    'Stacked parent',
+    'Intended merge order',
+    'Main changes affecting this PR',
+  ],
+  'Failure-path analysis': [
+    'Risk class',
+    'Ownership or stale authority',
+    'Retry, concurrency, or duplicate delivery',
+    'Partial side effect or unknown outcome',
+    'Recovery or reconciliation',
+    'Sensitive-data or model-output exposure',
+  ],
+  'Dependencies and risks': ['Dependencies', 'Remaining risks'],
+};
+
+const FIELD_HINTS = {
+  'Local validation': ' (use `Not run - reason` when applicable).',
+  'Contract and data impact': ' (use `None` when unaffected).',
+  'Failure-path analysis': ' (use `None - reason` when inapplicable).',
+  'Dependencies and risks': ' (use `None` when absent).',
+};
 
 const HIGH_RISK_CLASSES = new Set([
   'Shared contract',
@@ -70,6 +109,40 @@ function labelledValue(content, label) {
   return match && /[A-Za-z0-9]/.test(match[1]) ? match[1] : null;
 }
 
+function addByDeliveryState({ errors, warnings, isDraft, message }) {
+  (isDraft ? warnings : errors).push(message);
+}
+
+function validateBodyStructure({ body, isDraft, errors, warnings }) {
+  for (const heading of REQUIRED_SECTIONS) {
+    if (heading === 'Summary') continue;
+    const content = sectionContent(body, heading);
+    if (!hasMeaningfulContent(content)) {
+      addByDeliveryState({
+        errors,
+        warnings,
+        isDraft,
+        message: `Complete the \`## ${heading}\` section before requesting review.`,
+      });
+    }
+  }
+
+  for (const [heading, labels] of Object.entries(REQUIRED_FIELDS)) {
+    if (heading === 'Summary') continue;
+    const content = sectionContent(body, heading) || '';
+    for (const label of labels) {
+      if (!labelledValue(content, label)) {
+        addByDeliveryState({
+          errors,
+          warnings,
+          isDraft,
+          message: `Complete \`${label}:\` in \`${heading}\`${FIELD_HINTS[heading] || '.'}`,
+        });
+      }
+    }
+  }
+}
+
 function issueReferences(content, owner, repo) {
   if (!content) return [];
 
@@ -118,13 +191,19 @@ function validatePullRequestBody(input) {
     errors.push('Complete the `## Summary` section when opening a pull request.');
   }
 
-  const requiredScopeLabels = ['Primary owner', 'Owned behavior', 'Non-goals', 'Scope changed since issue'];
+  const requiredScopeLabels = REQUIRED_FIELDS.Summary;
   for (const label of requiredScopeLabels) {
     if (!labelledValue(summary, label)) {
-      const message = `Complete \`${label}:\` in \`Summary\`.`;
-      (isDraft ? warnings : errors).push(message);
+      addByDeliveryState({
+        errors,
+        warnings,
+        isDraft,
+        message: `Complete \`${label}:\` in \`Summary\`.`,
+      });
     }
   }
+
+  validateBodyStructure({ body, isDraft, errors, warnings });
 
   const governanceConfirmation = sectionContent(body, 'Governance confirmation');
   if (checkedBoxes(governanceConfirmation).length === 0) {
@@ -152,69 +231,8 @@ function validatePullRequestBody(input) {
   }
 
   if (!isDraft) {
-    for (const heading of REQUIRED_READY_SECTIONS) {
-      if (heading === 'Summary') continue;
-      const content = sectionContent(body, heading);
-      if (!hasMeaningfulContent(content)) {
-        errors.push(`Complete the \`## ${heading}\` section before requesting review.`);
-      }
-    }
-
-    const localValidation = sectionContent(body, 'Local validation') || '';
-    for (const label of ['Command', 'Result']) {
-      if (!labelledValue(localValidation, label)) {
-        errors.push(
-          `Complete \`${label}:\` in \`Local validation\` (use \`Not run - reason\` when applicable).`,
-        );
-      }
-    }
-
-    const contractImpact = sectionContent(body, 'Contract and data impact') || '';
-    for (const label of [
-      'API contract',
-      'Persistence schema',
-      'Fixtures and tests',
-      'Claimant and staff projections',
-    ]) {
-      if (!labelledValue(contractImpact, label)) {
-        errors.push(`Complete \`${label}:\` in \`Contract and data impact\` (use \`None\` when unaffected).`);
-      }
-    }
-
-
-    const ownership = sectionContent(body, 'Ownership and overlap') || '';
-    for (const label of [
-      'Expected impact area',
-      'Cross-owner impact',
-      'Overlapping issues or PRs',
-      'Owner agreement',
-    ]) {
-      if (!labelledValue(ownership, label)) {
-        errors.push(`Complete \`${label}:\` in \`Ownership and overlap\`.`);
-      }
-    }
-
-    const topology = sectionContent(body, 'Base and delivery topology') || '';
-    for (const label of ['Base reviewed against', 'Stacked parent', 'Intended merge order', 'Main changes affecting this PR']) {
-      if (!labelledValue(topology, label)) {
-        errors.push(`Complete \`${label}:\` in \`Base and delivery topology\`.`);
-      }
-    }
-
     const failureAnalysis = sectionContent(body, 'Failure-path analysis') || '';
     const riskClass = labelledValue(failureAnalysis, 'Risk class');
-    for (const label of [
-      'Risk class',
-      'Ownership or stale authority',
-      'Retry, concurrency, or duplicate delivery',
-      'Partial side effect or unknown outcome',
-      'Recovery or reconciliation',
-      'Sensitive-data or model-output exposure',
-    ]) {
-      if (!labelledValue(failureAnalysis, label)) {
-        errors.push(`Complete \`${label}:\` in \`Failure-path analysis\` (use \`None - reason\` when inapplicable).`);
-      }
-    }
     if (riskClass && HIGH_RISK_CLASSES.has(riskClass)) {
       const evidenceLabels = [
         'Ownership or stale authority',
@@ -225,13 +243,6 @@ function validatePullRequestBody(input) {
       ];
       if (evidenceLabels.every((label) => isNoneValue(labelledValue(failureAnalysis, label)))) {
         errors.push('A high-risk PR must identify at least one applicable failure path and its evidence.');
-      }
-    }
-
-    const dependenciesAndRisks = sectionContent(body, 'Dependencies and risks') || '';
-    for (const label of ['Dependencies', 'Remaining risks']) {
-      if (!labelledValue(dependenciesAndRisks, label)) {
-        errors.push(`Complete \`${label}:\` in \`Dependencies and risks\` (use \`None\` when absent).`);
       }
     }
 
