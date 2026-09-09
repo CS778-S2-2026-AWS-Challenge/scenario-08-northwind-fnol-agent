@@ -35,12 +35,11 @@ in `docs/api.md`.
   visibility classes, active state, and protected credential references; a
   published policy can restrict an authenticated principal's existing scopes.
 - Administration-only cross-resource audit search with bounded filters.
-- React/Vite Admin Console workflows for configuration and knowledge lifecycle actions, Release
+- Server-backed Admin API workflows for configuration and knowledge lifecycle actions, Release
   Sets, Runtime Snapshot resolution, evaluation evidence, operation metrics, Integration health,
   restricted audit search, and customer/staff account creation, updates, and session revocation.
-  The console uses shared design
-  tokens, authenticated API calls, projected action availability, explicit confirmation, revision
-  headers, idempotency keys, and authoritative reloads after writes.
+  The former React/Vite console is preserved under `archive/admin/` as historical source and is
+  not a current runtime entry point or CI target.
 
 ## Runtime wiring currently verified
 
@@ -112,9 +111,6 @@ py -3.12 -m mypy backend
 py -3.12 scripts/export_openapi.py --check
 py -3.12 -m pytest -q tests/test_admin_accounts.py tests/test_identity_adapters.py tests/test_identity_api.py tests/test_identity_runtime.py tests/test_staff_identity.py
 py -3.12 -m pytest -q tests/test_admin_operations.py tests/test_admin_integrations.py tests/test_staff_agent_gateway.py tests/test_model_gateway.py tests/test_control_plane_sqlite.py
-npm run lint --prefix admin
-npm test --prefix admin
-npm run build --prefix admin
 ```
 
 The focused account-administration, integration, and knowledge runs pass 27

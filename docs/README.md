@@ -50,9 +50,9 @@ them:
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
-- The independently served `admin/` React/Vite console consumes the authenticated Admin API for
-  server-backed configuration, knowledge, Agent-rule, evaluation, operation, integration, access,
-  audit, and account projections.
+- The former React/Vite Admin console is preserved under `../archive/admin/` as historical source;
+  it is not a current runtime entry point or CI target. The Admin API contract remains documented
+  and independently governed here.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
