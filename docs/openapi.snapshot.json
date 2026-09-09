@@ -3700,6 +3700,19 @@
       "CreateStaffAgentSessionRequest": {
         "additionalProperties": false,
         "properties": {
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
+          },
           "title": {
             "default": "New Staff Agent session",
             "maxLength": 200,
@@ -9286,6 +9299,34 @@
         "title": "StaffActionStatus",
         "type": "string"
       },
+      "StaffAgentCapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "default_model_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Profile Id"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/StaffAgentModelCapability"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "StaffAgentCapabilitiesResponse",
+        "type": "object"
+      },
       "StaffAgentDraft": {
         "additionalProperties": false,
         "properties": {
@@ -9471,12 +9512,53 @@
         "title": "StaffAgentMessagesResponse",
         "type": "object"
       },
+      "StaffAgentModelCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "structured_output": {
+            "title": "Structured Output",
+            "type": "boolean"
+          },
+          "tools": {
+            "title": "Tools",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "protocol",
+          "structured_output",
+          "tools"
+        ],
+        "title": "StaffAgentModelCapability",
+        "type": "object"
+      },
       "StaffAgentSession": {
         "additionalProperties": false,
         "properties": {
           "created_at": {
             "format": "date-time",
             "title": "Created At",
+            "type": "string"
+          },
+          "model_profile_id": {
+            "default": "qwen-local",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Model Profile Id",
             "type": "string"
           },
           "session_id": {
@@ -16016,6 +16098,55 @@
         "summary": "Read Staff Profile",
         "tags": [
           "staff identity"
+        ]
+      }
+    },
+    "/api/v1/workbench/agent/capabilities": {
+      "get": {
+        "operationId": "read_capabilities_api_v1_workbench_agent_capabilities_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAgentCapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Capabilities",
+        "tags": [
+          "workbench-agent"
         ]
       }
     },

@@ -1304,7 +1304,7 @@ def submit_message(
         None,
     )
     message_text = payload.content.text if payload.content is not None else ''
-    if active_handoff is not None and not message_text.lstrip().lower().startswith('@agent'):
+    if active_handoff is not None:
         timestamp = now_utc()
         claimant_message = MessageRecord(
             message_id=new_id('msg'),
@@ -1427,14 +1427,7 @@ def submit_message(
         session_id=session_id,
         model_profile_id=session.model_profile_id,
         trigger_message_id=claimant_message.message_id,
-        message_text=(
-            payload.content.text.lstrip()[len('@agent') :].lstrip()
-            if payload.content is not None
-            and payload.content.text.lstrip().lower().startswith('@agent')
-            else payload.content.text
-            if payload.content is not None
-            else None
-        ),
+        message_text=payload.content.text if payload.content is not None else None,
         evidence_refs=payload.evidence_refs,
         professional_review_required=any(
             signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
