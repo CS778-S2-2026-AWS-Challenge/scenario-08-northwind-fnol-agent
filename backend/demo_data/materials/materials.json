@@ -22,6 +22,7 @@
       "claim_path": "motor",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Rear bumper damage",
       "described_as": [
@@ -29,6 +30,7 @@
         "Impact damage to bumper and tail light",
         "Supports vehicle.damage_description"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Lets the Agent propose the damage description instead of interrogating the claimant for it.",
@@ -126,6 +128,7 @@
       "claim_path": "motor",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Incident scene, wide",
       "described_as": [
@@ -133,6 +136,7 @@
         "Road markings and kerb visible",
         "Supports position and extent"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Supports the staff judgement about position and extent, which a close crop cannot establish.",
@@ -219,6 +223,7 @@
       "claim_path": "motor",
       "material_class": "Incident evidence",
       "demonstrates_condition": "invalid",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Unusable photograph",
       "described_as": [
@@ -226,6 +231,7 @@
         "Damage not identifiable",
         "Arrived, but does not support the stated fact"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Demonstrates the invalid condition: material arrived and still does not support the decision it was offered for.",
@@ -290,12 +296,21 @@
       "claim_path": "motor",
       "material_class": "Incident evidence",
       "demonstrates_condition": "disputed",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Damage inconsistent with statement",
       "described_as": [
         "Shows front nearside damage",
         "Claimant stated rear impact only",
         "Neither side resolved; staff decision required"
+      ],
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "target": "field:vehicle.damage_description",
+          "reason": "The photograph shows a damaged area the confirmed damage description does not name.",
+          "resolution": "unresolved"
+        }
       ],
       "simulated": true,
       "attributes": {
@@ -372,6 +387,7 @@
       "claim_path": "motor",
       "material_class": "Authority or official report",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Police event report",
       "described_as": [
@@ -379,6 +395,7 @@
         "Attending unit recorded both vehicles and the road position",
         "Issued outside Northwind and outside the claimant, on the issuer timetable"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Carries weight about what happened that the claimant cannot supply alone.",
@@ -479,17 +496,19 @@
       "path": "motor/motor-assessment-unavailable-notice.pdf",
       "claim_path": "motor",
       "material_class": "Assessment or estimate",
-      "demonstrates_condition": "unavailable",
+      "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
-      "title": "Assessment cannot be provided",
+      "title": "Third-party vehicle assessment cannot be provided",
       "described_as": [
         "Assessor reference: SIMULATED",
-        "The vehicle was not accessible at the recorded location within the window",
-        "Sought and cannot currently be obtained; the reason is recorded, not inferred"
+        "The other party vehicle was not accessible at the recorded location",
+        "A received answer to the assessment request, not the assessment itself"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
-        "purpose": "Establishes that the assessment was sought and cannot be obtained, so staff act on a recorded reason rather than on an assumption that the wait continues.",
+        "purpose": "Records the assessor answer itself, so staff act on a stated reason rather than on an assumption that the wait continues. This document arrived; what it says cannot be produced is a different material.",
         "applicable_paths_and_trigger": {
           "paths": [
             "motor"
@@ -512,8 +531,15 @@
               "blocked_on": "backend contract work"
             }
           },
-          "unavailable": {
-            "means_for_this_material": "The assessor has answered that no assessment can be produced, and the reason is on the record.",
+          "received": {
+            "means_for_this_material": "The assessor answer has arrived and states its reason.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "invalid": {
+            "means_for_this_material": "A refusal arrived, but without a reason it establishes nothing.",
             "persisted_mapping": {
               "unresolved": "How this condition maps onto persisted evidence status and file-status values",
               "blocked_on": "backend contract work"
@@ -539,7 +565,108 @@
           }
         },
         "linkage": {
-          "attaches_to": "Attaches to the vehicle damage assessment request it answers, and leaves the claim fact it would have supported unsettled.",
+          "attaches_to": "Attaches to the third-party vehicle assessment request it answers, and is what establishes that assessment as unavailable.",
+          "registered_field": {
+            "unresolved": "Which registered field this material class links to",
+            "blocked_on": "P2"
+          }
+        },
+        "behaviour_when_not_usable": {
+          "pending": {
+            "claimant": "Who is being waited on, and that the claim is preserved meanwhile.",
+            "staff": "The request, its condition, and the responsible party. Waiting without an owner is not a displayable state."
+          },
+          "received": {
+            "claimant": "That it arrived, and what it now unblocks.",
+            "staff": "The material, its provenance, and whether it has been checked."
+          },
+          "invalid": {
+            "claimant": "What is wrong in terms they can act on, without overwriting the fact it was meant to support.",
+            "staff": "The reason it is unusable and the action available to them."
+          }
+        },
+        "retention": {
+          "sensitivity": "elevated",
+          "rule": {
+            "unresolved": "The retention rule for classes marked Elevated in section 2",
+            "blocked_on": "privacy review"
+          }
+        }
+      }
+    },
+    {
+      "path": "motor/motor-assessment-not-obtainable",
+      "claim_path": "motor",
+      "material_class": "Assessment or estimate",
+      "demonstrates_condition": "unavailable",
+      "held_as": "record",
+      "media_type": null,
+      "title": "Third-party vehicle assessment, not obtainable",
+      "described_as": [
+        "No assessment of the other party vehicle exists",
+        "The assessor answered that one cannot be produced",
+        "Sought and cannot currently be obtained; the reason is on the notice, not inferred"
+      ],
+      "references": [
+        {
+          "relation": "established_by",
+          "target": "motor/motor-assessment-unavailable-notice.pdf",
+          "reason": "The assessor answer recording why the third-party vehicle could not be assessed."
+        }
+      ],
+      "simulated": true,
+      "attributes": {
+        "purpose": "Carries the unavailability itself, so the claim records that an assessment was sought and will not arrive rather than leaving a silent gap that reads as a wait nobody is servicing.",
+        "applicable_paths_and_trigger": {
+          "paths": [
+            "motor"
+          ],
+          "trigger": "When the assessor answer establishing non-availability has been received."
+        },
+        "source_and_stakeholder": {
+          "provided_by": "external_party",
+          "detail": "The output of a third-party service request authorised by Northwind and by the claimant.",
+          "stakeholder": {
+            "unresolved": "Which stakeholder issues this assessment, and what access exists",
+            "blocked_on": "P3"
+          }
+        },
+        "conditions_it_can_occupy": {
+          "pending": {
+            "means_for_this_material": "Before the answer arrives, the wait is on the assessor.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "unavailable": {
+            "means_for_this_material": "The answer has arrived and establishes that no assessment can be produced. The reason is on the notice this record cites, never on this record alone.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          }
+        },
+        "media_and_quality_requirements": {
+          "usable": "No artefact of its own. What has to be legible is the notice it cites, which carries the assessor reference and the reason.",
+          "insufficient": "An unavailability asserted with no notice behind it, which section 7 forbids: it cannot be distinguished from a request nobody answered."
+        },
+        "provenance_and_verification": {
+          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+        },
+        "consent_and_visibility": {
+          "disclosure_requires_consent": true,
+          "claimant_sees": "That an assessment was requested, its condition, and the next step.",
+          "staff_sees": "The assessment, its provenance, whether it has been checked, and the authorisation that permitted the disclosure.",
+          "copy_and_scope": {
+            "unresolved": "What consent copy and disclosure scope this class requires",
+            "blocked_on": "P5"
+          }
+        },
+        "linkage": {
+          "attaches_to": "Stands in the place the third-party vehicle assessment would have occupied, and leaves the claim fact it would have supported unsettled.",
           "registered_field": {
             "unresolved": "Which registered field this material class links to",
             "blocked_on": "P2"
@@ -569,12 +696,20 @@
       "claim_path": "motor",
       "material_class": "Assessment or estimate",
       "demonstrates_condition": "superseded",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Vehicle damage assessment, first issue",
       "described_as": [
         "Assessor reference: SIMULATED",
         "Repairable, parts pending",
         "Replaced by a later assessment; retained in the record"
+      ],
+      "references": [
+        {
+          "relation": "superseded_by",
+          "target": "motor/motor-assessment-v2.pdf",
+          "reason": "The revised assessment issued against the same assessor reference."
+        }
       ],
       "simulated": true,
       "attributes": {
@@ -669,6 +804,7 @@
       "claim_path": "motor",
       "material_class": "Assessment or estimate",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Vehicle damage assessment, revised",
       "described_as": [
@@ -676,6 +812,7 @@
         "Repairable, revised parts list",
         "Supersedes the first issue"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "The current professional judgement of damage, cost, and repairability.",
@@ -758,6 +895,7 @@
       "claim_path": "motor",
       "material_class": "Communication and consent record",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Assessor disclosure authorisation",
       "described_as": [
@@ -765,6 +903,7 @@
         "Purpose: request a vehicle damage assessment",
         "Authorised by the claimant linked to this claim"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Makes the disclosure to the assessor auditable rather than assumed.",
@@ -843,6 +982,7 @@
       "claim_path": "home",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Water damage to ceiling",
       "described_as": [
@@ -850,6 +990,7 @@
         "Active ingress at time of capture",
         "Supports property.affected_areas"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Lets the Agent propose the affected areas rather than asking the claimant to enumerate them.",
@@ -936,6 +1077,7 @@
       "claim_path": "home",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Water damage, second room",
       "described_as": [
@@ -943,6 +1085,7 @@
         "Shows extent beyond one area",
         "Supports property.affected_areas"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Establishes that the loss extends beyond one area, which changes the scope of the assessment.",
@@ -1029,6 +1172,7 @@
       "claim_path": "home",
       "material_class": "Incident evidence",
       "demonstrates_condition": "invalid",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Attendance note, unreadable",
       "described_as": [
@@ -1036,6 +1180,7 @@
         "Text not legible in the supplied copy",
         "Arrived, but carries no usable detail"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Demonstrates that a third-party record can arrive and still carry nothing usable.",
@@ -1100,6 +1245,7 @@
       "claim_path": "home",
       "material_class": "Assessment or estimate",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Repair assessment",
       "described_as": [
@@ -1107,6 +1253,7 @@
         "Ingress traced to the roof valley; two rooms affected",
         "Repairable; scope is the input to the cost conversation, not a decision"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "The professional judgement of the repair scope, and the input to the cost conversation.",
@@ -1200,6 +1347,7 @@
       "claim_path": "home",
       "material_class": "Communication and consent record",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Repair assessment disclosure authorisation",
       "described_as": [
@@ -1207,6 +1355,7 @@
         "Purpose: arrange a repair assessment",
         "Authorised by the claimant linked to this claim"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Makes the disclosure to the repair assessor auditable rather than assumed.",
@@ -1285,6 +1434,7 @@
       "claim_path": "contents",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Damaged item",
       "described_as": [
@@ -1292,6 +1442,7 @@
         "Visible impact damage to casing",
         "Identifies the item claimed for"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Identifies the item claimed for and the damage to it.",
@@ -1378,6 +1529,7 @@
       "claim_path": "contents",
       "material_class": "Incident evidence",
       "demonstrates_condition": "received",
+      "held_as": "photo",
       "media_type": "image/jpeg",
       "title": "Item before the event",
       "described_as": [
@@ -1385,6 +1537,7 @@
         "Supporting context rather than damage evidence",
         "Establishes the item existed and where"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Establishes that the item existed and where it was, which damage evidence alone does not.",
@@ -1471,6 +1624,7 @@
       "claim_path": "contents",
       "material_class": "Authority or official report",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Police theft report",
       "described_as": [
@@ -1478,6 +1632,7 @@
         "Records the reported theft of the item claimed for",
         "Issued outside Northwind and outside the claimant, on the issuer timetable"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Carries weight about the reported theft that the claimant cannot supply alone.",
@@ -1578,17 +1733,19 @@
       "path": "contents/contents-authority-unavailable-notice.pdf",
       "claim_path": "contents",
       "material_class": "Authority or official report",
-      "demonstrates_condition": "unavailable",
+      "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
-      "title": "Official report cannot be issued",
+      "title": "Investigation outcome cannot be issued",
       "described_as": [
         "Event reference: SIMULATED",
-        "No report is held against the reference supplied",
-        "Sought and cannot currently be obtained; the reason is recorded, not inferred"
+        "The theft was recorded; no investigation outcome is held against this reference",
+        "A received answer to the request, not the outcome report itself"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
-        "purpose": "Establishes that the official report was sought and cannot be issued, so the claim can proceed on what is known rather than waiting indefinitely.",
+        "purpose": "Records the authority answer itself, so the claim can proceed on what is known rather than waiting indefinitely. This document arrived; the outcome report it says is not held is a different material.",
         "applicable_paths_and_trigger": {
           "paths": [
             "contents"
@@ -1611,8 +1768,15 @@
               "blocked_on": "backend contract work"
             }
           },
-          "unavailable": {
-            "means_for_this_material": "The authority has answered that no report is held, and the reason is on the record.",
+          "received": {
+            "means_for_this_material": "The authority answer has arrived and states its reason.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "invalid": {
+            "means_for_this_material": "A refusal arrived, but without a reason it establishes nothing.",
             "persisted_mapping": {
               "unresolved": "How this condition maps onto persisted evidence status and file-status values",
               "blocked_on": "backend contract work"
@@ -1638,7 +1802,105 @@
           }
         },
         "linkage": {
-          "attaches_to": "Attaches to the authority request it answers, and leaves the claim fact it would have supported unsettled.",
+          "attaches_to": "Attaches to the investigation outcome request it answers, and is what establishes that outcome report as unavailable.",
+          "registered_field": {
+            "unresolved": "Which registered field this material class links to",
+            "blocked_on": "P2"
+          }
+        },
+        "behaviour_when_not_usable": {
+          "pending": {
+            "claimant": "Who is being waited on, and that the claim is preserved meanwhile.",
+            "staff": "The request, its condition, and the responsible party. Waiting without an owner is not a displayable state."
+          },
+          "received": {
+            "claimant": "That it arrived, and what it now unblocks.",
+            "staff": "The material, its provenance, and whether it has been checked."
+          },
+          "invalid": {
+            "claimant": "What is wrong in terms they can act on, without overwriting the fact it was meant to support.",
+            "staff": "The reason it is unusable and the action available to them."
+          }
+        },
+        "retention": {
+          "sensitivity": "standard",
+          "rule": "Follows the claim it belongs to."
+        }
+      }
+    },
+    {
+      "path": "contents/contents-authority-outcome-not-held",
+      "claim_path": "contents",
+      "material_class": "Authority or official report",
+      "demonstrates_condition": "unavailable",
+      "held_as": "record",
+      "media_type": null,
+      "title": "Investigation outcome report, not held",
+      "described_as": [
+        "No investigation outcome exists against the event reference",
+        "The authority answered that none is held",
+        "Sought and cannot currently be obtained; the reason is on the notice, not inferred"
+      ],
+      "references": [
+        {
+          "relation": "established_by",
+          "target": "contents/contents-authority-unavailable-notice.pdf",
+          "reason": "The authority answer recording that no outcome is held against this reference."
+        }
+      ],
+      "simulated": true,
+      "attributes": {
+        "purpose": "Carries the unavailability itself, so the claim records that an outcome report was sought and is not held rather than leaving a silent gap that reads as a wait nobody is servicing.",
+        "applicable_paths_and_trigger": {
+          "paths": [
+            "contents"
+          ],
+          "trigger": "When the authority answer establishing non-availability has been received."
+        },
+        "source_and_stakeholder": {
+          "provided_by": "external_party",
+          "detail": "Issued by a body outside Northwind and outside the claimant, and arriving on the issuer timetable.",
+          "stakeholder": {
+            "unresolved": "Which stakeholder issues this report, and what access exists",
+            "blocked_on": "P3"
+          }
+        },
+        "conditions_it_can_occupy": {
+          "pending": {
+            "means_for_this_material": "Before the answer arrives, the wait is on the issuing authority.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          },
+          "unavailable": {
+            "means_for_this_material": "The answer has arrived and establishes that no outcome report is held. The reason is on the notice this record cites, never on this record alone.",
+            "persisted_mapping": {
+              "unresolved": "How this condition maps onto persisted evidence status and file-status values",
+              "blocked_on": "backend contract work"
+            }
+          }
+        },
+        "media_and_quality_requirements": {
+          "usable": "No artefact of its own. What has to be legible is the notice it cites, which carries the event reference and the reason.",
+          "insufficient": "An unavailability asserted with no notice behind it, which section 7 forbids: it cannot be distinguished from a request nobody answered."
+        },
+        "provenance_and_verification": {
+          "origin": "generated for the Validation Prototype; no real incident, authority, retailer, or assessor is represented",
+          "stated_on_the_material": "SIMULATED MATERIAL - NOT A REAL INCIDENT OR DOCUMENT",
+          "checking_received": "none beyond structural checks. That the file exists, is the declared type, and carries its origin statement is not verification of its content."
+        },
+        "consent_and_visibility": {
+          "disclosure_requires_consent": true,
+          "claimant_sees": "That it is awaited or has arrived, and who is being waited on.",
+          "staff_sees": "The report, its issuer, and the authorisation that permitted the request.",
+          "copy_and_scope": {
+            "unresolved": "What consent copy and disclosure scope this class requires",
+            "blocked_on": "P5"
+          }
+        },
+        "linkage": {
+          "attaches_to": "Stands in the place the investigation outcome report would have occupied, and leaves the claim fact it would have supported unsettled.",
           "registered_field": {
             "unresolved": "Which registered field this material class links to",
             "blocked_on": "P2"
@@ -1665,6 +1927,7 @@
       "claim_path": "contents",
       "material_class": "Identity and ownership evidence",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Purchase receipt",
       "described_as": [
@@ -1672,6 +1935,7 @@
         "Item and purchase date shown",
         "Supports ownership and value"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Establishes that the claimed item belonged to the claimant, before value or entitlement can be discussed at all.",
@@ -1772,6 +2036,7 @@
       "claim_path": "contents",
       "material_class": "Identity and ownership evidence",
       "demonstrates_condition": "invalid",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Receipt, second item, illegible",
       "described_as": [
@@ -1779,6 +2044,7 @@
         "Item line partially obscured",
         "Arrived, but does not carry the needed detail"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Demonstrates ownership evidence that arrived and cannot do its job.",
@@ -1846,6 +2112,7 @@
       "claim_path": "contents",
       "material_class": "Identity and ownership evidence",
       "demonstrates_condition": "expired",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Valuation certificate, expired",
       "described_as": [
@@ -1853,6 +2120,7 @@
         "Was valid; no longer is",
         "A current valuation would restore it"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Demonstrates the expired condition: it was valid and time has invalidated it.",
@@ -1931,12 +2199,21 @@
       "claim_path": "contents",
       "material_class": "Identity and ownership evidence",
       "demonstrates_condition": "disputed",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Second ownership record, conflicting",
       "described_as": [
         "Names a different purchase date to the receipt",
         "Both documents remain in the record",
         "Neither side resolved; staff decision required"
+      ],
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "target": "contents/contents-purchase-receipt.pdf",
+          "reason": "The two ownership records give different purchase dates for the same item.",
+          "resolution": "unresolved"
+        }
       ],
       "simulated": true,
       "attributes": {
@@ -2016,6 +2293,7 @@
       "claim_path": "contents",
       "material_class": "Assessment or estimate",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Replacement assessment",
       "described_as": [
@@ -2023,6 +2301,7 @@
         "Replacement rather than repair",
         "Input to the cost conversation, not a decision"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "The professional judgement that the item is replaced rather than repaired, and the input to the cost conversation.",
@@ -2116,6 +2395,7 @@
       "claim_path": "contents",
       "material_class": "Communication and consent record",
       "demonstrates_condition": "received",
+      "held_as": "document",
       "media_type": "application/pdf",
       "title": "Valuation disclosure authorisation",
       "described_as": [
@@ -2123,6 +2403,7 @@
         "Purpose: obtain a replacement assessment",
         "Authorised by the claimant linked to this claim"
       ],
+      "references": [],
       "simulated": true,
       "attributes": {
         "purpose": "Makes the disclosure to the valuer auditable rather than assumed.",
