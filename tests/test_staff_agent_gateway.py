@@ -65,7 +65,9 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     assert result.provider_model == 'gpt54-mini'
     request = gateway.requests[0]
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
-    assert request.messages[1].content.startswith('{"question":"What should I check next?"')
+    message_content = request.messages[1].content
+    assert message_content is not None
+    assert message_content.startswith('{"question":"What should I check next?"')
     operation = operations.metrics_records()[0]
     assert operation.kind.value == 'model_invocation'
     assert operation.state.value == 'succeeded'
