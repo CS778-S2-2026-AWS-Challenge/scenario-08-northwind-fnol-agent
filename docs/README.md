@@ -50,9 +50,9 @@ them:
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
-- The independently served `admin/` React/Vite console consumes the authenticated Admin API for
-  server-backed configuration, knowledge, Agent-rule, evaluation, operation, integration, access,
-  audit, and account projections.
+- The former React/Vite Admin console is preserved under `../archive/admin/` as historical source;
+  it is not a current runtime entry point or CI target. The Admin API contract remains documented
+  and independently governed here.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
@@ -67,8 +67,11 @@ them:
 - [RAG Knowledge Ingestion](rag-ingestion.md)
 - [Filtered RAG Retrieval](rag-retrieval.md)
 - [RAG Source Inventory and External-Service Scenario](rag-source-and-external-service-contract.md)
+- [Knowledge Source Coverage](knowledge-source-coverage.md)
+- [Privacy Governance](privacy-governance.md)
 - [Registry and Dynamic FNOL Form Design](registry_design.md)
 - [Runtime Deployment Profiles](runtime-deployment-profiles.md)
+- [Self-hosted Runner Deployment](../deploy/self-hosted-runner.md)
 - [Staff Tag Registry](staff-tag-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
@@ -113,6 +116,7 @@ superseded when the implementation state changes.
 - [User Personas](research/user-personas.md)
 - [FNOL As-Is Process and Reporting Fields](research/fnol-as-is-process-and-reporting-fields.md)
 - [Existing Claims Fraud Controls and Verification](research/existing-claims-fraud-controls-and-verification.md)
+- [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)
 - [Claimant Survey Response Export](research/claimant-survey-final-responses.csv)

@@ -60,6 +60,15 @@ def test_s3_compatible_knowledge_store_hides_provider_failure() -> None:
         store.write('key', b'value', content_type='text/plain', metadata={})
 
 
+def test_s3_compatible_knowledge_store_hides_non_not_found_client_failure() -> None:
+    client = FakeS3Client()
+    client.error = ClientError({'Error': {'Code': 'AccessDenied'}}, 'GetObject')
+    store = S3CompatibleKnowledgeObjectStore(client, 'northwind-knowledge')
+
+    with pytest.raises(KnowledgeObjectStoreUnavailable, match='unavailable'):
+        store.read('knowledge/source.md')
+
+
 def test_knowledge_config_requires_credentials_and_reads_non_secret_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

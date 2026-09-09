@@ -96,6 +96,7 @@ from backend.services.agent import (
     ControlledAgent,
     FeatureControlledAgent,
     InvariantGuardedAgent,
+    UnavailableAgent,
 )
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
@@ -313,7 +314,7 @@ def create_app(
                 app.state.knowledge_admin_repository,
                 app.state.runtime_configuration_resolver,
             ),
-            ControlledAgent(),
+            UnavailableAgent(),
         )
         app.state.agent_runtime_status = 'configured'
         if staff_agent_turn_provider is not None:
@@ -341,7 +342,11 @@ def create_app(
         base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
         app.state.staff_agent_turn_provider = staff_agent_turn_provider
-    app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
+    app.state.agent_turn_provider = (
+        base_agent_turn_provider
+        if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+        else InvariantGuardedAgent(base_agent_turn_provider)
+    )
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage

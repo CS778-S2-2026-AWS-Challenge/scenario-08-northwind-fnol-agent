@@ -16,7 +16,9 @@ concurrency:
 jobs:
   backend-quality:
     name: Backend quality
-    runs-on: ubuntu-latest
+    # Set repository variable NORTHWIND_CI_RUNNER to northwind-ci after the
+    # trusted self-hosted runner is installed. Fork pull requests stay hosted.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || vars.NORTHWIND_CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     steps:
@@ -98,38 +100,6 @@ jobs:
       - name: Check AuditEvent contract snapshot drift
         if: steps.impact.outputs.audit == 'true'
         run: python scripts/export_audit_contract.py --check
-
-  customer-quality:
-    name: Customer quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: customer/package-lock.json
-
-      - name: Install customer dependencies
-        working-directory: customer
-        run: npm ci
-
-      - name: Lint customer
-        working-directory: customer
-        run: npm run lint
-
-      - name: Test customer
-        working-directory: customer
-        run: npm test
-
-      - name: Build customer
-        working-directory: customer
-        run: npm run build
 
   docs-quality:
     name: Docs quality

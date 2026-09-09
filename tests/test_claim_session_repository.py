@@ -303,6 +303,70 @@ def test_start_session_reads_saved_claim_in_new_session(
     )
 
 
+def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'claim-for-gpt-resume'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+    original_session_id = created.json()['session']['session_id']
+    _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
+    repository.save_session(
+        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt54mini'})
+    )
+
+    resumed = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'resume-gpt-from-fresh-client'},
+        json={'intent': 'resume'},
+    )
+
+    assert resumed.status_code == 201
+    assert resumed.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+    resumed_session = repository.get_session(
+        claim_id,
+        resumed.json()['session_id'],
+        'cus_demo',
+    )
+    assert resumed_session is not None
+    assert resumed_session.model_profile_id == 'nowcoding-gpt54mini'
+
+
+def test_resume_rejects_explicit_model_profile_conflict(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'claim-for-profile-conflict'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+    claim_id = created.json()['claim']['claim_id']
+    original_session_id = created.json()['session']['session_id']
+    _, paused_session = pause_created_claim(repository, claim_id, original_session_id)
+    repository.save_session(
+        paused_session.model_copy(update={'model_profile_id': 'nowcoding-gpt54mini'})
+    )
+
+    resumed = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={**auth_headers, 'Idempotency-Key': 'resume-conflicting-profile'},
+        json={'intent': 'resume', 'model_profile_id': 'qwen-local'},
+    )
+
+    assert resumed.status_code == 409
+    assert resumed.json()['error']['code'] == 'MODEL_PROFILE_CONFLICT'
+    assert len(repository.list_sessions_for_claim(claim_id, 'cus_demo')) == 1
+
+
 def test_start_session_surfaces_repository_revision_conflict(
     client: TestClient,
     auth_headers: dict[str, str],
