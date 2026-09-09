@@ -610,6 +610,14 @@ Staff logout revokes the server-side auth session even when this best-effort pre
 cannot be persisted; presence failure must never leave the bearer session active.
 An acceptance using a stale presence revision is rejected before the Claim assignment is stored.
 
+The development/test validation seed uses the provider-neutral `ValidationSeedGraph` boundary.
+It writes three Claim graphs, their active Sessions, Messages, Evidence metadata, the current
+staff presence lease, and one Idempotency record as one operation. Fixture persistence snapshots
+and restores all affected stores on failure; MongoDB uses the existing transaction boundary.
+The seed reuses the logical records above and adds no fields, provider keys, object-storage
+references, or alternate Claim schema. A repeated key replays the stored response, while a
+different key requires an empty Claim queue.
+
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
   when no publication exists; drafts and unverified provider records are never runtime fallback.
