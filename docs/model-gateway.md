@@ -161,6 +161,11 @@ The credential reference is stored as a secret environment-variable name only. T
 profile is bound to the Session at creation/resume; message requests do not accept a model
 override and never silently switch profiles.
 
+The Workbench Staff Agent uses the same published profile catalog under its separate
+`staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
+stored on the Staff Agent session and passed to each provider request; a message cannot change
+the session profile and the browser never receives endpoint or credential fields.
+
 ### Amazon Bedrock Converse
 
 The `bedrock_converse` adapter calls

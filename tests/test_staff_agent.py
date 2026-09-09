@@ -72,14 +72,67 @@ def _create_claim(client: TestClient, suffix: str = 'staff-agent') -> str:
     return str(response.json()['claim']['claim_id'])
 
 
-def _create_session(client: TestClient) -> str:
+def _create_session(client: TestClient, model_profile_id: str | None = None) -> str:
     response = client.post(
         '/api/v1/workbench/agent/sessions',
         headers=STAFF_HEADERS,
-        json={'title': 'Evidence review'},
+        json={
+            'title': 'Evidence review',
+            **({'model_profile_id': model_profile_id} if model_profile_id else {}),
+        },
     )
     assert response.status_code == 201
     return str(response.json()['session_id'])
+
+
+def test_staff_agent_session_persists_selected_model_profile() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        response = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt54mini'},
+        )
+        assert response.status_code == 201
+        session_id = response.json()['session_id']
+        assert response.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        assert listed.status_code == 200
+        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt54mini'
+
+        message = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'profile-bound-question',
+                'content': 'Summarise the current work.',
+                'claim_ids': [],
+            },
+        )
+
+    assert message.status_code == 201
+    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt54mini'
+    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt54mini'
+
+
+def test_staff_agent_rejects_model_override_in_message_request() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        session_id = _create_session(client, 'nowcoding-gpt54mini')
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'profile-override',
+                'content': 'Use another model for this question.',
+                'claim_ids': [],
+                'model_profile_id': 'qwen-local',
+            },
+        )
+
+    assert response.status_code == 422
 
 
 def test_staff_agent_persists_explicit_multi_claim_scope_and_lists_conversation() -> None:

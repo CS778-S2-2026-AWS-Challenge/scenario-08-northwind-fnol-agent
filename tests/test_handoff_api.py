@@ -217,16 +217,24 @@ def test_explicit_human_request_preserves_confirmed_context(
     assert turn['claimant_message']['message_id'] in support_branch.source_refs  # type: ignore[index]
     assert evaluation.handoff_intents[0]['support_need'] == 'human_requested'
 
-    repeated = submit_message(
+    continued = submit_message(
         client,
         auth_headers,
         claim_id,
         session_id,
-        '@agent I still want to speak to a person.',
-        key='repeated-human-message',
+        'I still want to speak to a person.',
+        key='continued-human-message',
         revision=int(str(turn['claim_revision'])),
     )
-    assert repeated['decision']['reason_codes'] == ['HANDOFF_ALREADY_QUEUED']  # type: ignore[index]
+    assert continued['decision'] is None
+    stored_continued = repository.get_message(
+        claim_id,
+        session_id,
+        continued['claimant_message']['message_id'],  # type: ignore[index]
+        'cus_demo',
+    )
+    assert stored_continued is not None
+    assert stored_continued.visibility.value == 'shared'
     assert len(repository.list_handoffs(claim_id, 'cus_demo')) == 1
 
 

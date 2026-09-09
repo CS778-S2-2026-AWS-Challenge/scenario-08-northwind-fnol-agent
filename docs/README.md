@@ -44,6 +44,8 @@ them:
 ## Current Engineering Documents
 
 - [Agent Action to Claim Context Command Boundary](agent-action-command-boundary.md)
+- [Agent Context Contract](agent-context-contract.md)
+- [Agent Behaviour and Action Brief](agent-behaviour-action-brief.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [FNOL Agent Behaviour Catalogue](agent-behaviour-catalogue.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
