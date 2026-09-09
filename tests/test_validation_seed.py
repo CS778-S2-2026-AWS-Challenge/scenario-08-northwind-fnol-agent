@@ -666,9 +666,57 @@ def test_validation_seed_same_key_race_real_mongodb_replica_set() -> None:
         )
         assert persisted is not None
         assert persisted.response_payload == responses[0]
+        returned_claim_ids = set(responses[0]['claim_ids'])
+        assert len(returned_claim_ids) == 3
         assert all(
             repository.get_claim(claim_id, 'cus_demo') is not None
-            for claim_id in responses[0]['claim_ids']
+            for claim_id in returned_claim_ids
+        )
+
+        # The same-key loser must replay the committed graph, not commit a second one.
+        claims = repository.list_claims_internal()
+        assert len(claims) == 3
+        persisted_claim_ids = {claim.claim_id for claim in claims}
+        assert len(persisted_claim_ids) == 3
+        assert persisted_claim_ids == returned_claim_ids
+
+        sessions = []
+        messages = []
+        evidence = []
+        for claim in claims:
+            claim_sessions = repository.list_sessions_for_claim(
+                claim.claim_id,
+                claim.customer_id,
+            )
+            assert len(claim_sessions) == 1
+            sessions.extend(claim_sessions)
+            messages.extend(
+                repository.list_messages(
+                    claim.claim_id,
+                    claim_sessions[0].session_id,
+                    claim.customer_id,
+                )
+            )
+            claim_evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
+            assert len(claim_evidence) == 1
+            evidence.extend(claim_evidence)
+
+        assert len(sessions) == 3
+        assert len({session.session_id for session in sessions}) == 3
+        assert len(messages) == 12
+        assert len({message.message_id for message in messages}) == 12
+        assert len(evidence) == 3
+        assert len({item.evidence_id for item in evidence}) == 3
+        assert (
+            repository._collection.count_documents(
+                {
+                    'record_type': 'idempotency',
+                    'actor_id': 'stf_demo',
+                    'route': VALIDATION_SEED_ROUTE,
+                    'key': 'real-same-key-race',
+                }
+            )
+            == 1
         )
     finally:
         if connected:
