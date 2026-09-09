@@ -16,11 +16,8 @@ from pathlib import PurePosixPath
 
 FULL_TESTS = ('tests',)
 TOOLING_FULL_PATHS = {
-    '.circleci/config.yml',
-    '.github/workflows/ci.yml',
     'pyproject.toml',
     'backend/requirements-dev.txt',
-    'scripts/select_backend_tests.py',
 }
 
 

@@ -4,9 +4,10 @@ This file defines the CI quality-profile mechanism and the checks attached to
 it.
 
 Quality-profile mechanism: the `github` profile uses the GitHub Actions checks
-`Backend quality`, `Customer quality`, and `Northwind PR policy`; the
-`circleci` profile uses the CircleCI equivalents. The `none` profile means no remote
-code-quality provider is configured and cannot supply merge evidence.
+`Backend quality` and `Northwind PR policy`; the `circleci` profile uses the
+CircleCI equivalents plus the scoped documentation and automation checks. The
+`none` profile means no remote code-quality provider is configured and cannot
+supply merge evidence.
 `Kanban Sync` only manages Project status rules — it must not merge PRs, must
 not change Draft status, and must not substitute Project status for acceptance
 evidence.
@@ -62,6 +63,28 @@ one:
   Scoped pytest runs intentionally omit the global coverage threshold; the
   full coverage gate remains on `main`. The selector is itself covered by
   tests and must never return an empty selection for a backend behavior change.
+
+- **Path-filtered CircleCI workflows**: the setup configuration uses the
+  CircleCI path-filtering continuation flow. A pull request creates only the
+  affected quality workflow: backend, GitHub automation, documentation, or CI
+  configuration. The policy workflow remains universal because every pull
+  request must satisfy repository governance. A `main` push bypasses path
+  filtering and runs the complete quality set.
+
+  The backend workflow remains one executor so dependency installation and
+  coverage setup are not duplicated, but its pytest command receives the
+  individual files selected by `scripts/select_backend_tests.py`. Unselected
+  test files are not collected or run. CI configuration changes do not force a
+  full backend suite; they run the lightweight CI YAML and selector checks
+  instead. Changes to the selector itself, shared dependencies, or shared
+  domain contracts still force the complete backend suite because those paths
+  can invalidate every test mapping.
+
+  GitHub Actions uses the same boundary at workflow level: backend quality is
+  created only for backend/test/contract changes, while documentation quality
+  is created only for documentation and planning changes. Both workflows still
+  run on `main` pushes. This keeps the two configured providers aligned without
+  making a documentation change start the backend executor.
 
 - **Two-signal backend coverage**: the existing total coverage floor and changed-line
   coverage answer different questions and are both required:

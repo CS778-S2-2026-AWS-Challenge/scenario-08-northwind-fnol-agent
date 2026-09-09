@@ -5,7 +5,7 @@ import pytest
 
 @pytest.mark.parametrize(
     'profile_path',
-    [Path('.circleci/config.yml'), Path('.github/workflows/ci.yml')],
+    [Path('.circleci/continue_config.yml'), Path('.github/workflows/ci.yml')],
 )
 def test_backend_quality_profiles_separate_total_and_diff_coverage(
     profile_path: Path,
