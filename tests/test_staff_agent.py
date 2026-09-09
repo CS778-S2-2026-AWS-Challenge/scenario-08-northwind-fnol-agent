@@ -24,6 +24,7 @@ from backend.services.staff_agent import (
     StaffAgentProviderResult,
     StaffAgentTurnProvider,
 )
+from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 
 STAFF_HEADERS = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_HEADERS = {'Authorization': 'Bearer synthetic-claimant'}
@@ -224,6 +225,7 @@ def test_staff_agent_builds_default_gateway_from_runtime_profile() -> None:
     )
     assert len(gateway.requests) == 1
     assert gateway.requests[0].purpose == 'staff_assistant'
+    assert gateway.requests[0].prompt_version == STAFF_ASSISTANT_PROMPT_ID
 
 
 def test_staff_agent_gateway_fails_closed_when_profile_resolution_errors(
