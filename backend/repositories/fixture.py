@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from threading import RLock
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -56,6 +57,7 @@ class FixtureRepository(PersistenceRepository):
     """In-memory repository used by the prototype and replaceable contract tests."""
 
     def __init__(self) -> None:
+        self._validation_seed_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
@@ -288,9 +290,18 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
 
-    def seed_validation_graph(self, graph: ValidationSeedGraph) -> None:
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Serialize validation seeds so a same-key race cannot create two graphs."""
+        with self._validation_seed_lock:
+            return self._seed_validation_graph(graph)
+
+    def _seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist validation records as one rollback-safe fixture operation."""
-        snapshot = deepcopy(self.__dict__)
+        snapshot = {
+            key: deepcopy(value)
+            for key, value in self.__dict__.items()
+            if key != '_validation_seed_lock'
+        }
         try:
             existing = self.find_idempotency(
                 graph.idempotency.actor_id,
@@ -300,7 +311,7 @@ class FixtureRepository(PersistenceRepository):
             if existing is not None:
                 if existing.request_fingerprint != graph.idempotency.request_fingerprint:
                     raise IdempotencyConflict(graph.idempotency.key)
-                return
+                return existing
             if self.list_claims_internal():
                 raise DemoSeedConflict('The validation seed requires an empty claim queue.')
 
@@ -342,9 +353,12 @@ class FixtureRepository(PersistenceRepository):
                 self.save_message(message, claims_by_id[message.claim_id].customer_id)
             self.save_idempotency(graph.idempotency)
         except Exception:
+            lock = self._validation_seed_lock
             self.__dict__.clear()
             self.__dict__.update(snapshot)
+            self._validation_seed_lock = lock
             raise
+        return None
 
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         claim = self._claims.get(claim_id)
