@@ -230,7 +230,7 @@ def test_explicit_human_request_preserves_confirmed_context(
     stored_continued = repository.get_message(
         claim_id,
         session_id,
-        continued['claimant_message']['message_id'],
+        continued['claimant_message']['message_id'],  # type: ignore[index]
         'cus_demo',
     )
     assert stored_continued is not None
