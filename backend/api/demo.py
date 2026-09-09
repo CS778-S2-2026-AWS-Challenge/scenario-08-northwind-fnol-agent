@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 
 from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
 from backend.domain.models import DemoResetResponse, DemoSeedResponse
 from backend.services.demo_reset import reset_demo_components
-from backend.services.demo_seed import seed_workbench_demo_scenarios
+from backend.services.demo_seed import seed_validation_scenarios, seed_workbench_demo_scenarios
 
 router = APIRouter(prefix='/api/v1/workbench/demo', tags=['workbench-demo'])
 
@@ -48,4 +48,20 @@ def seed_scenarios(
         status='seeded',
         scenario_ids=list(result.scenario_ids),
         claim_ids=list(result.claim_ids),
+    )
+
+
+@router.post('/seed-validation', response_model=DemoSeedResponse)
+def seed_validation(
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+) -> DemoSeedResponse:
+    require_local_demo(request)
+    return seed_validation_scenarios(
+        request.app.state.claim_repository,
+        request.app.state.identity_repository,
+        request.app.state.staff_identity_repository,
+        principal.subject,
+        idempotency_key,
     )

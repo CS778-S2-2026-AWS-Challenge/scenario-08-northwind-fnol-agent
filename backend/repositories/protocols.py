@@ -44,6 +44,12 @@ class IdempotencyConflict(RepositoryConflict):
     pass
 
 
+class DemoSeedConflict(RepositoryConflict):
+    """The controlled validation seed cannot run against a populated queue."""
+
+    pass
+
+
 @dataclass(frozen=True)
 class IdempotencyRecord:
     actor_id: str
@@ -61,6 +67,19 @@ class IdempotencyRecord:
     action_code: str | None = None
     target_ref: str | None = None
     response_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ValidationSeedGraph:
+    """Provider-neutral records for one atomic validation-data seed operation."""
+
+    claims: tuple[WorkingClaim, ...]
+    sessions: tuple[SessionRecord, ...]
+    messages: tuple[MessageRecord, ...]
+    evidence: tuple[EvidenceRecord, ...]
+    staff_presence: StaffPresenceRecord
+    expected_presence_revision: int | None
+    idempotency: IdempotencyRecord
 
 
 class ClaimRepository(Protocol):
@@ -154,6 +173,10 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
+
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> None:
+        """Atomically persist the three-path validation graph and retry record."""
+        raise NotImplementedError
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:
         """Append one immutable audit fact.
