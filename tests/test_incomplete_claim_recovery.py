@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 import mongomock
 from fastapi.testclient import TestClient
@@ -35,7 +36,7 @@ def _create_claim(
         },
     )
     assert response.status_code == 201
-    return response.json()
+    return cast(dict[str, object], response.json())
 
 
 def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
@@ -104,7 +105,9 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     assert replay.status_code == 200
     assert replay.json() == body
     assert len(repository.list_follow_ups(claim_id, 'cus_demo')) == 1
-    assert repository.get_claim(claim_id, 'cus_demo').revision == revision + 1
+    replayed_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert replayed_claim is not None
+    assert replayed_claim.revision == revision + 1
 
     claimant_read = client.get(
         f'/api/v1/claims/{claim_id}',
