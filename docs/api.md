@@ -2296,6 +2296,44 @@ Response `200`:
 }
 ```
 
+### `POST /api/v1/workbench/demo/seed-validation`
+
+Seeds the three Sprint 3 field-state validation paths: motor, home, and contents. The endpoint
+is available only in development and test environments, requires an active staff account, and
+uses the canonical scenarios `AT-14-field-states-motor`, `AT-15-field-states-home`, and
+`AT-16-field-states-contents`. It creates new opaque Claim, Session, Message, and Evidence
+identifiers for each request, assigns the current staff member, and provisions the synthetic
+claimant account `claimant.one@example.invalid` when the normal local identity store does not
+already contain it. The route uses the existing Claim, Session, Message, Evidence,
+`StaffPresenceRecord`, and idempotency contracts; it does not add fields or replace the older
+`seed-scenarios` queue.
+
+The request has no body and requires an `Idempotency-Key`. The first accepted request persists all
+three graphs, presence lease, and retry response atomically. Repeating the same key replays the
+original response without creating records. A different key is rejected with
+`409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` when any Claim already exists. Persistence failure leaves no
+partial Claim graph. The synthetic Evidence records are explicitly `unofficial` with
+`file_status=not_available`; the endpoint never fabricates an object-storage key, checksum, or
+file.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": [
+    "AT-14-field-states-motor",
+    "AT-15-field-states-home",
+    "AT-16-field-states-contents"
+  ],
+  "claim_ids": [
+    "clm_opaque_motor",
+    "clm_opaque_home",
+    "clm_opaque_contents"
+  ]
+}
+```
+
 ### `POST /api/v1/workbench/demo/reset`
 
 Resets the running local demonstration state. The route requires the synthetic
@@ -2959,6 +2997,8 @@ All errors use one envelope:
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
+| `DEMO_SEED_REQUIRES_EMPTY_QUEUE` | `409` | Controlled demo seed requires an empty Claim queue |
+| `DEMO_CLAIMANT_UNAVAILABLE` | `409` | Synthetic claimant identity is unavailable for a controlled demo seed |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
 | `CONFIGURATION_APPROVER_CONFLICT` | `403` | A high-impact configuration's sole author attempted publication |
 | `PROVIDER_CONFIGURATION_INVALID` | `422` | Provider configuration is incomplete or structurally invalid |
