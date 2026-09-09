@@ -75,3 +75,13 @@ The `local_mvp` profile is a bounded development composition, not promotion of t
 `mongodb` profile. Policy and claim-history lookups remain labelled `using_fixture`, and the Agent
 remains controlled until its separately owned model proposal contract is delivered. AWS,
 Cloudflare, and the complete MongoDB provider profile remain unavailable rather than speculative.
+
+## GitHub Actions self-hosted runner
+
+The optional repository-scoped runner for the Tailscale-connected host is
+prepared and deployed separately from the application runtime profiles. The
+step-by-step administrator runbook is [Self-hosted runner deployment](../deploy/self-hosted-runner.md).
+The runner does not select a backend data provider, does not receive
+application credentials, and does not change the model service. The repository
+variable `NORTHWIND_CI_RUNNER` is empty by default, so workflows remain on
+hosted runners until the host and security checks are complete.

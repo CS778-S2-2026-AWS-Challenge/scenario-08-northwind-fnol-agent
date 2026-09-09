@@ -664,6 +664,7 @@ class SessionRecord(ContractModel):
     session_id: str
     claim_id: str
     customer_id: str
+    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
     status: SessionStatus = SessionStatus.ACTIVE
     summary: str | None = None
     unresolved_questions: list[str] = Field(default_factory=list)
@@ -737,6 +738,40 @@ class ModelDecisionProvenance(ContractModel):
     prompt_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class RuntimeInvocationTrace(ContractModel):
+    """Bounded provider metadata for one staged Runtime invocation."""
+
+    ordinal: int = Field(ge=1, le=2)
+    provider_model: str | None = Field(default=None, max_length=300)
+    provider_request_id: str | None = Field(default=None, max_length=500)
+    finish_reason: str | None = Field(default=None, max_length=100)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    latency_ms: float = Field(ge=0)
+
+
+class RuntimeTraceRecord(ContractModel):
+    """Internal trace for the first namespaced, read-only Runtime turn."""
+
+    trace_id: str
+    claim_id: str
+    session_id: str
+    model_profile_id: str
+    trigger_message_id: str
+    invocations: list[RuntimeInvocationTrace] = Field(min_length=1, max_length=2)
+    tool_call_id: str
+    tool_name: Literal['claim.read']
+    tool_arguments: dict[str, Any] = Field(default_factory=dict)
+    tool_result_status: Literal['succeeded', 'unavailable', 'failed']
+    action_code: str
+    runtime_action_code: str
+    reason_codes: list[str] = Field(min_length=1)
+    status: Literal['succeeded', 'rejected', 'unavailable', 'failed']
+    created_at: datetime
+    finished_at: datetime
+
+
 class ConfigurationRevisionReference(ContractModel):
     configuration_id: str = Field(min_length=1, max_length=100)
     revision: int = Field(ge=1)
@@ -764,6 +799,7 @@ class AgentDecisionRecord(ContractModel):
     session_id: str
     trigger_message_id: str
     action: AgentAction
+    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
     reason_codes: list[str] = Field(min_length=1)
     customer_reason: str = Field(min_length=1, max_length=1000)
     customer_response: str = Field(min_length=1, max_length=5000)
@@ -1362,10 +1398,12 @@ class CreateClaimRequest(ContractModel):
     channel: Channel = Channel.WEB_AGENT
     locale: str = Field(default='en-NZ', min_length=2, max_length=35)
     incident_type: str | None = Field(default=None, max_length=100)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class StartSessionRequest(ContractModel):
     intent: str = Field(default='resume', min_length=1, max_length=50)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 NonEmptyText = Annotated[
@@ -1469,6 +1507,7 @@ class ClaimantSession(ContractModel):
     session_id: str
     claim_id: str
     status: SessionStatus
+    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
     resume: ResumePackage
     started_at: datetime
     last_active_at: datetime
@@ -1510,6 +1549,7 @@ class FormChange(ContractModel):
 class ClaimantDecision(ContractModel):
     decision_id: str
     action: AgentAction
+    action_code: str | None = Field(default=None, pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
     reason_codes: list[str]
     customer_reason: str
     customer_next_step: CustomerNextStep

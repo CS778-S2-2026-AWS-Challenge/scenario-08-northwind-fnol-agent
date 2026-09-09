@@ -32,6 +32,7 @@ from backend.domain.models import (
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
+    RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
     SignalDecisionRecord,
@@ -59,6 +60,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions: dict[str, SessionRecord] = {}
         self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
+        self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
         self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
@@ -104,6 +106,7 @@ class FixtureRepository(PersistenceRepository):
             'sessions': len(self._sessions),
             'follow_ups': len(self._follow_ups),
             'messages': len(self._messages),
+            'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
             'staff_agent_messages': len(self._staff_agent_messages),
             'agent_decisions': len(self._decisions),
@@ -130,6 +133,7 @@ class FixtureRepository(PersistenceRepository):
         self._sessions.clear()
         self._follow_ups.clear()
         self._messages.clear()
+        self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
         self._staff_agent_messages.clear()
         self._decisions.clear()
@@ -1165,6 +1169,117 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(branch_evaluation.evaluation_id)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+
+    def save_runtime_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Persist a namespaced read-only turn without changing Claim revision."""
+        stored_claim = self._claims.get(claim.claim_id)
+        stored_session = self._sessions.get(session.session_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        records_match = (
+            claim == stored_claim
+            and stored_session is not None
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and session.status is SessionStatus.ACTIVE
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.context_revision == claim.revision
+            and claim.active_session_id == session.session_id
+            and claimant_message.claim_id == claim.claim_id
+            and agent_message.claim_id == claim.claim_id
+            and claimant_message.session_id == session.session_id
+            and agent_message.session_id == session.session_id
+            and claimant_message.actor is ActorType.CLAIMANT
+            and agent_message.actor is ActorType.AGENT
+            and agent_message.in_reply_to == claimant_message.message_id
+            and runtime_trace.claim_id == claim.claim_id
+            and runtime_trace.session_id == session.session_id
+            and runtime_trace.trigger_message_id == claimant_message.message_id
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.message_id == claimant_message.message_id
+            and idempotency.agent_message_id == agent_message.message_id
+            and idempotency.runtime_trace_id == runtime_trace.trace_id
+            and idempotency.decision_id is None
+        )
+        if not records_match:
+            raise KeyError(claim.claim_id)
+        if any(
+            existing is not None
+            for existing in (
+                self._messages.get(claimant_message.message_id),
+                self._messages.get(agent_message.message_id),
+                self._runtime_traces.get(runtime_trace.trace_id),
+            )
+        ):
+            raise IdempotencyConflict(runtime_trace.trace_id)
+        duplicate_client_message = next(
+            (
+                message
+                for message in self._messages.values()
+                if message.claim_id == claim.claim_id
+                and message.client_message_id == claimant_message.client_message_id
+            ),
+            None,
+        )
+        if duplicate_client_message is not None:
+            raise IdempotencyConflict(claimant_message.client_message_id or '')
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if (
+            existing_idempotency is not None
+            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
+        ):
+            raise IdempotencyConflict(idempotency.key)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
+        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
+        self._idempotency[lookup] = deepcopy(idempotency)
+
+    def get_runtime_trace(
+        self,
+        claim_id: str,
+        trace_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        trace = self._runtime_traces.get(trace_id)
+        if trace is None or trace.claim_id != claim_id:
+            return None
+        return deepcopy(trace)
+
+    def find_runtime_trace_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        matches = [
+            trace
+            for trace in self._runtime_traces.values()
+            if trace.claim_id == claim_id and trace.trigger_message_id == trigger_message_id
+        ]
+        if not matches:
+            return None
+        return deepcopy(max(matches, key=lambda trace: (trace.created_at, trace.trace_id)))
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if self.get_claim(evidence.claim_id, customer_id) is None:

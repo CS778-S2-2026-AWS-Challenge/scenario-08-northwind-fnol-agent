@@ -46,6 +46,7 @@ from backend.domain.models import (
     FollowUpStatus,
     HandoffRecord,
     MessageRecord,
+    RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
     SignalDecisionRecord,
@@ -165,7 +166,9 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
             client.close()
 
 
-IMMUTABLE_CHILD_RECORD_KINDS = frozenset({'message', 'agent_decision', 'branch_evaluation'})
+IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
+    {'message', 'agent_decision', 'branch_evaluation', 'runtime_trace'}
+)
 """Child records whose identity may never be rebound or rewritten once persisted."""
 
 
@@ -2140,6 +2143,168 @@ class MongoDBRepository:
                 mongo_session,
             )
         )
+
+    def save_runtime_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Persist a read-only namespaced Runtime turn without a Claim rewrite."""
+        if (
+            claim.revision != expected_revision
+            or session.claim_id != claim.claim_id
+            or session.customer_id != claim.customer_id
+            or session.status is not SessionStatus.ACTIVE
+            or session.context_revision != claim.revision
+            or claim.active_session_id != session.session_id
+            or claimant_message.claim_id != claim.claim_id
+            or agent_message.claim_id != claim.claim_id
+            or claimant_message.session_id != session.session_id
+            or agent_message.session_id != session.session_id
+            or claimant_message.actor is not ActorType.CLAIMANT
+            or agent_message.actor is not ActorType.AGENT
+            or agent_message.in_reply_to != claimant_message.message_id
+            or runtime_trace.claim_id != claim.claim_id
+            or runtime_trace.session_id != session.session_id
+            or runtime_trace.trigger_message_id != claimant_message.message_id
+            or idempotency.actor_id != claim.customer_id
+            or idempotency.claim_id != claim.claim_id
+            or idempotency.session_id != session.session_id
+            or idempotency.message_id != claimant_message.message_id
+            or idempotency.agent_message_id != agent_message.message_id
+            or idempotency.runtime_trace_id != runtime_trace.trace_id
+            or idempotency.decision_id is not None
+        ):
+            raise KeyError(claim.claim_id)
+        self._atomic(
+            lambda mongo_session: self._save_runtime_turn_records(
+                claim,
+                expected_revision,
+                session,
+                claimant_message,
+                agent_message,
+                runtime_trace,
+                idempotency,
+                mongo_session,
+            )
+        )
+
+    def _save_runtime_turn_records(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+        mongo_session: Any,
+    ) -> None:
+        self._reject_existing_idempotency(idempotency, mongo_session=mongo_session)
+        self._ensure_claim_revision(claim, expected_revision, mongo_session=mongo_session)
+        stored_session = self._get(
+            'session',
+            session.session_id,
+            SessionRecord,
+            customer_id=claim.customer_id,
+            session=mongo_session,
+        )
+        if (
+            stored_session is None
+            or stored_session.claim_id != claim.claim_id
+            or stored_session.status is not SessionStatus.ACTIVE
+        ):
+            raise KeyError(claim.claim_id)
+        if claimant_message.client_message_id is not None:
+            duplicate = self._collection.find_one(
+                {
+                    'record_type': 'message',
+                    'claim_id': claim.claim_id,
+                    'client_message_id': claimant_message.client_message_id,
+                },
+                session=mongo_session,
+            )
+            if duplicate is not None:
+                raise IdempotencyConflict(claimant_message.client_message_id)
+        records = (
+            ('message', claimant_message.message_id, claimant_message),
+            ('message', agent_message.message_id, agent_message),
+            ('runtime_trace', runtime_trace.trace_id, runtime_trace),
+        )
+        for kind, identifier, record in records:
+            existing = self._collection.find_one(
+                {'_id': self._record_id(kind, identifier), 'record_type': kind},
+                projection={'claim_id': 1, 'customer_id': 1},
+                session=mongo_session,
+            )
+            if existing is not None:
+                raise IdempotencyConflict(identifier)
+            self._reject_client_message_conflict(
+                {
+                    'record_type': kind,
+                    'claim_id': claim.claim_id,
+                    'client_message_id': getattr(record, 'client_message_id', None),
+                },
+                session=mongo_session,
+            )
+        self._put(
+            'session',
+            session.session_id,
+            session,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+            session=mongo_session,
+        )
+        for kind, identifier, record in records:
+            self._put(
+                kind,
+                identifier,
+                record,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+        self._save_idempotency(idempotency, mongo_session)
+
+    def get_runtime_trace(
+        self,
+        claim_id: str,
+        trace_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        record = self._get(
+            'runtime_trace',
+            trace_id,
+            RuntimeTraceRecord,
+            customer_id=customer_id,
+        )
+        return record if record is not None and record.claim_id == claim_id else None
+
+    def find_runtime_trace_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        document = self._collection.find_one(
+            {
+                'record_type': 'runtime_trace',
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+                'trigger_message_id': trigger_message_id,
+            },
+            sort=[('created_at', -1), ('_id', -1)],
+        )
+        return self._model_from_document(document, RuntimeTraceRecord)
 
     def _save_agent_turn_records(
         self,

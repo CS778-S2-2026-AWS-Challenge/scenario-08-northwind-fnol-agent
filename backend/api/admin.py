@@ -53,6 +53,7 @@ def _model_runtime_binding(request: Request) -> ModelRuntimeBinding:
         privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
         prompt_version=MOTOR_CLAIMANT_PROMPT_ID,
         structured_output=True,
+        tools=settings.model_supports_tools,
     )
 
 

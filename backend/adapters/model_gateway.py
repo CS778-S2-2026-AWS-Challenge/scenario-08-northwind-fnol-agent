@@ -146,9 +146,35 @@ class OpenAICompatibleModelGateway:
             raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
 
     def _request_payload(self, request: ModelRequest) -> dict[str, object]:
+        messages: list[dict[str, object]] = []
+        for message in request.messages:
+            item: dict[str, object] = {
+                'role': message.role.value,
+                'content': message.content,
+            }
+            if message.tool_calls:
+                item['tool_calls'] = [
+                    {
+                        'id': tool.call_id,
+                        'type': 'function',
+                        'function': {
+                            'name': tool.name,
+                            'arguments': json.dumps(
+                                tool.arguments,
+                                separators=(',', ':'),
+                            ),
+                        },
+                    }
+                    for tool in message.tool_calls
+                ]
+            if message.tool_call_id is not None:
+                item['tool_call_id'] = message.tool_call_id
+            if message.name is not None:
+                item['name'] = message.name
+            messages.append(item)
         payload: dict[str, object] = {
             'model': self._config.model,
-            'messages': [message.model_dump(mode='json') for message in request.messages],
+            'messages': messages,
         }
         if request.response_schema is not None:
             payload['response_format'] = {
@@ -271,6 +297,7 @@ class OpenAICompatibleModelGateway:
         if (
             request.response_schema is not None
             and completion_status is ModelCompletionStatus.COMPLETE
+            and not message.get('tool_calls')
         ):
             if content is None:
                 raise TypeError
@@ -434,7 +461,7 @@ class BedrockConverseModelGateway:
         messages: list[dict[str, object]] = []
         for message in request.messages:
             if message.role is ModelRole.SYSTEM:
-                system_parts.append(message.content)
+                system_parts.append(message.content or '')
                 continue
             if message.role is ModelRole.TOOL:
                 raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)

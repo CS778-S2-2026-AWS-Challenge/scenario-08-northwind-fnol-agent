@@ -22,10 +22,18 @@ normalise:
   request identity; and
 - input, output, and total token usage when supplied by the endpoint.
 
-`GatewayAgent` converts a normalised structured response into the existing
-`AgentProposal`. The existing deterministic validation then authorises, blocks, or
-requires review for the proposal. A model response never executes a tool, writes claim
-state, creates a claim, or authorises a handoff by itself.
+For the target model-backed claimant path, `GatewayAgent` performs a bounded two-stage
+turn: it advertises the read-only `claim.read` tool, validates and executes that tool against
+the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
+to the same model for a namespaced final response. A model response never executes a tool,
+writes Claim State, creates a claim, or authorises a handoff by itself.
+
+The final target subset is `conversation.answer` plus `runtime.continue`. The Runtime persists
+the claimant and agent messages, a bounded `RuntimeTraceRecord`, Session activity, and the
+idempotency response atomically. `claim.read` is observational: Claim revision and form state
+remain unchanged, and no legacy `AgentDecisionRecord` is created. The trace retains both provider
+invocations, tool call identity and arguments, result status, selected model profile, and final
+namespaced codes.
 
 Every adapter maps provider termination data to `complete`, `incomplete`, `refused`, or
 `unknown`. `GatewayAgent` accepts a proposal only from a `complete` response. Truncated,
@@ -71,13 +79,15 @@ identifier, and provider request identifier when supplied. These references are 
 are absent from claimant messages and decision projections. Token usage persistence remains a
 current limitation.
 
-The model-facing schema does not contain the server-only `controlled_rule_authorised` marker and
-rejects a response that tries to provide it. Structured `required_tools` proposals are permitted
-only for tool names and operations exposed by the Branch Evaluation and Runtime policy. Runtime
-validates arguments and executes at most one knowledge, policy, or claim-history context lookup,
-then permits exactly one model re-plan with the typed result. Provider-native tool-call side
-channels remain unsupported; a second context lookup or an unregistered operation rejects the
-turn before Claim mutation.
+The model-facing schema does not contain the server-only `controlled_rule_authorised`
+marker, and rejects a response that tries to provide it. The target request exposes only the
+`claim.read` manifest; unknown, multiple, or malformed tool calls fail closed before any
+persistence. A model response using the deprecated eight-action schema is rejected with
+`LEGACY_AGENT_ACTION_DEPRECATED` and cannot fall back to the controlled Agent. The compatibility
+path still permits structured `required_tools` proposals for the bounded context operations
+published by Branch Evaluation and Runtime policy; it validates arguments, executes at most one
+context lookup, and permits one typed re-plan. The target model-backed path uses the provider
+tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -139,6 +149,17 @@ Capability declarations are startup configuration, not provider discovery. Struc
 output and tool requests are rejected before transport when the selected adapter does
 not declare the required capability. `GatewayAgent` requires structured output, so that
 capability must be enabled for the `model_gateway` runtime to start.
+
+Both published claimant profiles use this adapter contract:
+
+| Profile | Model | Role | Required capabilities |
+| --- | --- | --- | --- |
+| `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | primary/default | structured output and tools |
+| `nowcoding-gpt54mini` | `gpt-5.4-mini` through the existing nowcoding endpoint | selectable | structured output and tools |
+
+The credential reference is stored as a secret environment-variable name only. The selected
+profile is bound to the Session at creation/resume; message requests do not accept a model
+override and never silently switch profiles.
 
 ### Amazon Bedrock Converse
 
@@ -223,9 +244,14 @@ idempotency records unchanged.
   Converse; streaming is not implemented.
 - Capability support is declared by configuration and verified by tests; there is no
   remote capability negotiation.
-- The gateway normalises provider tool calls but the claimant Runtime accepts tool intent only
-  through structured `AgentProposal.required_tools`. The server validates and executes the
-  registered bounded context operations and owns the single re-plan limit.
+- Only `claim.read` is currently wired into the target tool loop. Other registered tools and
+  namespaced actions remain unavailable until their handlers, authority checks, and persistence
+  contracts are implemented.
+- Runtime trace persistence is implemented for the fixture and Mongo repositories; a complete
+  `TurnPlan`/`ExecutionPlan`/`TurnResult` record family and admin trace projection remain open.
+- The compatibility gateway still normalises provider tool calls into structured
+  `AgentProposal.required_tools`; those context operations are bounded by Runtime policy and a
+  single re-plan.
 - Provider retries, fallback selection, circuit breaking, usage persistence, and model
   evaluation thresholds are not yet implemented. A configured runtime never substitutes
   a fixture or another provider silently.
@@ -245,17 +271,18 @@ does not yet implement the complete target Agent Runtime contract:
 - the current `ModelResponse` normalises transport output; the target Runtime additionally
   distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
   and final `TurnResult`;
-- the current `GatewayAgent` produces the compatibility eight-action `AgentProposal`; the target
-  action model separates conversation moves, Claim commands, human actions, external
-  coordination, and one Runtime control directive;
+- the target claimant path now produces the minimal namespaced pair
+  `conversation.answer`/`runtime.continue`; the broader action model still needs complete
+  conversation moves, Claim commands, human actions, and external coordination;
 - the current configuration declares endpoint capabilities; the target Model Profile
   Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
   and qualified fallback groups; and
-- the current Runtime executes only the registered knowledge, policy, and claim-history context
-  operations with a per-turn allow-list and one re-plan; additional action tools still require
-  published Tool Registry entries, authority checks, typed results, idempotency, and trajectory
-  tests before execution.
+- the current Gateway executes the published `claim.read` Tool Registry capability on the target
+  path, while compatibility context tools remain bounded by a per-turn allow-list and one
+  re-plan; additional action tools require published Tool Registry entries, authority checks,
+  typed results, idempotency, and trajectory tests before execution is enabled.
 
 These are incremental extensions, not reasons to replace the implemented provider-neutral
-port. Current compatibility types remain supported until the versioned API, persistence,
-consumers, fixtures, and tests migrate together.
+port. Legacy compatibility types remain readable for controlled/fixture migration only; a
+model-backed response using the deprecated eight-action contract is rejected and cannot enter
+the target Runtime path.

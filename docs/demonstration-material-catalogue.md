@@ -61,6 +61,13 @@ an open decision, recorded in section 9, not a blank to be filled in during prod
 | **Behaviour when not usable** | What the claimant and staff interfaces must show in each condition from section 4.2 that applies |
 | **Retention** | For a class marked Elevated in section 2, what is kept and for how long, once section 9's open decision is resolved |
 
+For a no-byte `Unavailable` record, **Source and stakeholder** must distinguish three things: nobody
+provided the absent material, an external party was expected to provide it, and Northwind records
+the established absence after a separate answer arrives. **Consent and visibility** must likewise
+distinguish the record and that received answer from the nonexistent artefact. Claimant and staff
+may see the unavailable condition, reason, next step, and permitted source detail, but neither
+surface may claim that the absent artefact was issued, provided, or available to open.
+
 ## 4. Condition model
 
 Conditions are the second axis. They apply across classes: any class can be missing, any received
@@ -149,6 +156,18 @@ Every path must reach **Missing**, **Pending**, **Received**, and **Invalid**. T
 conditions are required only in the cells marked above, so that each is demonstrated somewhere
 without requiring all three paths to carry all eight.
 
+A cell is reached in one of three ways, and they are not interchangeable:
+
+- **By absence** — `Missing` and `Pending`. Nothing was offered, or the wait is on someone
+  identifiable. No artefact exists because nothing came back, so the cell is reached by a material
+  of that class recording the condition among those it can occupy.
+- **By artefact** — `Received`, `Invalid`, `Superseded`, `Expired`, `Disputed`. Something arrived,
+  and the demonstration shows it.
+- **By record** — `Unavailable`. Section 7 requires it to be established rather than inferred, and
+  what establishes it is a received answer. So the cell is reached by a material that holds no bytes
+  and cites that answer. Neither half reaches the cell alone: the answer on its own is a received
+  document, and the record on its own is an assertion with nothing behind it.
+
 ## 6. Claimant and staff journey touchpoints
 
 | Moment | Claimant must see | Staff must see |
@@ -168,11 +187,11 @@ must show.
 
 - **Missing** must not block work that does not depend on it.
 - **Pending** must name who is being waited on. "Waiting" without an owner is not an acceptable state to display.
-- **Unavailable** must state why, and must not silently degrade into a claim of unavailability where none was established.
+- **Unavailable** must state why, and must not silently degrade into a claim of unavailability where none was established. What establishes it is an answer that arrived — an assessor or issuer saying that the material cannot be produced — and that answer is a *received* material of its own. The unavailable material is the one the answer refuses, and it has no artefact, because a material that cannot be obtained is precisely the one there is nothing to open. A demonstration that labels the answer as the unavailable material has produced a legible document and called it an absence.
 - **Invalid** must say what is wrong in terms the claimant can act on, and must not silently overwrite the fact it was meant to support.
-- **Superseded** must keep the earlier instance in the record; replacement is not deletion.
+- **Superseded** must keep the earlier instance in the record and name what replaced it; replacement is not deletion, and an earlier instance that cannot say what superseded it is indistinguishable from one that was simply set aside.
 - **Expired** must say what expired and what would restore it.
-- **Disputed** must keep both sides visible to staff and must not resolve itself automatically. The claimant is told a check is in progress, not which side is doubted.
+- **Disputed** must keep both sides visible to staff and must not resolve itself automatically, which means it must name its other side: either the material it conflicts with or the stated claim fact it contradicts. The claimant is told a check is in progress, not which side is doubted.
 
 ## 8. Boundary with P8.2 and P8.3
 
@@ -192,7 +211,7 @@ None of these is decided by this document, and each needs the named upstream wor
 
 | Open decision | Blocked on |
 | --- | --- |
-| How the conditions in 4.1 map onto persisted evidence status and file-status values | Backend contract work; the current enums were not designed against this model, and `Disputed` in particular has no obvious counterpart |
+| How the conditions in 4.1 map onto persisted evidence status and file-status values | Backend contract work; the current enums were not designed against this model. Direction was given on discussion #692: `EvidenceStatus` carries the business condition and `EvidenceFileStatus` the upload lifecycle alone, with conflict, supersession, and established unavailability carried by typed references rather than by a status word. `Disputed`, `Superseded`, and `Unavailable` now name their other side in the manifest, in the shape that mapping will take |
 | Which registered field each material class links to | **P2**, the field and Dynamic Form mapping. `contents` currently has no registered fields at all |
 | Which stakeholder issues each authority report and assessment, and what access exists | **P3**, the stakeholder and service catalogue |
 | What consent copy and disclosure scope each class requires | **P5**, the service-level consent and shared-data contract |

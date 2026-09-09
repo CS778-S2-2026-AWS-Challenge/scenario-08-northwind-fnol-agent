@@ -20,6 +20,7 @@ from backend.domain.models import (
     FollowUpRecord,
     HandoffRecord,
     MessageRecord,
+    RuntimeTraceRecord,
     SessionRecord,
     SignalDecisionRecord,
     StaffActionRecord,
@@ -55,6 +56,7 @@ class IdempotencyRecord:
     message_id: str | None = None
     agent_message_id: str | None = None
     decision_id: str | None = None
+    runtime_trace_id: str | None = None
     handoff_id: str | None = None
     follow_up_id: str | None = None
     action_registry_version: str | None = None
@@ -435,6 +437,40 @@ class PersistenceRepository(ClaimRepository, Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
+        raise NotImplementedError
+
+    def save_runtime_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a read-only namespaced Runtime turn.
+
+        Unlike a legacy Agent turn, this operation does not advance Claim revision or
+        create an ``AgentDecisionRecord``. It records the conversation, Runtime trace,
+        Session activity, and retry identity as one transaction.
+        """
+        raise NotImplementedError
+
+    def get_runtime_trace(
+        self,
+        claim_id: str,
+        trace_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        raise NotImplementedError
+
+    def find_runtime_trace_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
         raise NotImplementedError
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:

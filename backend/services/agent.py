@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from backend.core.errors import ApiError
+from backend.domain.agent_action_registry import action_contract
 from backend.domain.intake import infer_controlled_product_family, next_requirement_field
 from backend.domain.knowledge import KnowledgeChunk
 from backend.domain.models import (
@@ -21,6 +23,7 @@ from backend.domain.models import (
     ProposedContentsItem,
     ProposedFormChange,
     ResponsibleParty,
+    RuntimeTraceRecord,
     StateChange,
     WorkingClaim,
 )
@@ -164,6 +167,7 @@ class AgentTurnContext:
     trigger_message_id: str
     message_text: str | None
     evidence_refs: list[str]
+    model_profile_id: str = 'qwen-local'
     professional_review_required: bool = False
     branch_evaluation: BranchEvaluationResult | None = None
     knowledge_results: tuple[KnowledgeChunk, ...] = ()
@@ -193,6 +197,10 @@ class AgentProposal:
     controlled_rule_authorised: bool = False
     proposal_source: AgentProposalSource = AgentProposalSource.CONTROLLED_AGENT
     model_provenance: ModelDecisionProvenance | None = None
+    # Target Runtime code. During migration this is authoritative for model-backed
+    # turns; ``action`` is retained only for persisted compatibility records.
+    action_code: str | None = None
+    runtime_trace: RuntimeTraceRecord | None = None
 
 
 def _contains_unnegated_signal(
@@ -822,6 +830,18 @@ class FeatureControlledAgent:
         return self._primary.propose_turn(context)
 
 
+class UnavailableAgent:
+    """Fail closed when a target Runtime feature is disabled or not implemented."""
+
+    def propose_turn(self, context: AgentTurnContext) -> AgentProposal:
+        raise ApiError(
+            status_code=503,
+            code='AGENT_RUNTIME_UNAVAILABLE',
+            message='The target Agent Runtime capability is unavailable.',
+            retryable=False,
+        )
+
+
 class ControlledAgent:
     """Deterministic prototype provider that can be replaced by a model adapter."""
 
@@ -967,6 +987,26 @@ class ControlledAgent:
 
 
 def validate_proposal(proposal: AgentProposal) -> AgentAuthority:
+    if proposal.action_code is not None:
+        try:
+            contract = action_contract(proposal.action_code)
+        except ValueError:
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.BLOCKED,
+            )
+        if proposal.action_code != 'conversation.answer' or contract.state_effect.value != 'none':
+            return AgentAuthority(
+                proposed_by='agent',
+                validated_by='deterministic_rule_engine',
+                outcome=AuthorityOutcome.BLOCKED,
+            )
+        return AgentAuthority(
+            proposed_by='agent',
+            validated_by='deterministic_rule_engine',
+            outcome=AuthorityOutcome.AUTHORISED,
+        )
     if (
         proposal.action in {AgentAction.HANDOFF, AgentAction.URGENT_HANDOFF}
         and proposal.controlled_rule_authorised
