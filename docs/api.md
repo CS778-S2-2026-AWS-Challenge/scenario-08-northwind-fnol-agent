@@ -2538,12 +2538,42 @@ Request:
 }
 ```
 
-An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
+Every response contains `retrieved_at`, the server-observed UTC time at which that retrieval result
+was produced. It is present for `evidence_found`, `no_evidence`, `timeout`, and `unavailable`, and
+is distinct from a document's ingestion time or a provider-supplied timestamp. An
+`evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
 version, checksum, and source text for every result. `no_evidence` returns no results and an honest
 scope limitation. `timeout` and `unavailable` return no results, include the shared connection and
 structured-error projection described below, and remain retryable. Provider errors, traceback
 content, credentials, endpoints, and object-store identifiers are not exposed. Missing
-applicability fields fail request validation rather than broadening the search.
+applicability fields fail request validation rather than broadening the search. The deterministic
+knowledge retriever does not expose a numeric confidence value because the current contract has no
+authoritative confidence semantics.
+
+Response excerpt:
+
+```json
+{
+  "status": "evidence_found",
+  "retrieved_at": "2026-09-09T10:55:00Z",
+  "connection_state": "configured_service",
+  "errors": [],
+  "results": [
+    {
+      "document_id": "nw-policy-motor-standard-mvp-2026-1",
+      "chunk_id": "nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01",
+      "title": "Northwind Motor Standard Policy",
+      "section_path": "MTR-EXC-01 - Excesses",
+      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
+      "version": "MVP-2026.1",
+      "checksum": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989",
+      "text": "The base excess and any driver, age, use, or other additional excess come only from the matching policy schedule."
+    }
+  ],
+  "limitations": []
+}
+```
+
 When a structured Policy Schedule supplies a wording document identifier, the caller includes
 `document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
 The approved document catalogue comes from the controlled publication manifest. Applicability is
