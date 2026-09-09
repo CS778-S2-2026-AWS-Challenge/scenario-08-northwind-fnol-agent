@@ -6598,6 +6598,12 @@
             "title": "Results",
             "type": "array"
           },
+          "retrieved_at": {
+            "description": "Server-observed UTC time when this retrieval result was produced; not a document ingestion or provider timestamp.",
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "evidence_found",
@@ -6612,6 +6618,7 @@
         "required": [
           "connection_state",
           "status",
+          "retrieved_at",
           "results",
           "limitations"
         ],
