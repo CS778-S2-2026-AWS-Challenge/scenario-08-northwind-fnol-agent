@@ -1061,7 +1061,9 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
     assert search.product == 'motor'
     assert search.jurisdiction == 'NZ'
     assert search.authority == 'northwind_synthetic_demo'
-    replanned_context = json.loads(gateway.requests[1].messages[1].content)
+    replanned_content = gateway.requests[1].messages[1].content
+    assert replanned_content is not None
+    replanned_context = json.loads(replanned_content)
     assert replanned_context['knowledge_status'] == 'evidence_found'
     assert replanned_context['knowledge_citations'][0]['chunk_id'] == chunk.chunk_id
     assert proposal.tool_results == [
@@ -1579,7 +1581,9 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
 
     assert gateway.last_request is not None
     assert gateway.last_request.response_schema is not None
-    model_context = json.loads(gateway.last_request.messages[1].content)
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
     assert set(model_context) == {
         'branch',
         'claim',
@@ -1750,7 +1754,9 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
     )
 
     assert gateway.last_request is not None
-    model_context = json.loads(gateway.last_request.messages[1].content)
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
     assert model_context['branch']['selected_family'] == 'motor'
     assert 'family.motor' in model_context['branch']['active_branches']
     assert 'vehicle.registration' in model_context['branch']['allowed_field_codes']
@@ -2302,7 +2308,9 @@ def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
         )
         assert intake.status_code == 422, intake.text
         assert intake.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
-        assert repository.get_claim(claim_id, 'cus_demo').revision == 1
+        stored_claim = repository.get_claim(claim_id, 'cus_demo')
+        assert stored_claim is not None
+        assert stored_claim.revision == 1
         assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
         assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
         return

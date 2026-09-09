@@ -144,43 +144,43 @@ the append-only audit collection through a bounded, filterable projection.
 12. Resolve a current task-specific claimant consent before invoking an external participant.
 13. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
-13. Resolve the active configuration version and read its immutable publication record.
-14. List administration audit events by bounded actor, subject, event type, and time filters without
+14. Resolve the active configuration version and read its immutable publication record.
+15. List administration audit events by bounded actor, subject, event type, and time filters without
     exposing unrestricted claimant or provider payloads.
-15. Read customer memory only through a purpose-limited, visibility-filtered access path.
-16. Create and process follow-up tasks by due time, responsibility, priority, and status.
-17. Append audit events and query them by authorised subject and time range.
-18. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
+16. Read customer memory only through a purpose-limited, visibility-filtered access path.
+17. Create and process follow-up tasks by due time, responsibility, priority, and status.
+18. Append audit events and query them by authorised subject and time range.
+19. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
     state effect, and final role projection without exposing hidden or restricted data.
-19. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
+20. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
     priority without treating Claim lifecycle as the only work status.
-20. Reconcile an external request by Northwind operation identity, idempotency key, or
+21. Reconcile an external request by Northwind operation identity, idempotency key, or
     provider reference before any retry after an unknown outcome.
-21. Resolve one active, evaluated Model Profile by purpose and privacy class without
+22. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
-22. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+23. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
     browser-supplied customer identifier to alter the authenticated principal.
-23. Read and update the authenticated claimant's approved profile and communication
+24. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
-24. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+25. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-25. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+26. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-26. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+27. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-27. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+28. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-28. Append one Staff Agent question and answer atomically, resolve retries by
+29. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn.
-29. Create a unique Customer or Staff account through its identity repository without exposing the
+30. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
-30. Conditionally update approved Customer or Staff account fields by account revision; a stale
+31. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-31. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+32. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-32. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
 
 ## Development/Test Identity Invariants

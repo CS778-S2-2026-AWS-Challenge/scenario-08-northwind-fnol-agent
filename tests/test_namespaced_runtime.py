@@ -14,6 +14,7 @@ from backend.domain.configuration import (
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
+    ModelRequest,
     ModelResponse,
     ModelToolCall,
 )
@@ -25,7 +26,7 @@ class SequenceToolGateway:
     """Small provider-neutral gateway that exposes a real two-call sequence."""
 
     def __init__(self) -> None:
-        self.requests = []
+        self.requests: list[ModelRequest] = []
         self.responses = [
             ModelResponse(
                 completion_status=ModelCompletionStatus.COMPLETE,
@@ -64,12 +65,12 @@ class SequenceToolGateway:
     def capabilities(self) -> ModelCapabilities:
         return ModelCapabilities(structured_output=True, tools=True)
 
-    def complete(self, request):
+    def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
         return self.responses.pop(0)
 
 
-def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revision():
+def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revision() -> None:
     gateway = SequenceToolGateway()
     registry = ModelGatewayRegistry()
     registry.register('openai_compatible', lambda _config: gateway)
@@ -170,7 +171,7 @@ def test_namespaced_runtime_persists_tool_loop_without_legacy_decision_or_revisi
         assert len(gateway.requests) == 2
 
 
-def test_session_model_catalog_exposes_qwen_default_and_gpt_selection():
+def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
     configurations = ConfigurationRepository()
     settings = Settings(
         environment='test',

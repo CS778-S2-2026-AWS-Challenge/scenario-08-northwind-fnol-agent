@@ -441,9 +441,7 @@ class GatewayAgent:
                 try:
                     tool_result = read_claim_for_runtime(context.claim, tool_call.arguments)
                 except (TypeError, ValueError) as error:
-                    raise ModelGatewayError(
-                        ModelGatewayErrorCode.MALFORMED_RESPONSE
-                    ) from error
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from error
                 continuation_messages = [
                     *messages,
                     ModelMessage(
@@ -502,9 +500,7 @@ class GatewayAgent:
                 except ValidationError:
                     raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
                 if runtime_proposal.action_code != 'conversation.answer':
-                    raise ModelGatewayError(
-                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
-                    ) from None
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY) from None
                 if runtime_proposal.runtime_action_code != 'runtime.continue':
                     raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
                 result = AgentProposal(
