@@ -161,6 +161,13 @@ def seed_validation_scenarios(
     """Seed the three validation paths through the shared persistence contract."""
     key = require_idempotency_key(idempotency_key)
     fingerprint = request_fingerprint({'route': VALIDATION_SEED_ROUTE, 'version': 1})
+    staff_account = staff_identity_repository.get_account(staff_id)
+    if staff_account is None or not staff_account.active:
+        raise ApiError(
+            status_code=403,
+            code='ACCESS_DENIED',
+            message='The staff account is not active for validation seeding.',
+        )
     existing = repository.find_idempotency(staff_id, VALIDATION_SEED_ROUTE, key)
     if existing is not None:
         if existing.request_fingerprint != fingerprint or existing.response_payload is None:
@@ -171,13 +178,6 @@ def seed_validation_scenarios(
             )
         return DemoSeedResponse.model_validate(existing.response_payload)
 
-    staff_account = staff_identity_repository.get_account(staff_id)
-    if staff_account is None or not staff_account.active:
-        raise ApiError(
-            status_code=403,
-            code='ACCESS_DENIED',
-            message='The staff account is not active for validation seeding.',
-        )
     if repository.list_claims_internal():
         raise ApiError(
             status_code=409,

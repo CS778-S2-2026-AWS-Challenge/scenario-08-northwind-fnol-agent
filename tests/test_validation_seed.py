@@ -178,6 +178,20 @@ def test_validation_seed_rejects_inactive_staff_before_any_write() -> None:
     assert repository.list_claims_internal() == []
 
 
+def test_validation_seed_replay_rechecks_staff_authorization() -> None:
+    repository = FixtureRepository()
+    app = create_app(SETTINGS, repository)
+    with TestClient(app) as client:
+        headers = {**STAFF_AUTH, 'Idempotency-Key': 'auth-replay'}
+        first = client.post(SEED_PATH, headers=headers)
+        app.state.staff_identity_repository._accounts['stf_demo'].active = False
+        replay = client.post(SEED_PATH, headers=headers)
+
+    assert first.status_code == 200
+    assert replay.status_code == 403
+    assert replay.json()['error']['code'] == 'ACCESS_DENIED'
+
+
 class _FailingMessageRepository(FixtureRepository):
     def save_message(self, message, customer_id):  # type: ignore[no-untyped-def]
         raise RuntimeError('injected persistence failure')
@@ -319,6 +333,24 @@ def test_fixture_validation_seed_repository_guards_replay_conflict_and_graph_sha
     )
 
 
+@pytest.mark.parametrize(
+    'field_update',
+    [
+        {'claim_id': 'clm_other'},
+        {'customer_id': 'cus_other'},
+        {'status': 'closed'},
+        {'context_revision': 2},
+    ],
+)
+def test_fixture_validation_seed_rejects_incoherent_active_session(
+    field_update: dict[str, object],
+) -> None:
+    graph = _validation_graph(FixtureRepository(), key='incoherent')
+    session = graph.sessions[0].model_copy(update=field_update)
+    with pytest.raises(ValueError):
+        FixtureRepository().seed_validation_graph(replace(graph, sessions=(session,)))
+
+
 def test_mongodb_validation_seed_repository_guards_replay_conflict_and_graph_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -446,6 +478,26 @@ def test_mongodb_validation_seed_repository_guards_replay_conflict_and_graph_sha
         )
         is not None
     )
+
+
+@pytest.mark.parametrize(
+    'field_update',
+    [
+        {'claim_id': 'clm_other'},
+        {'customer_id': 'cus_other'},
+        {'status': 'closed'},
+        {'context_revision': 2},
+    ],
+)
+def test_mongodb_validation_seed_rejects_incoherent_active_session(
+    field_update: dict[str, object],
+) -> None:
+    repository = MongoDBRepository(mongomock.MongoClient(), 'validation_seed_incoherent')
+    repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    graph = _validation_graph(repository, key=f'incoherent-{field_update}')
+    session = graph.sessions[0].model_copy(update=field_update)
+    with pytest.raises(ValueError):
+        repository.seed_validation_graph(replace(graph, sessions=(session,)))
 
 
 class _RacingIdentityRepository(FixtureIdentityRepository):

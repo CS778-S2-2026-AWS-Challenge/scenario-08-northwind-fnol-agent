@@ -21,6 +21,7 @@ from backend.domain.models import (
     MessageRecord,
     RuntimeTraceRecord,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
     WorkingClaim,
@@ -80,6 +81,18 @@ class ValidationSeedGraph:
     staff_presence: StaffPresenceRecord
     expected_presence_revision: int | None
     idempotency: IdempotencyRecord
+
+
+def validate_validation_seed_session(claim: WorkingClaim, session: SessionRecord) -> None:
+    """Validate the active Claim/Session relationship before persistence."""
+    if (
+        session.claim_id != claim.claim_id
+        or session.customer_id != claim.customer_id
+        or claim.active_session_id != session.session_id
+        or session.status is not SessionStatus.ACTIVE
+        or session.context_revision != claim.revision
+    ):
+        raise ValueError(f'Validation seed active session does not match claim {claim.claim_id}.')
 
 
 class ClaimRepository(Protocol):

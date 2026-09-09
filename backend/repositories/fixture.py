@@ -48,6 +48,7 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_validation_seed_session,
 )
 
 
@@ -330,6 +331,7 @@ class FixtureRepository(PersistenceRepository):
                 ]
                 if len(active) != 1:
                     raise ValueError('Every validation seed claim needs one active session.')
+                validate_validation_seed_session(claim, active[0])
                 self.create_claim(claim, active[0])
             for session in graph.sessions:
                 if session.session_id != claims_by_id[session.claim_id].active_session_id:
