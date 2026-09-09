@@ -41,8 +41,8 @@ claim outcome.
 | Policy wording | `config/knowledge-sources.json` and `config/knowledge-source-corpus/*.md`; indexed under `knowledge/indexed/` in `northwind-knowledge` | Explicit `motor`, `home`, and `contents` products | Available and checksum-verified | Requires matching structured policy schedule; wording is not a coverage decision |
 | Intake and claimant/staff process | [`SPEC/01-product-scope.md`](../SPEC/01-product-scope.md), [`SPEC/02-users-and-journeys.md`](../SPEC/02-users-and-journeys.md), [`docs/api.md`](api.md) | Common journey contract, with product branches selected by the authoritative claim family | Defined as prototype contract | Not Northwind production operating procedure; external service details remain bounded or unavailable where unverified |
 | Safety and decision authority | [`SPEC/06-safety-and-governance.md`](../SPEC/06-safety-and-governance.md), [`docs/agent-runtime-policy.md`](agent-runtime-policy.md) | Common authority, urgent escalation, privacy, prompt-injection, and professional-review boundaries | Defined as prototype governance | Does not authorise the Agent to decide coverage, liability, fraud, payment, or emergency outcomes |
-| Evidence requirements and visibility | [`docs/api.md`](api.md), [`docs/fixtures_convention.md`](fixtures_convention.md), [`docs/demonstration-material-catalogue.md`](demonstration-material-catalogue.md) | Common evidence lifecycle plus product-specific material coverage | Contract defined; material production/association remains separate work | The catalogue explicitly states that no demonstration asset currently exists and does not define runtime filenames or storage layout |
-| Demonstration/material knowledge | [`docs/demonstration-material-catalogue.md`](demonstration-material-catalogue.md), [`config/rag-evaluation-cases.json`](../config/rag-evaluation-cases.json) | Required motor, home, and contents material classes and RAG evaluation questions | Catalogue and evaluation cases available; physical material assets are not yet available | P8.2 produces assets and P8.3 associates them with Claim/Evidence; do not claim asset or journey coverage before those outputs |
+| Evidence requirements and visibility | [`docs/api.md`](api.md), [`docs/fixtures_convention.md`](fixtures_convention.md), [`docs/demonstration-material-catalogue.md`](demonstration-material-catalogue.md) | Common evidence lifecycle plus product-specific material coverage | Contract defined; asset association and runtime seeding remain separate work | The catalogue defines the requirements, while #602 owns Claim/Evidence association and `demo_seed` integration |
+| Demonstration/material knowledge | [`docs/demonstration-material-catalogue.md`](demonstration-material-catalogue.md), [`config/rag-evaluation-cases.json`](../config/rag-evaluation-cases.json), `backend/demo_data/materials/materials.json` | Required motor, home, and contents material classes and RAG evaluation questions | 24 simulated assets exist in the repository (`motor` 9, `home` 5, `contents` 10); association, runtime seeding, and journey verification remain outstanding | Assets are not yet linked to Claim/Evidence or read by `demo_seed`; do not claim full material journey coverage before that work |
 | Privacy governance | [`docs/privacy-governance.md`](privacy-governance.md), [`SPEC/06-safety-and-governance.md`](../SPEC/06-safety-and-governance.md) | Common role, purpose, minimum-necessity, consent, disclosure, audit, and synthetic-data boundary | Defined for prototype | Production retention, deletion, residency, encryption, and incident-response decisions remain open |
 
 The process, safety, evidence, material, and privacy rows are deliberately
@@ -74,19 +74,26 @@ boundary, not a customer policy wording source.
 
 ## P4.2 Retrieval States
 
-P4.2 must preserve these states rather than collapsing them into an empty
-answer:
+P4.2 must preserve the existing knowledge-search response states rather than
+inventing a second API vocabulary:
 
 | State | Meaning | Required behaviour |
 | --- | --- | --- |
 | `evidence_found` | An approved, scope-matching chunk supports the request | Return the source, version, section, and citation-backed text |
-| `no_result` | No approved chunk matched the scoped request | State that no applicable governed passage was found; do not answer from an uncited source |
-| `ambiguous` | Sources or facts do not establish applicability or conflict materially | Preserve the limitation and request staff review where required |
-| `unavailable` | The knowledge object store or index cannot provide a trusted result | Return an explicit dependency limitation; do not treat it as no-result or success |
+| `no_evidence` | The selected knowledge provider answered successfully but no approved chunk matched the scoped request | State that no applicable governed passage was found; do not answer from an uncited source |
+| `timeout` | The knowledge provider exceeded the request budget | Return the documented retryable degraded limitation; do not treat it as no-evidence or success |
+| `unavailable` | The provider, object store, or trusted index cannot provide a result | Return an explicit retryable dependency limitation; do not treat it as no-evidence or success |
+
+`ambiguous` is not a `KnowledgeSearchResponse` state. It belongs to the
+separate structured policy/history retrieval contract when mapped uncertainty
+requires professional review. A knowledge search may return a cited wording
+passage that explains an ambiguity, but the ambiguity state must be represented
+by the structured retrieval/review contract rather than added to the knowledge
+search API by P4.2.
 
 No row in this matrix authorises coverage, fraud, liability, approval, rejection,
-or payment. Those decisions remain within the Agent Policy and authorised
-staff boundaries.
+or payment. Those decisions remain within the Agent Policy and authorised staff
+boundaries.
 
 ## Verification Evidence
 
