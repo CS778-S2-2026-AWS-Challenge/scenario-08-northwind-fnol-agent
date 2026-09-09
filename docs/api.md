@@ -1832,6 +1832,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `GET` | `/workbench/claims/{claim_id}/events` | Read the claim audit timeline |
 | `POST` | `/workbench/agent/sessions` | Create a private persistent Staff Agent session |
 | `GET` | `/workbench/agent/sessions` | List the authenticated staff member's Staff Agent sessions |
+| `GET` | `/workbench/agent/capabilities` | Read published Staff Agent model profiles |
 | `GET` | `/workbench/agent/sessions/{session_id}/messages` | Read one owned Staff Agent session |
 | `POST` | `/workbench/agent/sessions/{session_id}/messages` | Ask the Staff Agent with an explicit Claim scope |
 | `GET` | `/workbench/conversations` | List accessible Claim conversations and owned Staff Agent sessions |
@@ -1844,7 +1845,10 @@ Workbench pages and browser refreshes. They are not Claim conversation sessions 
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
 
-`POST /api/v1/workbench/agent/sessions` accepts an optional `title` and creates a `sas_` session.
+`POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
+`model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
+session; omitting it selects the published default. A message cannot override the session's
+profile.
 `GET /api/v1/workbench/agent/sessions` lists only sessions owned by the authenticated staff
 member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
 ordered `staff` and `assistant` messages; another staff identity receives `404` rather than an
@@ -1869,7 +1873,8 @@ customer updates, and external-service tasks), and authorised knowledge retrieva
 preserves source and availability limitations while building that context. It invokes the distinct
 `staff_assistant` model purpose under the
 `staff_internal_fnol` privacy class and prompt `northwind-fnol-staff-assistant-v1`. The response
-returns the saved session, the staff message and the assistant message. Assistant messages may
+returns the saved session, the staff message and the assistant message. Each assistant message
+records the provider model used for the session profile. Assistant messages may
 include source references and editable drafts of `claimant_message`, `internal_note`, or
 `external_request` kind. A draft can name only a Claim in the request scope.
 
@@ -1879,6 +1884,9 @@ move an accepted draft into the applicable revision-checked business-action rout
 performs permission, consent, idempotency and audit checks. Model unavailability, malformed output,
 or an out-of-scope draft fails the complete turn before either message is persisted. When no Staff
 Agent model profile is configured, message submission returns `503 DEPENDENCY_UNAVAILABLE`.
+
+`GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
+catalog for Staff authentication.
 
 ### `GET /api/v1/workbench/claims`
 
@@ -2209,7 +2217,8 @@ active handoff owner or Claim assignee, is another staff member.
 
 After a handoff is accepted, both parties may continue using the persisted session message
 history. A claimant message during an open handoff is routed to staff without an automatic Agent
-reply. Prefixing claimant text with `@agent` explicitly requests an Agent turn. Staff messages use
+reply. Claimants continue through the ordinary message route; there is no claimant command prefix.
+Staff messages use
 `POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
 `in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
 
