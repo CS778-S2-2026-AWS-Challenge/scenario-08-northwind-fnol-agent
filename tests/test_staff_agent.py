@@ -223,7 +223,7 @@ def test_staff_agent_builds_default_gateway_from_runtime_profile() -> None:
         'The configured Staff Agent is ready.'
     )
     assert len(gateway.requests) == 1
-    assert gateway.requests[0].purpose == 'staff_agent'
+    assert gateway.requests[0].purpose == 'staff_assistant'
 
 
 def test_staff_agent_gateway_fails_closed_when_profile_resolution_errors(
