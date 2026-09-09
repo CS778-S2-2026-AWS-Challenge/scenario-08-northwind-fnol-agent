@@ -1,0 +1,208 @@
+{
+  "scenario_id": "AT-14-field-states-motor",
+  "description": "Synthetic motor field-state example for the Week 6 validation prototype.",
+  "claim": {
+    "claim_id": "clm_fixture_at14",
+    "customer_id": "cus_demo",
+    "revision": 1,
+    "channel": "web_agent",
+    "locale": "en-NZ",
+    "incident_type": "motor",
+    "claim_state": {
+      "severity": "standard",
+      "coverage": "not_assessed",
+      "evidence": "not_started",
+      "fraud_signal": "none",
+      "customer_support": "guided",
+      "urgency": "normal",
+      "workflow_state": "collecting",
+      "next_action": "ASK"
+    },
+    "form": {
+      "claim.product_family": {
+        "value": "motor",
+        "source": "claimant",
+        "source_refs": ["msg_at14_family"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T01:01:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.description": {
+        "value": "The insured car was damaged while parked outside the office.",
+        "source": "claimant",
+        "source_refs": ["msg_at14_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T01:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "incident.type": {
+        "value": "collision",
+        "source": "claimant",
+        "source_refs": ["msg_at14_description"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T01:02:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "vehicle.registration": {
+        "value": "NWF-014",
+        "source": "claimant",
+        "source_refs": ["msg_at14_vehicle"],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-09-08T01:03:00Z",
+        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+      },
+      "vehicle.damage_description": {
+        "value": "The rear bumper appears dented.",
+        "source": "inference",
+        "source_refs": ["msg_at14_description"],
+        "status": "proposed",
+        "needed_for": "later_action",
+        "confidence": 0.72,
+        "updated_at": "2026-09-08T01:04:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "vehicle.drivable": {
+        "value": null,
+        "source": "claimant",
+        "source_refs": [],
+        "status": "missing",
+        "needed_for": "current_action",
+        "confidence": null,
+        "updated_at": "2026-09-08T01:04:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      },
+      "incident.cause": {
+        "value": "unknown parking-lot impact",
+        "source": "claimant",
+        "source_refs": ["msg_at14_description", "msg_at14_followup"],
+        "status": "disputed",
+        "needed_for": "later_action",
+        "confidence": 0.5,
+        "current_assertion_id": "assert_at14_inference",
+        "assertions": [
+          {
+            "assertion_id": "assert_at14_claimant",
+            "normalized_value": "another vehicle may have struck the parked car",
+            "source_refs": ["msg_at14_description"],
+            "relation": "initial",
+            "status": "proposed",
+            "precision": "exact",
+            "created_at": "2026-09-08T01:02:00Z"
+          },
+          {
+            "assertion_id": "assert_at14_inference",
+            "normalized_value": "the impact source is not established",
+            "source_refs": ["msg_at14_followup"],
+            "relation": "material_conflict",
+            "status": "proposed",
+            "precision": "unknown",
+            "reason_code": "CONFLICT_REQUIRES_REVIEW",
+            "created_at": "2026-09-08T01:05:00Z"
+          }
+        ],
+        "updated_at": "2026-09-08T01:05:00Z",
+        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+      }
+    },
+    "contents_items": [],
+    "evidence_summary": {"received": 0, "pending": 0, "needs_attention": 0},
+    "route": null,
+    "active_session_id": "ses_fixture_at14",
+    "external_claim": null,
+    "customer_next_step": {
+      "status": "confirm_material_facts",
+      "summary": "Confirm the remaining vehicle safety information before the next action.",
+      "responsible_party": "claimant",
+      "can_resume": true,
+      "required_items": ["vehicle.drivable"]
+    },
+    "created_at": "2026-09-08T01:00:00Z",
+    "updated_at": "2026-09-08T01:05:00Z"
+  },
+  "sessions": [
+    {
+      "session_id": "ses_fixture_at14",
+      "claim_id": "clm_fixture_at14",
+      "customer_id": "cus_demo",
+      "status": "active",
+      "summary": "Motor field-state example with one inferred and one disputed fact.",
+      "unresolved_questions": ["confirm:vehicle.drivable", "resolve:incident.cause"],
+      "pending_items": [],
+      "prior_commitments": [],
+      "context_revision": 1,
+      "started_at": "2026-09-08T01:00:00Z",
+      "last_active_at": "2026-09-08T01:05:00Z",
+      "closed_at": null
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_at14_family",
+      "claim_id": "clm_fixture_at14",
+      "session_id": "ses_fixture_at14",
+      "client_message_id": "at14-family",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "This is about my car."},
+      "evidence_refs": [],
+      "in_reply_to": null,
+      "created_at": "2026-09-08T01:01:00Z"
+    },
+    {
+      "message_id": "msg_at14_description",
+      "claim_id": "clm_fixture_at14",
+      "session_id": "ses_fixture_at14",
+      "client_message_id": "at14-description",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "My parked car was damaged outside the office."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at14_family",
+      "created_at": "2026-09-08T01:02:00Z"
+    },
+    {
+      "message_id": "msg_at14_vehicle",
+      "claim_id": "clm_fixture_at14",
+      "session_id": "ses_fixture_at14",
+      "client_message_id": "at14-vehicle",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "The registration is NWF-014."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at14_description",
+      "created_at": "2026-09-08T01:03:00Z"
+    },
+    {
+      "message_id": "msg_at14_followup",
+      "claim_id": "clm_fixture_at14",
+      "session_id": "ses_fixture_at14",
+      "client_message_id": "at14-followup",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {"type": "text", "text": "I did not see what caused the impact."},
+      "evidence_refs": [],
+      "in_reply_to": "msg_at14_vehicle",
+      "created_at": "2026-09-08T01:05:00Z"
+    }
+  ],
+  "expected": {
+    "family": "motor",
+    "field_states": {
+      "confirmed": ["claim.product_family", "incident.description", "incident.type", "vehicle.registration"],
+      "inferred": ["vehicle.damage_description"],
+      "missing": ["vehicle.drivable"],
+      "conflicting": ["incident.cause"],
+      "not_applicable": ["property.address", "contents.items"]
+    },
+    "claimant_hidden_fields": [],
+    "workbench_only_fields": []
+  }
+}

@@ -1,6 +1,6 @@
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -39,6 +39,7 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     IdempotencyConflict,
     IdempotencyRecord,
@@ -74,6 +75,16 @@ class FixtureRepository(PersistenceRepository):
         self._claim_coworkers: dict[str, ClaimCoworkerRecord] = {}
         self._handoffs: dict[str, HandoffRecord] = {}
         self._idempotency: dict[tuple[str, str, str], IdempotencyRecord] = {}
+        self._staff_presence: dict[str, StaffPresenceRecord] = {}
+        now = datetime.now(UTC)
+        self._staff_presence['stf_demo'] = StaffPresenceRecord(
+            staff_id='stf_demo',
+            online=True,
+            available=True,
+            last_seen_at=now,
+            expires_at=now + timedelta(minutes=5),
+            updated_at=now,
+        )
 
     def connection_status(self) -> str:
         return 'using_fixture'
@@ -108,6 +119,7 @@ class FixtureRepository(PersistenceRepository):
             'claim_coworkers': len(self._claim_coworkers),
             'handoffs': len(self._handoffs),
             'idempotency_records': len(self._idempotency),
+            'staff_presence': len(self._staff_presence),
         }
         self._claims.clear()
         self._audit_events.clear()
@@ -132,7 +144,42 @@ class FixtureRepository(PersistenceRepository):
         self._claim_coworkers.clear()
         self._handoffs.clear()
         self._idempotency.clear()
+        self._staff_presence.clear()
+        now = datetime.now(UTC)
+        self._staff_presence['stf_demo'] = StaffPresenceRecord(
+            staff_id='stf_demo',
+            online=True,
+            available=True,
+            last_seen_at=now,
+            expires_at=now + timedelta(minutes=5),
+            updated_at=now,
+        )
         return cleared
+
+    def get_staff_presence(self, staff_id: str) -> StaffPresenceRecord | None:
+        record = self._staff_presence.get(staff_id)
+        return deepcopy(record) if record is not None else None
+
+    def list_staff_presence(self) -> list[StaffPresenceRecord]:
+        return sorted(
+            (deepcopy(record) for record in self._staff_presence.values()),
+            key=lambda record: record.staff_id,
+        )
+
+    def save_staff_presence(
+        self, presence: StaffPresenceRecord, expected_revision: int | None = None
+    ) -> None:
+        current = self._staff_presence.get(presence.staff_id)
+        if current is None:
+            if expected_revision not in (None, 0):
+                raise RevisionConflict(0)
+            self._staff_presence[presence.staff_id] = deepcopy(presence)
+            return
+        if expected_revision is not None and current.revision != expected_revision:
+            raise RevisionConflict(current.revision)
+        if presence.revision != current.revision + 1:
+            raise RevisionConflict(current.revision)
+        self._staff_presence[presence.staff_id] = deepcopy(presence)
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:
         """Append one immutable audit event to the fixture store.
@@ -1547,8 +1594,21 @@ class FixtureRepository(PersistenceRepository):
         signal_decision: SignalDecisionRecord | None = None,
         handoff: HandoffRecord | None = None,
         message: MessageRecord | None = None,
+        required_staff_id: str | None = None,
+        required_staff_revision: int | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
+        if required_staff_id is not None:
+            presence = self._staff_presence.get(required_staff_id)
+            if (
+                presence is None
+                or not presence.is_claimable(datetime.now(UTC))
+                or (
+                    required_staff_revision is not None
+                    and presence.revision != required_staff_revision
+                )
+            ):
+                raise KeyError('staff_not_available')
         if not any((staff_action, customer_update, signal_decision, handoff, message)):
             raise KeyError(claim.claim_id)
         records = (staff_action, customer_update, signal_decision, handoff, message)
@@ -1615,6 +1675,11 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        if required_staff_id is not None and required_staff_revision is not None:
+            assert presence is not None
+            self._staff_presence[required_staff_id] = deepcopy(
+                presence.model_copy(update={'revision': presence.revision + 1})
+            )
         if existing_message is not None:
             raise IdempotencyConflict(message.message_id if message is not None else '')
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)

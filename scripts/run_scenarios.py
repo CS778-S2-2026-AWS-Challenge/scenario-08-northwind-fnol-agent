@@ -10,6 +10,11 @@ from backend.repositories.fixture import FixtureRepository  # noqa: E402
 from backend.repositories.scenario_loader import load_scenarios, seed_scenario  # noqa: E402
 
 SCENARIO_DIRECTORY = REPOSITORY_ROOT / 'backend' / 'demo_data' / 'scenarios'
+NON_CANONICAL_SCENARIO_IDS = {
+    'AT-14-field-states-motor',
+    'AT-15-field-states-home',
+    'AT-16-field-states-contents',
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +31,14 @@ class ScenarioResult:
 
 def run_scenarios(directory: Path = SCENARIO_DIRECTORY) -> list[ScenarioResult]:
     results: list[ScenarioResult] = []
-    for scenario in load_scenarios(directory):
+    # Keep validation output aligned with the Day 3 runner contract. Week 6
+    # field-state records live in the same directory but are not MVP paths.
+    scenarios = [
+        scenario
+        for scenario in load_scenarios(directory)
+        if scenario.scenario_id not in NON_CANONICAL_SCENARIO_IDS
+    ]
+    for scenario in scenarios:
         repository = FixtureRepository()
         seed_scenario(repository, scenario)
         claim = repository.get_claim(scenario.claim.claim_id, scenario.claim.customer_id)

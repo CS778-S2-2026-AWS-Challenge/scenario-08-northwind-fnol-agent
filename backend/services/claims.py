@@ -26,6 +26,7 @@ from backend.domain.models import (
     CreateClaimRequest,
     CreateClaimResponse,
     CustomerNextStep,
+    FieldSelectionState,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -671,15 +672,32 @@ def update_form(
             'incident_type': incident_type,
         }
     )
-    next_step = next_requirement_step(
-        BranchRuleEvaluator()
-        .evaluate(
-            projected_claim,
-            current_action=claim.claim_state.next_action,
-            recomputation_reason='form_update_preview',
-        )
-        .requirements
+    candidate_branch_evaluation = BranchRuleEvaluator().evaluate(
+        projected_claim,
+        current_action=claim.claim_state.next_action,
+        recomputation_reason='form_update_validation',
     )
+    candidate_field_selection = {
+        item.field_code: item.selection_state
+        for item in candidate_branch_evaluation.field_selection
+    }
+    for update in payload.updates:
+        if (
+            update.field_code != 'claim.product_family'
+            and candidate_field_selection.get(update.field_code) is FieldSelectionState.INACTIVE
+        ):
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message='The form update is incompatible with the selected claim family.',
+                details=[
+                    ErrorDetail(
+                        field=update.field_code,
+                        reason='The field is inactive for the selected or confirmed family.',
+                    )
+                ],
+            )
+    next_step = next_requirement_step(candidate_branch_evaluation.requirements)
     updated_claim = projected_claim.model_copy(
         update={
             'customer_next_step': next_step,
