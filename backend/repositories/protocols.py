@@ -187,8 +187,8 @@ class ClaimRepository(Protocol):
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
 
-    def seed_validation_graph(self, graph: ValidationSeedGraph) -> None:
-        """Atomically persist the three-path validation graph and retry record."""
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Persist the graph, returning an existing idempotent result on replay."""
         raise NotImplementedError
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:

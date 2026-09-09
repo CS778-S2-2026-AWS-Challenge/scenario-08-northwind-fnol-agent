@@ -70,6 +70,7 @@ from backend.repositories.protocols import (
 )
 
 ModelT = TypeVar('ModelT', bound=BaseModel)
+ResultT = TypeVar('ResultT')
 _DATETIME_ADAPTER = TypeAdapter(datetime)
 
 
@@ -524,11 +525,13 @@ class MongoDBRepository:
             raise KeyError(claim.claim_id)
         self._atomic(lambda mongo_session: self._create_claim(claim, session, mongo_session))
 
-    def seed_validation_graph(self, graph: ValidationSeedGraph) -> None:
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
         """Persist validation records in one MongoDB transaction."""
-        self._atomic(lambda mongo_session: self._seed_validation_graph(graph, mongo_session))
+        return self._atomic(lambda mongo_session: self._seed_validation_graph(graph, mongo_session))
 
-    def _seed_validation_graph(self, graph: ValidationSeedGraph, mongo_session: Any) -> None:
+    def _seed_validation_graph(
+        self, graph: ValidationSeedGraph, mongo_session: Any
+    ) -> IdempotencyRecord | None:
         idempotency_query = {
             'record_type': 'idempotency',
             'actor_id': graph.idempotency.actor_id,
@@ -540,7 +543,7 @@ class MongoDBRepository:
             payload = existing_idempotency.get('payload', {})
             if payload.get('request_fingerprint') != graph.idempotency.request_fingerprint:
                 raise IdempotencyConflict(graph.idempotency.key)
-            return
+            return IdempotencyRecord(**payload)
         if self._collection.find_one(
             {'record_type': 'claim'},
             projection={'_id': 1},
@@ -644,6 +647,7 @@ class MongoDBRepository:
                 session=mongo_session,
             )
         self._save_idempotency(graph.idempotency, session=mongo_session)
+        return None
 
     def _create_claim(
         self,
@@ -3007,10 +3011,10 @@ class MongoDBRepository:
                 records.append(record)
         return records
 
-    def _atomic(self, operation: Callable[[Any], None]) -> None:
+    def _atomic(self, operation: Callable[[Any], ResultT]) -> ResultT:
         """Run a multi-record write only where MongoDB transactions are available."""
         with self._client.start_session() as session:
-            session.with_transaction(operation)
+            return session.with_transaction(operation)
 
     # Remaining PersistenceRepository operations are deliberately explicit until
     # their mapping and transaction tests are added in follow-up commits.

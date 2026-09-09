@@ -1,4 +1,5 @@
 import gc
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -289,8 +290,10 @@ def test_fixture_validation_seed_repository_guards_replay_conflict_and_graph_sha
     repository = FixtureRepository()
     graph = _validation_graph(repository)
 
-    repository.seed_validation_graph(graph)
-    repository.seed_validation_graph(graph)
+    assert repository.seed_validation_graph(graph) is None
+    replay = repository.seed_validation_graph(graph)
+    assert replay is not None
+    assert replay.response_payload == graph.idempotency.response_payload
     with pytest.raises(IdempotencyConflict):
         repository.seed_validation_graph(
             replace(
@@ -333,6 +336,25 @@ def test_fixture_validation_seed_repository_guards_replay_conflict_and_graph_sha
     )
 
 
+def test_fixture_validation_seed_same_key_race_returns_one_persisted_result() -> None:
+    repository = FixtureRepository()
+    first_graph = _validation_graph(repository, key='same-key-race')
+    second_graph = _validation_graph(repository, key='same-key-race')
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(repository.seed_validation_graph, (first_graph, second_graph)))
+
+    persisted = repository.find_idempotency('stf_demo', VALIDATION_SEED_ROUTE, 'same-key-race')
+    assert persisted is not None
+    assert sum(result is None for result in results) == 1
+    replay = next(result for result in results if result is not None)
+    assert replay.response_payload == persisted.response_payload
+    assert all(
+        repository.get_claim(claim_id, 'cus_demo') is not None
+        for claim_id in (persisted.response_payload or {}).get('claim_ids', [])
+    )
+
+
 @pytest.mark.parametrize(
     'field_update',
     [
@@ -358,8 +380,10 @@ def test_mongodb_validation_seed_repository_guards_replay_conflict_and_graph_sha
     repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
     graph = _validation_graph(repository)
 
-    repository.seed_validation_graph(graph)
-    repository.seed_validation_graph(graph)
+    assert repository.seed_validation_graph(graph) is None
+    replay = repository.seed_validation_graph(graph)
+    assert replay is not None
+    assert replay.response_payload == graph.idempotency.response_payload
     with pytest.raises(IdempotencyConflict):
         repository.seed_validation_graph(
             replace(

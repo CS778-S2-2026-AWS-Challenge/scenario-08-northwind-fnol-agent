@@ -219,7 +219,7 @@ def seed_validation_scenarios(
         idempotency=idempotency,
     )
     try:
-        repository.seed_validation_graph(graph)
+        replayed = repository.seed_validation_graph(graph)
     except DemoSeedConflict as error:
         raise ApiError(
             status_code=409,
@@ -227,6 +227,13 @@ def seed_validation_scenarios(
             message='Reset the local demo before loading validation scenarios.',
         ) from error
     except IdempotencyConflict as error:
+        replayed = repository.find_idempotency(staff_id, VALIDATION_SEED_ROUTE, key)
+        if (
+            replayed is not None
+            and replayed.request_fingerprint == fingerprint
+            and replayed.response_payload is not None
+        ):
+            return DemoSeedResponse.model_validate(replayed.response_payload)
         raise ApiError(
             status_code=409,
             code='IDEMPOTENCY_CONFLICT',
@@ -240,6 +247,14 @@ def seed_validation_scenarios(
             retryable=True,
             current_revision=error.current_revision,
         ) from error
+    if replayed is not None:
+        if replayed.response_payload is None:
+            raise ApiError(
+                status_code=500,
+                code='INTERNAL_ERROR',
+                message='The validation seed replay could not be restored.',
+            )
+        return DemoSeedResponse.model_validate(replayed.response_payload)
     return response
 
 
