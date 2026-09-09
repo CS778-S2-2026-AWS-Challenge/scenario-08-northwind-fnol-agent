@@ -465,8 +465,8 @@ def test_model_catalog_does_not_bootstrap_when_model_settings_are_incomplete() -
         environment='test',
         identity_mode=IdentityMode.DEVELOPER,
         agent_runtime_profile=AgentRuntimeProfile.CONTROLLED,
-        model_base_url=None,
-        model_identifier=None,
+        model_base_url='',
+        model_identifier='',
     )
     assert _settings_configuration(settings) is None
 
