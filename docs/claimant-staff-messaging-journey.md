@@ -84,10 +84,11 @@ Run the focused checks while developing; CircleCI supplies the authoritative exa
 
 ```text
 py -3.12 -m pytest tests/test_handoff_api.py tests/test_staff_actions_api.py tests/test_workbench_api.py
-npm test --prefix customer -- --run src/App.test.jsx src/EmployeeWorkbench.test.js
+npm test --prefix archive/customer -- --run src/App.test.jsx src/EmployeeWorkbench.test.js
 ```
 
-Focused checks are `customer/src/App.test.jsx`, `customer/src/EmployeeWorkbench.test.js`,
+Historical focused checks are `archive/customer/src/App.test.jsx`,
+`archive/customer/src/EmployeeWorkbench.test.js`,
 `tests/test_handoff_api.py`, `tests/test_staff_actions_api.py`, and
 `tests/test_workbench_api.py`. The componentised Workbench suite is run with
-`npm test --prefix workbench`.
+`npm test --prefix archive/workbench`; these archived client checks are not current CI targets.

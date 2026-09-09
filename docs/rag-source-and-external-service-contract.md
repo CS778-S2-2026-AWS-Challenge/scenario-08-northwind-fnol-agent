@@ -91,7 +91,7 @@ The #262 claimant flow can be repeated from the repository root with:
 
 ```powershell
 python -m pytest tests/test_claimant_external_service.py tests/test_integrations.py
-npm test --prefix customer -- src/App.test.jsx
+npm test --prefix archive/customer -- src/App.test.jsx
 ```
 
 The backend checks prove that the action is absent before the controlled created-motor state,
@@ -106,7 +106,7 @@ The claimant tests exercise the
 consent-required, permission and submission progress, assigned success, retryable failure,
 explicit retry, authoritative-result recovery, and claim-scoped interaction states.
 
-For a visible check, start the backend and claimant client, complete a synthetic motor report
+For a historical visible check, start the backend and archived claimant client, complete a synthetic motor report
 with a confirmed incident location, and create the claim. Verify that the assessor card appears
 only then, names the controlled fixture provider, lists the four shared-data groups, and keeps
 the request button disabled until permission is checked. Submit the request and verify the
