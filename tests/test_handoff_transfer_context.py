@@ -7,7 +7,6 @@ from backend.repositories.fixture import FixtureRepository
 from backend.repositories.scenario_loader import load_scenario, seed_scenario
 from backend.services.handoff_context import _active_signals, build_handoff_transfer_context
 
-
 SCENARIO = (
     Path(__file__).resolve().parents[1]
     / 'backend'
@@ -34,8 +33,7 @@ def test_transfer_context_uses_durable_retrieval_and_tag_coordinates() -> None:
     assert context.policy_retrieval_refs == [linked.policy_retrieval_id]
     assert context.history_retrieval_refs == [linked.claim_history_retrieval_id]
     assert any(
-        ref.startswith('tag_registry:northwind-fnol-staff-tags:')
-        for ref in context.provenance_refs
+        ref.startswith('tag_registry:northwind-fnol-staff-tags:') for ref in context.provenance_refs
     )
     assert len(context.provenance_refs) == len(set(context.provenance_refs))
 

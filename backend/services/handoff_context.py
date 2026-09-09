@@ -61,17 +61,13 @@ def build_handoff_transfer_context(
         record.retrieval_id for record in retrievals if record.kind is RetrievalKind.POLICY
     ]
     history_retrieval_refs = [
-        record.retrieval_id
-        for record in retrievals
-        if record.kind is RetrievalKind.CLAIM_HISTORY
+        record.retrieval_id for record in retrievals if record.kind is RetrievalKind.CLAIM_HISTORY
     ]
     provenance_refs: list[str] = []
     for signal in active_signals:
         provenance_refs.extend([signal.signal_id, *signal.source_refs])
     for tag in tags:
-        provenance_refs.append(
-            f'tag_registry:{TAG_REGISTRY_ID}:{tag.registry_version}:{tag.code}'
-        )
+        provenance_refs.append(f'tag_registry:{TAG_REGISTRY_ID}:{tag.registry_version}:{tag.code}')
         provenance_refs.extend(tag.source_refs)
 
     return HandoffTransferContext(

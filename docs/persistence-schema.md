@@ -409,6 +409,18 @@ Evidence record or protected object.
 
 - A handoff retains immutable identity, type, reason, priority, requested action, source
   context, transfer packet, and creation time.
+- Policy and claim-history context in the transfer packet references authoritative persisted
+  Retrieval records by stable `retrieval_id`; the packet does not duplicate policy wording,
+  claim-history facts, or mutable provider output as a second source of truth.
+- Transfer-time Review Signal provenance retains only relevant stable signal/source references.
+  Derived Staff Tags retain the minimum immutable Registry coordinate needed to reconstruct their
+  basis: tag code, Registry version, and source references. Current mutable tag and signal state is
+  recomputed from authoritative Claim-linked records.
+- The transfer packet does not persist a second mutable current-responsibility or ownership field.
+  Current responsibility remains authoritative in live Claim and Workbench state.
+- Policy/history absence remains distinguishable from provider or source unavailability. A failed
+  or unavailable required retrieval must remain explicit in durable handoff context rather than
+  being represented as an unexplained empty reference list.
 - Lifecycle changes may update status, owner, and applicable timestamps through a
   revision-checked claim mutation.
 - Acceptance records one owner. Active work cannot be reassigned by a blind overwrite.
