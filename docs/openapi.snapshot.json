@@ -2373,6 +2373,18 @@
           "action": {
             "$ref": "#/components/schemas/AgentAction"
           },
+          "action_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z]+\\.[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Code"
+          },
           "customer_next_step": {
             "$ref": "#/components/schemas/CustomerNextStep"
           },
@@ -2729,6 +2741,13 @@
           "last_active_at": {
             "format": "date-time",
             "title": "Last Active At",
+            "type": "string"
+          },
+          "model_profile_id": {
+            "default": "qwen-local",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Model Profile Id",
             "type": "string"
           },
           "resume": {
@@ -3460,6 +3479,19 @@
             "minLength": 2,
             "title": "Locale",
             "type": "string"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
           }
         },
         "title": "CreateClaimRequest",
@@ -8847,6 +8879,17 @@
             "title": "Claim Types",
             "type": "array"
           },
+          "default_model_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Profile Id"
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/ModelCapability"
@@ -9694,6 +9737,16 @@
             "title": "Activated At",
             "type": "string"
           },
+          "attention_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagAttentionLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "basis": {
             "$ref": "#/components/schemas/TagBasis"
           },
@@ -9718,17 +9771,26 @@
             "title": "Display Weight",
             "type": "integer"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/TagFreshness"
+          },
           "label": {
             "maxLength": 100,
             "minLength": 1,
             "title": "Label",
             "type": "string"
           },
+          "projection_mode": {
+            "$ref": "#/components/schemas/TagProjectionMode"
+          },
           "registry_version": {
             "maxLength": 20,
             "minLength": 1,
             "title": "Registry Version",
             "type": "string"
+          },
+          "source_actor": {
+            "$ref": "#/components/schemas/TagSourceActor"
           },
           "source_refs": {
             "items": {
@@ -9762,6 +9824,9 @@
           "status",
           "visibility",
           "basis",
+          "source_actor",
+          "freshness",
+          "projection_mode",
           "source_refs",
           "activated_at",
           "display_weight"
@@ -9778,6 +9843,19 @@
             "minLength": 1,
             "title": "Intent",
             "type": "string"
+          },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
           }
         },
         "title": "StartSessionRequest",
@@ -10016,6 +10094,15 @@
         "title": "SupportRequestResponse",
         "type": "object"
       },
+      "TagAttentionLevel": {
+        "enum": [
+          "notice",
+          "elevated",
+          "high"
+        ],
+        "title": "TagAttentionLevel",
+        "type": "string"
+      },
       "TagBasis": {
         "enum": [
           "reported",
@@ -10040,20 +10127,44 @@
         "title": "TagCategory",
         "type": "string"
       },
+      "TagFreshness": {
+        "enum": [
+          "current",
+          "stale"
+        ],
+        "title": "TagFreshness",
+        "type": "string"
+      },
       "TagInstanceStatus": {
         "enum": [
-          "proposed",
           "active",
-          "disputed",
-          "retired"
+          "disputed"
         ],
         "title": "TagInstanceStatus",
         "type": "string"
       },
+      "TagProjectionMode": {
+        "enum": [
+          "deterministic",
+          "staff_assessed",
+          "external_result",
+          "unavailable"
+        ],
+        "title": "TagProjectionMode",
+        "type": "string"
+      },
+      "TagSourceActor": {
+        "enum": [
+          "claimant",
+          "staff",
+          "system",
+          "external_service"
+        ],
+        "title": "TagSourceActor",
+        "type": "string"
+      },
       "TagVisibility": {
         "enum": [
-          "visible",
-          "safe_summary_only",
           "staff_only"
         ],
         "title": "TagVisibility",

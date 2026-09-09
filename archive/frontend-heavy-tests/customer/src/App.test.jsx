@@ -2230,4 +2230,71 @@ describe('adaptive claimant entry', () => {
       screen.queryByRole('heading', { name: 'Motor claim details' }),
     ).not.toBeInTheDocument())
   })
+
+  it('resumes a saved session with its persisted model after a fresh client load', async () => {
+    const persistedClaim = {
+      ...createdClaim().claim,
+      claim_id: 'clm_saved_gpt',
+      revision: 4,
+      incident_type: 'motor',
+    }
+    const persistedSession = {
+      session_id: 'ses_saved_gpt',
+      claim_id: persistedClaim.claim_id,
+      status: 'active',
+      model_profile_id: 'nowcoding-gpt54mini',
+      resume: { summary: 'Saved GPT report.', pending_items: [], prior_commitments: [], customer_next_step: nextStep },
+      started_at: '2026-08-27T01:00:00Z',
+      last_active_at: '2026-08-27T02:00:00Z',
+      closed_at: null,
+    }
+    setClaimantAccessToken('claimant-test-token')
+    fetch.mockImplementation((url, options = {}) => {
+      const method = options.method || 'GET'
+      if (url === '/api/v1/claims/capabilities') {
+        return jsonResponse({
+          claim_types: ['motor', 'home', 'contents'],
+          default_model_profile_id: 'qwen-local',
+          models: [
+            { id: 'qwen-local', label: 'qwen3.8-27b', protocol: 'openai_compatible', structured_output: true, tools: true },
+            { id: 'nowcoding-gpt54mini', label: 'gpt-5.4-mini', protocol: 'openai_compatible', structured_output: true, tools: true },
+          ],
+        })
+      }
+      if (url === '/api/v1/account') {
+        return jsonResponse({
+          customer_id: 'cus_test',
+          development_identity: true,
+          profile: { display_name: 'Test Claimant', email: 'test@example.invalid', phone: '' },
+          preferences: { email: true, sms: false },
+        })
+      }
+      if (url === '/api/v1/claims?limit=25') {
+        return jsonResponse({
+          items: [{
+            ...persistedClaim,
+            can_resume: true,
+          }],
+          page: { next_cursor: null },
+        })
+      }
+      if (url === `/api/v1/claims/${persistedClaim.claim_id}/sessions` && method === 'POST') {
+        const body = JSON.parse(options.body)
+        expect(body).toEqual({ intent: 'resume' })
+        return jsonResponse(persistedSession, 201)
+      }
+      if (url === `/api/v1/claims/${persistedClaim.claim_id}`) return jsonResponse(persistedClaim)
+      if (url === `/api/v1/claims/${persistedClaim.claim_id}/sessions/${persistedSession.session_id}/messages?limit=100`) {
+        return jsonResponse({ items: [], page: { next_cursor: null } })
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Resume claim' }))
+
+    expect(await screen.findByRole('heading', { name: 'Continue where you left off' })).toBeVisible()
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('nowcoding-gpt54mini')
+  })
 })

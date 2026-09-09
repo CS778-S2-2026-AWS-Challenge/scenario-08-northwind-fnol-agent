@@ -27,7 +27,7 @@ const filterMetadata = {
     { value: 'high', label: 'High' },
   ],
   tags: [{ value: tag.code, label: tag.label, category: tag.category }],
-  tag_registry_version: '0.2',
+  tag_registry_version: '0.3',
 }
 
 const claim = {
