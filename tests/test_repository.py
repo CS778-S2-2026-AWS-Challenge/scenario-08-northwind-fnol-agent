@@ -16,6 +16,8 @@ from backend.domain.models import (
     MessageRecord,
     MessageVisibility,
     ResponsibleParty,
+    RuntimeInvocationTrace,
+    RuntimeTraceRecord,
     SessionRecord,
     WorkingClaim,
 )
@@ -54,6 +56,77 @@ def make_claim() -> tuple[WorkingClaim, SessionRecord]:
         last_active_at=timestamp,
     )
     return claim, session
+
+
+def make_runtime_records(
+    claim: WorkingClaim,
+    session: SessionRecord,
+) -> tuple[
+    WorkingClaim,
+    SessionRecord,
+    MessageRecord,
+    MessageRecord,
+    RuntimeTraceRecord,
+    IdempotencyRecord,
+]:
+    claim = claim.model_copy(update={'active_session_id': session.session_id})
+    session = session.model_copy(update={'context_revision': claim.revision})
+    claimant_message = MessageRecord(
+        message_id='msg_runtime_claimant',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        client_message_id='runtime-client',
+        actor='claimant',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'Read my current report.'},
+        created_at=claim.created_at,
+    )
+    agent_message = MessageRecord(
+        message_id='msg_runtime_agent',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        actor='agent',
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': 'I read the current report.'},
+        in_reply_to=claimant_message.message_id,
+        created_at=claim.created_at,
+    )
+    trace = RuntimeTraceRecord(
+        trace_id='trace_runtime',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        model_profile_id='qwen-local',
+        trigger_message_id=claimant_message.message_id,
+        invocations=[
+            RuntimeInvocationTrace(
+                ordinal=1,
+                provider_model='qwen3.8-27b',
+                provider_request_id='provider-request-1',
+                latency_ms=10,
+            )
+        ],
+        tool_call_id='call_claim_read',
+        tool_name='claim.read',
+        tool_result_status='succeeded',
+        action_code='conversation.answer',
+        runtime_action_code='runtime.continue',
+        reason_codes=['CLAIM_CONTEXT_READ'],
+        status='succeeded',
+        created_at=claim.created_at,
+        finished_at=claim.updated_at,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/api/v1/claims/messages',
+        key='runtime-key',
+        request_fingerprint='runtime-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        runtime_trace_id=trace.trace_id,
+    )
+    return claim, session, claimant_message, agent_message, trace, idempotency
 
 
 def test_fixture_repository_enforces_ownership_and_revision() -> None:
@@ -375,6 +448,140 @@ def test_fixture_repository_rejects_inconsistent_agent_turn_records() -> None:
             linked_agent_message,
             decision,
             idempotency,
+        )
+
+
+def test_fixture_repository_persists_and_reads_runtime_trace() -> None:
+    repository = FixtureRepository()
+    records = make_runtime_records(*make_claim())
+    claim, session, claimant_message, agent_message, trace, idempotency = records
+    repository.create_claim(claim, session)
+
+    repository.save_runtime_turn(
+        claim,
+        claim.revision,
+        session,
+        claimant_message,
+        agent_message,
+        trace,
+        idempotency,
+    )
+
+    assert repository.get_runtime_trace(claim.claim_id, trace.trace_id, claim.customer_id) == trace
+    assert (
+        repository.find_runtime_trace_for_trigger(
+            claim.claim_id,
+            claimant_message.message_id,
+            claim.customer_id,
+        )
+        == trace
+    )
+    assert repository.get_runtime_trace(claim.claim_id, trace.trace_id, 'other_customer') is None
+    assert repository.get_runtime_trace(claim.claim_id, 'missing-trace', claim.customer_id) is None
+    assert (
+        repository.find_runtime_trace_for_trigger(
+            claim.claim_id,
+            'missing-message',
+            claim.customer_id,
+        )
+        is None
+    )
+
+
+def test_fixture_runtime_turn_rejects_revision_records_and_retries() -> None:
+    repository = FixtureRepository()
+    claim, session, claimant_message, agent_message, trace, idempotency = make_runtime_records(
+        *make_claim()
+    )
+
+    with pytest.raises(KeyError):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    repository.create_claim(claim, session)
+    with pytest.raises(RevisionConflict):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision - 1,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    with pytest.raises(KeyError):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message.model_copy(update={'claim_id': 'other-claim'}),
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    repository.save_message(
+        claimant_message.model_copy(update={'message_id': 'existing-message'}),
+        claim.customer_id,
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    duplicate_repository = FixtureRepository()
+    duplicate_repository.create_claim(claim, session)
+    duplicate_repository.save_message(claimant_message, claim.customer_id)
+    new_claimant_message = claimant_message.model_copy(update={'message_id': 'new-message'})
+    new_agent_message = agent_message.model_copy(update={'in_reply_to': 'new-message'})
+    with pytest.raises(IdempotencyConflict):
+        duplicate_repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            new_claimant_message,
+            new_agent_message,
+            trace.model_copy(update={'trace_id': 'new-trace', 'trigger_message_id': 'new-message'}),
+            IdempotencyRecord(
+                **{
+                    **idempotency.__dict__,
+                    'message_id': 'new-message',
+                    'runtime_trace_id': 'new-trace',
+                }
+            ),
+        )
+
+    conflict_repository = FixtureRepository()
+    conflict_repository.create_claim(claim, session)
+    conflict_repository.save_idempotency(idempotency)
+    with pytest.raises(IdempotencyConflict):
+        conflict_repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency.__class__(
+                **{
+                    **idempotency.__dict__,
+                    'request_fingerprint': 'different-fingerprint',
+                }
+            ),
         )
 
 

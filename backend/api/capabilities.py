@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.core.auth import Principal, require_claimant
 from backend.core.config import AgentRuntimeProfile
+from backend.domain.configuration import ModelRuntimeConfiguration
+from backend.services.model_profiles import model_catalog
 
 
 class ModelCapability(BaseModel):
@@ -20,6 +22,7 @@ class RuntimeCapabilitiesResponse(BaseModel):
 
     claim_types: list[str]
     models: list[ModelCapability]
+    default_model_profile_id: str | None = None
 
 
 router = APIRouter(prefix='/api/v1/claims', tags=['capabilities'])
@@ -33,16 +36,23 @@ def capabilities(
     settings = request.app.state.settings
     models: list[ModelCapability] = []
     if settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
-        models.append(
-            ModelCapability(
-                id=settings.model_identifier,
-                label=settings.model_identifier,
-                protocol=settings.model_protocol_adapter,
-                structured_output=settings.model_supports_structured_output,
-                tools=settings.model_supports_tools,
+        for record in model_catalog(request):
+            configuration = ModelRuntimeConfiguration.model_validate(record.values)
+            models.append(
+                ModelCapability(
+                    id=configuration.profile_id,
+                    label=configuration.model_identifier,
+                    protocol=configuration.protocol,
+                    structured_output=configuration.structured_output,
+                    tools=configuration.tools,
+                )
             )
-        )
     return RuntimeCapabilitiesResponse(
         claim_types=['motor', 'home', 'contents'],
         models=models,
+        default_model_profile_id=(
+            'qwen-local'
+            if any(model.id == 'qwen-local' for model in models)
+            else (models[0].id if models else None)
+        ),
     )

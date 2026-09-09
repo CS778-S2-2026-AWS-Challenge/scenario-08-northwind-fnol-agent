@@ -746,6 +746,10 @@ def _configuration_key(domain: str, values: dict[str, object]) -> str:
         service_id = values.get('service_id')
         if isinstance(service_id, str) and service_id:
             return service_id
+    if domain == 'model':
+        profile_id = values.get('profile_id')
+        if isinstance(profile_id, str) and profile_id:
+            return profile_id
     return 'default'
 
 
@@ -789,6 +793,7 @@ def _validate_configuration_values(
             and configuration.privacy_class == model_runtime_binding.privacy_class
             and configuration.prompt_version == model_runtime_binding.prompt_version
             and configuration.structured_output is model_runtime_binding.structured_output
+            and configuration.tools is model_runtime_binding.tools
         )
         if configuration.evaluation_status != 'configured' or not binding_matches:
             raise _error(

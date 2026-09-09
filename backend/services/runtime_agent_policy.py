@@ -13,6 +13,7 @@ from backend.domain.agent_runtime_configuration import (
     AgentToolPolicyConfiguration,
     ControlledRulesConfiguration,
 )
+from backend.domain.agent_tool_registry import AGENT_TOOL_REGISTRY
 from backend.domain.branch_registry import BranchRuleEvaluator, build_default_registry
 from backend.domain.models import (
     AgentAction,
@@ -130,7 +131,7 @@ def _registered_tool_names() -> frozenset[str]:
     contract_tools = {
         tool for contract in AGENT_ACTION_REGISTRY.values() for tool in contract.permitted_tools
     }
-    return frozenset(contract_tools | set(PROPOSAL_TOOL_ACTIONS))
+    return frozenset(contract_tools | set(PROPOSAL_TOOL_ACTIONS) | set(AGENT_TOOL_REGISTRY))
 
 
 def registered_agent_tool_names() -> tuple[str, ...]:
@@ -218,7 +219,7 @@ class RuntimeAgentPolicyResolver:
         assert isinstance(controlled_rules, ControlledRulesConfiguration)
         assert isinstance(features, AgentFeatureSettingsConfiguration)
 
-        model_record = snapshot.configurations.get('model')
+        model_record = snapshot.model()
         if model_record is not None:
             model_prompt_version = model_record.values.get('prompt_version')
             if model_prompt_version != instruction.prompt_version:
@@ -236,6 +237,9 @@ class RuntimeAgentPolicyResolver:
 
 def required_action_codes(proposal: AgentProposal) -> frozenset[str]:
     """Translate the compatibility proposal to its registered target-action boundary."""
+
+    if proposal.action_code is not None:
+        return frozenset({proposal.action_code, 'runtime.continue'})
 
     if proposal.action is AgentAction.URGENT_HANDOFF:
         actions = {'human.create_handoff', 'runtime.interrupt_urgent'}
