@@ -8,7 +8,7 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
+method surface covers Claim, Session, Message, read-only Runtime Trace, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
 External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
@@ -67,7 +67,7 @@ projections, fixtures, and transaction tests change together.
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
-| Agent turn | TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelopes, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`, linked to session and optional Claim |
+| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
@@ -139,8 +139,10 @@ the append-only audit collection through a bounded, filterable projection.
 8. Read staff queues by priority, state, owner, next action, and service timing.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Resolve a current task-specific claimant consent before invoking an external participant.
-12. Reserve an immutable external-operation identity and fingerprint before invocation, then
+11. Persist a namespaced read-only Runtime turn atomically with its claimant/agent messages,
+    Session activity, Runtime trace, and idempotency response without advancing Claim revision.
+12. Resolve a current task-specific claimant consent before invoking an external participant.
+13. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
 13. Resolve the active configuration version and read its immutable publication record.
 14. List administration audit events by bounded actor, subject, event type, and time filters without
@@ -570,6 +572,11 @@ and `feature`). Each component keeps its own immutable revisions and lifecycle/a
 tool-permission change cannot silently rewrite instructions or feature settings. High-impact
 components use the existing independent approval record and publication guard; no component may
 write production Claim State.
+
+Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
+Set can bind both `qwen-local` and `nowcoding-gpt54mini` without overwriting either profile.
+Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
+selected profile ID and Runtime resolves that exact key for every turn.
 
 An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
 turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID

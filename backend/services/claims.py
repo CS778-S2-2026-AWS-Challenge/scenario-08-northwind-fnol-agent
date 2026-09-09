@@ -237,6 +237,7 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
         session_id=session.session_id,
         claim_id=session.claim_id,
         status=session.status,
+        model_profile_id=session.model_profile_id,
         resume=ResumePackage(
             summary=session.summary,
             unresolved_questions=session.unresolved_questions,
@@ -314,6 +315,7 @@ def start_claim(
         session_id=session_id,
         claim_id=claim_id,
         customer_id=principal.subject,
+        model_profile_id=payload.model_profile_id or 'qwen-local',
         context_revision=claim.revision,
         started_at=timestamp,
         last_active_at=timestamp,
@@ -479,6 +481,10 @@ def start_session(
             session_id=new_id('ses'),
             claim_id=claim_id,
             customer_id=principal.subject,
+            model_profile_id=(
+                payload.model_profile_id
+                or (resume_source.model_profile_id if resume_source is not None else 'qwen-local')
+            ),
             summary=resume_source.summary if resume_source is not None else None,
             unresolved_questions=(
                 list(resume_source.unresolved_questions) if resume_source is not None else []

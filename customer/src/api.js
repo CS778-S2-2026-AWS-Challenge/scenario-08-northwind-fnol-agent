@@ -225,11 +225,16 @@ export async function logoutClaimant() {
   }
 }
 
-export function createClaim({ idempotencyKey = requestId('claim'), incidentType = null } = {}) {
+export function createClaim({ idempotencyKey = requestId('claim'), incidentType = null, modelProfileId = null } = {}) {
   return apiRequest('/api/v1/claims', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ channel: 'web_agent', locale: 'en-NZ', incident_type: incidentType }),
+    body: JSON.stringify({
+      channel: 'web_agent',
+      locale: 'en-NZ',
+      incident_type: incidentType,
+      ...(modelProfileId ? { model_profile_id: modelProfileId } : {}),
+    }),
   })
 }
 
@@ -296,19 +301,20 @@ export function listClaims({ cursor, limit = 25 } = {}) {
 export function resumeClaimSession({
   claimId,
   idempotencyKey = requestId('resume'),
+  modelProfileId = null,
 }) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ intent: 'resume' }),
+    body: JSON.stringify({ intent: 'resume', ...(modelProfileId ? { model_profile_id: modelProfileId } : {}) }),
   })
 }
 
-export function startClaimSession({ claimId, intent = 'new', idempotencyKey = requestId('session') }) {
+export function startClaimSession({ claimId, intent = 'new', idempotencyKey = requestId('session'), modelProfileId = null }) {
   return apiRequest(`/api/v1/claims/${claimId}/sessions`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
-    body: JSON.stringify({ intent }),
+    body: JSON.stringify({ intent, ...(modelProfileId ? { model_profile_id: modelProfileId } : {}) }),
   })
 }
 

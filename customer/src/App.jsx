@@ -194,7 +194,11 @@ function App() {
   const [detailsOpen, setDetailsOpen] = useState(true)
   const [mobileView, setMobileView] = useState('chat')
   const [workspaceView, setWorkspaceView] = useState('chat')
-  const [runtimeCapabilities, setRuntimeCapabilities] = useState({ claim_types: ['motor', 'home', 'contents'], models: [] })
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState({
+    claim_types: ['motor', 'home', 'contents'],
+    models: [],
+    default_model_profile_id: 'qwen-local',
+  })
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
   const [evidenceItems, setEvidenceItems] = useState([])
@@ -501,7 +505,12 @@ function App() {
       .then((capabilities) => {
         if (!active) return
         setRuntimeCapabilities(capabilities)
-        setSelectedModel(capabilities.models?.[0]?.id || '')
+        setSelectedModel(
+          capabilities.default_model_profile_id
+          || capabilities.models?.find((model) => model.id === 'qwen-local')?.id
+          || capabilities.models?.[0]?.id
+          || 'qwen-local',
+        )
       })
       .catch(() => {})
     return () => { active = false }
@@ -598,10 +607,11 @@ function App() {
     try {
       let activeClaim = claim
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: attempt.claimKey, incidentType: claimType })
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType, modelProfileId: selectedModel })
         activeClaim = created.claim
         setClaim(activeClaim)
         setSessionId(created.session.session_id)
+        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(activeClaim.form)
         setContentsItems(activeClaim.contents_items || [])
         setDynamicForm(activeClaim.dynamic_form || null)
@@ -718,11 +728,12 @@ function App() {
       let activeClaim = claim
       let activeSessionId = sessionId
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: operation.claimKey })
+        const created = await createClaim({ idempotencyKey: operation.claimKey, modelProfileId: selectedModel })
         activeClaim = created.claim
         activeSessionId = created.session.session_id
         setClaim(created.claim)
         setSessionId(activeSessionId)
+        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
@@ -791,7 +802,7 @@ function App() {
     setStatus('starting')
     try {
       if (claim && hasConversationContent) {
-        const session = await startClaimSession({ claimId: claim.claim_id, intent: 'new' })
+        const session = await startClaimSession({ claimId: claim.claim_id, intent: 'new', modelProfileId: selectedModel })
         const refreshedClaim = await getClaim(claim.claim_id)
         setClaim(refreshedClaim)
         setForm(refreshedClaim.form)
@@ -799,6 +810,7 @@ function App() {
         setDynamicForm(refreshedClaim.dynamic_form || null)
         setNextStep(refreshedClaim.customer_next_step)
         setSessionId(session.session_id)
+        if (session.model_profile_id) setSelectedModel(session.model_profile_id)
         setMessages([])
         setResumeContext(null)
         setHandoff(null)
@@ -808,9 +820,10 @@ function App() {
         setStatus('idle')
         return
       }
-      const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+      const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
       setClaim(created.claim)
       setSessionId(created.session.session_id)
+      if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
       setMessages([])
       setForm(created.claim.form)
       setContentsItems(created.claim.contents_items || [])
@@ -1086,12 +1099,13 @@ function App() {
     setError('')
     setStatus('resuming')
     try {
-      const session = await resumeClaimSession({ claimId })
+      const session = await resumeClaimSession({ claimId, modelProfileId: selectedModel })
       const current = await getClaim(claimId)
       const conversation = await getClaimMessages(claimId, session.session_id)
       latestRevision.current = current.revision
       setClaim(current)
       setSessionId(session.session_id)
+      if (session.model_profile_id) setSelectedModel(session.model_profile_id)
       setMessages(conversation.items)
       setForm(current.form)
       setContentsItems(current.contents_items || [])
@@ -1130,9 +1144,10 @@ function App() {
       }
       setAccount(await getAuthenticatedAccount())
       if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
         setClaim(created.claim)
         setSessionId(created.session.session_id)
+        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
@@ -1177,9 +1192,10 @@ function App() {
       }
       setAccount(await getAuthenticatedAccount())
       if (!claim) {
-        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null })
+        const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
         setClaim(created.claim)
         setSessionId(created.session.session_id)
+        if (created.session.model_profile_id) setSelectedModel(created.session.model_profile_id)
         setForm(created.claim.form)
         setContentsItems(created.claim.contents_items || [])
         setDynamicForm(created.claim.dynamic_form || null)
@@ -1374,8 +1390,9 @@ function App() {
                   setClaimType={setClaimType}
                   claimTypes={runtimeCapabilities.claim_types}
                   models={runtimeCapabilities.models}
-                  selectedModel={selectedModel}
-                  setSelectedModel={setSelectedModel}
+                   selectedModel={selectedModel}
+                   setSelectedModel={setSelectedModel}
+                   modelLocked={Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
                 />
@@ -1706,8 +1723,9 @@ function App() {
               setClaimType={setClaimType}
               claimTypes={runtimeCapabilities.claim_types}
               models={runtimeCapabilities.models}
-              selectedModel={selectedModel}
-              setSelectedModel={setSelectedModel}
+               selectedModel={selectedModel}
+               setSelectedModel={setSelectedModel}
+               modelLocked={Boolean(sessionId)}
               attachments={attachments}
               onFileSelected={handleFileSelected}
             />

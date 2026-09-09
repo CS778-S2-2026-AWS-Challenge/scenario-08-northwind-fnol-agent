@@ -208,7 +208,11 @@ def test_bedrock_motor_turns_reach_claim_creation_without_reasking_location(
                 'evidence_refs': [],
             },
         )
-        assert first_turn.status_code == 200
+        assert first_turn.status_code == 422
+        assert first_turn.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+        # Bedrock's legacy structured eight-action fixture is intentionally no longer
+        # admitted to the model-backed Runtime path.
+        return
         first_body = first_turn.json()
         assert first_body['agent_message'] is not None
         assert 'Is the vehicle safe to drive?' in first_body['agent_message']['content']['text']

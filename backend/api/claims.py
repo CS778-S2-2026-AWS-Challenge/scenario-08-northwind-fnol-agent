@@ -47,6 +47,7 @@ from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_services import grant_assessor_consent, request_assessor_routing
 from backend.services.message_history import list_claim_messages
 from backend.services.messages import submit_message
+from backend.services.model_profiles import select_model_profile
 from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 
@@ -103,6 +104,14 @@ def create_claim(
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> CreateClaimResponse:
+    if payload.model_profile_id is not None:
+        payload = payload.model_copy(
+            update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
+        )
+    elif request.app.state.settings.agent_runtime_profile.value == 'model_gateway':
+        payload = payload.model_copy(
+            update={'model_profile_id': select_model_profile(request, None)}
+        )
     return start_claim(repository_for(request), principal, payload, idempotency_key)
 
 
@@ -238,6 +247,9 @@ def create_session(
     principal: Principal = Depends(require_claimant),
     idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
 ) -> ClaimantSession:
+    payload = payload.model_copy(
+        update={'model_profile_id': select_model_profile(request, payload.model_profile_id)}
+    )
     return start_session_with_recovery(
         repository_for(request),
         principal,

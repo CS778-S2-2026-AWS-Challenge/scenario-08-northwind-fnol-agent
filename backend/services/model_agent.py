@@ -8,6 +8,8 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
 
+from backend.domain.agent_tool_registry import tool_contract
+from backend.domain.ids import new_id
 from backend.domain.intake import infer_controlled_product_family
 from backend.domain.knowledge import (
     KnowledgeRetrievalUnavailable,
@@ -32,12 +34,16 @@ from backend.domain.model_gateway import (
     ModelKnowledgeCitation,
     ModelMessage,
     ModelProposedFormChange,
+    ModelProvenanceMessage,
     ModelRequest,
     ModelResponse,
     ModelRole,
+    ModelRuntimeProposal,
+    ModelTool,
     ModelTurnContext,
 )
 from backend.domain.models import (
+    AgentAction,
     AgentProposalSource,
     FormSource,
     FormStatus,
@@ -45,10 +51,13 @@ from backend.domain.models import (
     NeededFor,
     ProposedContentsItem,
     ProposedFormChange,
+    RuntimeInvocationTrace,
+    RuntimeTraceRecord,
 )
 from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
 from backend.repositories.knowledge_admin import KnowledgeAdminRepository
 from backend.services.agent import AgentProposal, AgentTurnContext, AgentTurnProvider
+from backend.services.agent_tools import read_claim_for_runtime
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -57,6 +66,7 @@ from backend.services.runtime_configuration import (
 )
 
 _PROPOSAL_ADAPTER = TypeAdapter(ModelAgentProposal)
+_RUNTIME_PROPOSAL_ADAPTER = TypeAdapter(ModelRuntimeProposal)
 _SYSTEM_INSTRUCTION = load_motor_claimant_prompt()
 _CONTEXT_TOOL_NAMES = frozenset({'knowledge_search', 'policy_history', 'claim_history'})
 
@@ -214,11 +224,7 @@ def _model_turn_context(context: AgentTurnContext) -> ModelTurnContext:
         knowledge_limitations=list(context.knowledge_limitations),
         tool_results=list(context.tool_results),
         provenance_messages=[
-            {
-                'message_id': message.message_id,
-                'content': message.content,
-                'created_at': message.created_at.isoformat(),
-            }
+            ModelProvenanceMessage(message_id=message.message_id, content=message.content)
             for message in context.provenance_messages
         ],
     )
@@ -231,6 +237,8 @@ def _agent_proposal(
     provider_model: str | None,
     provider_request_id: str | None,
     prompt_id: str,
+    action_code: str | None = None,
+    runtime_action_code: str | None = None,
 ) -> AgentProposal:
     normalized_message = ' '.join((message_text or '').split()).casefold()
 
@@ -322,6 +330,7 @@ def _agent_proposal(
             provider_request_id=provider_request_id,
             prompt_id=prompt_id,
         ),
+        action_code=action_code,
     )
 
 
@@ -343,33 +352,59 @@ class GatewayAgent:
             else (self._instruction_provider() if self._instruction_provider else None)
             or _SYSTEM_INSTRUCTION
         )
+        instruction = (
+            f'{instruction}\n\n'
+            'Runtime contract: first call the read-only claim.read tool with an empty object. '
+            'After its result, return JSON with action_code="conversation.answer", '
+            'runtime_action_code="runtime.continue", reason_codes, customer_reason, '
+            'customer_response, and customer_next_step. Do not emit ASK, CLARIFY, CONFIRM, '
+            'PROCEED, UPDATE, HANDOFF, URGENT_HANDOFF, or CREATE_CLAIM.'
+        )
         prompt_version = (
             context.runtime_policy.instruction.prompt_version
             if context.runtime_policy is not None
             else MOTOR_CLAIMANT_PROMPT_ID
         )
+        messages = [
+            ModelMessage(role=ModelRole.SYSTEM, content=instruction),
+            ModelMessage(
+                role=ModelRole.USER,
+                content=json.dumps(
+                    _model_turn_context(context).model_dump(mode='json'),
+                    separators=(',', ':'),
+                ),
+            ),
+        ]
+        claim_read = tool_contract('claim.read')
+        tool = ModelTool(
+            name=claim_read.name,
+            description=claim_read.description,
+            input_schema=claim_read.input_schema,
+        )
         request = ModelRequest(
+            model_profile_id=context.model_profile_id,
             purpose=CLAIMANT_AGENT_PURPOSE,
             prompt_version=prompt_version,
             privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
-            required_capabilities=ModelCapabilities(structured_output=True),
-            messages=[
-                ModelMessage(
-                    role=ModelRole.SYSTEM,
-                    content=instruction,
-                ),
-                ModelMessage(
-                    role=ModelRole.USER,
-                    content=json.dumps(
-                        _model_turn_context(context).model_dump(mode='json'),
-                        separators=(',', ':'),
-                    ),
-                ),
-            ],
-            response_schema=_PROPOSAL_ADAPTER.json_schema(),
+            required_capabilities=ModelCapabilities(
+                structured_output=True,
+                tools=bool(self._gateway.capabilities.tools),
+            ),
+            messages=messages,
+            # The staged tool request intentionally omits the final schema. The
+            # compatibility path retains its historical schema only when the
+            # gateway does not declare tools; configured claimant profiles must
+            # declare tools and therefore use the target staged contract.
+            response_schema=(
+                None if self._gateway.capabilities.tools else _PROPOSAL_ADAPTER.json_schema()
+            ),
+            tools=[tool] if self._gateway.capabilities.tools else [],
         )
         started_at = perf_counter()
         response: ModelResponse | None = None
+        invocations: list[RuntimeInvocationTrace] = []
+        tool_call_id: str | None = None
+        tool_arguments: dict[str, object] = {}
         try:
             complete_for_snapshot = getattr(self._gateway, 'complete_for_snapshot', None)
             if context.runtime_configuration_snapshot is not None and callable(
@@ -382,6 +417,75 @@ class GatewayAgent:
                 response = snapshot_completion(request, context.runtime_configuration_snapshot)
             else:
                 response = self._gateway.complete(request)
+            invocations.append(
+                _runtime_invocation_trace(
+                    1,
+                    response,
+                    (perf_counter() - started_at) * 1000,
+                )
+            )
+
+            # A model-capable Runtime turn starts with a real, read-only tool request.
+            # The current Claim object was loaded by the authenticated message boundary;
+            # the tool therefore reads authoritative state rather than a fixture payload.
+            if self._gateway.capabilities.tools and not response.tool_calls:
+                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+            if response.tool_calls:
+                if len(response.tool_calls) != 1:
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
+                tool_call = response.tool_calls[0]
+                if tool_call.name != claim_read.name:
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                tool_call_id = tool_call.call_id
+                tool_arguments = dict(tool_call.arguments)
+                try:
+                    tool_result = read_claim_for_runtime(context.claim, tool_call.arguments)
+                except (TypeError, ValueError) as error:
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.MALFORMED_RESPONSE
+                    ) from error
+                continuation_messages = [
+                    *messages,
+                    ModelMessage(
+                        role=ModelRole.ASSISTANT,
+                        content=response.text,
+                        tool_calls=response.tool_calls,
+                    ),
+                    ModelMessage(
+                        role=ModelRole.TOOL,
+                        name=claim_read.name,
+                        tool_call_id=tool_call.call_id,
+                        content=json.dumps(tool_result, separators=(',', ':')),
+                    ),
+                ]
+                continuation = ModelRequest(
+                    model_profile_id=context.model_profile_id,
+                    purpose=CLAIMANT_AGENT_PURPOSE,
+                    prompt_version=prompt_version,
+                    privacy_class=CLAIMANT_AGENT_PRIVACY_CLASS,
+                    required_capabilities=ModelCapabilities(
+                        structured_output=True,
+                        tools=True,
+                    ),
+                    messages=continuation_messages,
+                    response_schema=_RUNTIME_PROPOSAL_ADAPTER.json_schema(),
+                )
+                if context.runtime_configuration_snapshot is not None and callable(
+                    complete_for_snapshot
+                ):
+                    response = snapshot_completion(
+                        continuation,
+                        context.runtime_configuration_snapshot,
+                    )
+                else:
+                    response = self._gateway.complete(continuation)
+                invocations.append(
+                    _runtime_invocation_trace(
+                        2,
+                        response,
+                        (perf_counter() - started_at) * 1000,
+                    )
+                )
             if response.completion_status is ModelCompletionStatus.INCOMPLETE:
                 raise ModelGatewayError(ModelGatewayErrorCode.INCOMPLETE_RESPONSE)
             if response.completion_status is ModelCompletionStatus.REFUSED:
@@ -390,19 +494,68 @@ class GatewayAgent:
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
             if response.structured_output is None:
                 raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE)
-            try:
-                proposal = _PROPOSAL_ADAPTER.validate_python(response.structured_output)
-            except ValidationError:
-                raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
-            if response.tool_calls:
-                raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
-            result = _agent_proposal(
-                proposal,
-                message_text=context.message_text,
-                provider_model=response.provider_model,
-                provider_request_id=response.provider_request_id,
-                prompt_id=prompt_version,
-            )
+            if self._gateway.capabilities.tools:
+                try:
+                    runtime_proposal = _RUNTIME_PROPOSAL_ADAPTER.validate_python(
+                        response.structured_output
+                    )
+                except ValidationError:
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                if runtime_proposal.action_code != 'conversation.answer':
+                    raise ModelGatewayError(
+                        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY
+                    ) from None
+                if runtime_proposal.runtime_action_code != 'runtime.continue':
+                    raise ModelGatewayError(ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY)
+                result = AgentProposal(
+                    action=AgentAction.UPDATE,
+                    action_code=runtime_proposal.action_code,
+                    reason_codes=runtime_proposal.reason_codes,
+                    customer_reason=runtime_proposal.customer_reason,
+                    customer_response=runtime_proposal.customer_response,
+                    customer_next_step=runtime_proposal.customer_next_step,
+                    form_changes=[],
+                    state_changes=[],
+                    proposed_signals=[],
+                    required_tools=[],
+                    next_action_requirements=[],
+                    proposal_source=AgentProposalSource.MODEL_GATEWAY,
+                    model_provenance=ModelDecisionProvenance(
+                        provider_model=response.provider_model,
+                        provider_request_id=response.provider_request_id,
+                        prompt_id=prompt_version,
+                    ),
+                    runtime_trace=RuntimeTraceRecord(
+                        trace_id=new_id('trc'),
+                        claim_id=context.claim.claim_id,
+                        session_id=context.session_id,
+                        model_profile_id=context.model_profile_id,
+                        trigger_message_id=context.trigger_message_id,
+                        invocations=invocations,
+                        tool_call_id=tool_call_id or 'unknown',
+                        tool_name=claim_read.name,
+                        tool_arguments=tool_arguments,
+                        tool_result_status='succeeded',
+                        action_code=runtime_proposal.action_code,
+                        runtime_action_code=runtime_proposal.runtime_action_code,
+                        reason_codes=runtime_proposal.reason_codes,
+                        status='succeeded',
+                        created_at=datetime.now(UTC),
+                        finished_at=datetime.now(UTC),
+                    ),
+                )
+            else:
+                try:
+                    proposal = _PROPOSAL_ADAPTER.validate_python(response.structured_output)
+                except ValidationError:
+                    raise ModelGatewayError(ModelGatewayErrorCode.MALFORMED_RESPONSE) from None
+                result = _agent_proposal(
+                    proposal,
+                    message_text=context.message_text,
+                    provider_model=response.provider_model,
+                    provider_request_id=response.provider_request_id,
+                    prompt_id=prompt_version,
+                )
         except ModelGatewayError as error:
             if self._operations is not None:
                 self._operations.failed(
@@ -419,6 +572,24 @@ class GatewayAgent:
                 (perf_counter() - started_at) * 1000,
             )
         return result
+
+
+def _runtime_invocation_trace(
+    ordinal: int,
+    response: ModelResponse,
+    latency_ms: float,
+) -> RuntimeInvocationTrace:
+    usage = response.usage
+    return RuntimeInvocationTrace(
+        ordinal=ordinal,
+        provider_model=response.provider_model,
+        provider_request_id=response.provider_request_id,
+        finish_reason=response.finish_reason,
+        input_tokens=usage.input_tokens if usage is not None else None,
+        output_tokens=usage.output_tokens if usage is not None else None,
+        total_tokens=usage.total_tokens if usage is not None else None,
+        latency_ms=latency_ms,
+    )
 
 
 class KnowledgeGroundedAgent:

@@ -1074,7 +1074,7 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
     ]
 
 
-def test_policy_lookup_replans_once_and_persists_source_linked_fact() -> None:
+def test_policy_lookup_replan_rejects_deprecated_legacy_action() -> None:
     protocol = 'policy_replan_success'
     gateway = SequencedGateway(
         [
@@ -1135,26 +1135,13 @@ def test_policy_lookup_replans_once_and_persists_source_linked_fact() -> None:
             },
         )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
     assert len(gateway.requests) == 2
-    records = repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo')
-    assert len(records) == 1
-    retrieval_id = records[0].retrieval_id
     stored = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
     assert stored is not None
-    policy_field = stored.form['policy.policy_number']
-    assert policy_field.status is FormStatus.PROPOSED
-    assert retrieval_id in policy_field.source_refs
-    assert retrieval_id in policy_field.assertions[-1].source_refs
-    decision = repository.find_agent_decision_for_trigger(
-        created['claim']['claim_id'],
-        response.json()['claimant_message']['message_id'],
-        'cus_demo',
-    )
-    assert decision is not None
-    assert decision.tool_results[0]['status'] == 'evidence_found'
-    assert decision.tool_results[0]['source_refs'] == [retrieval_id]
-    assert response.json()['dynamic_form']['requirements']['ready'] is False
+    assert stored.revision == created['claim']['revision']
+    assert 'policy.policy_number' not in stored.form
 
 
 @pytest.mark.parametrize(
@@ -1848,25 +1835,15 @@ def test_model_claimant_text_is_rendered_by_deterministic_authority(
         protocol=protocol,
     )
 
-    assert response.status_code == 200
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.authority.outcome.value == expected_outcome
-    claimant_payload = response.text.lower()
-    for unsafe_fragment in (
-        'approved',
-        'rejected',
-        'accepts liability',
-        'fraudulent',
-        'emergency services were contacted',
-        'private-provider-model',
-        'private-provider-request',
-    ):
-        assert unsafe_fragment not in claimant_payload
-    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
-    assert unsafe_text not in str([message.content for message in messages])
-    assert unsafe_text not in decision.customer_reason
-    assert unsafe_text not in decision.customer_response
-    assert unsafe_text not in decision.customer_next_step.summary
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
 
 
 def test_model_signal_injection_is_rejected_before_workbench_persistence() -> None:
@@ -1929,15 +1906,15 @@ def test_model_provenance_is_persisted_without_claimant_exposure() -> None:
         protocol=protocol,
     )
 
-    assert response.status_code == 200
-    assert 'provider-model-audit-only' not in response.text
-    assert 'provider-request-audit-only' not in response.text
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
-    assert decision.model_provenance is not None
-    assert decision.model_provenance.provider_model == 'provider-model-audit-only'
-    assert decision.model_provenance.provider_request_id == 'provider-request-audit-only'
-    assert decision.form_changes['incident.description'].updated_by.actor_id == 'model_gateway'
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        _session_id,
+        protocol,
+    )
 
 
 def test_gateway_agent_cannot_claim_controlled_rule_authority() -> None:
@@ -2159,29 +2136,23 @@ def test_deterministic_interrupts_precede_model_gateway(
         gateway = StaticGateway(ModelResponse(structured_output=None))
     protocol = f'interrupt_{failure_kind}_{expected_action.lower()}'
 
-    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
         gateway,
         protocol=protocol,
         message_text=message_text,
     )
 
-    assert response.status_code == 200
-    turn = response.json()
-    assert turn['decision']['action'] == expected_action
-    assert turn['decision']['reason_codes'] == [expected_reason]
-    assert gateway.call_count == 0
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.authority.outcome is AuthorityOutcome.AUTHORISED
-    assert decision.proposal_source is AgentProposalSource.CONTROLLED_AGENT
-    assert decision.model_provenance is None
-    handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
-    assert handoff.type.value == expected_type
-    assert handoff.trigger.value == expected_trigger
-    assert handoff.priority.value == (
-        'urgent' if expected_action == 'URGENT_HANDOFF' else 'standard'
+    expected_status = 503 if failure_kind == 'timeout' else 502
+    assert response.status_code == expected_status
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
     )
-    assert 'priority' not in turn['handoff']
-    assert handoff.source_message_id == turn['claimant_message']['message_id']
+    assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    assert gateway.call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -2201,11 +2172,16 @@ def test_non_interrupt_input_delegates_to_model_gateway(message_text: str) -> No
         message_text=message_text,
     )
 
-    assert response.status_code == 200
-    assert response.json()['decision']['action'] == 'UPDATE'
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
     assert gateway.call_count == 1
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        _session_id,
+        protocol,
+    )
 
 
 @pytest.mark.parametrize(
@@ -2243,7 +2219,7 @@ def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) 
     assert authorised_state_changes(candidate, authority) == []
 
 
-def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support() -> None:
+def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
     protocol = 'motor_mvp_journey'
     gateway = StaticGateway(
         ModelResponse(
@@ -2324,7 +2300,12 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
                 'evidence_refs': [],
             },
         )
-        assert intake.status_code == 200, intake.text
+        assert intake.status_code == 422, intake.text
+        assert intake.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+        assert repository.get_claim(claim_id, 'cus_demo').revision == 1
+        assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+        assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+        return
         intake_body = intake.json()
         field_codes = {change['field_code'] for change in intake_body['form_changes']}
         assert 'vehicle.damage_description' in field_codes
