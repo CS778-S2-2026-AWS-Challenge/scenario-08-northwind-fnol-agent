@@ -3,6 +3,8 @@
 This research record is the final P3.3 delivery for Issue #588. It reconciles the accepted P3.1
 stakeholder/service research with the accepted P3.2 independent challenge into one implementation-facing
 catalogue for motor, home, and contents First Notice of Loss (FNOL) journeys in New Zealand.
+The P3.4 section extends this indexed record for Issue #589 without revising P3.3's accepted source
+authority or implementation boundary.
 
 This document is governed research evidence only. It does not select providers, create Northwind
 authority, define a new application state machine, or claim procurement, credentials, approved
@@ -183,3 +185,114 @@ This reconciled catalogue supplies the governed-document output required by #588
 
 The evidence level is research and governed documentation only. This delivery does not claim API,
 persistence, Runtime, browser-route, live-provider, or full-journey implementation evidence.
+
+## Close the P3.4 research gaps
+
+This section is the P3.4 gap-closure brief for Issue #589. It rechecks the public evidence behind
+every P3.3 high-impact gap and gives each atomic item exactly one `resolved` or `blocked`
+disposition. `Resolved` means that authoritative public evidence closes the stated research
+question. `Blocked` means that an implementation-ready Northwind fact still needs Northwind
+authority or access evidence, even when the public service boundary is well supported.
+
+The source coordinates refer to the linked P3.1 register above. All cited pages were rechecked on
+2026-09-09. Confidence applies only to the stated public fact. It never transfers to a Northwind
+provider arrangement, legal conclusion, service level, credential, permitted data use, or live
+technical access.
+
+| Closure ID | P3.3 gap and stable P3 IDs | Disposition | Verified public fact, source, and evidence limit | Confidence | Northwind access status | Implementation boundary | Owner and next action |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `P3.4-G01` | Police TCR authority: `P3-NZP-TCR` | `blocked` | S02-S03, accessed 2026-09-09: an involved person or authorised agent, including an insurance company, may request a held Traffic Crash Report (TCR); a representative or organisation supplies evidence of authorisation. Release remains subject to the Privacy Act or Official Information Act and is not guaranteed. | High | `unavailable` | Keep the Validation Prototype claimant-led or staff-prepared and manual. Do not represent a Northwind request as authorised or submitted. | @LLL263; obtain an approved Northwind representative-authority process, request evidence, operating owner, and channel before any implementation. |
+| `P3.4-G02` | Vehicle-recovery operating form: `P3-VEHICLE-RECOVERY` | `blocked` | S04-S05, accessed 2026-09-09: one insurer describes towing after claim acceptance, while the reviewed roadside service excludes accident vehicles and directs collision cases to the insurer. These examples prove distinct forms, not a Northwind form or entitlement. | High for the distinction; unknown for Northwind | `unavailable`; `simulation-only` for a configured demonstration | Preserve claimant-arranged, staff-arranged, insurer-network, and guidance-only choices. Do not infer collision dispatch from roadside membership. | @LLL263; Northwind Claims Operations must select the operating form, eligibility rule, dispatch owner, service evidence, and recovery path. |
+| `P3.4-G03` | Repair and assessment appointment: `P3-REPAIRER`, `P3-ASSESSOR` | `blocked` | S06-S07, accessed 2026-09-09: repairers, assessors, adjusters, engineers, and tradespeople can participate; insurers should explain their roles, oversee third parties, and keep delegated authority within managed parameters. The sources do not name a Northwind network or delegation. | High for roles and oversight; unknown for Northwind authority | `unavailable`; `simulation-only` where the provider is explicitly synthetic | Keep claimant-selected and insurer-appointed work distinct. No quote, appointment, repair approval, or assessment result changes Claim State by itself. | @LLL263; obtain Northwind pathway selection, appointment/delegation rules, provider eligibility, observable events, and service expectations. |
+| `P3.4-G04` | Observable completion evidence: all 12 claim-participant IDs | `blocked` | S01-S15, accessed 2026-09-09: the public result forms are mapped by participant in the next table. They prove possible evidence, not that Northwind can receive it electronically or treat it as completion. | High for the mapped public forms; unknown for Northwind observability | `unavailable` unless manually supplied; `simulation-only` for synthetic provider results | Store an actual provider result separately from request delivery, then verify it through the existing result-verification contract. Never infer completion from acknowledgement or `provider_reference`. | @LLL263; for each implemented service, obtain its result schema, delivery channel, provenance, completion rule, service level, and verification owner. |
+| `P3.4-G05` | FENZ operating form: `P3-FENZ-INFO` | `blocked` | S09-S10, accessed 2026-09-09: an Official Information Act request names the requester, contact address, requested information, and timeframe; FENZ acknowledges it and normally decides within 20 working days. Personal-information access requires identity proof and written authority for a representative. No insurer API or guaranteed report is described. | High | `unavailable`; `simulation-only` if the asynchronous exchange is demonstrated | Keep this claimant-requested or staff-prepared and manual. Acknowledgement, extension, transfer, charge, refusal, and released information remain distinct outcomes. | @LLL263; obtain Northwind request authority, approved channel, identity/authority evidence, information scope, tracking owner, and response-ingestion process. |
+| `P3.4-G06` | MetService operating form: `P3-METSERVICE` | `blocked` | S11, accessed 2026-09-09: MetService publishes weather-station, lightning, historical-forecast, wind-rose, and detailed forensic report forms with starting prices. The page does not establish Northwind's selected product, final or custom quote, licence, procurement, data scope, or access. | High for public products and starting prices; unknown for Northwind | `unavailable`; `simulation-only` for a synthetic report | Treat weather material as external evidence only. It cannot decide cause, coverage, liability, or claim acceptance. | @LLL263; obtain product selection, final quote, licence/data terms, procurement approval, request channel, service level, and result-verification owner. |
+| `P3.4-G07A` | NHC Home/contents boundary: `P3-NHC`, `P3-CONTENTS-EVIDENCE` | `resolved` | S06 and S12-S14, accessed 2026-09-09: NHCover is for eligible residential buildings and limited residential land; contents evidence remains a separate private-insurance evidence path. This does not establish any Northwind workflow. | High | `unavailable` for Northwind integration; no simulation is needed to preserve the product boundary | Keep `P3-NHC` Home building/land-specific and keep contents ownership/value evidence under `P3-CONTENTS-EVIDENCE`. | @LLL263; no further public research is required unless the statutory scope changes. |
+| `P3.4-G07B` | NHC prototype workflow: `P3-NHC` | `blocked` | S12-S14, accessed 2026-09-09: most claimants contact their insurer, which manages the NHCover portion; NHC manages limited direct paths. The public material does not establish whether Northwind is a partner or its internal state, authority, or technical exchange. | High for the public pathway; unknown for Northwind | `unavailable`; `simulation-only` for a labelled insurer-mediated demonstration | Represent only a Home-specific manual or synthetic coordination step until Northwind's partner and data-exchange evidence exists. | @LLL263; obtain partner status, claim-routing authority, state mapping, data exchange, result evidence, and exception ownership from Northwind and NHC. |
+| `P3.4-G08` | Broker actionability: `P3-BROKER` | `blocked` | S07 and S12-S14, accessed 2026-09-09: a broker may manage communication or make a claim when the claimant authorises it; delegated claims authority must stay within managed parameters. The sources do not establish a Northwind broker service or delegation. | High for the public role; unknown for Northwind | `unavailable`; `simulation-only` if a broker handoff is demonstrated | Keep the broker as an authority-boundary participant. Do not expose an external action without claimant authority and an explicit Northwind delegation. | @LLL263; obtain broker identity, claimant-authority evidence, delegation scope, permitted data, action/result contract, and oversight owner. |
+| `P3.4-G09` | ACC actionability: `P3-ACC-PROVIDER` | `blocked` | S15, accessed 2026-09-09: eligible registered health providers lodge ACC claims with recorded patient declaration and consent; ACC then requests information or makes its own cover decision. This does not give Northwind diagnosis or lodgement authority. | High | `unavailable`; do not simulate Northwind lodgement | Keep this as an adjacent injury-support and authority-boundary example. The FNOL Agent may recommend appropriate human or health-provider support but cannot diagnose, lodge, or imply ACC acceptance. | @LLL263; require an explicit product-scope and authority decision before treating ACC as a Northwind action target. |
+| `P3.4-G10` | Direct contents-evidence retrieval: `P3-CONTENTS-EVIDENCE` | `blocked` | S06, accessed 2026-09-09: receipts, warranties, purchase records, photographs, and independent valuations can support a contents claim, and a retailer may retain a purchase record. The source does not establish a direct insurer retrieval service or disclosure authority. | High for evidence forms; unknown for direct access | `unavailable`; claimant upload is the baseline; synthetic material may be `simulation-only` | Ask the claimant to retrieve and upload the evidence. Record an unavailable item honestly and do not imply Northwind queried a retailer, bank, manufacturer, service centre, or valuer. | @LLL263; identify a specific provider and obtain claimant authority, Northwind purpose, permitted fields, access contract, provenance, and no-result handling before direct retrieval. |
+| `P3.4-G11` | Enabling-platform production access: all eight `P3-EN-*` IDs | `blocked` | S16-S27, accessed 2026-09-09: first-party documentation supports the generic capabilities listed in the platform table below. Public vendor material cannot establish Northwind procurement, credentials, approved region or data use, service level, security acceptance, or production access. | High for generic capability; unknown for Northwind production access | `unavailable` for production; `simulation-only` or governed local development until separately approved | Use only repository-authorised provider-neutral adapters and profiles. Never promote a fixture, local credential, or successful test call into a production-capability claim. | @LLL263; retain the per-platform blockers below until Northwind supplies the named approval evidence. |
+
+### Map public result forms without inventing completion states
+
+This table closes the public-fact portion of `P3.4-G04`. A listed result is only a possible
+external evidence form. It is not proof that Northwind can observe the result, that the service is
+complete, or that Claim State may change.
+
+| P3 ID | Publicly supported result or completion evidence | Source and access date | Northwind observation boundary |
+| --- | --- | --- | --- |
+| `P3-NZP-REPORT` | Report acknowledgement or Police reference; a later report update where the public channel supports it | S01, accessed 2026-09-09 | Direct read access is `unavailable`; accept claimant-supplied evidence or use `simulation-only` data. |
+| `P3-NZP-TCR` | Request decision and a released TCR, or a withholding outcome | S02-S03, accessed 2026-09-09 | Direct request and response access is `unavailable`; manual handling remains authoritative. |
+| `P3-VEHICLE-RECOVERY` | Vehicle transport to an eligible destination, or inability to assist | S04-S05, accessed 2026-09-09 | Dispatch and telemetry are `unavailable`; a synthetic acknowledgement is `simulation-only`. |
+| `P3-REPAIRER` | Appointment, quote or scope, invoice, progress update, completion evidence, or inability to proceed | S06-S07, accessed 2026-09-09 | Provider status access is `unavailable`; use supplied documents or `simulation-only` records. |
+| `P3-ASSESSOR` | Inspection record, damage assessment, specialist report, scope, request for information, or delay | S06-S07, accessed 2026-09-09 | Provider status access is `unavailable`; any synthetic report is `simulation-only`. |
+| `P3-EMERGENCY-WORKS` | Evidence that the property was made safe, sanitary, secure, or weathertight, plus available work records | S06 and S08, accessed 2026-09-09 | Contractor dispatch/status is `unavailable`; claimant or staff evidence is required. |
+| `P3-FENZ-INFO` | Request acknowledgement, decision, extension, transfer, charge, refusal, or released information | S09-S10, accessed 2026-09-09 | Direct response access is `unavailable`; model the asynchronous exchange manually or as `simulation-only`. |
+| `P3-METSERVICE` | Weather-station, lightning, forecast, wind-rose, or forensic report obtained for a specified event | S11, accessed 2026-09-09 | Purchased-report access is `unavailable`; a synthetic report is `simulation-only`. |
+| `P3-NHC` | Claim-manager update, assessment, scope of works, expert report, settlement advice, or non-acceptance explanation | S12-S14, accessed 2026-09-09 | Northwind partner exchange is `unavailable`; an insurer-mediated demonstration is `simulation-only`. |
+| `P3-CONTENTS-EVIDENCE` | Receipt, warranty, purchase/delivery record, photograph, service record, or independent valuation | S06, accessed 2026-09-09 | Direct source retrieval is `unavailable`; claimant upload remains the baseline. |
+| `P3-BROKER` | Authorised claim lodgement, communication relay, or referral to the responsible insurer | S07 and S12-S14, accessed 2026-09-09 | A Northwind broker channel is `unavailable`; any synthetic handoff is `simulation-only`. |
+| `P3-ACC-PROVIDER` | Lodgement, request for more information, status shown through an approved provider system, or ACC cover decision | S15, accessed 2026-09-09 | Northwind lodgement/status access is `unavailable` and must not be simulated as a Northwind action. |
+
+The implementation representation remains the existing `ExternalTaskRecord`,
+`ExternalTaskDelivery`, `ExternalTaskResult`, and `ExternalTaskResultVerification` contract. The
+research words in this table are not new enum values. An `accepted` external task proves provider
+acceptance only; a formal result stays separate and does not become a confirmed Claim fact without
+the governed reconciliation path.
+
+### Retain per-platform access blockers
+
+The public capability is resolved for research purposes, but each Northwind production-access item
+remains blocked. The access labels below are research labels only and are not Runtime states.
+
+| P3 ID | Verified generic capability and source | Northwind access status | Owner and next action |
+| --- | --- | --- | --- |
+| `P3-EN-MESSAGING` | Programmable messaging, verification, message identifiers, and delivery status: S16, accessed 2026-09-09 | `unavailable` for production; `simulation-only` for a controlled scenario | @LLL263; obtain procurement, sender registration, communication basis, opt-out rule, approved content, credentials, region, and service level. |
+| `P3-EN-DOC-AZURE` | Authenticated asynchronous document analysis, job status, extracted JSON, regional temporary storage, and documented retention: S17, accessed 2026-09-09 | `unavailable` for production; `simulation-only` for extracted candidates | @LLL263; obtain subscription, region, model, retention decision, deletion procedure, data-use approval, credentials, and extraction verification rule. |
+| `P3-EN-IDENTITY` | Hosted identity protocols and compliance resources: S18, accessed 2026-09-09 | `unavailable` for production; local identity remains governed by repository contracts | @LLL263; obtain tenant procurement, identity mapping, region, security/privacy review, credentials, and explicit separation of authentication from claim-action authority. |
+| `P3-EN-ROUTES` | Route computation from origin, destination, travel mode, and selected response fields under commercial terms: S19-S20, accessed 2026-09-09 | `unavailable` for production; `simulation-only` for route planning | @LLL263; obtain project/billing access, accepted licence, approved location-data scope, credentials, quota/service level, and proof that routing is not provider dispatch. |
+| `P3-EN-MODEL` | Provider model inference and published data-control, security, privacy, access-control, and audit capabilities: S21-S23, accessed 2026-09-09 | `unavailable` as a generic production claim; only an individually approved profile may be configured | @LLL263; obtain provider/model/region approval, retention and training-use terms, minimum data scope, evaluation, credentials, limits, fallback qualification, and security review. |
+| `P3-EN-DOC-AWS` | Image/PDF extraction of text, forms, tables, signatures, layout, coordinates, and confidence: S24, accessed 2026-09-09 | `unavailable` for production; `simulation-only` for machine-derived candidates | @LLL263; obtain account/region/IAM, storage and retention controls, supported claim-document set, data-use approval, credentials, service level, and fact-confirmation rule. |
+| `P3-EN-CONVERSATION` | Chat channels, messages, files, receipts, retrieval, moderation, and webhooks: S25, accessed 2026-09-09 | `unavailable` for production; repository conversation fixtures remain separate | @LLL263; obtain procurement, identity mapping, role visibility, retention/deletion, region, approved claim content, credentials, moderation, and service level. |
+| `P3-EN-DAMAGE-AI` | Vendor-described image-based vehicle-damage analysis, confidence, and integration capability: S26-S27, accessed 2026-09-09 | `unavailable` for production; `simulation-only` for the Validation Prototype | @LLL263; obtain commercial access, New Zealand availability, permitted image/metadata use, thresholds, result schema and semantics, security review, credentials, service level, and human-verification rule. |
+
+## Record the P3.4 change log
+
+The change log maps every P3.3 handoff row to its P3.4 disposition. A confidence increase below
+applies to the public fact only; it does not change the recorded Northwind access status.
+
+| P3.3 gap | P3.4 record | Change from P3.3 |
+| --- | --- | --- |
+| Police TCR authority | `P3.4-G01` | Confirmed the public representative-authority evidence at high confidence; retained Northwind access as `blocked` and `unavailable`. |
+| Vehicle recovery operating form | `P3.4-G02` | Confirmed the collision-towing versus roadside-breakdown distinction; retained Northwind operating form and dispatch as `blocked`. |
+| Repair pathway and appointment authority | `P3.4-G03` | Confirmed participant roles, insurer oversight, and bounded delegation; retained Northwind appointment and provider access as `blocked`. |
+| Observable external completion evidence | `P3.4-G04` and the 12-row result map | Enumerated the public result form for every claim participant; retained electronic Northwind observability as `blocked`. |
+| FENZ operating form | `P3.4-G05` | Confirmed request inputs, acknowledgement, decision timing, and representative evidence; retained Northwind authority and direct access as `blocked`. |
+| MetService operating form | `P3.4-G06` | Confirmed public report categories and starting prices; retained product selection, final quote, licence, procurement, and Northwind access as `blocked`. |
+| NHC prototype state and contents boundary | `P3.4-G07A` and `P3.4-G07B` | Marked the Home/land versus contents research boundary `resolved`; retained the Northwind partner workflow and access as `blocked`. |
+| Broker actionability | `P3.4-G08` | Confirmed authorised broker participation and bounded delegation; retained an actionable Northwind broker service as `blocked`. |
+| ACC actionability | `P3.4-G09` | Confirmed the registered-provider and patient-consent pathway; retained Northwind diagnosis, lodgement, and status access as `blocked`. |
+| Direct contents-evidence retrieval | `P3.4-G10` | Confirmed the claimant-supplied evidence forms; retained direct Northwind retrieval as `blocked`. |
+| Enabling-platform production access | `P3.4-G11` and the eight-row platform table | Rechecked each generic capability source; retained every unapproved production path as `blocked` and `unavailable` or `simulation-only`. |
+
+## State the P3.4 acceptance result
+
+This P3.4 closure records the following bounded result:
+
+- Every P3.3 high-impact gap has a stable P3.4 closure coordinate and exactly one `resolved` or
+  `blocked` disposition.
+- Every public fact used to narrow a gap names its P3.1 source coordinate, 2026-09-09 access date,
+  evidence limit, and fact-level confidence.
+- Every remaining Northwind-specific authority, procurement, credential, data-use,
+  regional-availability, service-level, and technical-access question is explicitly
+  `unavailable` or `simulation-only`, with an owner and next action.
+- Public completion evidence is mapped for all 12 claim participants, and production-access
+  blockers are retained separately for all eight enabling platforms.
+- The research labels do not alter the authoritative external-task lifecycle, delivery, result,
+  verification, or reconciliation contracts.
+- The existing `docs/README.md` Unified Third-party Service Catalogue and Implementation Brief
+  entry resolves to this P3.3/P3.4 record; no second catalogue or index entry is introduced.
+
+The evidence level remains governed research and documentation only. It does not claim API,
+persistence, Runtime, browser-route, live-provider, or full-journey evidence.
