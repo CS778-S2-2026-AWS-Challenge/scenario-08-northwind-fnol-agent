@@ -17,6 +17,7 @@ from backend.domain.staff_agent import (
     StaffAgentDraftKind,
     StaffAgentModelOutput,
 )
+from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import ControlledAgent
 from backend.services.staff_agent import (
@@ -24,7 +25,6 @@ from backend.services.staff_agent import (
     StaffAgentProviderResult,
     StaffAgentTurnProvider,
 )
-from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 
 STAFF_HEADERS = {'Authorization': 'Bearer synthetic-staff'}
 CLAIMANT_HEADERS = {'Authorization': 'Bearer synthetic-claimant'}
