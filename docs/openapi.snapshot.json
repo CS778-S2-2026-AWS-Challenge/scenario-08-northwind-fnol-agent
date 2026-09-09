@@ -9819,6 +9819,16 @@
             "title": "Activated At",
             "type": "string"
           },
+          "attention_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagAttentionLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "basis": {
             "$ref": "#/components/schemas/TagBasis"
           },
@@ -9843,17 +9853,26 @@
             "title": "Display Weight",
             "type": "integer"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/TagFreshness"
+          },
           "label": {
             "maxLength": 100,
             "minLength": 1,
             "title": "Label",
             "type": "string"
           },
+          "projection_mode": {
+            "$ref": "#/components/schemas/TagProjectionMode"
+          },
           "registry_version": {
             "maxLength": 20,
             "minLength": 1,
             "title": "Registry Version",
             "type": "string"
+          },
+          "source_actor": {
+            "$ref": "#/components/schemas/TagSourceActor"
           },
           "source_refs": {
             "items": {
@@ -9887,6 +9906,9 @@
           "status",
           "visibility",
           "basis",
+          "source_actor",
+          "freshness",
+          "projection_mode",
           "source_refs",
           "activated_at",
           "display_weight"
@@ -10154,6 +10176,15 @@
         "title": "SupportRequestResponse",
         "type": "object"
       },
+      "TagAttentionLevel": {
+        "enum": [
+          "notice",
+          "elevated",
+          "high"
+        ],
+        "title": "TagAttentionLevel",
+        "type": "string"
+      },
       "TagBasis": {
         "enum": [
           "reported",
@@ -10178,20 +10209,44 @@
         "title": "TagCategory",
         "type": "string"
       },
+      "TagFreshness": {
+        "enum": [
+          "current",
+          "stale"
+        ],
+        "title": "TagFreshness",
+        "type": "string"
+      },
       "TagInstanceStatus": {
         "enum": [
-          "proposed",
           "active",
-          "disputed",
-          "retired"
+          "disputed"
         ],
         "title": "TagInstanceStatus",
         "type": "string"
       },
+      "TagProjectionMode": {
+        "enum": [
+          "deterministic",
+          "staff_assessed",
+          "external_result",
+          "unavailable"
+        ],
+        "title": "TagProjectionMode",
+        "type": "string"
+      },
+      "TagSourceActor": {
+        "enum": [
+          "claimant",
+          "staff",
+          "system",
+          "external_service"
+        ],
+        "title": "TagSourceActor",
+        "type": "string"
+      },
       "TagVisibility": {
         "enum": [
-          "visible",
-          "safe_summary_only",
           "staff_only"
         ],
         "title": "TagVisibility",

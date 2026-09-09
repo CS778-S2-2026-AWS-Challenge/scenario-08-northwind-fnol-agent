@@ -1,9 +1,14 @@
-# Archived frontend surfaces
+# Archived frontend tests
 
-The `customer/`, `workbench/`, and `admin/` frontend implementations were moved here as
-historical source records. They are no longer current product surfaces, runtime entry points, or
-CI quality targets.
+This directory preserves frontend test suites that were too broad and expensive for the active
+product quality jobs. Product source remains under `customer/`, `workbench/`, and `admin/`.
 
-Current frontend work must use the active product routes and components defined by the current
-frontend/runtime standard. Do not restore these directories as application entry points without a
-new, explicitly scoped implementation and governance decision.
+The archived tests are historical evidence only. Test discovery and continuous integration must
+not execute them. New regression coverage belongs in focused tests beside the active component or
+contract that owns the behavior.
+
+The archived suites are:
+
+- `frontend-heavy-tests/customer/src/App.test.jsx`.
+- `frontend-heavy-tests/workbench/src/pages/WorkbenchPage.test.jsx`.
+- `frontend-heavy-tests/workbench/src/components/ReviewActions.test.jsx`.

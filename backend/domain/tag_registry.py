@@ -1,6 +1,6 @@
 """Versioned staff-facing classification tags for Workbench projections."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
@@ -9,7 +9,9 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field
 
 TAG_REGISTRY_ID: Final = 'northwind-fnol-staff-tags'
-TAG_REGISTRY_VERSION: Final = '0.2'
+TAG_REGISTRY_VERSION: Final = '0.3'
+
+CLAIM_FAMILIES: Final = ('motor', 'home', 'contents')
 
 
 class TagCategory(StrEnum):
@@ -24,8 +26,6 @@ class TagCategory(StrEnum):
 
 
 class TagVisibility(StrEnum):
-    VISIBLE = 'visible'
-    SAFE_SUMMARY_ONLY = 'safe_summary_only'
     STAFF_ONLY = 'staff_only'
 
 
@@ -36,11 +36,34 @@ class TagBasis(StrEnum):
     STAFF_ASSESSED = 'staff_assessed'
 
 
+class TagSourceActor(StrEnum):
+    CLAIMANT = 'claimant'
+    STAFF = 'staff'
+    SYSTEM = 'system'
+    EXTERNAL_SERVICE = 'external_service'
+
+
+class TagFreshness(StrEnum):
+    CURRENT = 'current'
+    STALE = 'stale'
+
+
+class TagAttentionLevel(StrEnum):
+    NOTICE = 'notice'
+    ELEVATED = 'elevated'
+    HIGH = 'high'
+
+
+class TagProjectionMode(StrEnum):
+    DETERMINISTIC = 'deterministic'
+    STAFF_ASSESSED = 'staff_assessed'
+    EXTERNAL_RESULT = 'external_result'
+    UNAVAILABLE = 'unavailable'
+
+
 class TagInstanceStatus(StrEnum):
-    PROPOSED = 'proposed'
     ACTIVE = 'active'
     DISPUTED = 'disputed'
-    RETIRED = 'retired'
 
 
 class TagDefinitionStatus(StrEnum):
@@ -70,6 +93,10 @@ class StaffTag(BaseModel):
     status: TagInstanceStatus
     visibility: TagVisibility
     basis: TagBasis
+    source_actor: TagSourceActor
+    freshness: TagFreshness
+    projection_mode: TagProjectionMode
+    attention_level: TagAttentionLevel | None = None
     source_refs: list[str] = Field(min_length=1, max_length=100)
     activated_at: datetime
     display_weight: int = Field(ge=1, le=100)
@@ -91,65 +118,48 @@ class StaffTagDefinition:
     exit_rule_ref: str
     queue_display_weight: int
     requires_professional_authority: bool
-    filterable: bool = True
+    projection_mode: TagProjectionMode
+    attention_level: TagAttentionLevel | None
+    filterable: bool
 
 
-_CATEGORY_DEFAULTS: dict[
-    TagCategory,
-    tuple[TagVisibility, tuple[str, ...], int, bool, str],
-] = {
+_CATEGORY_DEFAULTS: dict[TagCategory, tuple[int, bool, str]] = {
     TagCategory.CLAIM_TYPE: (
-        TagVisibility.VISIBLE,
-        ('content_branch', 'confirmed_fact'),
         50,
         False,
         'Classifies the policy or loss scope',
     ),
     TagCategory.INCIDENT: (
-        TagVisibility.VISIBLE,
-        ('content_branch', 'confirmed_fact'),
         60,
         False,
         'Describes the reported incident',
     ),
     TagCategory.PEOPLE_SAFETY: (
-        TagVisibility.SAFE_SUMMARY_ONLY,
-        ('confirmed_fact', 'staff_assessment', 'emergency_source'),
         10,
         True,
         'Summarises reported people and safety context',
     ),
     TagCategory.STAKEHOLDER: (
-        TagVisibility.VISIBLE,
-        ('confirmed_fact', 'external_operation'),
         70,
         False,
         'Identifies a participant or service party',
     ),
     TagCategory.IMPACT: (
-        TagVisibility.SAFE_SUMMARY_ONLY,
-        ('confirmed_fact', 'external_result', 'staff_assessment'),
         30,
         False,
         'Summarises the reported practical impact',
     ),
     TagCategory.EVIDENCE: (
-        TagVisibility.SAFE_SUMMARY_ONLY,
-        ('evidence_record', 'work_item'),
         80,
         False,
         'Summarises available or pending evidence',
     ),
     TagCategory.PROGRESS: (
-        TagVisibility.SAFE_SUMMARY_ONLY,
-        ('lifecycle', 'work_item', 'handoff', 'external_operation'),
         40,
         False,
         'Summarises current claim progress',
     ),
     TagCategory.ATTENTION: (
-        TagVisibility.STAFF_ONLY,
-        ('review_signal', 'staff_decision'),
         20,
         True,
         'Flags a source-linked matter for staff attention',
@@ -161,7 +171,7 @@ def _rows(
     category: TagCategory,
     values: tuple[tuple[str, str, TagScope], ...],
 ) -> list[StaffTagDefinition]:
-    visibility, sources, weight, authority, description = _CATEGORY_DEFAULTS[category]
+    weight, authority, description = _CATEGORY_DEFAULTS[category]
     definitions: list[StaffTagDefinition] = []
     for code, label, scope in values:
         status = (
@@ -176,13 +186,16 @@ def _rows(
                 staff_label=label,
                 staff_description=f'{description}: {label}.',
                 scope=scope,
-                visibility=visibility,
-                applicable_claim_families=('motor', 'home', 'contents'),
-                source_types=sources,
-                activation_rule_ref=f'tag.{code}.activate.v1',
-                exit_rule_ref=f'tag.{code}.retire.v1',
+                visibility=TagVisibility.STAFF_ONLY,
+                applicable_claim_families=(),
+                source_types=(),
+                activation_rule_ref='unavailable',
+                exit_rule_ref='unavailable',
                 queue_display_weight=weight,
                 requires_professional_authority=authority,
+                projection_mode=TagProjectionMode.UNAVAILABLE,
+                attention_level=None,
+                filterable=False,
             )
         )
     return definitions
@@ -382,6 +395,268 @@ _DEFINITIONS = [
 ]
 
 
+def _code_set(value: str) -> frozenset[str]:
+    return frozenset(value.split())
+
+
+_MOTOR_ONLY_CODES = _code_set(
+    """
+    claim_type.motor
+    incident.collision
+    incident.rear_end_collision
+    incident.single_vehicle
+    incident.multi_vehicle
+    incident.vehicle_theft
+    stakeholder.other_driver
+    stakeholder.passenger
+    stakeholder.pedestrian_cyclist
+    stakeholder.other_insurer
+    impact.vehicle_drivable
+    impact.vehicle_not_drivable
+    impact.vehicle_safety_unknown
+    impact.towing_needed
+    impact.towing_completed
+    evidence.dashcam_available
+    """
+)
+_HOME_ONLY_CODES = _code_set(
+    """
+    claim_type.home
+    stakeholder.landlord_manager
+    stakeholder.body_corporate
+    impact.home_habitable
+    impact.home_uninhabitable
+    impact.habitability_unknown
+    impact.temporary_accommodation
+    impact.emergency_repairs
+    impact.essential_services
+    impact.property_unsecured
+    """
+)
+_CONTENTS_ONLY_CODES = _code_set(
+    """
+    claim_type.contents
+    incident.contents_theft
+    impact.essential_contents
+    impact.high_value_items
+    """
+)
+_HOME_CONTENTS_CODES = _code_set(
+    """
+    incident.burglary
+    incident.water_escape
+    incident.earthquake
+    incident.damage_over_time
+    stakeholder.builder_tradesperson
+    impact.multiple_areas_items
+    """
+)
+_ALL_FAMILY_CODES = _code_set(
+    """
+    claim_type.cross_product
+    claim_type.unconfirmed
+    incident.vandalism
+    incident.fire_smoke
+    incident.flood
+    incident.storm
+    incident.accidental_damage
+    incident.impact_damage
+    incident.glass_damage
+    incident.cause_unconfirmed
+    injury.none_reported
+    injury.status_unknown
+    injury.reported_unassessed
+    injury.minor_reported
+    injury.moderate_reported
+    injury.serious_reported
+    safety.scene_safe_reported
+    safety.scene_uncertain
+    safety.scene_unsafe
+    safety.immediate_help_needed
+    safety.distress_support
+    safety.accessibility_support
+    stakeholder.third_party_property
+    stakeholder.witness
+    stakeholder.police
+    stakeholder.emergency_services
+    stakeholder.repairer
+    stakeholder.assessor
+    stakeholder.engineer_specialist
+    stakeholder.broker_representative
+    stakeholder.legal_representative
+    impact.further_loss_ongoing
+    evidence.photos_supplied
+    evidence.video_supplied
+    evidence.proof_of_ownership
+    evidence.police_reference
+    evidence.police_report_pending
+    evidence.repair_quote
+    evidence.assessment_report
+    evidence.partial
+    evidence.ready_for_review
+    evidence.unavailable
+    evidence.source_conflict
+    progress.new_report
+    progress.details_incomplete
+    progress.awaiting_claimant
+    progress.awaiting_external
+    progress.staff_assistance_requested
+    progress.staff_assisting
+    progress.follow_up_due
+    progress.follow_up_overdue
+    progress.ready_to_lodge
+    progress.claim_lodged
+    progress.assessor_requested
+    progress.assessor_assigned
+    progress.repair_contact_pending
+    progress.external_request_in_progress
+    progress.customer_update_due
+    attention.fraud_l1
+    attention.fraud_l2
+    attention.fraud_l3
+    attention.coverage_review
+    attention.liability_review
+    attention.liability_disputed
+    attention.customer_dispute
+    attention.identity_verification
+    attention.duplicate_claim
+    attention.material_conflict
+    attention.complex_loss
+    attention.privacy_sensitive
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectionRule:
+    source_types: tuple[str, ...]
+    projection_mode: TagProjectionMode
+    activation_rule_ref: str
+    exit_rule_ref: str = 'tag_projection.project_staff_tags.recompute'
+
+
+def _rules(
+    codes: str,
+    *,
+    source_types: tuple[str, ...],
+    projection_mode: TagProjectionMode = TagProjectionMode.DETERMINISTIC,
+    activation_rule_ref: str,
+) -> dict[str, _ProjectionRule]:
+    rule = _ProjectionRule(
+        source_types=source_types,
+        projection_mode=projection_mode,
+        activation_rule_ref=activation_rule_ref,
+    )
+    return {code: rule for code in codes.split()}
+
+
+_PROJECTION_RULES = {
+    **_rules(
+        'claim_type.motor claim_type.home claim_type.contents claim_type.unconfirmed',
+        source_types=('claim.incident_type', 'field.incident.type'),
+        activation_rule_ref='tag_projection._project_claim_type',
+    ),
+    **_rules(
+        """
+        incident.collision incident.vehicle_theft incident.contents_theft
+        incident.fire_smoke incident.water_escape incident.cause_unconfirmed
+        """,
+        source_types=('field.incident.type',),
+        activation_rule_ref='tag_projection._project_incident',
+    ),
+    **_rules(
+        """
+        injury.none_reported injury.status_unknown injury.reported_unassessed
+        safety.scene_safe_reported safety.scene_uncertain safety.immediate_help_needed
+        safety.accessibility_support
+        """,
+        source_types=('field.incident.injury_or_danger', 'claim.urgency', 'claim.customer_support'),
+        activation_rule_ref='tag_projection._project_people_and_safety',
+    ),
+    **_rules(
+        'stakeholder.police stakeholder.emergency_services',
+        source_types=('field.authorities', 'evidence.police_report'),
+        activation_rule_ref='tag_projection._project_stakeholders',
+    ),
+    **_rules(
+        """
+        impact.vehicle_drivable impact.vehicle_not_drivable impact.vehicle_safety_unknown
+        impact.home_habitable impact.home_uninhabitable impact.habitability_unknown
+        impact.property_unsecured impact.further_loss_ongoing impact.multiple_areas_items
+        """,
+        source_types=('field.vehicle', 'field.property'),
+        activation_rule_ref='tag_projection._project_impact',
+    ),
+    **_rules(
+        """
+        evidence.photos_supplied evidence.video_supplied evidence.dashcam_available
+        evidence.proof_of_ownership evidence.police_reference evidence.police_report_pending
+        evidence.repair_quote
+        evidence.assessment_report evidence.partial evidence.ready_for_review
+        evidence.source_conflict
+        """,
+        source_types=('evidence_record',),
+        activation_rule_ref='tag_projection._project_evidence',
+    ),
+    **_rules(
+        """
+        progress.new_report progress.details_incomplete progress.awaiting_claimant
+        progress.awaiting_external progress.staff_assistance_requested progress.staff_assisting
+        progress.ready_to_lodge progress.external_request_in_progress
+        """,
+        source_types=('claim_state', 'field', 'evidence_record', 'handoff'),
+        activation_rule_ref='tag_projection._project_progress',
+    ),
+    **_rules(
+        'progress.claim_lodged progress.assessor_requested progress.assessor_assigned '
+        'stakeholder.assessor',
+        source_types=('external_result',),
+        projection_mode=TagProjectionMode.EXTERNAL_RESULT,
+        activation_rule_ref='tag_projection._project_progress',
+    ),
+    **_rules(
+        'attention.coverage_review attention.material_conflict attention.complex_loss',
+        source_types=('claim_state', 'evidence_record', 'review_signal', 'staff_decision'),
+        activation_rule_ref='tag_projection._project_attention',
+    ),
+}
+
+_ATTENTION_LEVELS = {
+    'attention.fraud_l1': TagAttentionLevel.NOTICE,
+    'attention.fraud_l2': TagAttentionLevel.ELEVATED,
+    'attention.fraud_l3': TagAttentionLevel.HIGH,
+    'attention.coverage_review': TagAttentionLevel.ELEVATED,
+    'attention.liability_review': TagAttentionLevel.ELEVATED,
+    'attention.liability_disputed': TagAttentionLevel.HIGH,
+    'attention.customer_dispute': TagAttentionLevel.ELEVATED,
+    'attention.identity_verification': TagAttentionLevel.ELEVATED,
+    'attention.duplicate_claim': TagAttentionLevel.HIGH,
+    'attention.material_conflict': TagAttentionLevel.HIGH,
+    'attention.complex_loss': TagAttentionLevel.ELEVATED,
+    'attention.privacy_sensitive': TagAttentionLevel.NOTICE,
+}
+
+
+def _family_mapping() -> dict[str, tuple[str, ...]]:
+    groups = (
+        (_MOTOR_ONLY_CODES, ('motor',)),
+        (_HOME_ONLY_CODES, ('home',)),
+        (_CONTENTS_ONLY_CODES, ('contents',)),
+        (_HOME_CONTENTS_CODES, ('home', 'contents')),
+        (_ALL_FAMILY_CODES, CLAIM_FAMILIES),
+    )
+    mapping: dict[str, tuple[str, ...]] = {}
+    for codes, families in groups:
+        for code in codes:
+            if code in mapping:
+                raise ValueError(f'Duplicate staff tag family mapping: {code}.')
+            mapping[code] = families
+    return mapping
+
+
+_FAMILY_MAPPING = MappingProxyType(_family_mapping())
+
+
 def _build_registry() -> dict[str, StaffTagDefinition]:
     registry: dict[str, StaffTagDefinition] = {}
     prefixes: dict[TagCategory, str | tuple[str, ...]] = {
@@ -394,6 +669,18 @@ def _build_registry() -> dict[str, StaffTagDefinition]:
         TagCategory.PROGRESS: 'progress.',
         TagCategory.ATTENTION: 'attention.',
     }
+    definition_codes = {definition.code for definition in _DEFINITIONS}
+    family_codes = set(_FAMILY_MAPPING)
+    if family_codes != definition_codes:
+        missing = sorted(definition_codes - family_codes)
+        unknown = sorted(family_codes - definition_codes)
+        raise ValueError(f'Invalid staff tag family map; missing={missing}, unknown={unknown}.')
+    if set(_ATTENTION_LEVELS) != {
+        definition.code
+        for definition in _DEFINITIONS
+        if definition.category is TagCategory.ATTENTION
+    }:
+        raise ValueError('Every Attention tag requires exactly one attention level.')
     for definition in _DEFINITIONS:
         if definition.code in registry:
             raise ValueError(f'Duplicate staff tag code: {definition.code}.')
@@ -401,7 +688,20 @@ def _build_registry() -> dict[str, StaffTagDefinition]:
             raise ValueError(
                 f'Staff tag {definition.code} does not match {definition.category.value}.'
             )
-        registry[definition.code] = definition
+        rule = _PROJECTION_RULES.get(definition.code)
+        enriched = replace(
+            definition,
+            applicable_claim_families=_FAMILY_MAPPING[definition.code],
+            source_types=rule.source_types if rule is not None else (),
+            activation_rule_ref=(rule.activation_rule_ref if rule is not None else 'unavailable'),
+            exit_rule_ref=(rule.exit_rule_ref if rule is not None else 'unavailable'),
+            projection_mode=(
+                rule.projection_mode if rule is not None else TagProjectionMode.UNAVAILABLE
+            ),
+            attention_level=_ATTENTION_LEVELS.get(definition.code),
+            filterable=(definition.status is TagDefinitionStatus.PUBLISHED and rule is not None),
+        )
+        registry[definition.code] = enriched
     return registry
 
 
