@@ -31,6 +31,7 @@ from backend.repositories.scenario_loader import (
     seed_scenario,
 )
 from backend.repositories.staff_identity import StaffIdentityRepository
+from backend.services.demo_materials import associate_materials
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
 SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
@@ -194,6 +195,11 @@ def seed_validation_scenarios(
         )
         for scenario_id in VALIDATION_SCENARIO_IDS
     )
+    # The produced demonstration materials become Evidence on the claim of their family.
+    # This runs after `_validation_scenario` rather than before it: that transform replaces
+    # the scenario's evidence wholesale and assigns the claim its seeded identity, so
+    # associating first would attach material to a claim id that no longer exists.
+    scenarios = associate_materials(scenarios).scenarios
     presence, expected_presence_revision = _validation_presence(repository, staff_id)
     response = DemoSeedResponse(
         status='seeded',
