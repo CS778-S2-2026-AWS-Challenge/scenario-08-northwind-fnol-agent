@@ -220,6 +220,17 @@ def create_cowork_request(
         target = principal.subject
     if any(item.staff_id == target for item in repository.list_claim_coworkers(claim_id)):
         raise _error(409, 'OWNERSHIP_CONFLICT', 'That staff member already has cowork access.')
+    if any(
+        item.kind is CollaborationRequestKind.COWORK
+        and item.status is CollaborationRequestStatus.PENDING
+        and item.target_staff_id == target
+        for item in repository.list_collaboration_requests(claim_id)
+    ):
+        raise _error(
+            409,
+            'OWNERSHIP_CONFLICT',
+            'A cowork request for that staff member is already pending.',
+        )
     timestamp = now_utc()
     request = ClaimCollaborationRequest(
         request_id=new_id('col'),
@@ -272,6 +283,17 @@ def create_transfer_request(
         raise _error(403, 'ACCESS_DENIED', 'Only the primary owner can request a normal transfer.')
     if payload.target_staff_id == owner:
         raise _error(422, 'VALIDATION_ERROR', 'A transfer must name a different staff member.')
+    if any(
+        item.kind is CollaborationRequestKind.TRANSFER
+        and item.status is CollaborationRequestStatus.PENDING
+        and item.target_staff_id == payload.target_staff_id
+        for item in repository.list_collaboration_requests(claim_id)
+    ):
+        raise _error(
+            409,
+            'OWNERSHIP_CONFLICT',
+            'A transfer request for that staff member is already pending.',
+        )
     timestamp = now_utc()
     request = ClaimCollaborationRequest(
         request_id=new_id('col'),
