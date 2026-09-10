@@ -22,8 +22,9 @@ from backend.core.runtime_profiles import (
     runtime_capability_statuses,
     validate_data_runtime_bundle,
 )
-from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch
+from backend.domain.knowledge import KnowledgeChunk, KnowledgeSearch, KnowledgeSearchRequest
 from backend.repositories.fixture import FixtureRepository
+from backend.services.knowledge_search import search_knowledge
 
 
 def knowledge_search(
@@ -80,6 +81,63 @@ def test_fixture_profile_builds_one_coherent_bundle() -> None:
         'knowledge_documents': 'using_fixture',
         'knowledge_retrieval': 'using_fixture',
     }
+
+
+@pytest.mark.parametrize(
+    ('product', 'question', 'chunk_id', 'checksum'),
+    [
+        (
+            'motor',
+            'The base excess',
+            'nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01',
+            'a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989',
+        ),
+        (
+            'home',
+            'Gradual damage is generally excluded',
+            'nw-policy-home-standard-mvp-2026-1#HOM-BEN-03',
+            '1240612470e1ea03800e87fe6f48b24aa895559f9498daaeffd3d3be13c4eea7',
+        ),
+        (
+            'contents',
+            'The claimant should first protect people',
+            'nw-policy-contents-standard-mvp-2026-1#CON-CLM-01',
+            '041fd8fbf9eafaa2cd1ff13e2998c57ee725f5e32bf61c429abfe4272b87cf40',
+        ),
+    ],
+)
+def test_fixture_profile_returns_approved_citation_cases(
+    product: str,
+    question: str,
+    chunk_id: str,
+    checksum: str,
+) -> None:
+    bundle = build_data_runtime_bundle(Settings())
+    response = search_knowledge(
+        bundle.knowledge_retrieval,
+        KnowledgeSearchRequest(
+            question=question,
+            jurisdiction='NZ',
+            visibility='customer_and_staff',
+            authority='northwind_synthetic_demo',
+            version='MVP-2026.1',
+            insurer='Northwind Insurance',
+            product=product,
+            effective_at=datetime(2026, 8, 27, tzinfo=UTC),
+            limit=1,
+        ),
+    )
+
+    assert response.status == 'evidence_found'
+    assert response.limitations == []
+    citation = response.results[0]
+    assert citation.chunk_id == chunk_id
+    assert citation.document_id == chunk_id.split('#', 1)[0]
+    assert citation.source_uri.startswith('northwind://synthetic-policy/')
+    assert citation.version == 'MVP-2026.1'
+    assert citation.checksum == checksum
+    assert citation.section_path
+    assert citation.text
 
 
 def test_app_lifespan_closes_an_injected_repository() -> None:
