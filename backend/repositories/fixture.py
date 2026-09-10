@@ -29,6 +29,8 @@ from backend.domain.models import (
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    FollowUpRecord,
+    FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     RuntimeTraceRecord,
@@ -61,6 +63,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
@@ -106,6 +109,7 @@ class FixtureRepository(PersistenceRepository):
             'claims': len(self._claims),
             'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
+            'follow_ups': len(self._follow_ups),
             'messages': len(self._messages),
             'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
@@ -132,6 +136,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims.clear()
         self._audit_events.clear()
         self._sessions.clear()
+        self._follow_ups.clear()
         self._messages.clear()
         self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
@@ -378,6 +383,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim_id] = claim.model_copy(update={'customer_id': customer_id})
         stores: tuple[dict[str, Any], ...] = (
             self._sessions,
+            self._follow_ups,
             self._messages,
             self._decisions,
             self._assessor_routing_operations,
@@ -520,6 +526,85 @@ class FixtureRepository(PersistenceRepository):
         if claim is None or claim.customer_id != session.customer_id:
             raise KeyError(session.claim_id)
         self._sessions[session.session_id] = deepcopy(session)
+
+    def get_follow_up(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> FollowUpRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        record = self._follow_ups.get(follow_up_id)
+        if record is None or record.claim_id != claim_id:
+            return None
+        return deepcopy(record)
+
+    def list_follow_ups(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[FollowUpRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        records = [
+            deepcopy(record) for record in self._follow_ups.values() if record.claim_id == claim_id
+        ]
+        return sorted(records, key=lambda record: (record.created_at, record.follow_up_id))
+
+    def save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        stored_claim = self._validate_claim_mutation(
+            claim,
+            expected_revision,
+            allow_active_session_change=True,
+        )
+        stored_session = self._sessions.get(session.session_id)
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+
+        valid = (
+            stored_claim.active_session_id == session.session_id
+            and claim.active_session_id is None
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and stored_session is not None
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and session.status is SessionStatus.PAUSED
+            and session.context_revision == expected_revision
+            and session.recovery_context is not None
+            and follow_up.claim_id == claim.claim_id
+            and follow_up.source_session_id == session.session_id
+            and follow_up.status is FollowUpStatus.PENDING
+            and follow_up.attempt_count == 0
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.follow_up_id == follow_up.follow_up_id
+        )
+        if not valid:
+            raise KeyError(claim.claim_id)
+        if lookup in self._idempotency:
+            raise IdempotencyConflict(idempotency.key)
+        if follow_up.follow_up_id in self._follow_ups:
+            raise IdempotencyConflict(follow_up.follow_up_id)
+        if any(
+            record.claim_id == claim.claim_id and record.source_session_id == session.session_id
+            for record in self._follow_ups.values()
+        ):
+            raise IdempotencyConflict(session.session_id)
+
+        self._claims[claim.claim_id] = deepcopy(claim)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._follow_ups[follow_up.follow_up_id] = deepcopy(follow_up)
+        self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_session_mutation(
         self,

@@ -27,6 +27,7 @@ from backend.domain.models import (
     GrantAssessorConsentRequest,
     MessageListResponse,
     MessageTurnResponse,
+    PauseSessionResponse,
     StartSessionRequest,
     WorkflowState,
 )
@@ -39,6 +40,7 @@ from backend.services.claims import (
     get_claim,
     get_session,
     list_claims,
+    pause_session,
     promote_anonymous_claim,
     start_claim,
     update_form,
@@ -260,6 +262,28 @@ def create_session(
         claim_id,
         payload,
         idempotency_key,
+    )
+
+
+@router.post(
+    '/{claim_id}/sessions/{session_id}/pause',
+    response_model=PauseSessionResponse,
+)
+def pause_claim_session(
+    claim_id: str,
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_claimant),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> PauseSessionResponse:
+    return pause_session(
+        repository_for(request),
+        principal,
+        claim_id,
+        session_id,
+        idempotency_key,
+        if_match,
     )
 
 

@@ -744,18 +744,40 @@ def _queue_key(claim: WorkingClaim, active_handoffs: Sequence[HandoffRecord]) ->
 
 
 def _incomplete_context(
+    repository: PersistenceRepository,
     claim: WorkingClaim,
     sessions: Sequence[SessionRecord],
 ) -> WorkbenchIncompleteContext | None:
     if claim.claim_state.workflow_state is not WorkflowState.COLLECTING or not sessions:
         return None
     last = max(sessions, key=lambda item: item.last_active_at)
-    resume_point = last.summary or claim.customer_next_step.summary
+    recovery = last.recovery_context
+    follow_ups = [
+        record
+        for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
+        if record.source_session_id == last.session_id
+    ]
+    follow_up = (
+        max(
+            follow_ups,
+            key=lambda record: (record.created_at, record.follow_up_id),
+        )
+        if follow_ups
+        else None
+    )
     return WorkbenchIncompleteContext(
-        interrupted_at=last.last_active_at,
-        last_meaningful_activity_at=last.last_active_at,
-        resume_point=resume_point,
-        follow_up_status='not_scheduled',
+        interrupted_at=(recovery.interrupted_at if recovery is not None else last.last_active_at),
+        last_meaningful_activity_at=(
+            recovery.last_meaningful_activity_at if recovery is not None else last.last_active_at
+        ),
+        resume_point=(
+            recovery.resume_point
+            if recovery is not None
+            else last.summary or claim.customer_next_step.summary
+        ),
+        follow_up_due_at=follow_up.due_at if follow_up is not None else None,
+        follow_up_status=(follow_up.status.value if follow_up is not None else 'not_scheduled'),
+        follow_up_attempts=(follow_up.attempt_count if follow_up is not None else 0),
     )
 
 
@@ -1465,7 +1487,7 @@ def _build_projection(
         ),
         missing_information=missing,
         risk_signals=projected_risk_signals,
-        incomplete_context=_incomplete_context(claim, sessions),
+        incomplete_context=_incomplete_context(repository, claim, sessions),
         unread_claimant_messages=0,
         last_claimant_activity_at=(
             max(item.created_at for item in claimant_messages) if claimant_messages else None

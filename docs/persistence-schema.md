@@ -671,3 +671,32 @@ Candidate physical services and open provider decisions are recorded in
 `docs/data-architecture.md`. Availability, schema, identity, region, limits, retention,
 transactions, backup, recovery, and migration remain unconfirmed until verified for the
 selected profile.
+
+## P17.1 Incomplete Claim Checkpoint
+
+The explicit incomplete-Claim checkpoint is a provider-neutral atomic mutation. It does not add a
+second Claim State.
+
+For Claim revision `N`, the checkpoint persists together:
+
+- the same authoritative `WorkingClaim` at revision `N + 1`, with `active_session_id` cleared;
+- the previously active Session changed to `paused`;
+- bounded Session recovery context containing `interrupted_at`,
+  `last_meaningful_activity_at`, and a plain-language `resume_point`;
+- exactly one Claim-scoped Follow-up record linked to the interrupted Session; and
+- the idempotency record for the authenticated claimant, route, key, Claim, Session, and Follow-up
+  identity.
+
+Follow-up IDs use the `fup_` prefix. The P17.1 Follow-up record stores its identity, Claim,
+source Session, responsible party, attempt count, optional channel/outcome/due time, status, and
+timestamps. P17.1 creates the initial pending record with zero attempts; scheduling, delivery,
+attempt processing, abandonment, and retention transitions remain P17.2/P17.3 responsibilities.
+
+The Fixture and MongoDB adapters must expose the same `get_follow_up`, `list_follow_ups`, and
+`save_incomplete_checkpoint` behaviour. A stale revision, mismatched Claim/Session/customer,
+non-active source Session, conflicting idempotency identity, or second Follow-up for the same
+interruption fails before any bundle member becomes authoritative.
+
+Resume continues to create a new active interaction Session for the same Working Claim. The
+paused Session and its recovery context remain historical continuity evidence and never supersede
+the latest Working Claim.

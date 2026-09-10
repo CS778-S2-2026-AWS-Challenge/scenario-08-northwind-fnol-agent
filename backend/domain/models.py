@@ -101,6 +101,10 @@ class SessionStatus(str, Enum):
     CLOSED = 'closed'
 
 
+class FollowUpStatus(str, Enum):
+    PENDING = 'pending'
+
+
 class ActorType(str, Enum):
     CLAIMANT = 'claimant'
     AGENT = 'agent'
@@ -676,6 +680,30 @@ class QuestionRecord(ContractModel):
     asked_at: datetime
 
 
+class SessionRecoveryContext(ContractModel):
+    """Bounded interruption metadata; never a second Claim State."""
+
+    interrupted_at: datetime
+    last_meaningful_activity_at: datetime
+    resume_point: str = Field(min_length=1, max_length=1000)
+
+
+class FollowUpRecord(ContractModel):
+    """Claim-scoped durable follow-up identity created at interruption time."""
+
+    follow_up_id: str
+    claim_id: str
+    source_session_id: str
+    responsible_party: ResponsibleParty
+    attempt_count: int = Field(default=0, ge=0)
+    channel: PreferredChannel | None = None
+    outcome: str | None = Field(default=None, max_length=1000)
+    status: FollowUpStatus = FollowUpStatus.PENDING
+    due_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class SessionRecord(ContractModel):
     session_id: str
     claim_id: str
@@ -686,6 +714,7 @@ class SessionRecord(ContractModel):
     unresolved_questions: list[str] = Field(default_factory=list)
     pending_items: list[str] = Field(default_factory=list)
     prior_commitments: list[str] = Field(default_factory=list)
+    recovery_context: SessionRecoveryContext | None = None
     context_revision: int = Field(default=1, ge=1)
     question_budget: int = Field(default=9, ge=1)
     question_turn_count: int = Field(default=0, ge=0)
@@ -1511,6 +1540,14 @@ class FormConfirmationRequest(ContractModel):
     field_codes: list[str] = Field(min_length=1, max_length=50)
 
 
+class ClaimantIncompleteContext(ContractModel):
+    interrupted_at: datetime
+    last_meaningful_activity_at: datetime
+    resume_point: str
+    follow_up_due_at: datetime | None = None
+    follow_up_status: FollowUpStatus
+
+
 class ClaimantClaim(ContractModel):
     claim_id: str
     revision: int
@@ -1523,6 +1560,7 @@ class ClaimantClaim(ContractModel):
     external_service_action: ClaimantExternalServiceAction | None = None
     dynamic_form: 'DynamicFormProjection | None' = None
     customer_next_step: CustomerNextStep
+    incomplete_context: ClaimantIncompleteContext | None = None
     handoff: ClaimantHandoff | None = None
     created_at: datetime
     updated_at: datetime
@@ -1546,6 +1584,7 @@ class ClaimListItem(ContractModel):
     workflow_state: WorkflowState
     external_claim: ExternalClaimResult | None = None
     customer_next_step: CustomerNextStep
+    incomplete_context: ClaimantIncompleteContext | None = None
     created_at: datetime
     updated_at: datetime
     can_resume: bool
@@ -1565,6 +1604,11 @@ class ClaimantSession(ContractModel):
     started_at: datetime
     last_active_at: datetime
     closed_at: datetime | None = None
+
+
+class PauseSessionResponse(ContractModel):
+    claim: ClaimantClaim
+    session: ClaimantSession
 
 
 class CreateClaimResponse(ContractModel):
