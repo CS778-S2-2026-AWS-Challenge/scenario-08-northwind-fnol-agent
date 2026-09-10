@@ -65,10 +65,10 @@ function claimDetail(revision, {
   }
 }
 
-function staffMessage(text, messageId = 'msg_staff_journey') {
+function staffMessage(text, messageId = 'msg_staff_journey', sessionId = 'ses_26') {
   return {
     message_id: messageId,
-    session_id: 'ses_26',
+    session_id: sessionId,
     actor: 'staff',
     visibility: 'shared',
     content: { type: 'text', text },
@@ -324,12 +324,27 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     })
   })
 
-  it('reconciles a stale revision through a browser reload before a second UI send', async () => {
+  it('reloads stale authority, refuses silent retargeting, and only sends after the new active session is explicitly opened', async () => {
+    let activeSessionId = 'ses_26'
     let postAttempt = 0
+    const pageTwoSessions = [
+      { session_id: 'ses_26', status: 'active' },
+      { session_id: 'ses_27', status: 'closed' },
+    ]
+    const messagesBySession = { ses_25: [], ses_26: [], ses_27: [] }
     const { fetchMock, state } = createJourneyService({
+      pageTwoSessions,
+      messagesBySession,
+      claimFactory: () => claimDetail(state.revision.value, {
+        activeSessionId,
+        actionTarget: activeSessionId,
+      }),
       onPost(request, serviceState) {
         postAttempt += 1
         if (postAttempt === 1) {
+          activeSessionId = 'ses_27'
+          pageTwoSessions[0].status = 'closed'
+          pageTwoSessions[1].status = 'active'
           serviceState.revision.value = 8
           return jsonResponse(409, {
             error: {
@@ -341,8 +356,12 @@ describe('WorkbenchPage staff session browser/API journey', () => {
         }
 
         expect(request.revision).toBe('8')
-        const message = staffMessage('Journey staff reply', 'msg_after_revalidation')
-        serviceState.messagesBySession.ses_26.push(message)
+        const message = staffMessage(
+          'Journey staff reply',
+          'msg_after_revalidation',
+          'ses_27',
+        )
+        serviceState.messagesBySession.ses_27.push(message)
         serviceState.revision.value = 9
         return jsonResponse(200, {
           message,
@@ -358,7 +377,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       if (!diagnostic.includes('Not implemented: navigation')) originalConsoleError(...args)
     })
 
-    const firstPage = renderJourney()
+    const firstPage = renderJourney('ses_26')
     const user = userEvent.setup()
     const sendButton = await screen.findByRole('button', { name: 'Send message' })
     await waitFor(() => expect(sendButton).toBeEnabled())
@@ -370,6 +389,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.postRequests).toHaveLength(1)
     expect(state.postRequests[0].revision).toBe('7')
     expect(state.messagesBySession.ses_26).toHaveLength(0)
+    expect(state.messagesBySession.ses_27).toHaveLength(0)
 
     const readsBeforeReload = {
       claim: state.claimReads,
@@ -378,15 +398,24 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     }
 
     firstPage.unmount()
-    renderJourney()
+    const reloadedOldSession = renderJourney('ses_26')
 
-    const revalidatedButton = await screen.findByRole('button', { name: 'Send message' })
-    await waitFor(() => expect(revalidatedButton).toBeEnabled())
-
+    expect(await screen.findByText(/saved session is read-only/i)).toBeVisible()
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
+    expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
     expect(state.claimReads).toBeGreaterThan(readsBeforeReload.claim)
     expect(state.sessionReads.length).toBeGreaterThan(readsBeforeReload.sessions)
     expect(state.messageReads.length).toBeGreaterThan(readsBeforeReload.messages)
+    expect(state.postRequests).toHaveLength(1)
+
+    reloadedOldSession.unmount()
+    tabs.tabs[0] = { ...tabs.tabs[0], sessionId: 'ses_27' }
+    renderJourney('ses_27')
+
+    const revalidatedButton = await screen.findByRole('button', { name: 'Send message' })
+    await waitFor(() => expect(revalidatedButton).toBeEnabled())
+    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
     expect(state.postRequests).toHaveLength(1)
 
     await userEvent.setup().click(revalidatedButton)
@@ -398,9 +427,11 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.postRequests).toHaveLength(2)
     expect(state.postRequests[1].revision).toBe('8')
     expect(state.postRequests[1].key).not.toBe(state.postRequests[0].key)
-    expect(state.messagesBySession.ses_26).toHaveLength(1)
-    expect(state.messagesBySession.ses_26[0]).toMatchObject({
+    expect(state.messagesBySession.ses_26).toHaveLength(0)
+    expect(state.messagesBySession.ses_27).toHaveLength(1)
+    expect(state.messagesBySession.ses_27[0]).toMatchObject({
       message_id: 'msg_after_revalidation',
+      session_id: 'ses_27',
       visibility: 'shared',
     })
   })
