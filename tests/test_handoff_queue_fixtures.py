@@ -186,10 +186,14 @@ def test_incomplete_claims_view_and_metadata_describe_collecting_work() -> None:
             headers=headers,
         )
 
-    assert {'value': 'incomplete_claims', 'label': 'Incomplete claims'} in metadata.json()['views']
+    assert {
+        'value': 'incomplete_claims',
+        'label': 'Incomplete claims',
+        'group': 'operational',
+    } in metadata.json()['views']
     assert [item['claim_id'] for item in response.json()['items']] == [claim_id]
     assert response.json()['items'][0]['workflow_state'] == 'collecting'
-    assert response.json()['items'][0]['work_summary']['queue_key'] == 'incomplete_claims'
+    assert response.json()['items'][0]['work_summary']['queue_key'] == 'processing'
 
 
 def test_staff_queue_filters_by_status_priority_and_combined_state() -> None:
@@ -369,7 +373,11 @@ def test_staff_queue_filter_metadata_is_canonical_without_claim_pages() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert {'value': 'human_requests', 'label': 'Staff assistance'} in payload['views']
+    assert {
+        'value': 'human_requests',
+        'label': 'Staff assistance',
+        'group': 'operational',
+    } in payload['views']
     assert {'value': 'professional_review', 'label': 'Professional review'} in payload[
         'workflow_states'
     ]

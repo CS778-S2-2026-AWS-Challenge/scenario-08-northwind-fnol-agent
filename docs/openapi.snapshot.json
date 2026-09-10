@@ -10780,6 +10780,16 @@
         "title": "WorkbenchActionResultDefaults",
         "type": "object"
       },
+      "WorkbenchActiveQueue": {
+        "enum": [
+          "processing",
+          "waiting_user",
+          "waiting_material",
+          "waiting_third_party"
+        ],
+        "title": "WorkbenchActiveQueue",
+        "type": "string"
+      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -11105,7 +11115,7 @@
           },
           "views": {
             "items": {
-              "$ref": "#/components/schemas/WorkbenchFilterOption"
+              "$ref": "#/components/schemas/WorkbenchQueueFilterOption"
             },
             "title": "Views",
             "type": "array"
@@ -11216,11 +11226,15 @@
           },
           "page": {
             "$ref": "#/components/schemas/PageInfo"
+          },
+          "view_counts": {
+            "$ref": "#/components/schemas/WorkbenchViewCounts"
           }
         },
         "required": [
           "items",
-          "page"
+          "page",
+          "view_counts"
         ],
         "title": "WorkbenchClaimListResponse",
         "type": "object"
@@ -12242,9 +12256,36 @@
         "title": "WorkbenchPriorityReason",
         "type": "object"
       },
+      "WorkbenchQueueFilterOption": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/WorkbenchQueueViewGroup"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "group"
+        ],
+        "title": "WorkbenchQueueFilterOption",
+        "type": "object"
+      },
       "WorkbenchQueueView": {
         "enum": [
           "all",
+          "processing",
+          "waiting_user",
+          "waiting_material",
+          "waiting_third_party",
           "urgent",
           "human_requests",
           "incomplete_claims",
@@ -12255,6 +12296,15 @@
           "created_routed"
         ],
         "title": "WorkbenchQueueView",
+        "type": "string"
+      },
+      "WorkbenchQueueViewGroup": {
+        "enum": [
+          "overview",
+          "active",
+          "operational"
+        ],
+        "title": "WorkbenchQueueViewGroup",
         "type": "string"
       },
       "WorkbenchReservation": {
@@ -13293,6 +13343,64 @@
         "title": "WorkbenchTagFilterOption",
         "type": "object"
       },
+      "WorkbenchViewCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "view": {
+            "$ref": "#/components/schemas/WorkbenchQueueView"
+          }
+        },
+        "required": [
+          "view",
+          "count"
+        ],
+        "title": "WorkbenchViewCount",
+        "type": "object"
+      },
+      "WorkbenchViewCountStatus": {
+        "enum": [
+          "available",
+          "unavailable"
+        ],
+        "title": "WorkbenchViewCountStatus",
+        "type": "string"
+      },
+      "WorkbenchViewCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchViewCount"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitation"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkbenchViewCountStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WorkbenchViewCounts",
+        "type": "object"
+      },
       "WorkbenchWaitingExternalService": {
         "additionalProperties": false,
         "properties": {
@@ -13404,8 +13512,7 @@
             "title": "Primary Blocker"
           },
           "queue_key": {
-            "title": "Queue Key",
-            "type": "string"
+            "$ref": "#/components/schemas/WorkbenchActiveQueue"
           },
           "risk_signals": {
             "items": {
@@ -16632,6 +16739,39 @@
           },
           {
             "in": "query",
+            "name": "assignee_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignee Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next_action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentAction"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Action"
+            }
+          },
+          {
+            "in": "query",
             "name": "tag",
             "required": false,
             "schema": {
@@ -16661,6 +16801,40 @@
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated After"
             }
           },
           {
