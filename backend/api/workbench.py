@@ -1,5 +1,6 @@
 import base64
 import re
+from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
@@ -9,6 +10,7 @@ from backend.core.auth import Principal, require_staff
 from backend.core.errors import ApiError
 from backend.domain.models import (
     AcceptHandoffRequest,
+    AgentAction,
     CollaborationMutationResponse,
     CreateCoworkRequest,
     CreateStaffActionRequest,
@@ -142,8 +144,12 @@ def read_workbench_claims(
     view: WorkbenchQueueView | None = Query(default=None),
     workflow_state: WorkflowState | None = Query(default=None),
     priority: WorkPriorityLevel | None = Query(default=None),
+    assignee_id: str | None = Query(default=None, min_length=1),
+    next_action: AgentAction | None = Query(default=None),
     tag: str | None = Query(default=None),
     search: str | None = Query(default=None, max_length=200),
+    updated_before: datetime | None = Query(default=None),
+    updated_after: datetime | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> WorkbenchClaimListResponse:
@@ -153,8 +159,12 @@ def read_workbench_claims(
         view=view,
         workflow_state=workflow_state,
         priority=priority,
+        assignee_id=assignee_id,
+        next_action=next_action,
         tag=tag,
         search=search,
+        updated_before=updated_before,
+        updated_after=updated_after,
         limit=limit,
         cursor=cursor,
     )

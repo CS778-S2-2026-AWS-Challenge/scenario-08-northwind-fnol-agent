@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import Field
 
 from backend.domain.external_services import (
+    ExternalRequestProvenance,
     ExternalTaskRecord,
     ExternalTaskRequest,
     ExternalTaskResultVerification,
@@ -71,6 +72,10 @@ class WorkPriorityLevel(StrEnum):
 
 class WorkbenchQueueView(StrEnum):
     ALL = 'all'
+    PROCESSING = 'processing'
+    WAITING_USER = 'waiting_user'
+    WAITING_MATERIAL = 'waiting_material'
+    WAITING_THIRD_PARTY = 'waiting_third_party'
     URGENT = 'urgent'
     HUMAN_REQUESTS = 'human_requests'
     INCOMPLETE_CLAIMS = 'incomplete_claims'
@@ -79,6 +84,24 @@ class WorkbenchQueueView(StrEnum):
     PROFESSIONAL_REVIEW = 'professional_review'
     READY_TO_CREATE = 'ready_to_create'
     CREATED_ROUTED = 'created_routed'
+
+
+class WorkbenchActiveQueue(StrEnum):
+    PROCESSING = 'processing'
+    WAITING_USER = 'waiting_user'
+    WAITING_MATERIAL = 'waiting_material'
+    WAITING_THIRD_PARTY = 'waiting_third_party'
+
+
+class WorkbenchQueueViewGroup(StrEnum):
+    OVERVIEW = 'overview'
+    ACTIVE = 'active'
+    OPERATIONAL = 'operational'
+
+
+class WorkbenchViewCountStatus(StrEnum):
+    AVAILABLE = 'available'
+    UNAVAILABLE = 'unavailable'
 
 
 class MissingInformationAttention(StrEnum):
@@ -287,7 +310,7 @@ class WorkbenchIncompleteContext(ContractModel):
 
 
 class WorkbenchWorkSummary(ContractModel):
-    queue_key: str
+    queue_key: WorkbenchActiveQueue
     current_work_item: WorkbenchCurrentWorkItem | None = None
     primary_action_code: str | None = None
     primary_action_target_ref: str | None = None
@@ -403,22 +426,38 @@ class WorkbenchClaimListItem(ContractModel):
     updated_at: datetime
 
 
-class WorkbenchClaimListResponse(ContractModel):
-    items: list[WorkbenchClaimListItem]
-    page: PageInfo
-
-
 class WorkbenchFilterOption(ContractModel):
     value: str
     label: str
+
+
+class WorkbenchQueueFilterOption(WorkbenchFilterOption):
+    group: WorkbenchQueueViewGroup
 
 
 class WorkbenchTagFilterOption(WorkbenchFilterOption):
     category: str
 
 
+class WorkbenchViewCount(ContractModel):
+    view: WorkbenchQueueView
+    count: int = Field(ge=0)
+
+
+class WorkbenchViewCounts(ContractModel):
+    status: WorkbenchViewCountStatus
+    items: list[WorkbenchViewCount] = Field(default_factory=list)
+    limitation: str | None = None
+
+
+class WorkbenchClaimListResponse(ContractModel):
+    items: list[WorkbenchClaimListItem]
+    page: PageInfo
+    view_counts: WorkbenchViewCounts
+
+
 class WorkbenchClaimFilterMetadata(ContractModel):
-    views: list[WorkbenchFilterOption]
+    views: list[WorkbenchQueueFilterOption]
     workflow_states: list[WorkbenchFilterOption]
     priorities: list[WorkbenchFilterOption]
     tags: list[WorkbenchTagFilterOption]
@@ -456,6 +495,8 @@ class WorkbenchExternalResultEvidence(ContractModel):
 class WorkbenchExternalLifecycle(ContractModel):
     stakeholder: str
     service: str
+    catalogue_reference: str | None = None
+    provenance: ExternalRequestProvenance
     request_type: str
     authority_state: str
     consent_state: str
