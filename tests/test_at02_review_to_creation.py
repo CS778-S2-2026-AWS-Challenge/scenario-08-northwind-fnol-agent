@@ -170,6 +170,32 @@ def test_the_family_is_taken_from_the_policy_not_read_into_a_sentence() -> None:
     assert field.source_refs == ['ret_fixture_at02_policy']
 
 
+def test_who_updated_a_field_agrees_with_where_it_came_from() -> None:
+    """`source`, `source_refs`, and `updated_by` are three statements about one origin.
+
+    A field sourced from a policy retrieval but stamped as updated by the claimant
+    attributes a system classification to a claimant action, and a consumer reading the
+    audit metadata rather than the source would believe it. The three have to agree.
+    """
+
+    scenario = load_scenario(SCENARIO_PATH)
+    holders = {
+        'claim.form': scenario.claim.form,
+        'handoff packet': scenario.handoffs[0].packet.form_snapshot,
+    }
+
+    for label, form in holders.items():
+        for code, field in form.items():
+            actor = field.updated_by.actor_type.value
+            if field.source.value == 'claimant':
+                assert actor == 'claimant', f'{label}: {code}'
+                assert all(ref.startswith('msg_') for ref in field.source_refs), f'{label}: {code}'
+            elif field.source.value == 'policy':
+                # The convention `policy.policy_number` already uses in this fixture.
+                assert actor == 'system', f'{label}: {code}'
+                assert all(ref.startswith('ret_') for ref in field.source_refs), f'{label}: {code}'
+
+
 def test_an_evening_is_not_an_exact_timestamp() -> None:
     """ "The evening of 14 August" fixes the day, and the stored precision says so."""
 

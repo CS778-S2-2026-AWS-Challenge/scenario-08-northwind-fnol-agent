@@ -76,8 +76,8 @@
         "confidence": 1.0,
         "updated_at": "2026-08-13T11:05:00Z",
         "updated_by": {
-          "actor_type": "claimant",
-          "actor_id": "cus_demo"
+          "actor_type": "system",
+          "actor_id": "sys_policy_adapter"
         },
         "precision": "exact"
       },
@@ -556,8 +556,8 @@
             "confidence": 1.0,
             "updated_at": "2026-08-13T11:05:00Z",
             "updated_by": {
-              "actor_type": "claimant",
-              "actor_id": "cus_demo"
+              "actor_type": "system",
+              "actor_id": "sys_policy_adapter"
             },
             "precision": "exact"
           },
