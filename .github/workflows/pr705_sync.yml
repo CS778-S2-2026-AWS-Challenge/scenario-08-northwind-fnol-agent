@@ -1,0 +1,70 @@
+name: PR705 merge synchronization
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  synchronize:
+    if: github.event.pull_request.number == 705
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Reconcile overlapping text contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ours=c44ef287a92db4bb656f8a8999bb760cddffc1a3
+          base=b322ace3a1c042c2ad3f7e27faa49578c3d39add
+          theirs=a0c5e50f273dde74237951bace7866a6b10b8684
+          for file in docs/api.md tests/test_handoff_queue_fixtures.py; do
+            git show "$ours:$file" > /tmp/ours
+            git show "$base:$file" > /tmp/base
+            git show "$theirs:$file" > /tmp/theirs
+            set +e
+            git merge-file -p /tmp/ours /tmp/base /tmp/theirs > "$file"
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "Three-way merge conflict remains in $file"
+              grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$file" || true
+              exit 1
+            fi
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Regenerate OpenAPI snapshot from reconciled code
+        run: python scripts/export_openapi.py
+
+      - name: Commit synchronized files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add docs/api.md docs/openapi.snapshot.json tests/test_handoff_queue_fixtures.py
+          if git diff --cached --quiet; then
+            echo "No synchronization changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "merge: synchronize Workbench and recovery contracts"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
