@@ -25,6 +25,7 @@ and the storage reference only; the business condition is what `status` is for.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -316,7 +317,11 @@ MANIFEST_RELATION: dict[str, EvidenceRelation] = {
 FIELD_TARGET_PREFIX = 'field:'
 
 
-def _references_for(material: dict[str, Any], raised_at: datetime) -> list[EvidenceReference]:
+def _references_for(
+    material: dict[str, Any],
+    raised_at: datetime,
+    catalogue: Mapping[str, str],
+) -> list[EvidenceReference]:
     """Carry the manifest's typed references onto the record.
 
     The catalogue records these because a condition that is a statement about a second
@@ -328,16 +333,25 @@ def _references_for(material: dict[str, Any], raised_at: datetime) -> list[Evide
     and a resolution the manifest does not state is `unresolved`, which is what the
     demonstration needs to be able to show.
 
+    A target is checked against the catalogue before it becomes a reference. Deriving an
+    identifier from a string always succeeds, so a typo, a deleted material, or a target
+    in another family would otherwise produce a reference that looks valid and points at
+    no record — and an unavailability whose establishing notice does not exist is exactly
+    the claim section 7 forbids. The same-family rule follows from the reference model:
+    an `evidence_id` is only meaningful on the claim that holds the record.
+
     Args:
         material: One manifest entry.
         raised_at: When the relation is recorded as raised, taken from the claim rather
             than from a clock, so seeding twice produces the same records.
+        catalogue: Every catalogued material path mapped to its claim family.
 
     Returns:
         The typed references, empty when the material records none.
 
     Raises:
-        MaterialAssociationError: The manifest names a relation with no counterpart.
+        MaterialAssociationError: The manifest names a relation with no counterpart, or a
+            target that is not a catalogued material of the same family.
     """
 
     entries = material.get('references')
@@ -354,6 +368,18 @@ def _references_for(material: dict[str, Any], raised_at: datetime) -> list[Evide
                 f'{material["path"]}: unrecognised relation {entry.get("relation")!r}'
             )
         target = str(entry.get('target', ''))
+        if not target.startswith(FIELD_TARGET_PREFIX):
+            family = str(material['claim_path'])
+            if target not in catalogue:
+                raise MaterialAssociationError(
+                    f'{material["path"]}: {relation.value} names {target}, '
+                    f'which is not a catalogued material'
+                )
+            if catalogue[target] != family:
+                raise MaterialAssociationError(
+                    f'{material["path"]}: {relation.value} names {target}, which belongs to '
+                    f'the {catalogue[target]} family and so is on a different claim'
+                )
         # A supersession and an established unavailability happened once and stay true, so
         # they are recorded resolved at the moment they are raised. Only a conflict can
         # stand open, and the manifest records its resolution because the demonstration
@@ -384,12 +410,18 @@ def _references_for(material: dict[str, Any], raised_at: datetime) -> list[Evide
     return references
 
 
-def evidence_record_for(material: dict[str, Any], claim: WorkingClaim) -> EvidenceRecord:
+def evidence_record_for(
+    material: dict[str, Any],
+    claim: WorkingClaim,
+    catalogue: Mapping[str, str],
+) -> EvidenceRecord:
     """Build the Evidence record one material becomes on its demonstration claim.
 
     Args:
         material: One manifest entry.
         claim: The claim the material attaches to.
+        catalogue: Every catalogued material path mapped to its claim family, used to
+            check that each relation target resolves.
 
     Returns:
         The record, with file facts read from the produced file.
@@ -424,7 +456,7 @@ def evidence_record_for(material: dict[str, Any], claim: WorkingClaim) -> Eviden
         media_type=media_type,
         size_bytes=size_bytes,
         source=_source_for(material),
-        references=_references_for(material, claim.updated_at),
+        references=_references_for(material, claim.updated_at, catalogue),
         related_fields=[],
         needed_for=['current_action'],
         provenance=provenance,
@@ -472,6 +504,24 @@ def associate_materials(
             continue
         by_scenario.setdefault(scenario_id, []).append(material)
 
+    catalogue = {str(material['path']): str(material['claim_path']) for material in entries}
+    supplied = {scenario.scenario_id for scenario in scenarios}
+
+    # A material whose claim is mapped but not supplied would otherwise be in neither
+    # list: grouped away from `unassociated`, and never reached by the loop below. Every
+    # catalogued material has to come back in exactly one of the two.
+    for scenario_id, orphaned in by_scenario.items():
+        if scenario_id in supplied:
+            continue
+        for material in orphaned:
+            unassociated.append(
+                UnassociatedMaterial(
+                    path=str(material['path']),
+                    condition=str(material['demonstrates_condition']),
+                    reason=f'{scenario_id} carries this family but was not supplied',
+                )
+            )
+
     associated: list[str] = []
     composed: list[ScenarioFixture] = []
     for scenario in scenarios:
@@ -482,7 +532,7 @@ def associate_materials(
         records = list(scenario.evidence)
         for material in candidates:
             try:
-                records.append(evidence_record_for(material, scenario.claim))
+                records.append(evidence_record_for(material, scenario.claim, catalogue))
             except MaterialAssociationError as error:
                 unassociated.append(
                     UnassociatedMaterial(

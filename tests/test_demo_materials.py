@@ -8,6 +8,7 @@ wrong in the way that matters.
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -109,7 +110,7 @@ def test_file_facts_are_read_from_the_produced_file(
 
     by_path = {str(material['path']): material for material in materials}
     material = by_path['motor/motor-incident-rear-bumper.jpg']
-    record = evidence_record_for(material, scenarios[0].claim)
+    record = evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
     target = MATERIALS_DIRECTORY / 'motor/motor-incident-rear-bumper.jpg'
 
     assert record.size_bytes == target.stat().st_size
@@ -129,7 +130,7 @@ def test_a_material_held_as_a_record_carries_no_file_facts(
     # that does; what is under test here is the file half, not the status half.
     material['demonstrates_condition'] = 'pending'
 
-    record = evidence_record_for(material, scenarios[0].claim)
+    record = evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
     assert record.original_filename is None
     assert record.media_type is None
     assert record.size_bytes is None
@@ -149,7 +150,7 @@ def test_a_file_that_contradicts_its_declared_media_type_is_refused(
     material['media_type'] = 'image/jpeg'
 
     with pytest.raises(MaterialAssociationError, match='does not begin as'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_provenance_carries_no_catalogue_condition(scenarios: tuple[ScenarioFixture, ...]) -> None:
@@ -178,9 +179,13 @@ def test_incident_evidence_held_as_a_document_is_not_an_incident_image(
 
     by_path = {str(material['path']): material for material in materials}
     note = evidence_record_for(
-        by_path['home/home-attendance-note-illegible.pdf'], scenarios[0].claim
+        by_path['home/home-attendance-note-illegible.pdf'],
+        scenarios[0].claim,
+        _catalogue(materials),
     )
-    photo = evidence_record_for(by_path['home/home-incident-ceiling.jpg'], scenarios[0].claim)
+    photo = evidence_record_for(
+        by_path['home/home-incident-ceiling.jpg'], scenarios[0].claim, _catalogue(materials)
+    )
 
     assert note.kind == 'other_document'
     assert photo.kind == 'incident_image'
@@ -357,7 +362,7 @@ def test_a_missing_produced_file_is_refused_rather_than_asserted(
     material = {**by_path['motor/motor-incident-scene-wide.jpg'], 'path': 'motor/absent.jpg'}
 
     with pytest.raises(MaterialAssociationError, match='the produced file is missing'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_an_unrecognised_media_type_is_refused(
@@ -370,7 +375,7 @@ def test_an_unrecognised_media_type_is_refused(
     material = {**by_path['motor/motor-incident-scene-wide.jpg'], 'media_type': 'image/heic'}
 
     with pytest.raises(MaterialAssociationError, match='unrecognised media type'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_an_unrecognised_class_is_refused_rather_than_given_a_default_kind(
@@ -386,7 +391,7 @@ def test_an_unrecognised_class_is_refused_rather_than_given_a_default_kind(
     }
 
     with pytest.raises(MaterialAssociationError, match='has no kind'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_incident_evidence_held_in_an_unknown_form_is_refused(
@@ -399,7 +404,7 @@ def test_incident_evidence_held_in_an_unknown_form_is_refused(
     material = {**by_path['motor/motor-incident-scene-wide.jpg'], 'held_as': 'audio'}
 
     with pytest.raises(MaterialAssociationError, match='has no kind'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_an_unrecognised_provider_is_refused(
@@ -417,7 +422,7 @@ def test_an_unrecognised_provider_is_refused(
     material = {**original, 'attributes': attributes}
 
     with pytest.raises(MaterialAssociationError, match='unrecognised provider'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_a_record_nobody_recorded_is_refused(
@@ -435,7 +440,7 @@ def test_a_record_nobody_recorded_is_refused(
     material = {**original, 'attributes': attributes, 'demonstrates_condition': 'pending'}
 
     with pytest.raises(MaterialAssociationError, match='did not record it'):
-        evidence_record_for(material, scenarios[0].claim)
+        evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
 
 
 def test_a_material_with_no_recorded_attributes_still_produces_a_record(
@@ -452,5 +457,103 @@ def test_a_material_with_no_recorded_attributes_still_produces_a_record(
     }
     material = {**original, 'attributes': attributes}
 
-    record = evidence_record_for(material, scenarios[0].claim)
+    record = evidence_record_for(material, scenarios[0].claim, _catalogue(materials))
     assert record.context_summary is None
+
+
+def _catalogue(materials: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(material['path']): str(material['claim_path']) for material in materials}
+
+
+def test_a_material_whose_claim_was_not_supplied_is_reported_not_dropped(
+    scenarios: tuple[ScenarioFixture, ...],
+    materials: list[dict[str, Any]],
+) -> None:
+    """Every catalogued material comes back in exactly one of the two lists.
+
+    Grouping by scenario and then iterating the caller's scenarios leaves a gap: a
+    material whose family maps to a claim the caller did not supply is in neither list.
+    A demonstration would then be short of material with nothing saying which, or why.
+    """
+
+    motor_only = tuple(
+        scenario for scenario in scenarios if scenario.scenario_id == SCENARIO_FOR_FAMILY['motor']
+    )
+
+    result = associate_materials(motor_only)
+
+    assert len(result.associated) + len(result.unassociated) == len(materials)
+    reasons = {item.reason for item in result.unassociated}
+    assert reasons == {
+        f'{SCENARIO_FOR_FAMILY["home"]} carries this family but was not supplied',
+        f'{SCENARIO_FOR_FAMILY["contents"]} carries this family but was not supplied',
+    }
+    assert all(path.startswith('motor/') for path in result.associated)
+
+
+def test_a_relation_naming_nothing_is_refused_rather_than_left_dangling(
+    scenarios: tuple[ScenarioFixture, ...],
+    materials: list[dict[str, Any]],
+) -> None:
+    """Deriving an identifier from a string always succeeds; that is the hazard.
+
+    A typo or a deleted target would otherwise produce a reference that validates and
+    points at no record — and an unavailability whose establishing notice does not exist
+    is the unestablished claim section 7 forbids.
+    """
+
+    entries = copy.deepcopy(materials)
+    subject = next(
+        material
+        for material in entries
+        if material['claim_path'] == 'motor' and material.get('references')
+    )
+    subject['references'][0]['target'] = 'motor/motor-invented.pdf'
+
+    result = associate_materials(scenarios, entries)
+
+    assert subject['path'] not in result.associated
+    reported = next(item for item in result.unassociated if item.path == subject['path'])
+    assert 'not a catalogued material' in reported.reason
+
+
+def test_a_relation_naming_another_family_is_refused(
+    scenarios: tuple[ScenarioFixture, ...],
+    materials: list[dict[str, Any]],
+) -> None:
+    """An evidence identifier is only meaningful on the claim that holds the record."""
+
+    entries = copy.deepcopy(materials)
+    subject = next(
+        material
+        for material in entries
+        if material['claim_path'] == 'motor' and material.get('references')
+    )
+    other_family = next(
+        material['path'] for material in entries if material['claim_path'] == 'contents'
+    )
+    subject['references'][0]['target'] = other_family
+
+    result = associate_materials(scenarios, entries)
+
+    reported = next(item for item in result.unassociated if item.path == subject['path'])
+    assert 'different claim' in reported.reason
+
+
+def test_a_conflict_against_a_claim_field_is_not_checked_against_the_catalogue(
+    scenarios: tuple[ScenarioFixture, ...],
+    materials: list[dict[str, Any]],
+) -> None:
+    """A claim field is not a material, so the material check must not reject it."""
+
+    result = associate_materials(scenarios, materials)
+    against_fact = [
+        reference
+        for scenario in result.scenarios
+        for record in scenario.evidence
+        for reference in record.references
+        if reference.field_code is not None
+    ]
+
+    assert against_fact
+    assert all(reference.evidence_id is None for reference in against_fact)
