@@ -89,7 +89,7 @@ def _evidence(claim_id: str, evidence_id: str) -> EvidenceRecord:
         evidence_id=evidence_id,
         claim_id=claim_id,
         kind='photo',
-        status=EvidenceStatus.INCOMPLETE,
+        status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,
         created_at=FIXED_TIME,

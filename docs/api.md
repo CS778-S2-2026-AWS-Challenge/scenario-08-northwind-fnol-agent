@@ -597,7 +597,7 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 {
   "severity": "standard",
   "coverage": "clear",
-  "evidence": "pending_generation",
+  "evidence": "pending",
   "fraud_signal": "none",
   "customer_support": "guided",
   "urgency": "normal",
@@ -610,7 +610,7 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 |---|---|---|
 | `severity` | `unassessed`, `fast_track`, `standard`, `complex` | ... |
 | `coverage` | `not_assessed`, `clear`, `ambiguous`, `review_required` | ... |
-| `evidence` | `not_started`, `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` | ... |
+| `evidence` | `not_started`, `received`, `unofficial`, `invalid`, `pending`, `unavailable`, `in_conflict` | ... |
 | `fraud_signal` | `none`, `review_required` | Internal only |
 | `customer_support` | `self_service`, `guided`, `human_requested`, `accessibility_required` | Shared when relevant |
 | `urgency` | `normal`, `urgent`, `immediate_safety_risk` | Shared, with internal routing detail excluded |
@@ -854,7 +854,7 @@ later claimant statement is resolved against existing assertions rather than sil
   "evidence_id": "evd_01J4Y7V5QJ",
   "claim_id": "clm_01J4Y7Q2AW",
   "kind": "police_report",
-  "status": "pending_generation",
+  "status": "pending",
   "file_status": "not_available",
   "original_filename": null,
   "media_type": null,
@@ -875,11 +875,39 @@ later claimant statement is resolved against existing assertions rather than sil
 | Field | Allowed values or rule |
 |---|---|
 | `kind` | Registered evidence type such as `incident_image`, `police_report`, `receipt`, `repair_quote`, or `other_document` |
-| `status` | `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` |
+| `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
 | `related_fields` | Registered form field codes supported or challenged by the item |
 | `needed_for` | One or more business actions; later evidence MUST NOT block an unrelated safe current action |
+| `references` | Typed statements about a second record or claim fact. **Staff-visible only** |
+
+`status` carries the condition of the material and `file_status` the upload and
+processing lifecycle. They answer different questions and MUST NOT be read as
+alternatives to each other: `pending` with `not_available` is a document that does not
+exist yet, and `pending` with `awaiting_upload` is a file on its way in.
+
+Three conditions are statements about a *second* thing and therefore cannot be carried by
+`status` alone. Each is recorded as an `EvidenceReference`:
+
+| Field | Allowed values or rule |
+|---|---|
+| `relation` | `conflicts_with`, `superseded_by`, `unavailability_established_by` |
+| `evidence_id` | The other evidence record; required for every relation except a conflict against a claim fact |
+| `field_code` | The claim field contradicted; permitted only with `conflicts_with` |
+| `state` | `unresolved` or `resolved`; exactly one of `evidence_id` and `field_code` is set |
+| `reason` | Why the relation exists, in terms a staff member can act on |
+| `raised_at` | When it was recorded |
+| `resolved_at` | Present if and only if `state` is `resolved`, and never before `raised_at` |
+
+A material can be `received`, `ready`, and contested at the same time, so conflict is a
+reference rather than a status. A record may carry an unresolved `conflicts_with` only
+when it is `received` with a `ready` file: a conflict is established by comparing settled
+evidence, and material still arriving, or that never arrived, cannot be the thing another
+record disagrees with.
+
+`references` does not appear in the claimant projection. A claimant is told a check is in
+progress; which side is doubted, and why, is staff-only.
 
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
@@ -968,7 +996,7 @@ Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overr
       {
         "evidence_id": "evd_01J4Y7V5QJ",
         "kind": "police_report",
-        "status": "pending_generation",
+        "status": "pending",
         "file_status": "not_available",
         "source": "claimant",
         "visibility": "shared",
@@ -1448,7 +1476,7 @@ consent rules, retention, and a dedicated typed acceptance contract before it ma
 an electronic signature.
 
 When the claimant continues without any supporting file, the guided Motor client registers one
-claimant-owned `incomplete` evidence item needed for a `later_action`. The created claim therefore
+claimant-owned `pending` evidence item needed for a `later_action`. The created claim therefore
 remains visible in the Workbench `awaiting_evidence` view without blocking controlled creation.
 The `standard_motor_intake` fixture route assigns the created Working Claim deterministically to
 `stf_demo`. This is a repeatable prototype allocation rule, not an approved Northwind workforce
@@ -1619,7 +1647,7 @@ Request:
 ```json
 {
   "kind": "police_report",
-  "status": "pending_generation",
+  "status": "pending",
   "related_fields": ["authorities.police_report_reference"],
   "needed_for": ["later_action"],
   "claimant_note": "Police said the report will be available next week."
@@ -1628,9 +1656,11 @@ Request:
 
 This request requires `Idempotency-Key` and `If-Match`. Response `201` returns
 the evidence resource, new claim revision, and customer next step. A
-`pending_generation` item MUST NOT block an action that does not require it.
-Evidence with a received file must use the upload flow rather than being
-registered directly as `received`.
+`pending` item MUST NOT block an action that does not require it. Evidence with a
+received file must use the upload flow rather than being registered directly as
+`received`, and a condition that describes content that exists — `invalid`,
+`superseded`, `expired` — cannot be registered at all, because registration records
+material that has not arrived.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/uploads`
 

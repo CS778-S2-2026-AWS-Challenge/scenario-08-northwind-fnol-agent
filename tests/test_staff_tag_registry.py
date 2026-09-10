@@ -155,7 +155,7 @@ def test_workbench_projects_human_readable_tags_from_authoritative_records(
             evidence_id='evd_tag_police',
             claim_id=claim_id,
             kind='police_report',
-            status=EvidenceStatus.PENDING_GENERATION,
+            status=EvidenceStatus.PENDING,
             file_status=EvidenceFileStatus.NOT_AVAILABLE,
             source=EvidenceSource.CLAIMANT,
             related_fields=['authorities.police_report_reference'],

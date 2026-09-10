@@ -4,12 +4,12 @@ from enum import Enum
 
 from pydantic import Field, model_validator
 
+from backend.domain.evidence import is_in_conflict
 from backend.domain.models import (
     ActorType,
     ContractModel,
     EvidenceRecord,
     EvidenceSource,
-    EvidenceStatus,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     IntegrationSource,
@@ -1109,13 +1109,19 @@ def _names_conflicting_material(
     result: ExternalTaskResult,
     evidence: Sequence[EvidenceRecord],
 ) -> bool:
-    """Report whether material this result itself names is recorded as inconsistent."""
+    """Report whether material this result itself names stands in an unresolved conflict.
+
+    The question is unchanged; where the answer is read from is not. A conflict used to
+    be a status, which could say that a material was contested but never with what. It is
+    a typed reference now, so the same guard reads the record's references and a
+    resolved conflict no longer counts against the provider.
+    """
 
     named = set(result.evidence_ids)
     for record in evidence:
         if record.evidence_id not in named:
             continue
-        if record.status is EvidenceStatus.INCONSISTENT:
+        if is_in_conflict(record.references):
             return True
     return False
 
@@ -1164,9 +1170,10 @@ def verify_external_task_result(
     Two outcomes are therefore reachable:
 
     - `INCONSISTENT` when material this result itself names is recorded as
-      `EvidenceStatus.INCONSISTENT`. The conflict is read from the records the
-      result names, never from the claim's aggregate evidence state, because a
-      claim-wide rollup would attribute an unrelated conflict to this provider.
+      standing in an unresolved conflict with another record or a claim fact. The
+      conflict is read from the references of the records the result names, never from
+      the claim's aggregate evidence state, because a claim-wide rollup would attribute
+      an unrelated conflict to this provider.
     - `REVIEW_REQUIRED` otherwise, which is the honest description of an answer
       that has been placed and attributed but not compared.
 

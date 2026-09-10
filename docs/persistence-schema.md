@@ -367,7 +367,15 @@ the append-only audit collection through a bounded, filterable projection.
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
-- Pending, incomplete, unofficial, and not-yet-generated evidence remain distinct states.
+- Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
+  `EvidenceStatus` carries the business condition of the material and
+  `EvidenceFileStatus` the upload and processing lifecycle alone, so the two
+  vocabularies cannot drift into describing the same thing differently. A condition
+  that is a statement about a second record or a claim fact — conflict, supersession,
+  established unavailability — is carried by a typed `EvidenceReference` with its own
+  unresolved or resolved state, reason, and timing, never by the status alone.
+  References are staff-visible only: a claimant is told a check is in progress, not
+  which side is doubted.
 
 Anonymous browser sessions may own a temporary conversation Claim, but Evidence
 upload mutations require an authenticated claimant. Selecting a file before

@@ -250,7 +250,7 @@ def test_mongodb_still_allows_mutable_lifecycle_record_updates() -> None:
         evidence_id='evd_mongo_immutable',
         claim_id=claim.claim_id,
         kind='incident_image',
-        status=EvidenceStatus.PENDING_GENERATION,
+        status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
         source=EvidenceSource.CLAIMANT,
         created_at=FIXED_TIME,

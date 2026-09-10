@@ -312,6 +312,6 @@ def test_primary_rear_end_journey_preserves_context_through_handoff(
 
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
-    assert stored.claim_state.evidence.value == 'pending_generation'
+    assert stored.claim_state.evidence.value == 'pending'
     assert stored.claim_state.customer_support.value == 'human_requested'
     assert stored.form['authorities.police_report_reference'].status.value == 'pending_generation'

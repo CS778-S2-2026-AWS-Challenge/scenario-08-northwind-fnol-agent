@@ -78,10 +78,12 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
             'synthetic-plumber-site-note.pdf',
             'synthetic-weather-history-capture.png',
         ]
+        # The third record is contested, but a conflict is a reference now rather
+        # than a status, and the claimant projection does not carry the other side.
         assert [item['status'] for item in evidence] == [
             'received',
             'received',
-            'inconsistent',
+            'received',
         ]
         retrievals = {
             item['retrieval_id']: item
