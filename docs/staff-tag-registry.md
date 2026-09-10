@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Registry ID | `northwind-fnol-staff-tags` |
-| Current version | `0.2` |
+| Current version | `0.3` |
 | Executable authority | `backend/domain/tag_registry.py` |
 | Projection service | `backend/services/tag_projection.py` |
 | Consumer | Authorised Staff Workbench APIs and clients |
@@ -22,11 +22,16 @@ authoritative records and returns typed `StaffTag` objects in Workbench queue an
 Frontend code renders those objects; it must not infer tags from free text, queue names, routes,
 colours, or local conditionals.
 
+Every definition declares exact applicable Claim families, authoritative source types, a projection
+mode, a real activation rule, an exit/recomputation rule, and explicit filterability. Definitions
+without an implemented source contract are published vocabulary but remain `unavailable` and
+non-filterable.
+
 Staff do not directly edit tags. They correct a Claim field or perform an authorised business
 action, and the backend recomputes the projection. Every projected tag contains stable code,
-Registry version, staff label and description, category, lifecycle status, visibility, evidence
-basis, source references, activation time, and display weight. A tag without source references
-is invalid.
+Registry version, staff label and description, category, status, staff-only visibility, basis,
+source actor, freshness, projection mode, optional Attention level, source references, activation
+time, and display weight. A tag without source references is invalid.
 
 Tags are staff-facing classifications, not priority values. Display weight controls which tags
 are easiest to scan when space is limited; Claim ordering remains governed by the separate queue
@@ -34,7 +39,7 @@ and priority contract.
 
 ## Categories
 
-Version 0.2 registers 106 definitions:
+Version 0.3 registers 106 definitions:
 
 | Category | Purpose | Definitions |
 | --- | --- | ---: |
@@ -52,8 +57,9 @@ The 103 VP and VP+ definitions are published. Three Later stakeholder definition
 `stakeholder.legal_representative`. Draft definitions cannot be projected or used as filters.
 
 The complete code, English label, scope, publication status, visibility, supported Claim families,
-source types, activation/exit rule references, display weight, and authority requirement for all
-106 definitions are held in the executable Registry. A catalogue change must update that Registry,
+source types, projection mode, activation/exit rule references, display weight, Attention level,
+filterability, and authority requirement for all 106 definitions are held in the executable Registry.
+A catalogue change must update that Registry,
 projection tests, `docs/api.md`, and the generated OpenAPI snapshot together.
 
 ## Source and Wording Rules

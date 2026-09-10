@@ -12,7 +12,7 @@
     "claim_state": {
       "severity": "standard",
       "coverage": "ambiguous",
-      "evidence": "inconsistent",
+      "evidence": "in_conflict",
       "fraud_signal": "none",
       "customer_support": "guided",
       "urgency": "normal",
@@ -120,7 +120,16 @@
       "evidence_id": "evd_fixture_at02_weather_capture",
       "claim_id": "clm_fixture_at02",
       "kind": "other_document",
-      "status": "inconsistent",
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "evidence_id": "evd_fixture_at02_plumber_note",
+          "state": "unresolved",
+          "reason": "The recorded weather does not support the cause the attending plumber reported, and both answer incident.cause.",
+          "raised_at": "2026-08-13T11:04:30Z"
+        }
+      ],
+      "status": "received",
       "file_status": "ready",
       "original_filename": "synthetic-weather-history-capture.png",
       "media_type": "image/png",

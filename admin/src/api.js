@@ -1,3 +1,5 @@
+export const ADMIN_ACCESS_DENIED_EVENT = 'northwind:admin-access-denied'
+
 export async function adminFetch(path, { token, ...options } = {}) {
   const headers = new Headers(options.headers || {})
   headers.set('Accept', 'application/json')
@@ -12,6 +14,9 @@ export async function adminFetch(path, { token, ...options } = {}) {
     error.details = payload?.error?.details || []
     error.retryable = payload?.error?.retryable || false
     error.currentRevision = payload?.error?.current_revision
+    if ((response.status === 401 || response.status === 403) && typeof window !== 'undefined') {
+      window.dispatchEvent(new window.CustomEvent(ADMIN_ACCESS_DENIED_EVENT, { detail: error }))
+    }
     throw error
   }
   return payload

@@ -337,4 +337,4 @@ def test_pending_later_evidence_does_not_block_controlled_claim_creation(
     evidence = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=auth_headers).json()[
         'items'
     ]
-    assert evidence[0]['status'] == 'pending_generation'
+    assert evidence[0]['status'] == 'pending'

@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from threading import RLock
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -44,10 +45,13 @@ from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
+    DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    ValidationSeedGraph,
+    validate_validation_seed_session,
 )
 
 
@@ -55,6 +59,7 @@ class FixtureRepository(PersistenceRepository):
     """In-memory repository used by the prototype and replaceable contract tests."""
 
     def __init__(self) -> None:
+        self._validation_seed_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
@@ -289,6 +294,76 @@ class FixtureRepository(PersistenceRepository):
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
+
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Serialize validation seeds so a same-key race cannot create two graphs."""
+        with self._validation_seed_lock:
+            return self._seed_validation_graph(graph)
+
+    def _seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Persist validation records as one rollback-safe fixture operation."""
+        snapshot = {
+            key: deepcopy(value)
+            for key, value in self.__dict__.items()
+            if key != '_validation_seed_lock'
+        }
+        try:
+            existing = self.find_idempotency(
+                graph.idempotency.actor_id,
+                graph.idempotency.route,
+                graph.idempotency.key,
+            )
+            if existing is not None:
+                if existing.request_fingerprint != graph.idempotency.request_fingerprint:
+                    raise IdempotencyConflict(graph.idempotency.key)
+                return existing
+            if self.list_claims_internal():
+                raise DemoSeedConflict('The validation seed requires an empty claim queue.')
+
+            claims_by_id = {claim.claim_id: claim for claim in graph.claims}
+            if len(claims_by_id) != len(graph.claims) or not claims_by_id:
+                raise ValueError('Validation seed claims must be unique and non-empty.')
+            sessions_by_id = {session.session_id: session for session in graph.sessions}
+            if len(sessions_by_id) != len(graph.sessions):
+                raise ValueError('Validation seed sessions must be unique.')
+            messages_by_id = {message.message_id: message for message in graph.messages}
+            if len(messages_by_id) != len(graph.messages):
+                raise ValueError('Validation seed messages must be unique.')
+            evidence_by_id = {item.evidence_id: item for item in graph.evidence}
+            if len(evidence_by_id) != len(graph.evidence):
+                raise ValueError('Validation seed evidence must be unique.')
+
+            self.save_staff_presence(graph.staff_presence, graph.expected_presence_revision)
+            sessions_by_claim: dict[str, list[SessionRecord]] = {
+                claim_id: [] for claim_id in claims_by_id
+            }
+            for session in graph.sessions:
+                sessions_by_claim.setdefault(session.claim_id, []).append(session)
+            for claim in graph.claims:
+                active = [
+                    session
+                    for session in sessions_by_claim.get(claim.claim_id, [])
+                    if session.session_id == claim.active_session_id
+                ]
+                if len(active) != 1:
+                    raise ValueError('Every validation seed claim needs one active session.')
+                validate_validation_seed_session(claim, active[0])
+                self.create_claim(claim, active[0])
+            for session in graph.sessions:
+                if session.session_id != claims_by_id[session.claim_id].active_session_id:
+                    self.save_session(session)
+            for evidence in graph.evidence:
+                self.save_evidence(evidence, claims_by_id[evidence.claim_id].customer_id)
+            for message in graph.messages:
+                self.save_message(message, claims_by_id[message.claim_id].customer_id)
+            self.save_idempotency(graph.idempotency)
+        except Exception:
+            lock = self._validation_seed_lock
+            self.__dict__.clear()
+            self.__dict__.update(snapshot)
+            self._validation_seed_lock = lock
+            raise
+        return None
 
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         claim = self._claims.get(claim_id)

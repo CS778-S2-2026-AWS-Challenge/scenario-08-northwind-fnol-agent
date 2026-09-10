@@ -44,15 +44,17 @@ them:
 ## Current Engineering Documents
 
 - [Agent Action to Claim Context Command Boundary](agent-action-command-boundary.md)
+- [Agent Context Contract](agent-context-contract.md)
+- [Agent Behaviour and Action Brief](agent-behaviour-action-brief.md)
 - [Agent Runtime Policy](agent-runtime-policy.md)
 - [FNOL Agent Behaviour Catalogue](agent-behaviour-catalogue.md)
 - [Claim Creation and Provider Adapter Boundary](claim-creation-boundary.md)
 - [Claimant-to-Staff Messaging Journey](claimant-staff-messaging-journey.md)
 - [Control Plane Roles and Publication Lifecycle](control-plane-governance.md)
 - [First Control Plane Interface Contract](control-plane-interface.md)
-- The former React/Vite Admin console is preserved under `../archive/admin/` as historical source;
-  it is not a current runtime entry point or CI target. The Admin API contract remains documented
-  and independently governed here.
+- The independently served `admin/` React/Vite console consumes the authenticated Admin API for
+  server-backed configuration, knowledge, Agent-rule, evaluation, operation, integration, access,
+  audit, and account projections.
 - [Shared Claim State Transaction Boundary](claim-state-transaction-boundary.md)
 - [Data Architecture](data-architecture.md)
 - [Demonstration Material Catalogue](demonstration-material-catalogue.md)
@@ -74,6 +76,10 @@ them:
 - [Self-hosted Runner Deployment](../deploy/self-hosted-runner.md)
 - [Staff Tag Registry](staff-tag-registry.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
+
+Task-specific implementation and decision records requested by the maintainer live under
+`work_record/`. They preserve delivery context but do not override `SPEC/` or current engineering
+contracts.
 
 Generated contract snapshots are mechanical drift sentinels. The current AuditEvent
 envelope snapshot is [audit-event.schema.json](contracts/audit-event.schema.json) and is
@@ -117,6 +123,9 @@ superseded when the implementation state changes.
 - [FNOL As-Is Process and Reporting Fields](research/fnol-as-is-process-and-reporting-fields.md)
 - [Existing Claims Fraud Controls and Verification](research/existing-claims-fraud-controls-and-verification.md)
 - [Third-party Stakeholder and Service Research](research/third-party-stakeholder-service-research.md)
+- [Third-party Stakeholder and Service Independent Challenge Review](research/third-party-stakeholder-service-independent-challenge-review.md)
+- [Unified Third-party Service Catalogue and Implementation Brief](research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md)
+- [Third-party Service Claimant Consent Copy Draft](research/third-party-service-claimant-consent-copy-draft.md)
 - [Insurance Industry Interview and User Observation](research/insurance-industry-interview-and-user-observation.md)
 - [Participant Information and Consent](research/participant-information-and-consent.md)
 - [Claimant Survey Response Export](research/claimant-survey-final-responses.csv)

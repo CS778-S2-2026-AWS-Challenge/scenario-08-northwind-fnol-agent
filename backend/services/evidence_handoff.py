@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 
+from backend.domain.evidence import is_in_conflict
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceRecord,
@@ -12,8 +13,9 @@ from backend.services.evidence_visibility import default_evidence_visibility
 
 PENDING_EVIDENCE_STATUSES = {
     EvidenceStatus.UNOFFICIAL,
-    EvidenceStatus.INCOMPLETE,
-    EvidenceStatus.PENDING_GENERATION,
+    EvidenceStatus.INVALID,
+    EvidenceStatus.PENDING,
+    EvidenceStatus.MISSING,
 }
 PENDING_FILE_STATUSES = set(EvidenceFileStatus) - {
     EvidenceFileStatus.NOT_AVAILABLE,
@@ -44,6 +46,7 @@ def assemble_evidence_handoff_packet(
             status=record.status,
             file_status=record.file_status,
             source=record.source,
+            references=record.references,
             visibility=visibility,
             original_filename=record.original_filename,
             media_type=record.media_type,
@@ -74,11 +77,10 @@ def assemble_evidence_handoff_packet(
         dict.fromkeys(
             [
                 *packet.conflicts,
-                *(
-                    item.evidence_id
-                    for item in evidence
-                    if item.status is EvidenceStatus.INCONSISTENT
-                ),
+                # A conflict is carried by the record's references now, so what staff are
+                # handed is what the record itself says it contests rather than a status
+                # that could not have named the other side.
+                *(item.evidence_id for item in evidence if is_in_conflict(item.references)),
             ]
         )
     )

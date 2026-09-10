@@ -111,3 +111,11 @@ def select_model_profile(request: object, requested: str | None) -> str:
             retryable=False,
         )
     return selected
+
+
+def model_configuration(request: object, profile_id: str) -> ModelRuntimeConfiguration | None:
+    """Return one published profile after applying the same catalog boundary."""
+    for record in model_catalog(request):
+        if record.values.get('profile_id') == profile_id:
+            return ModelRuntimeConfiguration.model_validate(record.values)
+    return None

@@ -22,7 +22,6 @@ from backend.domain.evidence import (
 from backend.domain.models import (
     EvidenceRecord,
     EvidenceState,
-    EvidenceStatus,
     EvidenceSummary,
 )
 from backend.repositories.scenario_loader import (
@@ -107,11 +106,10 @@ class EvidenceFixtureService:
             claim_id=entry.claim_id,
             records=records,
             claimant_visible_records=claimant_visible,
-            stages=tuple(
-                lifecycle_stage_for(record)
-                for record in records
-                if record.status is not EvidenceStatus.INCONSISTENT
-            ),
+            # Every record now resolves to a stage. Conflict used to be a status with
+            # no entry stage, so records in it had to be filtered out here; it is a
+            # reference now, and a contested material is still a received one.
+            stages=tuple(lifecycle_stage_for(record) for record in records),
         )
 
     def all_paths(self) -> tuple[PathEvidence, ...]:

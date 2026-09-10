@@ -437,7 +437,7 @@ def test_pending_evidence_can_still_be_recorded_while_storage_is_unavailable(
             },
             json={
                 'kind': 'police_report',
-                'status': 'pending_generation',
+                'status': 'pending',
                 'related_fields': ['authorities.police_report_reference'],
                 'needed_for': ['later_action'],
                 'claimant_note': 'The report will be available next week.',

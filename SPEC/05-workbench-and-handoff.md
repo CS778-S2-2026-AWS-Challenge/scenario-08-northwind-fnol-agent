@@ -31,13 +31,14 @@ record decisions and complete work, but they do not maintain a competing queue t
 Sensitive signals, internal reasons, provider payloads, and staff-only notes must not be
 exposed in claimant responses.
 
-## Open Staff Agent Entry
+## Staff Agent Entry
 
-`@Agent` invokes the Agent within the current staff member's identity, role, Claim scope,
-and task. It is not a fixed natural-language command set. Staff may ask open questions or
-combine supported capabilities such as reading and summarising a Claim, explaining gaps,
-comparing evidence, retrieving and explaining policy, proposing next steps, drafting
-communication, inspecting handoff quality, or preparing an external request.
+The dedicated Workbench Staff Agent session invokes the Agent within the current staff
+member's identity, role, Claim scope, and task. It is not a fixed natural-language command
+set. Staff may ask open questions or combine supported capabilities such as reading and
+summarising a Claim, explaining gaps, comparing evidence, retrieving and explaining policy,
+proposing next steps, drafting communication, inspecting handoff quality, or preparing an
+external request. Claimant conversations do not expose an `@agent` command.
 
 The Agent returns source-linked facts, limitations, proposals, and required authority.
 Suggested UI actions may aid discovery, but staff remain free to use natural language.

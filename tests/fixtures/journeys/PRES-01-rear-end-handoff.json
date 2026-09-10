@@ -30,7 +30,7 @@
     {
       "input": "Police said the police report will be ready next week.",
       "expected_action": "UPDATE",
-      "expected_evidence_status": "pending_generation",
+      "expected_evidence_status": "pending",
       "response_contains": [],
       "next_step_status": "ready_to_create"
     },

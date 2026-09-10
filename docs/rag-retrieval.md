@@ -20,8 +20,11 @@ queried through the authorised policy boundary.
 
 `POST /internal/v1/knowledge/search` requires the integration-service credential. A successful
 result retains the exact document ID, chunk ID, section path, source URI, version, checksum, and
-source text. Empty, expired, mismatched, and unavailable searches return no invented evidence and
-include a limitation.
+source text. Every returned state also carries the server-observed UTC `retrieved_at` for that
+retrieval result; it is not the document ingestion time or a provider timestamp. Empty, expired,
+mismatched, and unavailable searches return no invented evidence and include a limitation. The
+deterministic ranker does not emit a numeric confidence value because no authoritative confidence
+semantics are defined by the current contract.
 
 ## Repeatable local verification
 

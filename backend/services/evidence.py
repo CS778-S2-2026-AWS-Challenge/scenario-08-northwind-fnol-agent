@@ -55,6 +55,17 @@ from backend.services.support import (
     require_idempotency_key,
 )
 
+# Conditions that say something about content that exists. Registration records material
+# that has not arrived, so none of these can be declared there: they can only follow an
+# upload, or a comparison against material already held.
+ARRIVED_MATERIAL_STATUSES = frozenset(
+    {
+        EvidenceStatus.INVALID,
+        EvidenceStatus.SUPERSEDED,
+        EvidenceStatus.EXPIRED,
+    }
+)
+
 
 def _claim_not_found() -> ApiError:
     return ApiError(
@@ -256,6 +267,20 @@ def register_evidence(
             message='Received evidence must be registered through the upload flow.',
             details=[ErrorDetail(field='status', reason='Use an upload for received evidence.')],
         )
+    if payload.status in ARRIVED_MATERIAL_STATUSES:
+        raise ApiError(
+            status_code=422,
+            code='VALIDATION_ERROR',
+            message='This condition describes material that has arrived, and registration '
+            'records material that has not.',
+            details=[
+                ErrorDetail(
+                    field='status',
+                    reason=f'{payload.status.value} can only follow an upload, because it '
+                    'says something about content that exists.',
+                )
+            ],
+        )
 
     timestamp = now_utc()
     evidence = EvidenceRecord(
@@ -411,7 +436,10 @@ def request_upload(
         evidence_id=evidence_id,
         claim_id=claim_id,
         kind=payload.kind,
-        status=EvidenceStatus.INCOMPLETE,
+        # The upload has been registered and has not finished. That is a fact about
+        # the file, not about the material, so the business condition is that the
+        # claim is still waiting and the file status carries the rest.
+        status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.AWAITING_UPLOAD,
         original_filename=payload.original_filename,
         media_type=payload.media_type,

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from backend.core.errors import ApiError
 from backend.domain.data_query import (
     DataConnectionState,
@@ -39,6 +41,7 @@ def _provider_ready(state: DataConnectionState) -> bool:
 def _unavailable_response() -> KnowledgeSearchResponse:
     return KnowledgeSearchResponse(
         status='unavailable',
+        retrieved_at=datetime.now(UTC),
         connection_state=DataConnectionState.UNAVAILABLE,
         errors=[
             DataQueryError(
@@ -84,6 +87,7 @@ def search_knowledge(
         message = TIMEOUT_LIMITATION if timed_out else UNAVAILABLE_LIMITATION
         return KnowledgeSearchResponse(
             status='timeout' if timed_out else 'unavailable',
+            retrieved_at=datetime.now(UTC),
             connection_state=(
                 DataConnectionState.DEGRADED if timed_out else DataConnectionState.UNAVAILABLE
             ),
@@ -115,6 +119,7 @@ def search_knowledge(
     if not chunks:
         return KnowledgeSearchResponse(
             status='no_evidence',
+            retrieved_at=datetime.now(UTC),
             connection_state=connection_state,
             results=[],
             limitations=[NO_KNOWLEDGE_LIMITATION],
@@ -142,6 +147,7 @@ def search_knowledge(
         ) from error
     return KnowledgeSearchResponse(
         status='evidence_found',
+        retrieved_at=datetime.now(UTC),
         connection_state=connection_state,
         results=results,
         limitations=[],

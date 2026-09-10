@@ -4,12 +4,14 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from backend.domain.evidence import is_in_conflict
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingStatus,
     Coverage,
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceSource,
     EvidenceStatus,
     FormSource,
     FormStatus,
@@ -31,7 +33,10 @@ from backend.domain.tag_registry import (
     TAG_REGISTRY_VERSION,
     StaffTag,
     TagBasis,
+    TagFreshness,
     TagInstanceStatus,
+    TagProjectionMode,
+    TagSourceActor,
     get_staff_tag_definition,
 )
 
@@ -42,8 +47,9 @@ _PENDING_FILE_STATES = {
     EvidenceFileStatus.PROCESSING,
 }
 _PENDING_EVIDENCE_STATES = {
-    EvidenceStatus.PENDING_GENERATION,
-    EvidenceStatus.INCOMPLETE,
+    EvidenceStatus.PENDING,
+    EvidenceStatus.MISSING,
+    EvidenceStatus.INVALID,
     EvidenceStatus.UNOFFICIAL,
 }
 _CLOSED_HANDOFF_STATES = {HandoffStatus.RESOLVED, HandoffStatus.CANCELLED}
@@ -58,6 +64,8 @@ class _TagAdder(Protocol):
         source_refs: Sequence[str],
         activated_at: datetime,
         status: TagInstanceStatus = TagInstanceStatus.ACTIVE,
+        source_actor: TagSourceActor | None = None,
+        freshness: TagFreshness = TagFreshness.CURRENT,
     ) -> None: ...
 
 
@@ -69,6 +77,36 @@ def _basis_for(source: FormSource) -> TagBasis:
     if source in {FormSource.DOCUMENT, FormSource.IMAGE}:
         return TagBasis.VERIFIED
     return TagBasis.DERIVED
+
+
+def _source_actor_for_form(source: FormSource) -> TagSourceActor:
+    if source is FormSource.CLAIMANT:
+        return TagSourceActor.CLAIMANT
+    if source is FormSource.STAFF:
+        return TagSourceActor.STAFF
+    return TagSourceActor.SYSTEM
+
+
+def _source_actor_for_evidence(source: EvidenceSource) -> TagSourceActor:
+    if source is EvidenceSource.CLAIMANT:
+        return TagSourceActor.CLAIMANT
+    if source is EvidenceSource.STAFF:
+        return TagSourceActor.STAFF
+    return TagSourceActor.EXTERNAL_SERVICE
+
+
+def _source_actor_for_basis(basis: TagBasis) -> TagSourceActor:
+    if basis is TagBasis.REPORTED:
+        return TagSourceActor.CLAIMANT
+    if basis is TagBasis.STAFF_ASSESSED:
+        return TagSourceActor.STAFF
+    return TagSourceActor.SYSTEM
+
+
+def _status_for(field_status: FormStatus) -> TagInstanceStatus:
+    if field_status is FormStatus.DISPUTED:
+        return TagInstanceStatus.DISPUTED
+    return TagInstanceStatus.ACTIVE
 
 
 def _signal_is_active(
@@ -112,8 +150,15 @@ def project_staff_tags(
         source_refs: Sequence[str],
         activated_at: datetime,
         status: TagInstanceStatus = TagInstanceStatus.ACTIVE,
+        source_actor: TagSourceActor | None = None,
+        freshness: TagFreshness = TagFreshness.CURRENT,
     ) -> None:
         definition = get_staff_tag_definition(code)
+        if definition.projection_mode is TagProjectionMode.UNAVAILABLE:
+            raise ValueError(f'Staff tag {code} has no implemented projection rule.')
+        family = (claim.incident_type or '').strip().lower()
+        if code != 'claim_type.unconfirmed' and family not in definition.applicable_claim_families:
+            return
         refs = list(dict.fromkeys(ref for ref in source_refs if ref))
         if not refs:
             raise ValueError(f'Staff tag {code} requires at least one source reference.')
@@ -127,12 +172,17 @@ def project_staff_tags(
             status=status,
             visibility=definition.visibility,
             basis=basis,
+            source_actor=source_actor or _source_actor_for_basis(basis),
+            freshness=freshness,
+            projection_mode=definition.projection_mode,
+            attention_level=definition.attention_level,
             source_refs=refs,
             activated_at=activated_at,
             display_weight=definition.queue_display_weight,
         )
 
     _project_claim_type(claim, add)
+    _project_incident(claim, add)
     _project_people_and_safety(claim, add)
     _project_stakeholders(claim, evidence, add)
     _project_impact(claim, add)
@@ -149,20 +199,27 @@ def project_staff_tags(
 def _project_claim_type(claim: WorkingClaim, add: _TagAdder) -> None:
     add_tag = add
     family = (claim.incident_type or '').strip().lower()
-    field = claim.form.get('incident.type')
+    field = claim.form.get('claim.product_family')
     if family in {'motor', 'home', 'contents'}:
-        basis = _basis_for(field.source) if field is not None else TagBasis.REPORTED
-        refs = (
-            [*field.source_refs, 'field:incident.type']
-            if field is not None
-            else [f'claim:{claim.claim_id}:incident_type']
-        )
-        activated_at = field.updated_at if field is not None else claim.created_at
+        if field is not None and field.value == family:
+            basis = _basis_for(field.source)
+            refs = [*field.source_refs, 'field:claim.product_family']
+            activated_at = field.updated_at
+            status = _status_for(field.status)
+            source_actor = _source_actor_for_form(field.source)
+        else:
+            basis = TagBasis.DERIVED
+            refs = [f'claim:{claim.claim_id}:incident_type']
+            activated_at = claim.created_at
+            status = TagInstanceStatus.ACTIVE
+            source_actor = TagSourceActor.SYSTEM
         add_tag(
             f'claim_type.{family}',
             basis=basis,
             source_refs=refs,
             activated_at=activated_at,
+            status=status,
+            source_actor=source_actor,
         )
         return
     add_tag(
@@ -170,6 +227,48 @@ def _project_claim_type(claim: WorkingClaim, add: _TagAdder) -> None:
         basis=TagBasis.DERIVED,
         source_refs=[f'claim:{claim.claim_id}:incident_type'],
         activated_at=claim.created_at,
+        source_actor=TagSourceActor.SYSTEM,
+    )
+
+
+def _project_incident(claim: WorkingClaim, add: _TagAdder) -> None:
+    field = claim.form.get('incident.type')
+    if field is None or field.status is FormStatus.MISSING:
+        add(
+            'incident.cause_unconfirmed',
+            basis=TagBasis.DERIVED,
+            source_refs=['field:incident.type'],
+            activated_at=claim.created_at,
+            source_actor=TagSourceActor.SYSTEM,
+        )
+        return
+    if field.status not in {FormStatus.CONFIRMED, FormStatus.DISPUTED}:
+        return
+    if not isinstance(field.value, str):
+        return
+
+    family = (claim.incident_type or '').strip().lower()
+    subtype = field.value.strip().lower()
+    code_by_family_and_subtype = {
+        ('motor', 'collision'): 'incident.collision',
+        ('motor', 'theft'): 'incident.vehicle_theft',
+        ('contents', 'theft'): 'incident.contents_theft',
+        ('motor', 'fire'): 'incident.fire_smoke',
+        ('home', 'fire'): 'incident.fire_smoke',
+        ('contents', 'fire'): 'incident.fire_smoke',
+        ('home', 'water'): 'incident.water_escape',
+        ('contents', 'water'): 'incident.water_escape',
+    }
+    code = code_by_family_and_subtype.get((family, subtype))
+    if code is None:
+        return
+    add(
+        code,
+        basis=_basis_for(field.source),
+        source_refs=[*field.source_refs, 'field:incident.type'],
+        activated_at=field.updated_at,
+        status=_status_for(field.status),
+        source_actor=_source_actor_for_form(field.source),
     )
 
 
@@ -182,6 +281,7 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=TagBasis.DERIVED,
             source_refs=['field:incident.injury_or_danger'],
             activated_at=claim.created_at,
+            source_actor=TagSourceActor.SYSTEM,
         )
     elif injury.status is FormStatus.CONFIRMED and injury.value is False:
         refs = [*injury.source_refs, 'field:incident.injury_or_danger']
@@ -190,6 +290,8 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=_basis_for(injury.source),
             source_refs=refs,
             activated_at=injury.updated_at,
+            status=_status_for(injury.status),
+            source_actor=_source_actor_for_form(injury.source),
         )
     elif injury.status is FormStatus.CONFIRMED and injury.value is True:
         add_tag(
@@ -197,6 +299,8 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=_basis_for(injury.source),
             source_refs=[*injury.source_refs, 'field:incident.injury_or_danger'],
             activated_at=injury.updated_at,
+            status=_status_for(injury.status),
+            source_actor=_source_actor_for_form(injury.source),
         )
 
     # The current combined injury/danger field can establish a safe scene only when the
@@ -209,6 +313,7 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=_basis_for(injury.source),
             source_refs=[*injury.source_refs, 'field:incident.injury_or_danger'],
             activated_at=injury.updated_at,
+            source_actor=_source_actor_for_form(injury.source),
         )
     else:
         add_tag(
@@ -216,6 +321,7 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=TagBasis.DERIVED,
             source_refs=['field:incident.injury_or_danger'],
             activated_at=claim.created_at,
+            source_actor=TagSourceActor.SYSTEM,
         )
 
     if claim.claim_state.urgency is Urgency.IMMEDIATE_SAFETY_RISK:
@@ -224,6 +330,7 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=TagBasis.DERIVED,
             source_refs=[f'claim:{claim.claim_id}:urgency'],
             activated_at=claim.updated_at,
+            source_actor=TagSourceActor.SYSTEM,
         )
 
     if claim.claim_state.customer_support.value == 'accessibility_required':
@@ -232,6 +339,7 @@ def _project_people_and_safety(claim: WorkingClaim, add: _TagAdder) -> None:
             basis=TagBasis.REPORTED,
             source_refs=[f'claim:{claim.claim_id}:customer_support'],
             activated_at=claim.updated_at,
+            source_actor=TagSourceActor.CLAIMANT,
         )
 
 
@@ -243,19 +351,53 @@ def _project_stakeholders(
     add_tag = add
     police_field = claim.form.get('authorities.police_report_reference')
     police_evidence = [item for item in evidence if item.kind == 'police_report']
-    if police_field is not None or police_evidence:
+    confirmed_field = None
+    if (
+        police_field is not None
+        and police_field.status in {FormStatus.CONFIRMED, FormStatus.DISPUTED}
+        and bool(police_field.value)
+    ):
+        confirmed_field = police_field
+    if confirmed_field is not None or police_evidence:
         source_times = [item.created_at for item in police_evidence]
         source_refs = [f'evidence:{item.evidence_id}' for item in police_evidence]
-        if police_field is not None:
-            source_times.append(police_field.updated_at)
+        if confirmed_field is not None:
+            source_times.append(confirmed_field.updated_at)
             source_refs.extend(
-                [*police_field.source_refs, 'field:authorities.police_report_reference']
+                [*confirmed_field.source_refs, 'field:authorities.police_report_reference']
             )
+        if police_evidence and confirmed_field is None:
+            basis = TagBasis.VERIFIED
+            source_actor = _source_actor_for_evidence(police_evidence[0].source)
+        elif confirmed_field is not None and not police_evidence:
+            basis = _basis_for(confirmed_field.source)
+            source_actor = _source_actor_for_form(confirmed_field.source)
+        else:
+            basis = TagBasis.DERIVED
+            source_actor = TagSourceActor.SYSTEM
         add_tag(
             'stakeholder.police',
-            basis=TagBasis.REPORTED,
+            basis=basis,
             source_refs=source_refs,
             activated_at=min(source_times),
+            status=(
+                TagInstanceStatus.DISPUTED
+                if confirmed_field is not None and confirmed_field.status is FormStatus.DISPUTED
+                else TagInstanceStatus.ACTIVE
+            ),
+            source_actor=source_actor,
+        )
+    if confirmed_field is not None:
+        add_tag(
+            'evidence.police_reference',
+            basis=_basis_for(confirmed_field.source),
+            source_refs=[
+                *confirmed_field.source_refs,
+                'field:authorities.police_report_reference',
+            ],
+            activated_at=confirmed_field.updated_at,
+            status=_status_for(confirmed_field.status),
+            source_actor=_source_actor_for_form(confirmed_field.source),
         )
 
     emergency = claim.form.get('authorities.emergency_services_notified')
@@ -269,30 +411,7 @@ def _project_stakeholders(
             basis=_basis_for(emergency.source),
             source_refs=[*emergency.source_refs, 'field:authorities.emergency_services_notified'],
             activated_at=emergency.updated_at,
-        )
-
-    other_parties = claim.form.get('parties.other_parties')
-    if other_parties is None or other_parties.status is not FormStatus.CONFIRMED:
-        return
-    values = other_parties.value if isinstance(other_parties.value, list) else []
-    roles: set[str] = set()
-    for value in values:
-        if isinstance(value, dict):
-            roles.add(str(value.get('role') or '').lower())
-    refs = [*other_parties.source_refs, 'field:parties.other_parties']
-    if roles & {'driver', 'other_driver'}:
-        add_tag(
-            'stakeholder.other_driver',
-            basis=_basis_for(other_parties.source),
-            source_refs=refs,
-            activated_at=other_parties.updated_at,
-        )
-    if 'witness' in roles:
-        add_tag(
-            'stakeholder.witness',
-            basis=_basis_for(other_parties.source),
-            source_refs=refs,
-            activated_at=other_parties.updated_at,
+            source_actor=_source_actor_for_form(emergency.source),
         )
 
 
@@ -361,7 +480,7 @@ def _project_evidence(evidence: Sequence[EvidenceRecord], add: _TagAdder) -> Non
                 activated_at=item.created_at,
             )
     for item in evidence:
-        if item.kind == 'police_report' and item.status is EvidenceStatus.PENDING_GENERATION:
+        if item.kind == 'police_report' and item.status is EvidenceStatus.PENDING:
             add_tag(
                 'evidence.police_report_pending',
                 basis=TagBasis.VERIFIED,
@@ -529,10 +648,10 @@ def _project_attention(
             activated_at=claim.updated_at,
         )
 
-    inconsistent = [item for item in evidence if item.status is EvidenceStatus.INCONSISTENT]
-    if inconsistent:
-        refs = [f'evidence:{item.evidence_id}' for item in inconsistent]
-        activated_at = max(item.updated_at for item in inconsistent)
+    conflicted = [item for item in evidence if is_in_conflict(item.references)]
+    if conflicted:
+        refs = [f'evidence:{item.evidence_id}' for item in conflicted]
+        activated_at = max(item.updated_at for item in conflicted)
         add_tag(
             'evidence.source_conflict',
             basis=TagBasis.VERIFIED,

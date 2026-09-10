@@ -23,8 +23,13 @@ from backend.domain.models import (
 from backend.domain.tag_registry import (
     STAFF_TAG_REGISTRY,
     TAG_REGISTRY_VERSION,
+    TagAttentionLevel,
     TagCategory,
     TagDefinitionStatus,
+    TagFreshness,
+    TagProjectionMode,
+    TagSourceActor,
+    TagVisibility,
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.services.support import now_utc
@@ -60,7 +65,7 @@ def _confirmed(value: object, field_ref: str) -> StructuredFormField:
 
 
 def test_registry_contains_the_approved_staff_facing_catalogue() -> None:
-    assert TAG_REGISTRY_VERSION == '0.2'
+    assert TAG_REGISTRY_VERSION == '0.3'
     assert len(STAFF_TAG_REGISTRY) == 106
     counts = {
         category: sum(definition.category is category for definition in STAFF_TAG_REGISTRY.values())
@@ -86,6 +91,21 @@ def test_registry_contains_the_approved_staff_facing_catalogue() -> None:
     assert STAFF_TAG_REGISTRY['injury.none_reported'].staff_label == 'No injuries reported'
     assert STAFF_TAG_REGISTRY['stakeholder.police'].staff_label == 'Police involved'
     assert STAFF_TAG_REGISTRY['attention.fraud_l2'].staff_label == 'Fraud concern · Level 2'
+    assert all(
+        definition.visibility is TagVisibility.STAFF_ONLY
+        for definition in STAFF_TAG_REGISTRY.values()
+    )
+    assert all(definition.applicable_claim_families for definition in STAFF_TAG_REGISTRY.values())
+    assert all(
+        definition.attention_level is not None
+        for definition in STAFF_TAG_REGISTRY.values()
+        if definition.category is TagCategory.ATTENTION
+    )
+    assert all(
+        not definition.filterable
+        for definition in STAFF_TAG_REGISTRY.values()
+        if definition.projection_mode.value == 'unavailable'
+    )
 
 
 def test_workbench_projects_human_readable_tags_from_authoritative_records(
@@ -135,7 +155,7 @@ def test_workbench_projects_human_readable_tags_from_authoritative_records(
             evidence_id='evd_tag_police',
             claim_id=claim_id,
             kind='police_report',
-            status=EvidenceStatus.PENDING_GENERATION,
+            status=EvidenceStatus.PENDING,
             file_status=EvidenceFileStatus.NOT_AVAILABLE,
             source=EvidenceSource.CLAIMANT,
             related_fields=['authorities.police_report_reference'],
@@ -310,3 +330,100 @@ def test_generic_urgency_does_not_invent_or_duplicate_scene_safety_tags(
         len(codes & {'safety.scene_safe_reported', 'safety.scene_uncertain', 'safety.scene_unsafe'})
         == 1
     )
+
+
+def test_registry_exposes_explicit_projection_contracts_and_family_boundaries() -> None:
+    motor_only = STAFF_TAG_REGISTRY['impact.vehicle_not_drivable']
+    shared = STAFF_TAG_REGISTRY['incident.fire_smoke']
+    unavailable = STAFF_TAG_REGISTRY['attention.fraud_l1']
+
+    assert motor_only.applicable_claim_families == ('motor',)
+    assert motor_only.projection_mode is TagProjectionMode.DETERMINISTIC
+    assert motor_only.filterable is True
+    assert shared.applicable_claim_families == ('motor', 'home', 'contents')
+    assert unavailable.projection_mode is TagProjectionMode.UNAVAILABLE
+    assert unavailable.filterable is False
+    assert unavailable.attention_level is TagAttentionLevel.NOTICE
+
+
+def test_projected_tag_preserves_source_actor_and_disputed_status(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id = _create_claim(
+        client,
+        auth_headers,
+        incident_type='motor',
+        key='tag-projection-disputed',
+    )
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    timestamp = now_utc()
+    disputed_field = StructuredFormField(
+        value='NZ-POLICE-123',
+        source=FormSource.STAFF,
+        source_refs=['staff:review-1'],
+        status=FormStatus.DISPUTED,
+        needed_for=NeededFor.CURRENT_ACTION,
+        updated_at=timestamp,
+        updated_by=ActorReference(actor_type=ActorType.STAFF, actor_id='staff_demo'),
+    )
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'revision': claim.revision + 1,
+                'form': {**claim.form, 'authorities.police_report_reference': disputed_field},
+                'updated_at': timestamp,
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    tag = next(item for item in response.json()['tags'] if item['code'] == 'stakeholder.police')
+    assert tag['source_actor'] == TagSourceActor.STAFF.value
+    assert tag['status'] == 'disputed'
+    assert tag['freshness'] == TagFreshness.CURRENT.value
+
+
+def test_unavailable_fraud_vocabulary_is_not_projected_from_generic_signal(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id = _create_claim(
+        client,
+        auth_headers,
+        incident_type='home',
+        key='tag-projection-fraud-unavailable',
+    )
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    repository.save_claim(
+        claim.model_copy(
+            update={
+                'revision': claim.revision + 1,
+                'claim_state': claim.claim_state.model_copy(
+                    update={'fraud_signal': FraudSignal.REVIEW_REQUIRED}
+                ),
+                'updated_at': now_utc(),
+            }
+        ),
+        expected_revision=claim.revision,
+    )
+
+    response = client.get(
+        f'/api/v1/workbench/claims/{claim_id}',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert not any(item['code'].startswith('attention.fraud_') for item in response.json()['tags'])

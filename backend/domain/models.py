@@ -48,12 +48,21 @@ class Coverage(str, Enum):
 
 
 class EvidenceState(str, Enum):
+    """One claim's evidence position, rolled up from its records.
+
+    A rollup, not a second per-record vocabulary: every value here is the word one of the
+    records uses, except `not_started`, which is what no records at all means, and
+    `in_conflict`, which is not a record condition but the presence of an unresolved
+    conflict reference among them.
+    """
+
     NOT_STARTED = 'not_started'
     RECEIVED = 'received'
     UNOFFICIAL = 'unofficial'
-    INCOMPLETE = 'incomplete'
-    PENDING_GENERATION = 'pending_generation'
-    INCONSISTENT = 'inconsistent'
+    INVALID = 'invalid'
+    PENDING = 'pending'
+    UNAVAILABLE = 'unavailable'
+    IN_CONFLICT = 'in_conflict'
 
 
 class FraudSignal(str, Enum):
@@ -110,11 +119,46 @@ class MessageVisibility(str, Enum):
 
 
 class EvidenceStatus(str, Enum):
+    """The business condition of one piece of material, and nothing about its upload.
+
+    Every value answers "what is the state of the thing itself", so that a projection
+    reading this alone can tell a claimant or a staff member something true. Where the
+    material is in its journey from a browser to storage is `EvidenceFileStatus`, and the
+    two vocabularies deliberately no longer overlap.
+
+    `disputed` is not here. A conflict is not an alternative to having been received: a
+    material can be received, readable, and contested at the same time, and a status can
+    only say one of those. Conflict is carried by `EvidenceRecord.references`, which can
+    also say what the conflict is with, whether anyone has resolved it, and when.
+    """
+
+    MISSING = 'missing'
+    PENDING = 'pending'
     RECEIVED = 'received'
     UNOFFICIAL = 'unofficial'
-    INCOMPLETE = 'incomplete'
-    PENDING_GENERATION = 'pending_generation'
-    INCONSISTENT = 'inconsistent'
+    INVALID = 'invalid'
+    UNAVAILABLE = 'unavailable'
+    SUPERSEDED = 'superseded'
+    EXPIRED = 'expired'
+
+
+class EvidenceRelation(str, Enum):
+    """What one piece of material has to say about another, or about a claim fact.
+
+    Each of these exists because a condition that describes a relationship cannot be
+    carried by a status word: a reader told only the word cannot find the second thing.
+    """
+
+    CONFLICTS_WITH = 'conflicts_with'
+    SUPERSEDED_BY = 'superseded_by'
+    UNAVAILABILITY_ESTABLISHED_BY = 'unavailability_established_by'
+
+
+class EvidenceRelationState(str, Enum):
+    """Whether the relationship still stands open."""
+
+    UNRESOLVED = 'unresolved'
+    RESOLVED = 'resolved'
 
 
 class EvidenceFileStatus(str, Enum):
@@ -822,7 +866,53 @@ class AgentDecisionRecord(ContractModel):
     discrepancy_candidates: list[DiscrepancyCandidate] = Field(default_factory=list)
 
 
+class EvidenceReference(ContractModel):
+    """What one record has to say about another record or a claim fact.
+
+    A conflict, a supersession, and an established unavailability are all statements
+    about a *second* thing, so each names it. Without that, staff cannot be shown what is
+    contested, a claimant cannot be told what replaced what, and an unavailability cannot
+    be distinguished from a request nobody answered.
+
+    `state` and `resolved_at` exist because a conflict is not settled by being recorded.
+    A supersession and an established unavailability happen once and stay true, so they
+    are recorded resolved at the moment they are raised; a conflict stays unresolved
+    until a person decides it, and both surfaces need to show which of those it is.
+    """
+
+    relation: EvidenceRelation
+    evidence_id: str | None = Field(default=None, min_length=1, max_length=100)
+    field_code: str | None = Field(default=None, min_length=1, max_length=100)
+    state: EvidenceRelationState = EvidenceRelationState.UNRESOLVED
+    reason: str = Field(min_length=1, max_length=1000)
+    raised_at: datetime
+    resolved_at: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_reference(self) -> 'EvidenceReference':
+        if (self.evidence_id is None) == (self.field_code is None):
+            raise ValueError(
+                'An evidence reference must name exactly one of another evidence record '
+                'or a claim field.'
+            )
+        if self.relation is not EvidenceRelation.CONFLICTS_WITH and self.field_code is not None:
+            raise ValueError(
+                f'{self.relation.value} must name another evidence record, not a claim field.'
+            )
+        resolved = self.state is EvidenceRelationState.RESOLVED
+        if resolved != (self.resolved_at is not None):
+            raise ValueError(
+                'A resolved reference must record when it was resolved, and an unresolved '
+                'one must not.'
+            )
+        if self.resolved_at is not None and self.resolved_at < self.raised_at:
+            raise ValueError('An evidence reference cannot be resolved before it was raised.')
+        return self
+
+
 class EvidenceRecord(ContractModel):
+    """One piece of material on a claim, its condition, and what it says about others."""
+
     evidence_id: str
     claim_id: str
     kind: str
@@ -832,6 +922,7 @@ class EvidenceRecord(ContractModel):
     media_type: str | None = None
     size_bytes: int | None = Field(default=None, ge=0)
     source: EvidenceSource
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
     related_fields: list[str] = Field(default_factory=list)
     needed_for: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -853,6 +944,7 @@ class HandoffEvidenceItem(ContractModel):
     status: EvidenceStatus
     file_status: EvidenceFileStatus
     source: EvidenceSource
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=50)
     visibility: MessageVisibility
     original_filename: str | None = None
     media_type: str | None = None

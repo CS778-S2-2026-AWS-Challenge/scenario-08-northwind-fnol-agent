@@ -1,14 +1,23 @@
 from dataclasses import dataclass, field
 
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
-from backend.core.config import IdentityMode, Settings
+from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.domain.model_gateway import (
+    ModelCapabilities,
+    ModelCompletionStatus,
+    ModelRequest,
+    ModelResponse,
+)
 from backend.domain.staff_agent import (
     StaffAgentDraft,
     StaffAgentDraftKind,
     StaffAgentModelOutput,
 )
+from backend.prompts import STAFF_ASSISTANT_PROMPT_ID
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import ControlledAgent
 from backend.services.staff_agent import (
@@ -48,6 +57,27 @@ class RecordingStaffAgent(StaffAgentTurnProvider):
         )
 
 
+@dataclass
+class RecordingModelGateway:
+    requests: list[ModelRequest] = field(default_factory=list)
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=False)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output={
+                'answer': 'The configured Staff Agent is ready.',
+                'drafts': [],
+            },
+            provider_model='test-staff-model',
+            provider_request_id='req-staff-runtime',
+        )
+
+
 def _client(
     repository: FixtureRepository,
     provider: StaffAgentTurnProvider | None,
@@ -72,14 +102,204 @@ def _create_claim(client: TestClient, suffix: str = 'staff-agent') -> str:
     return str(response.json()['claim']['claim_id'])
 
 
-def _create_session(client: TestClient) -> str:
+def _create_session(client: TestClient, model_profile_id: str | None = None) -> str:
     response = client.post(
         '/api/v1/workbench/agent/sessions',
         headers=STAFF_HEADERS,
-        json={'title': 'Evidence review'},
+        json={
+            'title': 'Evidence review',
+            **({'model_profile_id': model_profile_id} if model_profile_id else {}),
+        },
     )
     assert response.status_code == 201
     return str(response.json()['session_id'])
+
+
+def test_staff_agent_session_persists_selected_model_profile() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        response = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'GPT review', 'model_profile_id': 'nowcoding-gpt54mini'},
+        )
+        assert response.status_code == 201
+        session_id = response.json()['session_id']
+        assert response.json()['model_profile_id'] == 'nowcoding-gpt54mini'
+        listed = client.get('/api/v1/workbench/agent/sessions', headers=STAFF_HEADERS)
+        assert listed.status_code == 200
+        assert listed.json()['items'][0]['model_profile_id'] == 'nowcoding-gpt54mini'
+
+        message = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'profile-bound-question',
+                'content': 'Summarise the current work.',
+                'claim_ids': [],
+            },
+        )
+
+    assert message.status_code == 201
+    assert provider.contexts[0].model_profile_id == 'nowcoding-gpt54mini'
+    assert message.json()['session']['model_profile_id'] == 'nowcoding-gpt54mini'
+
+
+def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_base_url='http://model.example.test/v1',
+        model_identifier='qwen3.8-27b',
+    )
+    with TestClient(create_app(settings, repository=FixtureRepository())) as client:
+        response = client.get(
+            '/api/v1/workbench/agent/capabilities',
+            headers=STAFF_HEADERS,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['default_model_profile_id'] == 'qwen-local'
+    assert [item['id'] for item in body['models']] == ['qwen-local']
+
+
+def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
+    settings = Settings(environment='test', identity_mode=IdentityMode.DEVELOPER)
+    with TestClient(create_app(settings)) as client:
+        response = client.get(
+            '/api/v1/workbench/agent/capabilities',
+            headers=STAFF_HEADERS,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {'models': [], 'default_model_profile_id': None}
+
+
+def _model_gateway_runtime_client(
+    gateway: RecordingModelGateway,
+) -> TestClient:
+    registry = ModelGatewayRegistry()
+    registry.register('test_gateway', lambda _config: gateway)
+    settings = Settings(
+        environment='test',
+        identity_mode=IdentityMode.DEVELOPER,
+        agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+        model_protocol_adapter='test_gateway',
+        model_base_url='https://model.example.test/v1',
+        model_identifier='test-model',
+    )
+    return TestClient(
+        create_app(
+            settings,
+            repository=FixtureRepository(),
+            model_gateway_registry=registry,
+        )
+    )
+
+
+def test_staff_agent_builds_default_gateway_from_runtime_profile() -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Configured Staff Agent'},
+        )
+        assert session.status_code == 201
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'configured-staff-message',
+                'content': 'Summarise the current Claim context.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()['assistant_message']['content'] == (
+        'The configured Staff Agent is ready.'
+    )
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].purpose == 'staff_assistant'
+    assert gateway.requests[0].prompt_version == STAFF_ASSISTANT_PROMPT_ID
+
+
+def test_staff_agent_gateway_fails_closed_when_profile_resolution_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Configuration failure'},
+        )
+        monkeypatch.setattr(
+            'backend.app.model_configuration',
+            lambda _request, _profile_id: (_ for _ in ()).throw(ValueError('invalid profile')),
+        )
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'configuration-failure-message',
+                'content': 'Review this Claim.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert gateway.requests == []
+
+
+def test_staff_agent_gateway_fails_closed_when_profile_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RecordingModelGateway()
+    with _model_gateway_runtime_client(gateway) as client:
+        session = client.post(
+            '/api/v1/workbench/agent/sessions',
+            headers=STAFF_HEADERS,
+            json={'title': 'Missing profile'},
+        )
+        monkeypatch.setattr('backend.app.model_configuration', lambda _request, _profile_id: None)
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session.json()["session_id"]}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'missing-profile-message',
+                'content': 'Review this Claim.',
+                'claim_ids': [],
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()['error']['code'] == 'DEPENDENCY_FAILED'
+    assert gateway.requests == []
+
+
+def test_staff_agent_rejects_model_override_in_message_request() -> None:
+    repository = FixtureRepository()
+    provider = RecordingStaffAgent()
+    with _client(repository, provider) as client:
+        session_id = _create_session(client, 'nowcoding-gpt54mini')
+        response = client.post(
+            f'/api/v1/workbench/agent/sessions/{session_id}/messages',
+            headers=STAFF_HEADERS,
+            json={
+                'client_message_id': 'profile-override',
+                'content': 'Use another model for this question.',
+                'claim_ids': [],
+                'model_profile_id': 'qwen-local',
+            },
+        )
+
+    assert response.status_code == 422
 
 
 def test_staff_agent_persists_explicit_multi_claim_scope_and_lists_conversation() -> None:

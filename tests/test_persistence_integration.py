@@ -206,7 +206,7 @@ def test_claim_session_and_evidence_share_one_persistence_baseline(
         },
         json={
             'kind': 'police_report',
-            'status': 'pending_generation',
+            'status': 'pending',
             'needed_for': ['later_action'],
             'claimant_note': 'The report is not available yet.',
         },
@@ -236,7 +236,7 @@ def test_claim_session_and_evidence_share_one_persistence_baseline(
         },
         json={
             'kind': 'receipt',
-            'status': 'pending_generation',
+            'status': 'pending',
             'needed_for': ['later_action'],
         },
     )

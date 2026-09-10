@@ -28,6 +28,7 @@ class StaffAgentSession(ContractModel):
     session_id: str
     staff_id: str
     title: str = Field(min_length=1, max_length=200)
+    model_profile_id: str = Field(default='qwen-local', min_length=1, max_length=100)
     created_at: datetime
     updated_at: datetime
 
@@ -50,6 +51,7 @@ class StaffAgentMessage(ContractModel):
 
 class CreateStaffAgentSessionRequest(ContractModel):
     title: str = Field(default='New Staff Agent session', min_length=1, max_length=200)
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class CreateStaffAgentMessageRequest(ContractModel):
