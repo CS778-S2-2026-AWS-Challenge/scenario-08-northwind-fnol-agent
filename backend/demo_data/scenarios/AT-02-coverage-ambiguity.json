@@ -20,11 +20,11 @@
       "next_action": "HANDOFF"
     },
     "form": {
-      "claim.product_family": {
-        "value": "home",
-        "source": "policy",
+      "incident.description": {
+        "value": "Water entered the ground floor after several days of heavy rain.",
+        "source": "claimant",
         "source_refs": [
-          "ret_fixture_at02_policy"
+          "msg_at02_claimant_1"
         ],
         "status": "confirmed",
         "needed_for": "current_action",
@@ -33,8 +33,7 @@
         "updated_by": {
           "actor_type": "claimant",
           "actor_id": "cus_demo"
-        },
-        "precision": "exact"
+        }
       },
       "incident.cause": {
         "value": "gradual_water_ingress",
@@ -51,11 +50,26 @@
           "actor_id": "sys_agent"
         }
       },
-      "incident.description": {
-        "value": "Water entered the ground floor after several days of heavy rain.",
-        "source": "claimant",
+      "policy.policy_number": {
+        "value": "POL-MVP-HOME-2048",
+        "source": "policy",
         "source_refs": [
-          "msg_at02_claimant_1"
+          "ret_fixture_at02_policy"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:04:20Z",
+        "updated_by": {
+          "actor_type": "system",
+          "actor_id": "sys_policy_adapter"
+        }
+      },
+      "claim.product_family": {
+        "value": "home",
+        "source": "policy",
+        "source_refs": [
+          "ret_fixture_at02_policy"
         ],
         "status": "confirmed",
         "needed_for": "current_action",
@@ -64,7 +78,8 @@
         "updated_by": {
           "actor_type": "claimant",
           "actor_id": "cus_demo"
-        }
+        },
+        "precision": "exact"
       },
       "incident.injury_or_danger": {
         "value": false,
@@ -129,21 +144,6 @@
           "actor_id": "cus_demo"
         },
         "precision": "exact"
-      },
-      "policy.policy_number": {
-        "value": "POL-MVP-HOME-2048",
-        "source": "policy",
-        "source_refs": [
-          "ret_fixture_at02_policy"
-        ],
-        "status": "confirmed",
-        "needed_for": "current_action",
-        "confidence": 1.0,
-        "updated_at": "2026-08-13T11:04:20Z",
-        "updated_by": {
-          "actor_type": "system",
-          "actor_id": "sys_policy_adapter"
-        }
       },
       "property.address": {
         "value": "18 Rimu Street, Auckland",
@@ -500,11 +500,11 @@
         "incident_summary": "Water entered the ground floor after several days of heavy rain.",
         "form_revision": 4,
         "form_snapshot": {
-          "claim.product_family": {
-            "value": "home",
-            "source": "policy",
+          "incident.description": {
+            "value": "Water entered the ground floor after several days of heavy rain.",
+            "source": "claimant",
             "source_refs": [
-              "ret_fixture_at02_policy"
+              "msg_at02_claimant_1"
             ],
             "status": "confirmed",
             "needed_for": "current_action",
@@ -513,8 +513,7 @@
             "updated_by": {
               "actor_type": "claimant",
               "actor_id": "cus_demo"
-            },
-            "precision": "exact"
+            }
           },
           "incident.cause": {
             "value": "gradual_water_ingress",
@@ -531,11 +530,26 @@
               "actor_id": "sys_agent"
             }
           },
-          "incident.description": {
-            "value": "Water entered the ground floor after several days of heavy rain.",
-            "source": "claimant",
+          "policy.policy_number": {
+            "value": "POL-MVP-HOME-2048",
+            "source": "policy",
             "source_refs": [
-              "msg_at02_claimant_1"
+              "ret_fixture_at02_policy"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:04:20Z",
+            "updated_by": {
+              "actor_type": "system",
+              "actor_id": "sys_policy_adapter"
+            }
+          },
+          "claim.product_family": {
+            "value": "home",
+            "source": "policy",
+            "source_refs": [
+              "ret_fixture_at02_policy"
             ],
             "status": "confirmed",
             "needed_for": "current_action",
@@ -544,7 +558,8 @@
             "updated_by": {
               "actor_type": "claimant",
               "actor_id": "cus_demo"
-            }
+            },
+            "precision": "exact"
           },
           "incident.injury_or_danger": {
             "value": false,
@@ -609,21 +624,6 @@
               "actor_id": "cus_demo"
             },
             "precision": "exact"
-          },
-          "policy.policy_number": {
-            "value": "POL-MVP-HOME-2048",
-            "source": "policy",
-            "source_refs": [
-              "ret_fixture_at02_policy"
-            ],
-            "status": "confirmed",
-            "needed_for": "current_action",
-            "confidence": 1.0,
-            "updated_at": "2026-08-13T11:04:20Z",
-            "updated_by": {
-              "actor_type": "system",
-              "actor_id": "sys_policy_adapter"
-            }
           },
           "property.address": {
             "value": "18 Rimu Street, Auckland",
