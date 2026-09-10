@@ -315,13 +315,6 @@ def send_staff_message(
     if active_session is None or active_session.status is not SessionStatus.ACTIVE:
         raise _validation('An active claimant session is required before sending a staff message.')
 
-    claimant_sessions = repository.list_sessions_for_claim(claim_id, claim.customer_id)
-    if len(claimant_sessions) > 1 and payload.in_reply_to is None:
-        raise _validation(
-            'A reply reference to the active claimant session is required when a Claim has '
-            'multiple claimant sessions.'
-        )
-
     handoffs = repository.list_handoffs(claim_id, claim.customer_id)
     active = next(
         (
