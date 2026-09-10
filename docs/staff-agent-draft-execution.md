@@ -58,5 +58,25 @@ handler has committed the corresponding result.
 - Existing Claimant API coverage proves motor, home, and contents intake, correction, confirmation,
   Dynamic Form requirements, and claim creation.
 - Staff Agent tests prove stable draft identity, explicit confirmation, registered handoff action
-  execution, idempotent replay, and no Claim mutation before confirmation.
+  execution, idempotent replay with durable source identifiers, no Claim mutation before confirmation,
+  informational-draft rejection, unknown-action rejection, stale-revision rejection, assigned-staff
+  permission denial, dependency-unavailable handling, and the post-execution Workbench projection.
 - The OpenAPI snapshot and API catalogue describe the execution route and the role boundary.
+
+The backend and claimant API suites provide contract and integration evidence for the three VP
+families. A browser-level claimant journey is a separate evidence level and must be recorded only
+after the existing customer client is exercised against the running API; component or API tests do
+not get relabelled as browser evidence.
+
+## Current evidence boundary
+
+The claimant client now has an integration test that starts an anonymous Claim, consumes a backend
+Dynamic Form projection, displays the backend-owned current requirement and progress, and submits a
+natural-language-equivalent field correction through the authoritative update route. The backend
+journey suite covers motor, home, and contents branch selection, confirmation, correction, and
+Claim creation.
+
+The remaining #608 evidence requirement is a full browser journey for each motor, home, and contents
+path against the running customer and backend services. The supported in-app browser harness was
+unavailable in this environment, so that evidence is intentionally still open and is not represented
+as complete by the API or jsdom tests above.

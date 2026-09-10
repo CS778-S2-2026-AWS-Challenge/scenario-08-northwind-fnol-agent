@@ -728,7 +728,11 @@ function App() {
       let activeClaim = claim
       let activeSessionId = sessionId
       if (!activeClaim) {
-        const created = await createClaim({ idempotencyKey: operation.claimKey, modelProfileId: selectedModel })
+        const created = await createClaim({
+          idempotencyKey: operation.claimKey,
+          incidentType: claimType || null,
+          modelProfileId: selectedModel,
+        })
         activeClaim = created.claim
         activeSessionId = created.session.session_id
         setClaim(created.claim)
