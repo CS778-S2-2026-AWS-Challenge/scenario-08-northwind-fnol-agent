@@ -238,6 +238,11 @@ The single non-motor record, `AT-02-coverage-ambiguity.json`, uses `property`, w
 the three paths. Whether it is renamed, replaced, or kept as a separate coverage case is a scenario
 decision for P8.2 or the scenario owner.
 
+> **Closed, 2026-09-10.** The snapshot above is left as it was written. The decision it names has
+> since been taken: `AT-02` is corrected to `home`, keeping its scenario identifier, because its own
+> policy record and description already describe a home water-ingress loss. #690 had made `property`
+> an explicitly unsupported family, so the scenario could no longer reach claim creation at all.
+
 Every evidence record in those scenarios references a fixture storage location and no asset exists
 behind it. Against section 5.2, only `motor` currently reaches **Pending**, no path reaches
 **Unavailable**, **Superseded**, **Expired**, or **Disputed**, and no path demonstrates ownership
