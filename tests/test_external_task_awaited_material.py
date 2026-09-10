@@ -24,8 +24,8 @@ os.environ.setdefault('DATA_RUNTIME_PROFILE', 'fixture')
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
-from backend.core.errors import ApiError
 from backend.domain.external_services import (
+    ExternalTaskEvidenceLink,
     external_task_for_evidence,
 )
 from backend.domain.models import (
@@ -86,6 +86,16 @@ def _revision(client: TestClient, claim_id: str) -> str:
 def _routed_claim(client: TestClient) -> str:
     """Drive a motor claim to an accepted assessor routing request."""
 
+    return _drive(client, route=True)
+
+
+def _consented_claim(client: TestClient) -> str:
+    """Drive a motor claim to recorded consent, stopping before its first request."""
+
+    return _drive(client, route=False)
+
+
+def _drive(client: TestClient, *, route: bool) -> str:
     created = client.post(
         '/api/v1/claims',
         headers={**CLAIMANT, 'Idempotency-Key': 'aw-open'},
@@ -145,6 +155,8 @@ def _routed_claim(client: TestClient) -> str:
         headers={**CLAIMANT, 'Idempotency-Key': 'aw-c', 'If-Match': _revision(client, claim_id)},
         json={'consent': True},
     )
+    if not route:
+        return claim_id
     routed = client.post(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={**CLAIMANT, 'Idempotency-Key': 'aw-r', 'If-Match': _revision(client, claim_id)},
@@ -297,32 +309,121 @@ def test_the_guard_itself_refuses_a_second_record(
     assert len(repository.list_external_task_evidence_links_internal(claim_id)) == 1
 
 
-def test_a_failed_link_write_surfaces_rather_than_leaving_a_silent_orphan(
+def test_an_interrupted_first_request_leaves_an_orphan_that_a_retry_repairs(
     client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If the link cannot be written the caller is told, not left with untraceable material.
+    """Fail between the two writes on the *first* request, then retry through the API.
 
-    The evidence and the link are two repository writes. A failure between them produces
-    external-system material with no link, which `external_task_for_evidence` then
-    rejects. That is the safe direction, but the caller still has to hear about it.
+    The evidence and the link are two repository calls. If the second fails, the claim
+    holds external-system material naming no task — the exact state
+    `external_task_for_evidence` rejects — while the task is already accepted.
+
+    The earlier version of this test patched the link write *after* a completed routing
+    had already written one, so it never created the orphan it described and never
+    exercised the retry. That is how the reconciliation gap survived it: the retry took
+    the recovery branch, found the task already accepted, skipped reconciliation, and
+    returned success over a broken invariant.
     """
+
+    claim_id = _consented_claim(client)
+    original = repository.save_external_task_evidence_link
+    calls = {'n': 0}
+
+    def fail_once(link: ExternalTaskEvidenceLink, customer_id: str) -> None:
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise KeyError('link store unavailable')
+        original(link, customer_id)
+
+    monkeypatch.setattr(repository, 'save_external_task_evidence_link', fail_once)
+
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 409
+
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    orphaned = [
+        item
+        for item in repository.list_evidence(claim_id, claim.customer_id)
+        if item.source is EvidenceSource.EXTERNAL_SYSTEM
+    ]
+    assert len(orphaned) == 1
+    assert repository.list_external_task_evidence_links_internal(claim_id) == []
+
+    retried = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+
+    assert retried.status_code in {200, 201}, retried.text
+    links = repository.list_external_task_evidence_links_internal(claim_id)
+    records = [
+        item
+        for item in repository.list_evidence(claim_id, claim.customer_id)
+        if item.source is EvidenceSource.EXTERNAL_SYSTEM
+    ]
+    assert len(records) == 1
+    assert len(links) == 1
+    # The invariant the whole change exists to hold.
+    assert external_task_for_evidence(records[0], links) == links[0].task_id
+
+
+def test_holding_the_evidence_is_not_proof_of_holding_the_link(
+    client: TestClient, repository: FixtureRepository
+) -> None:
+    """The recorder returned early on the evidence alone, so a lost link stayed lost."""
 
     claim_id = _routed_claim(client)
     claim = repository.get_claim_internal(claim_id)
     assert claim is not None
     task = repository.list_external_tasks_internal(claim_id)[0]
+    repository._external_task_evidence_links.clear()
 
-    def refuse(*args: object, **kwargs: object) -> None:
-        raise KeyError('link store unavailable')
+    _record_awaited_material(repository, task=task, claim=claim)
 
-    monkeypatch.setattr(repository, 'save_external_task_evidence_link', refuse)
-    monkeypatch.setattr(
-        repository,
-        'get_evidence',
-        lambda *args, **kwargs: None,
+    assert len(repository.list_external_task_evidence_links_internal(claim_id)) == 1
+
+
+def test_a_write_that_returns_quietly_is_not_taken_as_proof(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A silently dropped link write must fail the request, not pass as success.
+
+    The two writes are not one transaction, so a store that accepts the link and keeps
+    nothing raises nothing for the recorder to catch. Reporting 201 there would tell the
+    caller the assessment request is recorded while the material it produced still names
+    no task. The record is read back through `external_task_for_evidence` instead, and
+    the answer that guard gives is the only one taken as success.
+    """
+
+    claim_id = _consented_claim(client)
+
+    def drop(link: ExternalTaskEvidenceLink, customer_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(repository, 'save_external_task_evidence_link', drop)
+
+    response = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
     )
 
-    with pytest.raises(ApiError) as refused:
-        _record_awaited_material(repository, task=task, claim=claim)
-
-    assert refused.value.status_code == 409
+    assert response.status_code == 409, response.text

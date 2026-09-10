@@ -29,10 +29,12 @@ from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    UntraceableExternalEvidenceError,
     assert_disclosure_within_consent,
     assert_request_matches_task,
     assert_task_transition_is_permitted,
     classify_external_task_failure,
+    external_task_for_evidence,
 )
 from backend.domain.models import (
     ActorType,
@@ -301,6 +303,18 @@ def _record_awaited_material(
     creating the evidence alone would produce exactly the state that guard exists to
     reject.
 
+    Both halves are checked, not one. An interrupted attempt can leave the evidence
+    stored and the link lost, and a recorder that returned on the evidence alone could
+    never repair that: it would read the record it wrote first and report success over a
+    claim whose material still named no task. Whichever half is missing is written.
+
+    What was stored is then read back and resolved through the guard before returning.
+    The two writes are not one transaction, so a caller cannot conclude from a write
+    that returned quietly that both halves are present; the only answer that means
+    anything is the one the traceability boundary itself gives. If it cannot resolve the
+    record to its task, the request fails as unfinished rather than reporting a success
+    that left the invariant broken.
+
     Args:
         repository: Authoritative persistence boundary.
         task: The accepted task that owes the material.
@@ -311,7 +325,12 @@ def _record_awaited_material(
     """
 
     evidence_id = f'evd_{task.task_id.removeprefix("tsk_")}'
-    if repository.get_evidence(claim.claim_id, evidence_id, claim.customer_id) is not None:
+    held = repository.get_evidence(claim.claim_id, evidence_id, claim.customer_id)
+    linked = any(
+        link.evidence_id == evidence_id and link.task_id == task.task_id
+        for link in repository.list_external_task_evidence_links_internal(claim.claim_id)
+    )
+    if held is not None and linked:
         return
 
     recorded_at = task.updated_at
@@ -340,10 +359,23 @@ def _record_awaited_material(
         linked_at=recorded_at,
     )
     try:
-        repository.save_evidence(awaited, claim.customer_id)
-        repository.save_external_task_evidence_link(link, claim.customer_id)
+        if held is None:
+            repository.save_evidence(awaited, claim.customer_id)
+        if not linked:
+            repository.save_external_task_evidence_link(link, claim.customer_id)
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
+
+    stored = repository.get_evidence(claim.claim_id, evidence_id, claim.customer_id)
+    if stored is None:
+        raise _idempotency_error()
+    try:
+        external_task_for_evidence(
+            stored,
+            repository.list_external_task_evidence_links_internal(claim.claim_id),
+        )
+    except UntraceableExternalEvidenceError as untraceable:
+        raise _idempotency_error() from untraceable
 
 
 def _record_external_failure(
@@ -620,18 +652,24 @@ def route_assessor(
             ),
             None,
         )
-        if task is not None and task.status is ExternalTaskOperationStatus.PREPARED:
-            provider_reference = (
-                operation.result.assessor_reference or operation.result.queue_reference
-            )
-            assert provider_reference is not None
-            accepted = _record_external_acceptance(
-                repository,
-                task=task,
-                customer_id=claim.customer_id,
-                provider_reference=provider_reference,
-            )
-            _record_awaited_material(repository, task=accepted, claim=claim)
+        if task is not None:
+            # An interrupted attempt can leave the task advanced but its owed material
+            # half-written, so acceptance and reconciliation are decided separately. Only
+            # a still-prepared task needs the transition; every accepted task needs its
+            # owed material checked, because returning success over a missing link would
+            # report a repaired request while the provenance invariant stayed broken.
+            if task.status is ExternalTaskOperationStatus.PREPARED:
+                provider_reference = (
+                    operation.result.assessor_reference or operation.result.queue_reference
+                )
+                assert provider_reference is not None
+                task = _record_external_acceptance(
+                    repository,
+                    task=task,
+                    customer_id=claim.customer_id,
+                    provider_reference=provider_reference,
+                )
+            _record_awaited_material(repository, task=task, claim=claim)
         return _save_assessor_result(
             repository,
             payload.claim_id,
