@@ -728,15 +728,14 @@ class FollowUpRecord(ContractModel):
                 or self.due_at is None
             ):
                 raise ValueError('A pending Follow-up requires an authorised channel and due time.')
-        elif self.status is FollowUpStatus.BLOCKED:
-            if (
-                self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
-                or self.channel is not None
-                or self.due_at is not None
-            ):
-                raise ValueError(
-                    'A blocked Follow-up must not claim an authorised channel or schedule.'
-                )
+        elif self.status is FollowUpStatus.BLOCKED and (
+            self.contact_permission is not FollowUpContactPermission.NOT_AUTHORISED
+            or self.channel is not None
+            or self.due_at is not None
+        ):
+            raise ValueError(
+                'A blocked Follow-up must not claim an authorised channel or schedule.'
+            )
         return self
 
 
