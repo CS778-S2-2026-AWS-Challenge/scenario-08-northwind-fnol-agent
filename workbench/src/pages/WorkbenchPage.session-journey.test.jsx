@@ -91,6 +91,22 @@ function renderJourney(sessionId = 'ses_26') {
   )
 }
 
+function messageReadCount(state, sessionId) {
+  return state.messageReads.filter((readSessionId) => readSessionId === sessionId).length
+}
+
+async function expectLedgerMessageAfterRead(state, sessionId, readsBefore, text) {
+  await waitFor(() => {
+    expect(messageReadCount(state, sessionId)).toBeGreaterThan(readsBefore)
+    const ledger = document.querySelector('.message-ledger')
+    expect(ledger).toBeInTheDocument()
+    const matchingArticles = [...ledger.querySelectorAll('.message')].filter(
+      (article) => article.textContent?.includes(text),
+    )
+    expect(matchingArticles).toHaveLength(1)
+  })
+}
+
 function createJourneyService({
   revision = { value: 7 },
   claimFactory = () => claimDetail(revision.value),
@@ -202,6 +218,10 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       sessionId: 'ses_26',
       draft: 'Journey staff reply',
     }]
+    tabs.update.mockImplementation((claimId, patch) => {
+      const tab = tabs.tabs.find((item) => item.claimId === claimId)
+      if (tab) Object.assign(tab, patch)
+    })
   })
 
   afterEach(() => {
@@ -219,12 +239,16 @@ describe('WorkbenchPage staff session browser/API journey', () => {
 
     expect(state.sessionReads.some((path) => path.includes('cursor=page-2'))).toBe(true)
     expect(state.messageReads).toContain('ses_26')
+    const readsBeforeSend = messageReadCount(state, 'ses_26')
 
     await userEvent.setup().click(sendButton)
 
-    await waitFor(() => {
-      expect(screen.getByText('Journey staff reply')).toBeVisible()
-    })
+    await expectLedgerMessageAfterRead(
+      state,
+      'ses_26',
+      readsBeforeSend,
+      'Journey staff reply',
+    )
 
     expect(state.messagesBySession.ses_26).toHaveLength(1)
     expect(state.messagesBySession.ses_26[0]).toMatchObject({
@@ -234,7 +258,6 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       content: { type: 'text', text: 'Journey staff reply' },
     })
     expect(state.messagesBySession.ses_25).toHaveLength(0)
-    expect(state.messageReads.filter((sessionId) => sessionId === 'ses_26').length).toBeGreaterThanOrEqual(2)
   })
 
   it('keeps a displayed historical session read only and never posts from it', async () => {
@@ -272,7 +295,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(state.messageReads).toContain('ses_25')
   })
 
-  it('retries an ambiguous committed send with the same idempotency key and persists exactly one message', async () => {
+  it('retries an ambiguous committed send with the same idempotency key and persists exactly one rendered message', async () => {
     const committedByKey = new Map()
     const { fetchMock, state } = createJourneyService({
       onPost(request, serviceState) {
@@ -307,12 +330,16 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
     expect(state.messagesBySession.ses_26).toHaveLength(1)
     expect(state.postRequests).toHaveLength(1)
+    const readsBeforeRetry = messageReadCount(state, 'ses_26')
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    await waitFor(() => {
-      expect(screen.getByText('Journey staff reply')).toBeVisible()
-    })
+    await expectLedgerMessageAfterRead(
+      state,
+      'ses_26',
+      readsBeforeRetry,
+      'Journey staff reply',
+    )
 
     expect(state.postRequests).toHaveLength(2)
     expect(state.postRequests[0].key).toBeTruthy()
@@ -419,12 +446,16 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     await waitFor(() => expect(revalidatedButton).toBeEnabled())
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
     expect(service.state.postRequests).toHaveLength(1)
+    const readsBeforeRevalidatedSend = messageReadCount(service.state, 'ses_27')
 
     await userEvent.setup().click(revalidatedButton)
 
-    await waitFor(() => {
-      expect(screen.getByText('Journey staff reply')).toBeVisible()
-    })
+    await expectLedgerMessageAfterRead(
+      service.state,
+      'ses_27',
+      readsBeforeRevalidatedSend,
+      'Journey staff reply',
+    )
 
     expect(service.state.postRequests).toHaveLength(2)
     expect(service.state.postRequests[1].revision).toBe('8')
