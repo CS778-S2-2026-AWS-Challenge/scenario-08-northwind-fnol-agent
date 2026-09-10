@@ -47,6 +47,7 @@ from backend.domain.models import (
     ProposedFormChange,
     QuestionRecord,
     ResponsibleParty,
+    RuntimeTraceRecord,
     SessionRecord,
     StructuredFormField,
     SupportNeed,
@@ -231,6 +232,7 @@ def _claimant_decision(decision: AgentDecisionRecord) -> ClaimantDecision:
     return ClaimantDecision(
         decision_id=decision.decision_id,
         action=decision.action,
+        action_code=decision.action_code,
         reason_codes=(
             []
             if decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
@@ -325,6 +327,31 @@ def _message_only_response(
         claimant_message=_claimant_message(message),
         form_changes=[],
         handoff=None,
+    )
+
+
+def _namespaced_turn_response(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    claim_revision: int,
+    claimant_message: MessageRecord,
+    agent_message: MessageRecord,
+) -> MessageTurnResponse:
+    """Build the claimant projection for a Runtime trace without a legacy decision."""
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _session_not_found()
+    return MessageTurnResponse(
+        claim_id=claim_id,
+        session_id=claimant_message.session_id,
+        claim_revision=claim_revision,
+        claimant_message=_claimant_message(claimant_message),
+        agent_message=_claimant_message(agent_message),
+        form_changes=[],
+        decision=None,
+        handoff=None,
+        dynamic_form=claimant_dynamic_form_projection(repository, claim),
     )
 
 
@@ -1004,7 +1031,7 @@ def _pending_evidence_for_proposal(
         evidence_id=new_id('evd'),
         claim_id=claim_id,
         kind=str(pending.get('kind') or 'document'),
-        status=EvidenceStatus.PENDING_GENERATION,
+        status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,
         related_fields=['authorities.police_report_reference'],
@@ -1017,6 +1044,101 @@ def _pending_evidence_for_proposal(
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+def _submit_namespaced_runtime_turn(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    claim: WorkingClaim,
+    session: SessionRecord,
+    claimant_message: MessageRecord,
+    proposal: AgentProposal,
+    authority: object,
+    runtime_policy: object,
+    branch_evaluator: BranchRuleEvaluator,
+    previous_evaluation: BranchEvaluationRecord | None,
+    message_text: str,
+    route: str,
+    key: str,
+    fingerprint: str,
+    expected_revision: int,
+) -> MessageTurnResponse:
+    """Persist the first namespaced, read-only Runtime turn.
+
+    The target Runtime path deliberately does not create an ``AgentDecisionRecord`` or
+    advance Claim revision. It records the conversation and Runtime trace while only
+    updating Session activity, so ``claim.read`` remains observational.
+    """
+
+    runtime_trace: RuntimeTraceRecord | None = proposal.runtime_trace
+    if runtime_trace is None or runtime_trace.status != 'succeeded':
+        raise ApiError(
+            status_code=503,
+            code='AGENT_RUNTIME_UNAVAILABLE',
+            message='The namespaced Agent Runtime did not produce a persistable result.',
+            retryable=True,
+        )
+    timestamp = now_utc()
+    updated_session = session.model_copy(
+        update={'last_active_at': timestamp, 'context_revision': claim.revision}
+    )
+    agent_message = MessageRecord(
+        message_id=new_id('msg'),
+        claim_id=claim_id,
+        session_id=session_id,
+        actor=ActorType.AGENT,
+        visibility=MessageVisibility.CLAIMANT_VISIBLE,
+        content={'type': 'text', 'text': proposal.customer_response},
+        in_reply_to=claimant_message.message_id,
+        created_at=timestamp,
+    )
+    response = _namespaced_turn_response(
+        repository,
+        principal,
+        claim_id,
+        claim.revision,
+        claimant_message,
+        agent_message,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        runtime_trace_id=runtime_trace.trace_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+    try:
+        repository.save_runtime_turn(
+            claim,
+            expected_revision,
+            updated_session,
+            claimant_message,
+            agent_message,
+            runtime_trace,
+            idempotency,
+        )
+    except RevisionConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this page was loaded.',
+            retryable=True,
+            current_revision=conflict.current_revision,
+        ) from conflict
+    except IdempotencyConflict as conflict:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The message turn was already accepted with different retry data.',
+        ) from conflict
+    return response
 
 
 def submit_message(
@@ -1099,6 +1221,43 @@ def submit_message(
                 principal.subject,
             )
             if decision is None:
+                runtime_trace = repository.find_runtime_trace_for_trigger(
+                    claim_id,
+                    existing_client_message.message_id,
+                    principal.subject,
+                )
+                if runtime_trace is not None:
+                    agent_message = next(
+                        (
+                            message
+                            for message in repository.list_messages(
+                                claim_id,
+                                session_id,
+                                principal.subject,
+                            )
+                            if message.actor is ActorType.AGENT
+                            and message.in_reply_to == existing_client_message.message_id
+                        ),
+                        None,
+                    )
+                    if agent_message is None:
+                        raise ApiError(
+                            status_code=500,
+                            code='INTERNAL_ERROR',
+                            message='The Runtime message turn could not be restored.',
+                            retryable=True,
+                        )
+                    claim = repository.get_claim(claim_id, principal.subject)
+                    if claim is None:
+                        raise _session_not_found()
+                    return _namespaced_turn_response(
+                        repository,
+                        principal,
+                        claim_id,
+                        claim.revision,
+                        existing_client_message,
+                        agent_message,
+                    )
                 claim = repository.get_claim(claim_id, principal.subject)
                 if claim is not None:
                     return _message_only_response(
@@ -1145,7 +1304,7 @@ def submit_message(
         None,
     )
     message_text = payload.content.text if payload.content is not None else ''
-    if active_handoff is not None and not message_text.lstrip().lower().startswith('@agent'):
+    if active_handoff is not None:
         timestamp = now_utc()
         claimant_message = MessageRecord(
             message_id=new_id('msg'),
@@ -1266,15 +1425,9 @@ def submit_message(
     agent_context = AgentTurnContext(
         claim=claim,
         session_id=session_id,
+        model_profile_id=session.model_profile_id,
         trigger_message_id=claimant_message.message_id,
-        message_text=(
-            payload.content.text.lstrip()[len('@agent') :].lstrip()
-            if payload.content is not None
-            and payload.content.text.lstrip().lower().startswith('@agent')
-            else payload.content.text
-            if payload.content is not None
-            else None
-        ),
+        message_text=payload.content.text if payload.content is not None else None,
         evidence_refs=payload.evidence_refs,
         professional_review_required=any(
             signal.code == 'POLICY_RETRIEVAL_UNCERTAINTY' for signal in persisted_review_signals
@@ -1371,21 +1524,37 @@ def submit_message(
             proposal = replace(proposal, tool_results=context_tool_results)
     _validate_failed_retrieval_changes(proposal, message_text)
     authority = validate_proposal(proposal)
+    if proposal.action_code is not None:
+        return _submit_namespaced_runtime_turn(
+            repository,
+            principal,
+            claim_id,
+            session_id,
+            claim,
+            session,
+            claimant_message,
+            proposal,
+            authority,
+            runtime_policy,
+            branch_evaluator,
+            previous_evaluation,
+            message_text,
+            route,
+            key,
+            fingerprint,
+            expected_revision,
+        )
+    if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
+        raise ApiError(
+            status_code=422,
+            code='LEGACY_AGENT_ACTION_DEPRECATED',
+            message='Model responses using the deprecated legacy action contract are rejected.',
+            retryable=False,
+        )
     executed_state_changes = authorised_state_changes(proposal, authority)
     effective_customer_reason = proposal.customer_reason
     effective_customer_response = proposal.customer_response
     effective_next_step = _effective_next_step(proposal.customer_next_step, authority.outcome)
-    if proposal.proposal_source is AgentProposalSource.MODEL_GATEWAY:
-        (
-            effective_customer_reason,
-            effective_customer_response,
-            effective_next_step,
-        ) = _safe_model_customer_content(
-            proposal,
-            authority.outcome,
-            claim.customer_next_step,
-            claim.form,
-        )
     form_changes = _build_form_changes(
         claim.form,
         proposal.form_changes,
@@ -1628,7 +1797,7 @@ def submit_message(
                             else {}
                         ),
                         **(
-                            {'evidence': EvidenceState.PENDING_GENERATION}
+                            {'evidence': EvidenceState.PENDING}
                             if pending_evidence is not None
                             else {}
                         ),

@@ -603,6 +603,10 @@ def load_evidence_path_fixtures(
 
 def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
     staff_only_fields = {
+        # Catalogue section 7: the claimant is told a check is in progress, never which
+        # side is doubted. The references name the other side and the reason, so they
+        # stay staff-only; what the claimant sees is the claim's evidence state.
+        'references',
         'provenance',
         'wait_type',
         'responsible_party',

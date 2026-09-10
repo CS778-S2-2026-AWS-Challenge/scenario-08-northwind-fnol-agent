@@ -19,7 +19,9 @@ from backend.domain.models import (
     EvidenceRecord,
     HandoffRecord,
     MessageRecord,
+    RuntimeTraceRecord,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     StaffActionRecord,
     WorkingClaim,
@@ -43,6 +45,12 @@ class IdempotencyConflict(RepositoryConflict):
     pass
 
 
+class DemoSeedConflict(RepositoryConflict):
+    """The controlled validation seed cannot run against a populated queue."""
+
+    pass
+
+
 @dataclass(frozen=True)
 class IdempotencyRecord:
     actor_id: str
@@ -54,11 +62,37 @@ class IdempotencyRecord:
     message_id: str | None = None
     agent_message_id: str | None = None
     decision_id: str | None = None
+    runtime_trace_id: str | None = None
     handoff_id: str | None = None
     action_registry_version: str | None = None
     action_code: str | None = None
     target_ref: str | None = None
     response_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ValidationSeedGraph:
+    """Provider-neutral records for one atomic validation-data seed operation."""
+
+    claims: tuple[WorkingClaim, ...]
+    sessions: tuple[SessionRecord, ...]
+    messages: tuple[MessageRecord, ...]
+    evidence: tuple[EvidenceRecord, ...]
+    staff_presence: StaffPresenceRecord
+    expected_presence_revision: int | None
+    idempotency: IdempotencyRecord
+
+
+def validate_validation_seed_session(claim: WorkingClaim, session: SessionRecord) -> None:
+    """Validate the active Claim/Session relationship before persistence."""
+    if (
+        session.claim_id != claim.claim_id
+        or session.customer_id != claim.customer_id
+        or claim.active_session_id != session.session_id
+        or session.status is not SessionStatus.ACTIVE
+        or session.context_revision != claim.revision
+    ):
+        raise ValueError(f'Validation seed active session does not match claim {claim.claim_id}.')
 
 
 class ClaimRepository(Protocol):
@@ -152,6 +186,10 @@ class ClaimRepository(Protocol):
 
 class PersistenceRepository(ClaimRepository, Protocol):
     """Provider-neutral persistence boundary for the full Sprint 1 record set."""
+
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Persist the graph, returning an existing idempotent result on replay."""
+        raise NotImplementedError
 
     def append_audit_event(self, event: AuditEventEnvelope) -> None:
         """Append one immutable audit fact.
@@ -407,6 +445,40 @@ class PersistenceRepository(ClaimRepository, Protocol):
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
         """Atomically persist one validated Agent turn."""
+        raise NotImplementedError
+
+    def save_runtime_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically persist a read-only namespaced Runtime turn.
+
+        Unlike a legacy Agent turn, this operation does not advance Claim revision or
+        create an ``AgentDecisionRecord``. It records the conversation, Runtime trace,
+        Session activity, and retry identity as one transaction.
+        """
+        raise NotImplementedError
+
+    def get_runtime_trace(
+        self,
+        claim_id: str,
+        trace_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        raise NotImplementedError
+
+    def find_runtime_trace_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
         raise NotImplementedError
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:

@@ -17,6 +17,7 @@ from backend.repositories.operations import OperationRepository
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.staff_agent import (
     GatewayStaffAgent,
+    ProfileSelectingStaffAgent,
     StaffAgentContext,
     _knowledge_context,
 )
@@ -43,6 +44,7 @@ def _context() -> StaffAgentContext:
         conversation=(),
         knowledge=(),
         knowledge_status='no_evidence',
+        model_profile_id='nowcoding-gpt54mini',
     )
 
 
@@ -64,14 +66,34 @@ def test_gateway_staff_agent_builds_structured_request_and_returns_output() -> N
     assert result.output.answer == 'Check the evidence trail.'
     assert result.provider_model == 'gpt54-mini'
     request = gateway.requests[0]
+    assert request.model_profile_id == 'nowcoding-gpt54mini'
     assert request.required_capabilities == ModelCapabilities(structured_output=True)
-    assert request.messages[1].content.startswith('{"question":"What should I check next?"')
+    message_content = request.messages[1].content
+    assert message_content is not None
+    assert message_content.startswith('{"question":"What should I check next?"')
     operation = operations.metrics_records()[0]
     assert operation.kind.value == 'model_invocation'
     assert operation.state.value == 'succeeded'
     assert operation.result is not None
     assert operation.result['total_tokens'] == 25
     assert operation.result['provider_model'] == 'gpt54-mini'
+
+
+def test_profile_selecting_staff_agent_uses_session_model_profile() -> None:
+    output = StaffAgentModelOutput(answer='Use the saved model profile.', drafts=[])
+    gateway = StubGateway(
+        ModelResponse(
+            completion_status=ModelCompletionStatus.COMPLETE,
+            structured_output=output.model_dump(mode='json'),
+            provider_model='gpt54-mini',
+            provider_request_id='req-profile-selector',
+        )
+    )
+
+    result = ProfileSelectingStaffAgent(lambda profile_id: gateway).respond(_context())
+
+    assert result.output.answer == 'Use the saved model profile.'
+    assert gateway.requests[0].model_profile_id == 'nowcoding-gpt54mini'
 
 
 @pytest.mark.parametrize(

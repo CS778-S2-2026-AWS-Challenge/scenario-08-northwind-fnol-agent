@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from unittest.mock import ANY
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,10 +7,12 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.core.runtime_profiles import DataRuntimeBundle, build_data_runtime_bundle
+from backend.domain.data_query import DataConnectionState
 from backend.domain.knowledge import (
     KnowledgeChunk,
     KnowledgeRetrievalUnavailable,
     KnowledgeSearch,
+    KnowledgeSearchResponse,
 )
 
 AUTH = {'Authorization': 'Bearer synthetic-integration'}
@@ -110,10 +113,20 @@ def request_payload(**changes: object) -> dict[str, object]:
     return payload
 
 
+def retrieved_at(body: dict[str, object]) -> datetime:
+    value = body['retrieved_at']
+    assert isinstance(value, str)
+    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    assert parsed.utcoffset() == timedelta(0)
+    return parsed
+
+
 def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None:
     retriever = ControlledRetriever([citation_chunk()])
+    started_at = datetime.now(UTC)
     with client_for(retriever) as client:
         response = client.post(ENDPOINT, headers=AUTH, json=request_payload())
+    completed_at = datetime.now(UTC)
 
     assert response.status_code == 200
     body = response.json()
@@ -124,6 +137,8 @@ def test_knowledge_search_returns_exact_citation_and_passes_full_scope() -> None
     assert body['results'][0]['chunk_id'].endswith('#MTR-EXC-01')
     assert body['results'][0]['section_path'] == 'MTR-EXC-01 - Excesses'
     assert body['results'][0]['text'] == 'The matching policy schedule supplies the excess amount.'
+    assert started_at <= retrieved_at(body) <= completed_at
+    assert retrieved_at(body) != citation_chunk().ingested_at
     assert retriever.last_request is not None
     assert retriever.last_request.document_id == 'nw-policy-motor-standard-mvp-2026-1'
     assert retriever.last_request.insurer == 'Northwind Insurance'
@@ -156,8 +171,10 @@ def test_knowledge_search_reports_empty_and_unavailable_without_inventing_result
     assert empty.json()['errors'] == []
     assert empty.json()['results'] == []
     assert empty.json()['limitations']
+    retrieved_at(empty.json())
     assert unavailable.json() == {
         'status': 'unavailable',
+        'retrieved_at': ANY,
         'connection_state': 'unavailable',
         'errors': [
             {
@@ -171,6 +188,7 @@ def test_knowledge_search_reports_empty_and_unavailable_without_inventing_result
     }
     assert timed_out.json() == {
         'status': 'timeout',
+        'retrieved_at': ANY,
         'connection_state': 'degraded',
         'errors': [
             {
@@ -182,6 +200,8 @@ def test_knowledge_search_reports_empty_and_unavailable_without_inventing_result
         'results': [],
         'limitations': ['The knowledge service did not respond within the request budget.'],
     }
+    retrieved_at(unavailable.json())
+    retrieved_at(timed_out.json())
     assert 'secret-provider-detail' not in unavailable.text
     assert 'secret-provider-detail' not in timed_out.text
 
@@ -244,3 +264,24 @@ def test_knowledge_connection_drift_during_search_discards_provider_evidence() -
     assert response.json()['connection_state'] == 'unavailable'
     assert response.json()['results'] == []
     assert retriever.last_request is not None
+
+
+def test_knowledge_search_response_schema_requires_retrieval_timestamp() -> None:
+    with client_for(ControlledRetriever()) as client:
+        schema = client.get('/openapi.json').json()['components']['schemas'][
+            'KnowledgeSearchResponse'
+        ]
+
+    assert 'retrieved_at' in schema['required']
+    assert schema['properties']['retrieved_at']['format'] == 'date-time'
+
+
+def test_knowledge_search_response_rejects_non_utc_retrieval_timestamp() -> None:
+    with pytest.raises(ValueError, match='retrieved_at must be a UTC timestamp'):
+        KnowledgeSearchResponse(
+            status='no_evidence',
+            retrieved_at=datetime.fromisoformat('2026-09-09T22:55:00+12:00'),
+            connection_state=DataConnectionState.CONFIGURED_SERVICE,
+            results=[],
+            limitations=['No applicable approved knowledge was found.'],
+        )

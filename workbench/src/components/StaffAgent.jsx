@@ -25,7 +25,9 @@ export default function StaffAgent({
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [claims, setClaims] = useState([])
+  const [models, setModels] = useState([])
   const [selectedClaimIds, setSelectedClaimIds] = useState([])
+  const [newSessionModel, setNewSessionModel] = useState('qwen-local')
   const [scopeOpen, setScopeOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,13 +57,17 @@ export default function StaffAgent({
     setLoading(true)
     setError('')
     try {
-      const [sessionResponse, claimResponse] = await Promise.all([
+      const [sessionResponse, claimResponse, capabilityResponse] = await Promise.all([
         workbenchApi.staffAgentSessions(token),
         workbenchApi.claims(token, { limit: 100 }),
+        workbenchApi.staffAgentCapabilities(token),
       ])
       const nextSessions = sessionResponse.items || []
       setSessions(nextSessions)
       setClaims(claimResponse.items || [])
+      const nextModels = capabilityResponse.models || []
+      setModels(nextModels)
+      if (capabilityResponse.default_model_profile_id) setNewSessionModel(capabilityResponse.default_model_profile_id)
       const nextSessionId = requestedSessionId || nextSessions[0]?.session_id || null
       if (nextSessionId) await selectSession(nextSessionId)
     } catch (nextError) {
@@ -81,7 +87,7 @@ export default function StaffAgent({
     setLoading(true)
     setError('')
     try {
-      const session = await workbenchApi.createStaffAgentSession(token)
+      const session = await workbenchApi.createStaffAgentSession(token, 'New Staff Agent session', newSessionModel)
       setSessions((current) => [session, ...current])
       await selectSession(session.session_id)
       onConversationChanged()
@@ -101,7 +107,7 @@ export default function StaffAgent({
     try {
       let sessionId = activeSessionId
       if (!sessionId) {
-        const session = await workbenchApi.createStaffAgentSession(token)
+        const session = await workbenchApi.createStaffAgentSession(token, 'New Staff Agent session', newSessionModel)
         setSessions((current) => [session, ...current])
         sessionId = session.session_id
         setActiveSessionId(sessionId)
@@ -186,6 +192,13 @@ export default function StaffAgent({
               <select value={activeSessionId || ''} onChange={(event) => selectSession(event.target.value)} disabled={loading || !sessions.length}>
                 {!sessions.length && <option value="">No saved session</option>}
                 {sessions.map((session) => <option value={session.session_id} key={session.session_id}>{session.title}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>New session model</span>
+              <select value={newSessionModel} onChange={(event) => setNewSessionModel(event.target.value)} disabled={loading || !models.length}>
+                {!models.length && <option value="">No published model</option>}
+                {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
               </select>
             </label>
             <button className="icon-button" type="button" onClick={createSession} disabled={loading} aria-label="Start a new Staff Agent session"><MessageSquarePlus size={17} /></button>

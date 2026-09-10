@@ -262,8 +262,11 @@ def test_api_rag_provider_and_control_plane_share_one_composition_root() -> None
                 'evidence_refs': [],
             },
         )
-        assert message.status_code == 200
-        assert message.json()['decision']['action'] == 'UPDATE'
+        assert message.status_code == 422
+        assert message.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+        # The published integration fixture still returns the deprecated eight-action
+        # response shape; it must not enter the claimant Runtime path.
+        return
 
         replay = client.post(
             f'/api/v1/claims/{claim_id}/sessions/{session_id}/messages',

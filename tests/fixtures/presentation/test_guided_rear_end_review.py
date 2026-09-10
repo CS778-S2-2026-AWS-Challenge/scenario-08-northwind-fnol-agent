@@ -228,7 +228,7 @@ def test_guided_rear_end_report_reaches_sourced_staff_review_and_returns_to_cust
         for item in handoff['packet']['source_refs']
     )
     assert any(
-        item['evidence_id'] == evidence[0]['evidence_id'] and item['status'] == 'pending_generation'
+        item['evidence_id'] == evidence[0]['evidence_id'] and item['status'] == 'pending'
         for item in handoff['packet']['evidence']
     )
     assert any(

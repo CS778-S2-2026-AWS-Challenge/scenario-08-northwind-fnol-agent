@@ -169,7 +169,7 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'AT-06-pending-evidence',
             'ready_for_next',
             'PROCEED',
-            'pending_generation',
+            'pending',
             'continue_current_report',
             'claimant',
             None,
@@ -187,7 +187,7 @@ def test_entry_baselines_cover_the_current_scenario_actions_and_handoffs() -> No
             'AT-02-coverage-ambiguity',
             'professional_review',
             'HANDOFF',
-            'inconsistent',
+            'in_conflict',
             'professional_review_queued',
             'claims_professional',
             (

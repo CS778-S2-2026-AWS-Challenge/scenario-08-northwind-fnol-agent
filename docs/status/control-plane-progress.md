@@ -1,6 +1,6 @@
 # Control Plane implementation status
 
-Updated: 2026-09-07
+Updated: 2026-09-09
 
 This status record reports what is currently backed by the repository and what
 still requires implementation. It is evidence, not a replacement for the
@@ -12,6 +12,10 @@ in `docs/api.md`.
 - Versioned configuration records with revision checks, validation, independent
   approval for high-impact publication, publication, withdrawal, supersession,
   rollback, idempotency, and configuration audit events.
+- Model configurations use `configuration_key=profile_id` and can publish one catalog
+  containing `qwen-local` as primary plus `nowcoding-gpt54mini` as a selectable claimant
+  profile. Publication validation requires structured output and tool calling to be declared;
+  credentials remain secret references and are never returned to claimant capabilities.
 - Release Sets and Runtime Snapshots for one complete published configuration
   boundary per environment and runtime profile.
 - Customer and staff account creation, revision-checked updates, safe session listing, and active-
@@ -38,15 +42,19 @@ in `docs/api.md`.
 - React/Vite Admin Console workflows for configuration and knowledge lifecycle actions, Release
   Sets, Runtime Snapshot resolution, evaluation evidence, operation metrics, Integration health,
   restricted audit search, and customer/staff account creation, updates, and session revocation.
-  The console uses shared design
-  tokens, authenticated API calls, projected action availability, explicit confirmation, revision
-  headers, idempotency keys, and authoritative reloads after writes.
+  The console uses shared design tokens, authenticated API calls, projected action availability,
+  explicit confirmation, revision headers, idempotency keys, and authoritative reloads after
+  writes.
 
 ## Runtime wiring currently verified
 
 - The model gateway resolves a published model reference from the active Release
   Set when one exists, then re-checks the deployment-owned protocol, endpoint,
   purpose, privacy class, prompt version, and structured-output boundary.
+- The minimal model Runtime consumes the Session-bound profile and persists a read-only
+  `RuntimeTraceRecord` for the `claim.read` continuation. A general Runtime trace query,
+  isolated provider probe endpoint, and complete live validation evidence for both profiles
+  remain open.
 - A shared runtime configuration resolver now loads one coherent active Release Set
   snapshot for the model gateway, claimant Agent instruction, and staff model gateway.
   If a Release Set is active, an omitted or invalid domain fails resolution instead of

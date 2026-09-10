@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 from typing import Any, Literal, Protocol
 
@@ -44,7 +46,10 @@ class ModelRole(str, Enum):
 
 class ModelMessage(ModelContract):
     role: ModelRole
-    content: str
+    content: str | None = None
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 class ModelTool(ModelContract):
@@ -104,6 +109,7 @@ class ModelProfile(ModelContract):
 
 
 class ModelRequest(ModelContract):
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
@@ -152,7 +158,7 @@ class ModelClaimContext(ModelContract):
     incident_type: str | None = None
     claim_state: ModelClaimStateContext
     form: dict[str, ModelFormFieldContext] = Field(default_factory=dict)
-    contents_items: list['ModelContentsItemContext'] = Field(default_factory=list)
+    contents_items: list[ModelContentsItemContext] = Field(default_factory=list)
     known_field_codes: list[str] = Field(default_factory=list)
     evidence_summary: EvidenceSummary
     customer_next_step: CustomerNextStep
@@ -203,14 +209,14 @@ class ModelTurnContext(ModelContract):
     message_text: str | None = None
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
+    provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
     branch: ModelBranchContext | None = None
     knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
         'not_requested'
     )
-    knowledge_citations: list['ModelKnowledgeCitation'] = Field(default_factory=list)
+    knowledge_citations: list[ModelKnowledgeCitation] = Field(default_factory=list)
     knowledge_limitations: list[str] = Field(default_factory=list)
     tool_results: list[dict[str, Any]] = Field(default_factory=list)
-    provenance_messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ModelKnowledgeCitation(ModelContract):
@@ -222,6 +228,11 @@ class ModelKnowledgeCitation(ModelContract):
     version: str
     checksum: str
     text: str
+
+
+class ModelProvenanceMessage(ModelContract):
+    message_id: str
+    content: str
 
 
 class ModelProposedFormChange(ModelContract):
@@ -260,6 +271,23 @@ class ModelAgentProposal(ModelContract):
     required_tools: list[dict[str, object]] = Field(default_factory=list)
     next_action_requirements: list[str] = Field(default_factory=list)
     handoff_priority: str | None = None
+
+
+class ModelRuntimeProposal(ModelContract):
+    """Small target-runtime proposal used by the first real tool loop.
+
+    The compatibility ``ModelAgentProposal`` remains readable for existing fixture
+    callers, but model-backed Runtime turns use namespaced action codes here. Runtime
+    validates the codes and never treats the legacy eight-action enum as authority.
+    """
+
+    action_code: str = Field(pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
+    runtime_action_code: str = Field(pattern=r'^runtime\.[a-z][a-z0-9_]*$')
+    reason_codes: list[str] = Field(min_length=1)
+    customer_reason: str = Field(min_length=1, max_length=1000)
+    customer_response: str = Field(min_length=1, max_length=5000)
+    customer_next_step: CustomerNextStep
+    source_refs: list[str] = Field(default_factory=list)
 
 
 class ModelGatewayErrorCode(str, Enum):

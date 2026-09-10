@@ -8,7 +8,7 @@ Physical mappings belong inside the selected runtime-profile adapters and must p
 this contract.
 
 The MongoDB repository is selected only by the explicit `local_mvp` development profile. Its
-method surface covers Claim, Session, Message, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
+method surface covers Claim, Session, Message, read-only Runtime Trace, Agent Decision, Branch Evaluation, Audit Event, Evidence metadata,
 External Task, external request, and task-to-evidence link records, Retrieval, Review Signal, Handoff, Staff
 Action, Customer Update, Signal Decision, and Idempotency records. Mock-backed tests verify
 document mapping, ownership filters,
@@ -66,8 +66,8 @@ projections, fixtures, and transaction tests change together.
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
-| Staff Agent interaction | staff-owned persistent sessions, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
-| Agent turn | TurnPlan, AgentProposal, ExecutionPlan, ActionEnvelopes, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`, linked to session and optional Claim |
+| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
+| Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
@@ -139,46 +139,48 @@ the append-only audit collection through a bounded, filterable projection.
 8. Read staff queues by priority, state, owner, next action, and service timing.
 9. Accept and resolve handoffs and staff work through the same claim revision boundary.
 10. Record idempotency results by actor, operation, client key, and request fingerprint.
-11. Resolve a current task-specific claimant consent before invoking an external participant.
-12. Reserve an immutable external-operation identity and fingerprint before invocation, then
+11. Persist a namespaced read-only Runtime turn atomically with its claimant/agent messages,
+    Session activity, Runtime trace, and idempotency response without advancing Claim revision.
+12. Resolve a current task-specific claimant consent before invoking an external participant.
+13. Reserve an immutable external-operation identity and fingerprint before invocation, then
     recover its accepted result independently of a later Claim State compare-and-set.
-13. Resolve the active configuration version and read its immutable publication record.
-14. List administration audit events by bounded actor, subject, event type, and time filters without
+14. Resolve the active configuration version and read its immutable publication record.
+15. List administration audit events by bounded actor, subject, event type, and time filters without
     exposing unrestricted claimant or provider payloads.
-15. Read customer memory only through a purpose-limited, visibility-filtered access path.
-16. Create and process follow-up tasks by due time, responsibility, priority, and status.
-17. Append audit events and query them by authorised subject and time range.
-18. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
+16. Read customer memory only through a purpose-limited, visibility-filtered access path.
+17. Create and process follow-up tasks by due time, responsibility, priority, and status.
+18. Append audit events and query them by authorised subject and time range.
+19. Read one complete turn by `turn_id` and distinguish proposal, approval, execution,
     state effect, and final role projection without exposing hidden or restricted data.
-19. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
+20. List open WorkItems by Claim, owner, type, status, blocked action, due time, and
     priority without treating Claim lifecycle as the only work status.
-20. Reconcile an external request by Northwind operation identity, idempotency key, or
+21. Reconcile an external request by Northwind operation identity, idempotency key, or
     provider reference before any retry after an unknown outcome.
-21. Resolve one active, evaluated Model Profile by purpose and privacy class without
+22. Resolve one active, evaluated Model Profile by purpose and privacy class without
     returning endpoint credentials to Runtime or a browser.
-22. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
+23. Resolve an unexpired and unrevoked claimant session by token hash without allowing a
     browser-supplied customer identifier to alter the authenticated principal.
-23. Read and update the authenticated claimant's approved profile and communication
+24. Read and update the authenticated claimant's approved profile and communication
     preferences by `customer_id` without exposing another Customer record.
-24. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
+25. List external tasks for one authorised Claim in stable `(created_at, task_id)` order and map
     each task to its single request and single-origin evidence links without exposing another
     Claim.
-25. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
+26. Append an immutable branch evaluation for a Claim revision and list evaluations in creation
     order without allowing an evaluation to overwrite Claim State.
-26. Resolve an unexpired and unrevoked staff session from the independent staff identity store
+27. Resolve an unexpired and unrevoked staff session from the independent staff identity store
     without accepting claimant credentials or browser-supplied roles.
-27. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
+28. Create, list, and resume Staff Agent sessions by authenticated `staff_id` without exposing
     another staff member's sessions.
-28. Append one Staff Agent question and answer atomically, resolve retries by
+29. Append one Staff Agent question and answer atomically, resolve retries by
     `(staff_id, session_id, client_message_id)`, and preserve the explicit zero-to-five Claim scope
     used for that turn.
-29. Create a unique Customer or Staff account through its identity repository without exposing the
+30. Create a unique Customer or Staff account through its identity repository without exposing the
     password hash or allowing an administration retry to create a duplicate account.
-30. Conditionally update approved Customer or Staff account fields by account revision; a stale
+31. Conditionally update approved Customer or Staff account fields by account revision; a stale
     write returns the current revision without changing the record.
-31. List identity sessions for exactly one Customer or Staff account in stable newest-first order
+32. List identity sessions for exactly one Customer or Staff account in stable newest-first order
     without returning bearer values or token hashes.
-32. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
+33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
 
 ## Development/Test Identity Invariants
@@ -365,7 +367,15 @@ the append-only audit collection through a bounded, filterable projection.
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
-- Pending, incomplete, unofficial, and not-yet-generated evidence remain distinct states.
+- Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
+  `EvidenceStatus` carries the business condition of the material and
+  `EvidenceFileStatus` the upload and processing lifecycle alone, so the two
+  vocabularies cannot drift into describing the same thing differently. A condition
+  that is a statement about a second record or a claim fact — conflict, supersession,
+  established unavailability — is carried by a typed `EvidenceReference` with its own
+  unresolved or resolved state, reason, and timing, never by the status alone.
+  References are staff-visible only: a claimant is told a check is in progress, not
+  which side is doubted.
 
 Anonymous browser sessions may own a temporary conversation Claim, but Evidence
 upload mutations require an authenticated claimant. Selecting a file before
@@ -583,6 +593,11 @@ tool-permission change cannot silently rewrite instructions or feature settings.
 components use the existing independent approval record and publication guard; no component may
 write production Claim State.
 
+Model records use `domain=model` and `configuration_key=profile_id`, so one published Release
+Set can bind both `qwen-local` and `nowcoding-gpt54mini` without overwriting either profile.
+Claimant profiles must declare `structured_output=true` and `tools=true`; a Session stores the
+selected profile ID and Runtime resolves that exact key for every turn.
+
 An `AgentDecisionRecord` may retain a `runtime_configuration` provenance projection for the exact
 turn. It contains the Release Set ID, environment, runtime profile, each selected configuration ID
 and revision, and each selected knowledge ID, revision, and external version. It does not copy
@@ -614,6 +629,14 @@ provider-neutral lease revision is the transaction conflict point.
 Staff logout revokes the server-side auth session even when this best-effort presence cleanup
 cannot be persisted; presence failure must never leave the bearer session active.
 An acceptance using a stale presence revision is rejected before the Claim assignment is stored.
+
+The development/test validation seed uses the provider-neutral `ValidationSeedGraph` boundary.
+It writes three Claim graphs, their active Sessions, Messages, Evidence metadata, the current
+staff presence lease, and one Idempotency record as one operation. Fixture persistence snapshots
+and restores all affected stores on failure; MongoDB uses the existing transaction boundary.
+The seed reuses the logical records above and adds no fields, provider keys, object-storage
+references, or alternate Claim schema. A repeated key replays the stored response, while a
+different key requires an empty Claim queue.
 
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed

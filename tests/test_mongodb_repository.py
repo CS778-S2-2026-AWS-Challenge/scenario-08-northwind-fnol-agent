@@ -47,6 +47,8 @@ from backend.domain.models import (
     MessageVisibility,
     ResponsibleParty,
     RouteAssessorRequest,
+    RuntimeInvocationTrace,
+    RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
     StaffActionRecord,
@@ -181,6 +183,63 @@ def _retrieval(claim: WorkingClaim) -> PolicyRetrievalRecord:
             currency='NZD',
         ),
     )
+
+
+def _runtime_records(
+    claim: WorkingClaim,
+    session: SessionRecord,
+) -> tuple[MessageRecord, MessageRecord, RuntimeTraceRecord, IdempotencyRecord]:
+    claimant_message = _message(claim, session).model_copy(
+        update={
+            'message_id': 'msg_mongo_runtime_claimant',
+            'client_message_id': 'runtime-client',
+        }
+    )
+    agent_message = claimant_message.model_copy(
+        update={
+            'message_id': 'msg_mongo_runtime_agent',
+            'client_message_id': None,
+            'actor': ActorType.AGENT,
+            'content': {'type': 'text', 'text': 'I read the current report.'},
+            'in_reply_to': claimant_message.message_id,
+        }
+    )
+    trace = RuntimeTraceRecord(
+        trace_id='trace_mongo_runtime',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        model_profile_id='qwen-local',
+        trigger_message_id=claimant_message.message_id,
+        invocations=[
+            RuntimeInvocationTrace(
+                ordinal=1,
+                provider_model='qwen3.8-27b',
+                provider_request_id='provider-request-1',
+                latency_ms=10,
+            )
+        ],
+        tool_call_id='call_claim_read',
+        tool_name='claim.read',
+        tool_result_status='succeeded',
+        action_code='conversation.answer',
+        runtime_action_code='runtime.continue',
+        reason_codes=['CLAIM_CONTEXT_READ'],
+        status='succeeded',
+        created_at=claim.created_at,
+        finished_at=claim.updated_at,
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route='/agent-runtime-turn',
+        key='runtime-key',
+        request_fingerprint='runtime-fingerprint',
+        claim_id=claim.claim_id,
+        session_id=session.session_id,
+        message_id=claimant_message.message_id,
+        agent_message_id=agent_message.message_id,
+        runtime_trace_id=trace.trace_id,
+    )
+    return claimant_message, agent_message, trace, idempotency
 
 
 @pytest.fixture
@@ -1693,6 +1752,100 @@ def test_agent_turn_persists_linked_records_as_one_mutation(
         repository.get_agent_decision(claim.claim_id, decision.decision_id, claim.customer_id)
         == decision
     )
+
+
+def test_runtime_turn_persists_trace_without_claim_revision_change(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    claimant_message, agent_message, trace, idempotency = _runtime_records(claim, session)
+
+    repository.save_runtime_turn(
+        claim,
+        claim.revision,
+        session,
+        claimant_message,
+        agent_message,
+        trace,
+        idempotency,
+    )
+
+    assert repository.get_claim(claim.claim_id, claim.customer_id) == claim
+    assert repository.get_runtime_trace(claim.claim_id, trace.trace_id, claim.customer_id) == trace
+    assert (
+        repository.find_runtime_trace_for_trigger(
+            claim.claim_id,
+            claimant_message.message_id,
+            claim.customer_id,
+        )
+        == trace
+    )
+    assert repository.get_runtime_trace(claim.claim_id, trace.trace_id, 'other_customer') is None
+    assert repository.get_runtime_trace(claim.claim_id, 'missing-trace', claim.customer_id) is None
+    assert (
+        repository.find_runtime_trace_for_trigger(
+            claim.claim_id,
+            'missing-message',
+            claim.customer_id,
+        )
+        is None
+    )
+
+
+def test_runtime_turn_rejects_mismatched_revision_and_duplicate_records(
+    repository: MongoDBRepository,
+) -> None:
+    claim = _claim()
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    claimant_message, agent_message, trace, idempotency = _runtime_records(claim, session)
+
+    with pytest.raises(KeyError):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision - 1,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    repository.save_runtime_turn(
+        claim,
+        claim.revision,
+        session,
+        claimant_message,
+        agent_message,
+        trace,
+        idempotency,
+    )
+    with pytest.raises(IdempotencyConflict):
+        repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message,
+            agent_message,
+            trace,
+            idempotency,
+        )
+
+    invalid_repository = MongoDBRepository(mongomock.MongoClient(), 'northwind_test')
+    invalid_repository._atomic = lambda operation: operation(None)  # type: ignore[method-assign]
+    invalid_repository.create_claim(claim, session)
+    with pytest.raises(KeyError):
+        invalid_repository.save_runtime_turn(
+            claim,
+            claim.revision,
+            session,
+            claimant_message.model_copy(update={'claim_id': 'other-claim'}),
+            agent_message,
+            trace,
+            idempotency,
+        )
 
 
 def test_mongodb_staff_presence_has_provider_neutral_revision_and_expiry_contract(

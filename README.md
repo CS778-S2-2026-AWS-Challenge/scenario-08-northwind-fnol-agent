@@ -51,11 +51,12 @@ authorisation.
 | `customer/` | React and Vite claimant experience |
 | `workbench/` | React and Vite Claims Workbench with independent staff authentication |
 | `admin/` | React and Vite Control Plane console backed by the authenticated Admin API |
+| `archive/` | Historical records and heavyweight frontend tests excluded from product CI |
 | `employee/` | Deprecated redirect shell and legacy migration inventory; supported Workbench is `workbench/` |
 | `frontend/shared/` | Shared semantic design tokens consumed by claimant and staff clients |
 | `prototype/` | Historical static interaction demonstrators |
 | `tests/` | Backend unit, middleware, API, and fixture tests |
-| `.circleci/` | External backend, claimant, PR-policy, and GitHub-automation quality jobs |
+| `.circleci/` | External backend, PR-policy, documentation, and GitHub-automation quality jobs; frontend gates are archived |
 | `automation/github-automation/` | External GitHub webhook, PR policy, and Project 12 synchronization Worker |
 | `SPEC/` | Current product requirements and acceptance scenarios |
 | `docs/` | Product direction, API contract, engineering conventions, and research material |
@@ -134,8 +135,8 @@ In another terminal, start the claimant client:
 npm run dev --prefix customer
 ```
 
-The Vite development server proxies `/api` requests to the local backend. Start the componentised
-Claims Workbench separately:
+The Vite development server proxies `/api` requests to the local backend. Start the Claims
+Workbench separately:
 
 ```powershell
 npm run dev --prefix workbench
@@ -167,9 +168,10 @@ must not be used as a production approval mechanism.
 
 ## Verification
 
-CircleCI is the authoritative repository quality provider. Its workflow checks backend formatting,
-linting, types, tests, PR policy, GitHub automation, documentation, and claimant, Workbench, and
-Control Plane clients for every pull request. Backend pull requests use impact-scoped tests selected by
+CircleCI is the authoritative repository quality provider for the active backend, policy,
+documentation, and GitHub-automation gates. Claimant, Workbench, and Control Plane quality gates
+are archived to conserve CI credits; their package lint, test, and build commands remain available
+for local validation. Backend pull requests use impact-scoped tests selected by
 `scripts/select_backend_tests.py`; shared-contract and unmapped backend changes run the complete
 suite. Scoped PRs also limit Ruff and Mypy to changed Python files and run contract snapshot checks
 only when their inputs are affected. Documentation-only PRs skip the Python backend quality chain.
@@ -184,9 +186,9 @@ py -3.12 -m mypy backend tests
 py -3.12 -m pytest
 ```
 
-The claimant and GitHub automation packages retain their own `npm` verification commands. Local
-focused checks shorten feedback time but do not replace the exact-head CircleCI result required for
-review and merge.
+The frontend and GitHub automation packages retain their own `npm` verification commands. Local
+frontend checks are required for frontend changes because their remote gates are archived; backend,
+policy, documentation, and automation changes still require the exact-head CircleCI result.
 
 Run the synthetic integration fixtures from the repository root with:
 

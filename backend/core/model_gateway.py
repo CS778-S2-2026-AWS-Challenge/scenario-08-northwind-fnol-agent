@@ -231,19 +231,28 @@ class ConfigurationBackedModelGateway:
         self._registry = registry
         self._runtime_configuration_resolver = runtime_configuration_resolver
 
-    def _active_model_configuration(self) -> tuple[ModelRuntimeConfiguration | None, bool]:
+    def _active_model_configuration(
+        self,
+        profile_id: str | None = None,
+    ) -> tuple[ModelRuntimeConfiguration | None, bool]:
         """Resolve the model and whether a published Release Set is authoritative."""
         try:
             if self._runtime_configuration_resolver is not None:
                 snapshot = self._runtime_configuration_resolver.snapshot()
                 configuration = (
-                    snapshot.get('model')
+                    snapshot.model(profile_id)
                     if snapshot.release_set_id is not None
-                    else self._configuration_repository.active('model')
+                    else (
+                        self._configuration_repository.active(
+                            'model',
+                            profile_id or 'qwen-local',
+                        )
+                        or self._configuration_repository.active('model')
+                    )
                 )
                 authoritative = snapshot.release_set_id is not None
             else:
-                configuration = self._legacy_model_configuration()
+                configuration = self._legacy_model_configuration(profile_id)
                 authoritative = False
         except RuntimeConfigurationResolutionError:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
@@ -254,7 +263,10 @@ class ConfigurationBackedModelGateway:
         except ValueError as error:
             raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from error
 
-    def _legacy_model_configuration(self) -> ConfigurationRecord | None:
+    def _legacy_model_configuration(
+        self,
+        profile_id: str | None = None,
+    ) -> ConfigurationRecord | None:
         """Resolve the pre-Release-Set model path for injected fixture callers."""
         configuration = None
         if self._release_set_repository is not None:
@@ -263,7 +275,9 @@ class ConfigurationBackedModelGateway:
                 self._settings.data_runtime_profile.value,
             )
             if release is not None:
-                reference = release.configuration_refs.get('model')
+                reference = release.configuration_refs.get(f'model:{profile_id}') or (
+                    release.configuration_refs.get('model')
+                )
                 if reference is None:
                     raise RuntimeConfigurationResolutionError(
                         f"Active release set {release.release_set_id!r} omits 'model'."
@@ -280,7 +294,11 @@ class ConfigurationBackedModelGateway:
                     raise RuntimeConfigurationResolutionError(
                         f"Active release set {release.release_set_id!r} has an invalid 'model'."
                     )
-        return configuration or self._configuration_repository.active('model')
+        return (
+            configuration
+            or self._configuration_repository.active('model', profile_id or 'default')
+            or self._configuration_repository.active('model')
+        )
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -297,7 +315,7 @@ class ConfigurationBackedModelGateway:
         )
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        configuration, authoritative = self._active_model_configuration()
+        configuration, authoritative = self._active_model_configuration(request.model_profile_id)
         if configuration is None:
             gateway = build_model_gateway(self._settings, self._registry)
         else:
@@ -333,7 +351,7 @@ class ConfigurationBackedModelGateway:
         if snapshot.release_set_id is None:
             return self.complete(request)
         try:
-            record = snapshot.get('model')
+            record = snapshot.model(request.model_profile_id)
             if record is None:
                 raise RuntimeConfigurationResolutionError(
                     'The active Release Set does not select a model.'

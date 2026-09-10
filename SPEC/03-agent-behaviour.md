@@ -94,7 +94,7 @@ The Agent considers:
 - **Human support:** respect the need behind a request and do not repeatedly resist
   transfer. Repeated requests, urgency, distress, or accessibility needs transfer
   immediately.
-- **Pending evidence:** record missing, unofficial, incomplete, or not-yet-generated
+- **Pending evidence:** record missing, unofficial, invalid, or not-yet-generated
   evidence while progressing unrelated safe work.
 - **Resume:** restore shared claim state, unresolved work, and prior commitments without
   restarting.
@@ -120,10 +120,12 @@ and records later evidence or unresolved work without blocking unrelated progres
 
 ## Staff Agent Capability
 
-Staff may invoke `@Agent` through ordinary natural language within their current identity,
-role, Claim scope, and task. `@Agent` is an open capability entry point rather than a
-fixed command language. It may combine authorised reading, comparison, retrieval,
-explanation, next-step proposals, handoff inspection, and communication drafting.
+Staff may use the dedicated Workbench Staff Agent session through ordinary natural language
+within their current identity, role, Claim scope, and task. It is an open capability entry
+point rather than a fixed command language. It may combine authorised reading, comparison,
+retrieval, explanation, next-step proposals, handoff inspection, and communication drafting.
+Claimant conversations do not expose an `@agent` command or parser; claimant intent is sent
+through the normal Agent turn boundary.
 
 Suggested controls may make capabilities discoverable, but they do not define everything
 the Agent can understand. Staff read access does not imply execution permission. A send,
@@ -162,8 +164,9 @@ Turn evaluation considers the complete trajectory, including proposal rejection,
 authority, state effects, question repetition, side effects, and handoff quality. A
 correct final sentence alone does not prove compliant behaviour.
 
-## Open Rule
+## Human-support rule
 
-The exact production response to a first explicit human request requires Northwind and
-user evidence. Any configured rule must remain transparent, versioned, testable, and
-must never delay urgent, repeated, distress, or accessibility-related transfer.
+The first clear, unambiguous natural-language request to speak with a person creates a
+standard-priority human-support handoff. Repeated requests, urgency, distress, or an
+accessibility need transfer immediately and may raise the priority. The rule remains
+versioned, testable, and enforced by the Runtime rather than by prompt wording alone.

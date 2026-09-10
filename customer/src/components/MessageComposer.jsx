@@ -18,6 +18,7 @@ export default function MessageComposer({
   models = [],
   selectedModel = '',
   setSelectedModel,
+  modelLocked = false,
   attachments = [],
   onFileSelected,
 }) {
@@ -122,7 +123,7 @@ export default function MessageComposer({
                 aria-label="Model"
                 value={selectedModel}
                 onChange={(event) => setSelectedModel(event.target.value)}
-                disabled={busy || disabled || models.length === 0}
+                disabled={busy || disabled || modelLocked || models.length === 0}
               >
                 {models.length === 0 ? <option value="">{modelLabel}</option> : models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
               </select>

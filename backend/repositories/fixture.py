@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from threading import RLock
 from typing import Any
 
 from backend.domain.audit import AuditEventEnvelope, AuditSubject
@@ -30,6 +31,7 @@ from backend.domain.models import (
     EvidenceRecord,
     HandoffRecord,
     MessageRecord,
+    RuntimeTraceRecord,
     SessionRecord,
     SessionStatus,
     SignalDecisionRecord,
@@ -41,10 +43,13 @@ from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
 from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
+    DemoSeedConflict,
     IdempotencyConflict,
     IdempotencyRecord,
     PersistenceRepository,
     RevisionConflict,
+    ValidationSeedGraph,
+    validate_validation_seed_session,
 )
 
 
@@ -52,10 +57,12 @@ class FixtureRepository(PersistenceRepository):
     """In-memory repository used by the prototype and replaceable contract tests."""
 
     def __init__(self) -> None:
+        self._validation_seed_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
+        self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
         self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
@@ -100,6 +107,7 @@ class FixtureRepository(PersistenceRepository):
             'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
             'messages': len(self._messages),
+            'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
             'staff_agent_messages': len(self._staff_agent_messages),
             'agent_decisions': len(self._decisions),
@@ -125,6 +133,7 @@ class FixtureRepository(PersistenceRepository):
         self._audit_events.clear()
         self._sessions.clear()
         self._messages.clear()
+        self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
         self._staff_agent_messages.clear()
         self._decisions.clear()
@@ -280,6 +289,76 @@ class FixtureRepository(PersistenceRepository):
     def create_claim(self, claim: WorkingClaim, session: SessionRecord) -> None:
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
+
+    def seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Serialize validation seeds so a same-key race cannot create two graphs."""
+        with self._validation_seed_lock:
+            return self._seed_validation_graph(graph)
+
+    def _seed_validation_graph(self, graph: ValidationSeedGraph) -> IdempotencyRecord | None:
+        """Persist validation records as one rollback-safe fixture operation."""
+        snapshot = {
+            key: deepcopy(value)
+            for key, value in self.__dict__.items()
+            if key != '_validation_seed_lock'
+        }
+        try:
+            existing = self.find_idempotency(
+                graph.idempotency.actor_id,
+                graph.idempotency.route,
+                graph.idempotency.key,
+            )
+            if existing is not None:
+                if existing.request_fingerprint != graph.idempotency.request_fingerprint:
+                    raise IdempotencyConflict(graph.idempotency.key)
+                return existing
+            if self.list_claims_internal():
+                raise DemoSeedConflict('The validation seed requires an empty claim queue.')
+
+            claims_by_id = {claim.claim_id: claim for claim in graph.claims}
+            if len(claims_by_id) != len(graph.claims) or not claims_by_id:
+                raise ValueError('Validation seed claims must be unique and non-empty.')
+            sessions_by_id = {session.session_id: session for session in graph.sessions}
+            if len(sessions_by_id) != len(graph.sessions):
+                raise ValueError('Validation seed sessions must be unique.')
+            messages_by_id = {message.message_id: message for message in graph.messages}
+            if len(messages_by_id) != len(graph.messages):
+                raise ValueError('Validation seed messages must be unique.')
+            evidence_by_id = {item.evidence_id: item for item in graph.evidence}
+            if len(evidence_by_id) != len(graph.evidence):
+                raise ValueError('Validation seed evidence must be unique.')
+
+            self.save_staff_presence(graph.staff_presence, graph.expected_presence_revision)
+            sessions_by_claim: dict[str, list[SessionRecord]] = {
+                claim_id: [] for claim_id in claims_by_id
+            }
+            for session in graph.sessions:
+                sessions_by_claim.setdefault(session.claim_id, []).append(session)
+            for claim in graph.claims:
+                active = [
+                    session
+                    for session in sessions_by_claim.get(claim.claim_id, [])
+                    if session.session_id == claim.active_session_id
+                ]
+                if len(active) != 1:
+                    raise ValueError('Every validation seed claim needs one active session.')
+                validate_validation_seed_session(claim, active[0])
+                self.create_claim(claim, active[0])
+            for session in graph.sessions:
+                if session.session_id != claims_by_id[session.claim_id].active_session_id:
+                    self.save_session(session)
+            for evidence in graph.evidence:
+                self.save_evidence(evidence, claims_by_id[evidence.claim_id].customer_id)
+            for message in graph.messages:
+                self.save_message(message, claims_by_id[message.claim_id].customer_id)
+            self.save_idempotency(graph.idempotency)
+        except Exception:
+            lock = self._validation_seed_lock
+            self.__dict__.clear()
+            self.__dict__.update(snapshot)
+            self._validation_seed_lock = lock
+            raise
+        return None
 
     def get_claim(self, claim_id: str, customer_id: str) -> WorkingClaim | None:
         claim = self._claims.get(claim_id)
@@ -1080,6 +1159,117 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(branch_evaluation.evaluation_id)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+
+    def save_runtime_turn(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        claimant_message: MessageRecord,
+        agent_message: MessageRecord,
+        runtime_trace: RuntimeTraceRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Persist a namespaced read-only turn without changing Claim revision."""
+        stored_claim = self._claims.get(claim.claim_id)
+        stored_session = self._sessions.get(session.session_id)
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+        records_match = (
+            claim == stored_claim
+            and stored_session is not None
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and session.status is SessionStatus.ACTIVE
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.context_revision == claim.revision
+            and claim.active_session_id == session.session_id
+            and claimant_message.claim_id == claim.claim_id
+            and agent_message.claim_id == claim.claim_id
+            and claimant_message.session_id == session.session_id
+            and agent_message.session_id == session.session_id
+            and claimant_message.actor is ActorType.CLAIMANT
+            and agent_message.actor is ActorType.AGENT
+            and agent_message.in_reply_to == claimant_message.message_id
+            and runtime_trace.claim_id == claim.claim_id
+            and runtime_trace.session_id == session.session_id
+            and runtime_trace.trigger_message_id == claimant_message.message_id
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.message_id == claimant_message.message_id
+            and idempotency.agent_message_id == agent_message.message_id
+            and idempotency.runtime_trace_id == runtime_trace.trace_id
+            and idempotency.decision_id is None
+        )
+        if not records_match:
+            raise KeyError(claim.claim_id)
+        if any(
+            existing is not None
+            for existing in (
+                self._messages.get(claimant_message.message_id),
+                self._messages.get(agent_message.message_id),
+                self._runtime_traces.get(runtime_trace.trace_id),
+            )
+        ):
+            raise IdempotencyConflict(runtime_trace.trace_id)
+        duplicate_client_message = next(
+            (
+                message
+                for message in self._messages.values()
+                if message.claim_id == claim.claim_id
+                and message.client_message_id == claimant_message.client_message_id
+            ),
+            None,
+        )
+        if duplicate_client_message is not None:
+            raise IdempotencyConflict(claimant_message.client_message_id or '')
+        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+        existing_idempotency = self._idempotency.get(lookup)
+        if (
+            existing_idempotency is not None
+            and existing_idempotency.request_fingerprint != idempotency.request_fingerprint
+        ):
+            raise IdempotencyConflict(idempotency.key)
+        self._sessions[session.session_id] = deepcopy(session)
+        self._messages[claimant_message.message_id] = deepcopy(claimant_message)
+        self._messages[agent_message.message_id] = deepcopy(agent_message)
+        self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
+        self._idempotency[lookup] = deepcopy(idempotency)
+
+    def get_runtime_trace(
+        self,
+        claim_id: str,
+        trace_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        trace = self._runtime_traces.get(trace_id)
+        if trace is None or trace.claim_id != claim_id:
+            return None
+        return deepcopy(trace)
+
+    def find_runtime_trace_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTraceRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        matches = [
+            trace
+            for trace in self._runtime_traces.values()
+            if trace.claim_id == claim_id and trace.trigger_message_id == trigger_message_id
+        ]
+        if not matches:
+            return None
+        return deepcopy(max(matches, key=lambda trace: (trace.created_at, trace.trace_id)))
 
     def save_evidence(self, evidence: EvidenceRecord, customer_id: str) -> None:
         if self.get_claim(evidence.claim_id, customer_id) is None:

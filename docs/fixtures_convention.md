@@ -88,7 +88,7 @@ been agreed and the regression test has been updated deliberately.
 | `tests/fixtures/api/` | Public API response examples | A second private domain model |
 | `tests/fixtures/media/` | Synthetic image/document bytes and metadata | Real claimant uploads or provider payloads |
 | `tests/` | Backend loaders, API tests, domain tests, and journey assertions | Hidden manual repair scripts |
-| `customer/src/*.test.*` | Claimant/workbench component and client behaviour tests | Internal signal assertions in claimant projections |
+| `customer/src/*.test.*` | Claimant component and client behaviour tests | Internal signal assertions in claimant projections |
 | `scripts/run_scenarios.py` | Fixture loading and repeatability smoke checks | A substitute for multi-turn journey testing |
 
 The four current reusable state scenarios are AT-01, AT-06, AT-08, and AT-12.

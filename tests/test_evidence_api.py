@@ -55,7 +55,7 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     }
     payload = {
         'kind': 'police_report',
-        'status': 'pending_generation',
+        'status': 'pending',
         'related_fields': ['authorities.police_report_reference'],
         'needed_for': ['later_action'],
         'claimant_note': 'The report will be available next week.',
@@ -85,7 +85,7 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
     }
     stored = repository.get_claim(claim_id, 'cus_demo')
     assert stored is not None
-    assert stored.claim_state.evidence.value == 'pending_generation'
+    assert stored.claim_state.evidence.value == 'pending'
     evaluation = repository.list_branch_evaluations(claim_id, 'cus_demo')[-1]
     assert evaluation.recomputation_reason == 'evidence_changed'
     assert evaluation.resulting_claim_revision == stored.revision
@@ -97,8 +97,10 @@ def test_pending_evidence_is_saved_visible_and_does_not_block_current_work(
 @pytest.mark.parametrize(
     ('status', 'file_status'),
     [
-        ('incomplete', EvidenceFileStatus.READY),
-        ('incomplete', EvidenceFileStatus.NOT_AVAILABLE),
+        # `incomplete` used to cover both of the first two rows, which is the overlap
+        # this migration removes: an upload that has not finished is a file fact, and
+        # a copy that is not the official document is a fact about the material.
+        ('pending', EvidenceFileStatus.NOT_AVAILABLE),
         ('unofficial', EvidenceFileStatus.READY),
         ('unofficial', EvidenceFileStatus.NOT_AVAILABLE),
     ],
@@ -309,7 +311,7 @@ def test_upload_completion_exposes_processing_metadata_without_storage_details(
     assert updated_claim.form == {}
     assert updated_claim.evidence_summary.received == 0
     assert updated_claim.evidence_summary.pending == 1
-    assert updated_claim.claim_state.evidence.value == 'incomplete'
+    assert updated_claim.claim_state.evidence.value == 'pending'
     assert listed.json()['revision'] == updated_claim.revision
 
 
@@ -362,10 +364,10 @@ def test_processing_failure_is_claim_attention_and_retry_is_idempotent(
     assert claimant.json()['items'][0]['file_status'] == 'failed'
     assert 'processing_state' not in claimant.text
     assert workbench.status_code == 200
-    assert workbench.json()['claim_state']['evidence'] == 'incomplete'
+    assert workbench.json()['claim_state']['evidence'] == 'invalid'
     assert workbench.json()['section_summaries']['evidence']['needs_attention'] == 1
     assert claim is not None
-    assert claim.claim_state.evidence.value == 'incomplete'
+    assert claim.claim_state.evidence.value == 'invalid'
     assert stored is not None
     assert stored.file_status is EvidenceFileStatus.FAILED
 
@@ -888,7 +890,7 @@ def test_evidence_mutations_enforce_headers_revision_media_and_state(
     assert isinstance(claim, dict)
     claim_id = str(claim['claim_id'])
     endpoint = f'/api/v1/claims/{claim_id}/evidence'
-    pending = {'kind': 'police_report', 'status': 'pending_generation'}
+    pending = {'kind': 'police_report', 'status': 'pending'}
 
     missing_key = client.post(endpoint, headers={**auth_headers, 'If-Match': '1'}, json=pending)
     missing_revision = client.post(
@@ -958,7 +960,7 @@ def test_evidence_rejects_stale_revision_and_unknown_completion(
             'Idempotency-Key': 'first-evidence',
             'If-Match': '1',
         },
-        json={'kind': 'police_report', 'status': 'pending_generation'},
+        json={'kind': 'police_report', 'status': 'pending'},
     )
     stale = client.post(
         f'/api/v1/claims/{claim_id}/evidence',
@@ -987,7 +989,7 @@ def test_evidence_rejects_stale_revision_and_unknown_completion(
 
 @pytest.mark.parametrize(
     ('status', 'expected_state'),
-    [('unofficial', 'unofficial'), ('inconsistent', 'inconsistent')],
+    [('unofficial', 'unofficial'), ('missing', 'pending')],
 )
 def test_attention_evidence_updates_shared_evidence_dimension(
     client: TestClient,
@@ -1069,7 +1071,7 @@ def test_anonymous_sessions_can_continue_chat_but_cannot_persist_file_evidence(
     registered = client.post(
         f'/api/v1/claims/{claim_id}/evidence',
         headers={**anonymous_headers, 'Idempotency-Key': 'anonymous-register', 'If-Match': '1'},
-        json={'kind': 'receipt', 'status': 'incomplete'},
+        json={'kind': 'receipt', 'status': 'pending'},
     )
     requested = client.post(
         f'/api/v1/claims/{claim_id}/evidence/uploads',

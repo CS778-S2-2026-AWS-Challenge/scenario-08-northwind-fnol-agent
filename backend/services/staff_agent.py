@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -50,6 +50,7 @@ class StaffAgentContext:
     conversation: tuple[Mapping[str, Any], ...]
     knowledge: tuple[Mapping[str, Any], ...]
     knowledge_status: str
+    model_profile_id: str = 'qwen-local'
     references: tuple[Mapping[str, Any], ...] = ()
     review_signals: tuple[Mapping[str, Any], ...] = ()
     handoffs: tuple[Mapping[str, Any], ...] = ()
@@ -83,6 +84,7 @@ class GatewayStaffAgent:
 
     def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
         request = ModelRequest(
+            model_profile_id=context.model_profile_id,
             purpose=STAFF_AGENT_PURPOSE,
             privacy_class=STAFF_AGENT_PRIVACY_CLASS,
             prompt_version=STAFF_ASSISTANT_PROMPT_ID,
@@ -152,6 +154,22 @@ class GatewayStaffAgent:
         return result
 
 
+class ProfileSelectingStaffAgent:
+    """Resolve the session-bound published profile before each staff turn."""
+
+    def __init__(
+        self,
+        gateway_for_profile: Callable[[str], ModelGateway],
+        operations: ModelOperationsRecorder | None = None,
+    ) -> None:
+        self._gateway_for_profile = gateway_for_profile
+        self._operations = operations
+
+    def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
+        gateway = self._gateway_for_profile(context.model_profile_id)
+        return GatewayStaffAgent(gateway, self._operations).respond(context)
+
+
 def _require_staff(principal: Principal) -> None:
     if principal.actor_type != 'staff':
         raise ApiError(status_code=403, code='ACCESS_DENIED', message='Staff access is required.')
@@ -174,13 +192,20 @@ def create_staff_agent_session(
     repository: PersistenceRepository,
     principal: Principal,
     payload: CreateStaffAgentSessionRequest,
+    model_profile_selector: Callable[[str | None], str] | None = None,
 ) -> StaffAgentSession:
     _require_staff(principal)
     timestamp = now_utc()
+    selected_profile = (
+        model_profile_selector(payload.model_profile_id)
+        if model_profile_selector is not None
+        else (payload.model_profile_id or 'qwen-local')
+    )
     session = StaffAgentSession(
         session_id=new_id('sas'),
         staff_id=principal.subject,
         title=payload.title,
+        model_profile_id=selected_profile,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -380,6 +405,7 @@ def submit_staff_agent_message(
     )
     agent_context = StaffAgentContext(
         question=payload.content,
+        model_profile_id=session.model_profile_id,
         claims=claim_contexts,
         conversation=tuple(
             {

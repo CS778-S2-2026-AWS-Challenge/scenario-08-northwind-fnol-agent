@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 
@@ -63,11 +64,11 @@ from backend.core.runtime_profiles import (
 from backend.domain.configuration import (
     DataProfileConfiguration,
     IntegrationSourceValue,
-    ModelRuntimeConfiguration,
 )
 from backend.domain.model_gateway import (
     STAFF_AGENT_PRIVACY_CLASS,
     STAFF_AGENT_PURPOSE,
+    ModelGateway,
     ModelGatewayError,
     ModelGatewayErrorCode,
 )
@@ -96,6 +97,7 @@ from backend.services.agent import (
     ControlledAgent,
     FeatureControlledAgent,
     InvariantGuardedAgent,
+    UnavailableAgent,
 )
 from backend.services.external_service_entry import (
     assert_adapter_matches_entry,
@@ -103,6 +105,7 @@ from backend.services.external_service_entry import (
 )
 from backend.services.model_agent import GatewayAgent, KnowledgeGroundedAgent
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.model_profiles import model_configuration
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 from backend.services.runtime_configuration import (
     RuntimeConfigurationResolutionError,
@@ -112,7 +115,10 @@ from backend.services.runtime_integrations import (
     RuntimeIntegrationConfigurationError,
     RuntimeIntegrationPolicy,
 )
-from backend.services.staff_agent import GatewayStaffAgent, StaffAgentTurnProvider
+from backend.services.staff_agent import (
+    ProfileSelectingStaffAgent,
+    StaffAgentTurnProvider,
+)
 
 
 def create_app(
@@ -313,35 +319,42 @@ def create_app(
                 app.state.knowledge_admin_repository,
                 app.state.runtime_configuration_resolver,
             ),
-            ControlledAgent(),
+            UnavailableAgent(),
         )
         app.state.agent_runtime_status = 'configured'
         if staff_agent_turn_provider is not None:
             app.state.staff_agent_turn_provider = staff_agent_turn_provider
         else:
-            try:
-                published_model = app.state.runtime_configuration_resolver.resolve('model')
-            except RuntimeConfigurationResolutionError:
-                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
-            staff_gateway = build_scoped_model_gateway(
-                resolved_settings,
-                purpose=STAFF_AGENT_PURPOSE,
-                privacy_class=STAFF_AGENT_PRIVACY_CLASS,
-                prompt_version=STAFF_ASSISTANT_PROMPT_ID,
-                profile_suffix='staff-assistant',
-                registry=model_gateway_registry,
-                runtime_configuration=(
-                    ModelRuntimeConfiguration.model_validate(published_model.values)
-                    if published_model is not None
-                    else None
-                ),
+
+            def staff_gateway_for_profile(profile_id: str) -> ModelGateway:
+                try:
+                    configuration = model_configuration(SimpleNamespace(app=app), profile_id)
+                except (RuntimeConfigurationResolutionError, ValueError):
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION) from None
+                if configuration is None:
+                    raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+                return build_scoped_model_gateway(
+                    resolved_settings,
+                    purpose=STAFF_AGENT_PURPOSE,
+                    privacy_class=STAFF_AGENT_PRIVACY_CLASS,
+                    prompt_version=STAFF_ASSISTANT_PROMPT_ID,
+                    profile_suffix='staff-assistant',
+                    registry=model_gateway_registry,
+                    runtime_configuration=configuration,
+                )
+
+            app.state.staff_agent_turn_provider = ProfileSelectingStaffAgent(
+                staff_gateway_for_profile, model_operations
             )
-            app.state.staff_agent_turn_provider = GatewayStaffAgent(staff_gateway, model_operations)
     else:
         base_agent_turn_provider = agent_turn_provider or ControlledAgent()
         app.state.agent_runtime_status = 'not_configured'
         app.state.staff_agent_turn_provider = staff_agent_turn_provider
-    app.state.agent_turn_provider = InvariantGuardedAgent(base_agent_turn_provider)
+    app.state.agent_turn_provider = (
+        base_agent_turn_provider
+        if resolved_settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY
+        else InvariantGuardedAgent(base_agent_turn_provider)
+    )
     app.state.claims_service_adapter = claims_service_adapter or MockClaimsServiceAdapter()
     resolved_assessor_adapter = assessor_service_adapter or MockAssessorServiceAdapter()
     app.state.evidence_storage = bundle.evidence_storage

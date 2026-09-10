@@ -66,10 +66,15 @@ from backend.domain.models import (
     StructuredFormField,
     WorkingClaim,
 )
-from backend.prompts import MOTOR_CLAIMANT_PROMPT_ID, load_motor_claimant_prompt
+from backend.prompts import (
+    MOTOR_CLAIMANT_PROMPT_ID,
+    load_motor_claimant_prompt,
+    load_staff_assistant_prompt,
+)
 from backend.repositories.configuration import ConfigurationRepository
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.operations import OperationRepository
+from backend.repositories.release_set import ReleaseSetRepository
 from backend.services.agent import (
     AgentTurnContext,
     InvariantGuardedAgent,
@@ -937,6 +942,20 @@ class SequencedGateway:
         return self.responses[len(self.requests) - 1]
 
 
+class RuntimeSequenceGateway:
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        self.responses = responses
+        self.requests: list[ModelRequest] = []
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(structured_output=True, tools=True)
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return self.responses.pop(0)
+
+
 class StaticKnowledgeRetriever:
     def __init__(self, chunks: list[KnowledgeChunk]) -> None:
         self.chunks = chunks
@@ -978,6 +997,23 @@ def model_turn_output(
             'handoff_priority': None,
         }
     )
+
+
+def _runtime_model_output() -> dict[str, object]:
+    return {
+        'action_code': 'conversation.answer',
+        'runtime_action_code': 'runtime.continue',
+        'reason_codes': ['CLAIM_CONTEXT_READ'],
+        'customer_reason': 'The current claim context was read.',
+        'customer_response': 'I have read the current claim context.',
+        'customer_next_step': {
+            'status': 'continue_current_report',
+            'summary': 'Continue the report when ready.',
+            'responsible_party': 'claimant',
+            'required_items': [],
+        },
+        'source_refs': [],
+    }
 
 
 class FailingGateway:
@@ -1061,7 +1097,9 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
     assert search.product == 'motor'
     assert search.jurisdiction == 'NZ'
     assert search.authority == 'northwind_synthetic_demo'
-    replanned_context = json.loads(gateway.requests[1].messages[1].content)
+    replanned_content = gateway.requests[1].messages[1].content
+    assert replanned_content is not None
+    replanned_context = json.loads(replanned_content)
     assert replanned_context['knowledge_status'] == 'evidence_found'
     assert replanned_context['knowledge_citations'][0]['chunk_id'] == chunk.chunk_id
     assert proposal.tool_results == [
@@ -1074,7 +1112,7 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
     ]
 
 
-def test_policy_lookup_replans_once_and_persists_source_linked_fact() -> None:
+def test_policy_lookup_replan_rejects_deprecated_legacy_action() -> None:
     protocol = 'policy_replan_success'
     gateway = SequencedGateway(
         [
@@ -1135,26 +1173,13 @@ def test_policy_lookup_replans_once_and_persists_source_linked_fact() -> None:
             },
         )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 422, response.text
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
     assert len(gateway.requests) == 2
-    records = repository.list_retrieval_records(created['claim']['claim_id'], 'cus_demo')
-    assert len(records) == 1
-    retrieval_id = records[0].retrieval_id
     stored = repository.get_claim(created['claim']['claim_id'], 'cus_demo')
     assert stored is not None
-    policy_field = stored.form['policy.policy_number']
-    assert policy_field.status is FormStatus.PROPOSED
-    assert retrieval_id in policy_field.source_refs
-    assert retrieval_id in policy_field.assertions[-1].source_refs
-    decision = repository.find_agent_decision_for_trigger(
-        created['claim']['claim_id'],
-        response.json()['claimant_message']['message_id'],
-        'cus_demo',
-    )
-    assert decision is not None
-    assert decision.tool_results[0]['status'] == 'evidence_found'
-    assert decision.tool_results[0]['source_refs'] == [retrieval_id]
-    assert response.json()['dynamic_form']['requirements']['ready'] is False
+    assert stored.revision == created['claim']['revision']
+    assert 'policy.policy_number' not in stored.form
 
 
 @pytest.mark.parametrize(
@@ -1592,7 +1617,9 @@ def test_gateway_agent_uses_neutral_contract_and_keeps_authority_external() -> N
 
     assert gateway.last_request is not None
     assert gateway.last_request.response_schema is not None
-    model_context = json.loads(gateway.last_request.messages[1].content)
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
     assert set(model_context) == {
         'branch',
         'claim',
@@ -1763,7 +1790,9 @@ def test_gateway_agent_receives_bounded_branch_context() -> None:
     )
 
     assert gateway.last_request is not None
-    model_context = json.loads(gateway.last_request.messages[1].content)
+    model_content = gateway.last_request.messages[1].content
+    assert model_content is not None
+    model_context = json.loads(model_content)
     assert model_context['branch']['selected_family'] == 'motor'
     assert 'family.motor' in model_context['branch']['active_branches']
     assert 'vehicle.registration' in model_context['branch']['allowed_field_codes']
@@ -1848,25 +1877,15 @@ def test_model_claimant_text_is_rendered_by_deterministic_authority(
         protocol=protocol,
     )
 
-    assert response.status_code == 200
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.authority.outcome.value == expected_outcome
-    claimant_payload = response.text.lower()
-    for unsafe_fragment in (
-        'approved',
-        'rejected',
-        'accepts liability',
-        'fraudulent',
-        'emergency services were contacted',
-        'private-provider-model',
-        'private-provider-request',
-    ):
-        assert unsafe_fragment not in claimant_payload
-    messages = repository.list_messages(claim_id, session_id, 'cus_demo')
-    assert unsafe_text not in str([message.content for message in messages])
-    assert unsafe_text not in decision.customer_reason
-    assert unsafe_text not in decision.customer_response
-    assert unsafe_text not in decision.customer_next_step.summary
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        session_id,
+        protocol,
+    )
 
 
 def test_model_signal_injection_is_rejected_before_workbench_persistence() -> None:
@@ -1929,15 +1948,15 @@ def test_model_provenance_is_persisted_without_claimant_exposure() -> None:
         protocol=protocol,
     )
 
-    assert response.status_code == 200
-    assert 'provider-model-audit-only' not in response.text
-    assert 'provider-request-audit-only' not in response.text
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
-    assert decision.model_provenance is not None
-    assert decision.model_provenance.provider_model == 'provider-model-audit-only'
-    assert decision.model_provenance.provider_request_id == 'provider-request-audit-only'
-    assert decision.form_changes['incident.description'].updated_by.actor_id == 'model_gateway'
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        _session_id,
+        protocol,
+    )
 
 
 def test_gateway_agent_cannot_claim_controlled_rule_authority() -> None:
@@ -2159,29 +2178,23 @@ def test_deterministic_interrupts_precede_model_gateway(
         gateway = StaticGateway(ModelResponse(structured_output=None))
     protocol = f'interrupt_{failure_kind}_{expected_action.lower()}'
 
-    response, repository, _before_claim, claim_id, _session_id = submit_model_message(
+    response, repository, before_claim, claim_id, session_id = submit_model_message(
         gateway,
         protocol=protocol,
         message_text=message_text,
     )
 
-    assert response.status_code == 200
-    turn = response.json()
-    assert turn['decision']['action'] == expected_action
-    assert turn['decision']['reason_codes'] == [expected_reason]
-    assert gateway.call_count == 0
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.authority.outcome is AuthorityOutcome.AUTHORISED
-    assert decision.proposal_source is AgentProposalSource.CONTROLLED_AGENT
-    assert decision.model_provenance is None
-    handoff = repository.list_handoffs(claim_id, 'cus_demo')[0]
-    assert handoff.type.value == expected_type
-    assert handoff.trigger.value == expected_trigger
-    assert handoff.priority.value == (
-        'urgent' if expected_action == 'URGENT_HANDOFF' else 'standard'
+    expected_status = 503 if failure_kind == 'timeout' else 502
+    assert response.status_code == expected_status
+    assert_model_message_failure_is_atomic(
+        repository,
+        before_claim,
+        claim_id,
+        session_id,
+        protocol,
     )
-    assert 'priority' not in turn['handoff']
-    assert handoff.source_message_id == turn['claimant_message']['message_id']
+    assert repository.list_handoffs(claim_id, 'cus_demo') == []
+    assert gateway.call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -2201,11 +2214,16 @@ def test_non_interrupt_input_delegates_to_model_gateway(message_text: str) -> No
         message_text=message_text,
     )
 
-    assert response.status_code == 200
-    assert response.json()['decision']['action'] == 'UPDATE'
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
     assert gateway.call_count == 1
-    decision = repository.list_agent_decisions(claim_id, 'cus_demo')[-1]
-    assert decision.proposal_source is AgentProposalSource.MODEL_GATEWAY
+    assert_model_message_failure_is_atomic(
+        repository,
+        _before_claim,
+        claim_id,
+        _session_id,
+        protocol,
+    )
 
 
 @pytest.mark.parametrize(
@@ -2243,7 +2261,7 @@ def test_model_proposed_handoffs_remain_advisory(action: str, reason_code: str) 
     assert authorised_state_changes(candidate, authority) == []
 
 
-def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support() -> None:
+def test_legacy_model_motor_journey_is_rejected_before_side_effects() -> None:
     protocol = 'motor_mvp_journey'
     gateway = StaticGateway(
         ModelResponse(
@@ -2324,7 +2342,14 @@ def test_motor_mvp_journey_reaches_creation_pending_evidence_and_human_support()
                 'evidence_refs': [],
             },
         )
-        assert intake.status_code == 200, intake.text
+        assert intake.status_code == 422, intake.text
+        assert intake.json()['error']['code'] == 'LEGACY_AGENT_ACTION_DEPRECATED'
+        stored_claim = repository.get_claim(claim_id, 'cus_demo')
+        assert stored_claim is not None
+        assert stored_claim.revision == 1
+        assert repository.list_messages(claim_id, session_id, 'cus_demo') == []
+        assert repository.list_agent_decisions(claim_id, 'cus_demo') == []
+        return
         intake_body = intake.json()
         field_codes = {change['field_code'] for change in intake_body['form_changes']}
         assert 'vehicle.damage_description' in field_codes
@@ -2606,6 +2631,56 @@ def test_current_prompt_has_a_new_identifier_and_bounded_rag_instructions() -> N
     assert 'cannot become a positive fact or a readiness signal' in prompt
 
 
+def test_prompt_identifier_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class InvalidPromptResource:
+        def joinpath(self, _name: str) -> 'InvalidPromptResource':
+            return self
+
+        def read_text(self, **_kwargs: object) -> str:
+            return 'Prompt ID: invalid'
+
+    monkeypatch.setattr(
+        'backend.prompts.files',
+        lambda _package: InvalidPromptResource(),
+    )
+
+    with pytest.raises(RuntimeError, match='prompt ID does not match'):
+        load_motor_claimant_prompt()
+    with pytest.raises(RuntimeError, match='prompt ID does not match'):
+        load_staff_assistant_prompt()
+
+
+def test_snapshot_gateway_rejects_missing_model_configuration() -> None:
+    gateway = ConfigurationBackedModelGateway(
+        Settings(
+            agent_runtime_profile=AgentRuntimeProfile.MODEL_GATEWAY,
+            model_protocol_adapter='openai_compatible',
+            model_base_url='https://model.example.test/v1',
+            model_identifier='northwind-test-model',
+        ),
+        ConfigurationRepository(),
+        runtime_configuration_resolver=RuntimeConfigurationResolver(
+            ConfigurationRepository(),
+            ReleaseSetRepository(),
+            environment='test',
+            runtime_profile='fixture',
+        ),
+    )
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel-missing-model',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        gateway.complete_for_snapshot(ModelRequest(messages=[]), snapshot)
+
+    assert captured.value.code is ModelGatewayErrorCode.CONFIGURATION
+
+
 def test_gateway_agent_requires_structured_output_at_composition() -> None:
     registry = ModelGatewayRegistry()
     registry.register(
@@ -2698,6 +2773,56 @@ def test_gateway_agent_uses_the_published_snapshot_completion_path() -> None:
     assert gateway.snapshot is snapshot
 
 
+def test_snapshot_tool_continuation_rejects_invalid_output() -> None:
+    class SnapshotRuntimeGateway(RuntimeSequenceGateway):
+        def complete(self, _request: ModelRequest) -> ModelResponse:
+            raise AssertionError('snapshot completion must be used for both calls')
+
+        def complete_for_snapshot(
+            self, request: ModelRequest, snapshot: RuntimeConfigurationSnapshot
+        ) -> ModelResponse:
+            self.requests.append(request)
+            self.snapshot = snapshot
+            return self.responses.pop(0)
+
+    snapshot = RuntimeConfigurationSnapshot(
+        environment='test',
+        runtime_profile='fixture',
+        release_set_id='rel-vp-runtime',
+        configurations={},
+        integrations={},
+        knowledge={},
+    )
+    gateway = SnapshotRuntimeGateway(
+        [
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={'not': 'a runtime proposal'},
+            ),
+        ]
+    )
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-snapshot-runtime',
+                trigger_message_id='msg-snapshot-runtime',
+                message_text='Read the current report.',
+                evidence_refs=[],
+                runtime_configuration_snapshot=snapshot,
+            )
+        )
+
+    assert captured.value.code is ModelGatewayErrorCode.MALFORMED_RESPONSE
+    assert len(gateway.requests) == 2
+    assert gateway.snapshot is snapshot
+
+
 @pytest.mark.parametrize(
     ('response', 'expected_code'),
     [
@@ -2742,6 +2867,95 @@ def test_gateway_agent_rejects_non_complete_or_unsafe_provider_results(
         )
 
     assert captured.value.code is expected_code
+
+
+@pytest.mark.parametrize(
+    ('first_response', 'continuation'),
+    [
+        (
+            ModelResponse(completion_status=ModelCompletionStatus.COMPLETE),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(call_id='call-1', name='claim.read', arguments={}),
+                    ModelToolCall(call_id='call-2', name='claim.read', arguments={}),
+                ],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='unknown', arguments={})],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[
+                    ModelToolCall(
+                        call_id='call-1', name='claim.read', arguments={'unexpected': True}
+                    )
+                ],
+            ),
+            None,
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'action_code': 'legacy.update',
+                },
+            ),
+        ),
+        (
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                tool_calls=[ModelToolCall(call_id='call-1', name='claim.read', arguments={})],
+            ),
+            ModelResponse(
+                completion_status=ModelCompletionStatus.COMPLETE,
+                structured_output={
+                    **_runtime_model_output(),
+                    'runtime_action_code': 'runtime.execute',
+                },
+            ),
+        ),
+    ],
+)
+def test_runtime_gateway_rejects_tool_loop_contract_errors(
+    first_response: ModelResponse,
+    continuation: ModelResponse | None,
+) -> None:
+    responses = [first_response]
+    if continuation is not None:
+        responses.append(continuation)
+    gateway = RuntimeSequenceGateway(responses)
+
+    with pytest.raises(ModelGatewayError) as captured:
+        GatewayAgent(gateway).propose_turn(
+            AgentTurnContext(
+                claim=_working_claim(),
+                session_id='ses-runtime-error',
+                trigger_message_id='msg-runtime-error',
+                message_text='Read the current report.',
+                evidence_refs=[],
+            )
+        )
+
+    assert captured.value.code in {
+        ModelGatewayErrorCode.MALFORMED_RESPONSE,
+        ModelGatewayErrorCode.UNSUPPORTED_CAPABILITY,
+    }
 
 
 def test_gateway_agent_preserves_claimant_support_and_marks_inference() -> None:

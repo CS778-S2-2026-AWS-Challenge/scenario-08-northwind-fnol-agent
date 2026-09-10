@@ -52,6 +52,34 @@ class RuntimeConfigurationSnapshot:
             )
         return configuration
 
+    def model(self, profile_id: str | None = None) -> ConfigurationRecord | None:
+        """Resolve one published model profile selected by the current Session."""
+
+        if profile_id:
+            selected_profile = profile_id
+            selected = self.configurations.get(f'model:{selected_profile}')
+            if selected is not None:
+                return selected
+        selected = self.configurations.get('model')
+        if selected is not None and (
+            profile_id is None or selected.values.get('profile_id') == profile_id
+        ):
+            return selected
+        if profile_id is None:
+            # Older Release Sets published one unkeyed model record. Keep that
+            # policy-resolution path readable while a Session-selected profile
+            # remains strict in ``complete_for_snapshot``.
+            selected = self.configurations.get('model:qwen-local')
+            if selected is not None:
+                return selected
+            return None
+        if self.release_set_id is not None:
+            raise RuntimeConfigurationResolutionError(
+                f'Active release set {self.release_set_id!r} does not reference model '
+                f'profile {profile_id!r}.'
+            )
+        return None
+
     def knowledge_for_product(self, product: str) -> KnowledgeSourceRecord | None:
         """Return the selected published knowledge version for a product family.
 
@@ -203,6 +231,18 @@ class RuntimeConfigurationResolver:
         if snapshot.release_set_id is not None:
             return snapshot.get(domain)
         return self._configuration_repository.active(domain)
+
+    def resolve_model(self, profile_id: str | None = None) -> ConfigurationRecord | None:
+        """Resolve a Session-selected model profile without mixing release versions."""
+
+        snapshot = self.snapshot()
+        if snapshot.release_set_id is not None:
+            return snapshot.model(profile_id)
+        if profile_id:
+            selected = self._configuration_repository.active('model', profile_id)
+            if selected is not None:
+                return selected
+        return self._configuration_repository.active('model')
 
     def resolve_knowledge(self, product: str) -> KnowledgeSourceRecord | None:
         """Resolve knowledge from the active Release Set or explicit fallback."""

@@ -91,7 +91,6 @@ The #262 claimant flow can be repeated from the repository root with:
 
 ```powershell
 python -m pytest tests/test_claimant_external_service.py tests/test_integrations.py
-npm test --prefix customer -- src/App.test.jsx
 ```
 
 The backend checks prove that the action is absent before the controlled created-motor state,
@@ -102,7 +101,7 @@ checks that consent cannot survive without its idempotency result and that a dur
 success is restored when the public response write fails. A separate provider-acceptance/Claim-
 CAS race check proves that the identical claimant request can reconcile the already accepted
 operation without a second provider task, while an unrelated stale request remains rejected.
-The claimant tests exercise the
+The archived broad claimant suite previously exercised the
 consent-required, permission and submission progress, assigned success, retryable failure,
 explicit retry, authoritative-result recovery, and claim-scoped interaction states.
 
