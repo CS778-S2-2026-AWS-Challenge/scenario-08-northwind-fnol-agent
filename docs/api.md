@@ -2102,7 +2102,10 @@ transitions. Ownership actions project their complete mutation inputs: cowork ac
 requeue require `reason`; cowork invitations require `staff_id` and `reason`; transfer requests
 require `target_staff_id` and `reason`; and cowork or transfer decisions require a registered
 `decision` choice. Ownership mutation routes reject fields that are not present in the exact
-projected action input set.
+projected action input set. Reusing an `Idempotency-Key` replays the original response. A new
+key cannot create a second pending cowork request for the same target or a second pending transfer
+to the same target; these attempts return `409 OWNERSHIP_CONFLICT` without changing the Claim
+revision or creating another request.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised. The pair always identifies the exact same
