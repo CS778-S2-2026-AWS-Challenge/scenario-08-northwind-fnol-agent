@@ -11,6 +11,7 @@ from backend.adapters.model_gateway import ModelGatewayRegistry
 from backend.app import create_app
 from backend.core.auth import Principal
 from backend.core.config import AgentRuntimeProfile, IdentityMode, Settings
+from backend.core.errors import ApiError
 from backend.domain.model_gateway import (
     ModelCapabilities,
     ModelCompletionStatus,
@@ -844,7 +845,7 @@ def test_staff_agent_dependency_failure_preserves_claim_revision(
         draft = assistant['drafts'][0]
 
         def unavailable(*args: object, **kwargs: object) -> object:
-            raise staff_agent_service.ApiError(
+            raise ApiError(
                 status_code=503,
                 code='DEPENDENCY_UNAVAILABLE',
                 message='The handoff service is unavailable.',
