@@ -18,7 +18,6 @@ from backend.domain.staff_agent import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_profiles import model_catalog, select_model_profile
-from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.staff_agent import (
     StaffAgentTurnProvider,
     create_staff_agent_session,
@@ -64,14 +63,14 @@ def knowledge_version_for(request: Request, product: str) -> str | None:
         product: Canonical product family to resolve.
 
     Returns:
-        The selected version, the fixture manifest version, or ``None`` when an
-        active release cannot provide a version.
+        The selected version or the fixture manifest version.
+
+    Raises:
+        RuntimeConfigurationResolutionError: If an active release cannot provide
+            a version for the requested product.
     """
 
-    try:
-        selected = request.app.state.runtime_configuration_resolver.resolve_knowledge(product)
-    except RuntimeConfigurationResolutionError:
-        return None
+    selected = request.app.state.runtime_configuration_resolver.resolve_knowledge(product)
     return selected.version if selected is not None else approved_version_for_product(product)
 
 
