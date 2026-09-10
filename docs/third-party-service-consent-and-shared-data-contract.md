@@ -141,15 +141,15 @@ uses it.
 ## Preserve provenance and evidence status
 
 Use this mapping to audit each P5 service boundary back to the accepted P3.3/P3.4 research record.
-P3.1 source coordinates identify the public evidence, P3.3 disposition records the independent
-challenge result, and the P3.4 closure coordinate identifies the gap disposition that constrains
-Northwind use. Evidence status describes public-fact support separately from Northwind production
-authority and access.
+P3.1 source coordinates identify the public evidence, P3.2 disposition records the independent
+challenge result and is preserved in P3.3, and the P3.4 closure coordinate identifies the gap
+disposition that constrains Northwind use. Evidence status describes public-fact support separately
+from Northwind production authority and access.
 
 `blocked`, `unavailable`, and `simulation-only` in this table are research or access labels. They
 are not `ExternalTaskOperationStatus` values and do not create a second Runtime lifecycle.
 
-| P3 ID | P3.1 provenance | P3.3 disposition | P3.4 closure | Evidence and Northwind access status |
+| P3 ID | P3.1 provenance | P3.2 disposition | P3.4 closure | Evidence and Northwind access status |
 | --- | --- | --- | --- | --- |
 | `P3-NZP-REPORT` | S01 | Accepted with qualification | `P3.4-G04` — `blocked` | Public reporting and result forms are supported. Direct Northwind read access is `unavailable`; claimant-supplied evidence is the baseline and synthetic evidence may be `simulation-only`. |
 | `P3-NZP-TCR` | S02-S03 | Accepted with qualification | `P3.4-G01`, `P3.4-G04` — `blocked` | Public representative-request rules are supported. Direct Northwind request and response access is `unavailable`; manual handling remains authoritative. |
@@ -161,7 +161,7 @@ are not `ExternalTaskOperationStatus` values and do not create a second Runtime 
 | `P3-METSERVICE` | S11 | Accepted with qualification | `P3.4-G06`, `P3.4-G04` — `blocked` | Public report categories and result forms are supported. A selected Northwind product and purchased-report access are `unavailable`; a synthetic report may be `simulation-only`. |
 | `P3-NHC` | S12-S14 | Accepted with qualification | `P3.4-G07A` — `resolved`; `P3.4-G07B`, `P3.4-G04` — `blocked` | The Home building/land versus contents boundary is resolved. Northwind partner exchange remains `unavailable`; a labelled insurer-mediated demonstration may be `simulation-only`. |
 | `P3-CONTENTS-EVIDENCE` | S06 | Accepted with qualification | `P3.4-G07A` — `resolved`; `P3.4-G10`, `P3.4-G04` — `blocked` | Claimant-supplied contents evidence forms are supported. Direct Northwind retrieval is `unavailable`; claimant upload is the baseline and synthetic material may be `simulation-only`. |
-| `P3-BROKER` | S07, S12-S14 | Accepted with qualification | `P3.4-G08`, `P3.4-G04` — `blocked` | Public broker participation and bounded delegation are supported. A Northwind broker channel or delegation remains `unavailable`; a synthetic handoff may be `simulation-only`. |
+| `P3-BROKER` | S07, S14 | Accepted with qualification | `P3.4-G08`, `P3.4-G04` — `blocked` | Public broker participation and bounded delegation are supported. A Northwind broker channel or delegation remains `unavailable`; a synthetic handoff may be `simulation-only`. |
 | `P3-ACC-PROVIDER` | S15 | Accepted with qualification | `P3.4-G09`, `P3.4-G04` — `blocked` | The registered-provider ACC pathway is supported. Northwind diagnosis, lodgement, and status access are `unavailable` and must not be simulated as a Northwind action. |
 | `P3-EN-MESSAGING` | S16 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic messaging capability is supported. Northwind production access is `unavailable`; a controlled scenario may be `simulation-only`. |
 | `P3-EN-DOC-AZURE` | S17 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic asynchronous document analysis is supported. Northwind production access is `unavailable`; extracted candidates may be `simulation-only`. |
@@ -174,8 +174,9 @@ are not `ExternalTaskOperationStatus` values and do not create a second Runtime 
 
 The authoritative research detail remains
 `docs/research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md`.
-This compact mapping does not promote a public capability, P3.3 qualification, or P3.4 research
-closure into Northwind authority, claimant consent, provider access, or production readiness.
+This compact mapping does not promote a public capability, a P3.2 disposition preserved in P3.3,
+or a P3.4 research closure into Northwind authority, claimant consent, provider access, or
+production readiness.
 
 ## Use final claimant copy fragments
 
