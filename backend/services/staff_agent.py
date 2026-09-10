@@ -39,6 +39,7 @@ from backend.domain.staff_agent import (
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID, load_staff_assistant_prompt
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
 from backend.services.support import now_utc
 
@@ -296,6 +297,7 @@ def _knowledge_context(
     retriever: KnowledgeRetriever,
     question: str,
     claims: Sequence[WorkingClaim],
+    knowledge_version_for: Callable[[str], str | None] | None = None,
 ) -> tuple[tuple[Mapping[str, Any], ...], str]:
     products: list[str | None] = list(
         sorted({claim.incident_type for claim in claims if claim.incident_type})
@@ -305,12 +307,20 @@ def _knowledge_context(
     citations: dict[str, Mapping[str, Any]] = {}
     try:
         for product in products:
+            version = (
+                knowledge_version_for(product)
+                if knowledge_version_for is not None and product is not None
+                else approved_version_for_product(product)
+                if product is not None
+                else None
+            )
             for chunk in retriever.search(
                 KnowledgeSearch(
                     text=question,
                     jurisdiction='NZ',
                     visibility='customer_and_staff',
                     authority='northwind_synthetic_demo',
+                    version=version,
                     insurer='Northwind Insurance',
                     product=product,
                     effective_at=datetime.now(UTC),
@@ -324,6 +334,7 @@ def _knowledge_context(
                     'section_path': chunk.section_path,
                     'source_uri': chunk.source_uri,
                     'version': chunk.version,
+                    'checksum': chunk.checksum,
                     'text': chunk.text,
                 }
     except KnowledgeRetrievalUnavailable:
@@ -338,6 +349,8 @@ def submit_staff_agent_message(
     principal: Principal,
     session_id: str,
     payload: CreateStaffAgentMessageRequest,
+    *,
+    knowledge_version_for: Callable[[str], str | None] | None = None,
 ) -> StaffAgentTurnResponse:
     _require_staff(principal)
     session = _session(repository, principal, session_id)
@@ -396,7 +409,12 @@ def submit_staff_agent_message(
         claims.append(claim)
 
     history = repository.list_staff_agent_messages(session_id, principal.subject)[-12:]
-    knowledge, knowledge_status = _knowledge_context(retriever, payload.content, claims)
+    knowledge, knowledge_status = _knowledge_context(
+        retriever,
+        payload.content,
+        claims,
+        knowledge_version_for,
+    )
     claim_contexts = tuple(_claim_context(repository, claim) for claim in claims)
     context_limitations = tuple(
         limitation

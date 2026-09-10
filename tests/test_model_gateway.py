@@ -1056,14 +1056,14 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
         ]
     )
     chunk = KnowledgeChunk(
-        document_id='northwind-motor-vp',
-        chunk_id='northwind-motor-vp#next-steps',
-        title='Northwind Motor Claim Guide',
-        document_type='synthetic_process_guide',
+        document_id='nw-policy-motor-standard-mvp-2026-1',
+        chunk_id='nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01',
+        title='Northwind Motor Standard Policy',
+        document_type='synthetic_policy_wording',
         version='MVP-2026.1',
-        section_path='Next steps',
+        section_path='MTR-EXC-01 - Excesses',
         page=None,
-        source_uri='northwind://synthetic-guide/motor/MVP-2026.1',
+        source_uri='northwind://synthetic-policy/motor/MVP-2026.1',
         jurisdiction='NZ',
         insurer='Northwind Insurance',
         product='motor',
@@ -1071,9 +1071,11 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
         effective_to=datetime(2027, 1, 1, tzinfo=UTC),
         authority='northwind_synthetic_demo',
         visibility='customer_and_staff',
-        checksum='synthetic-checksum',
+        checksum='a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989',
         ingested_at=datetime(2026, 8, 25, tzinfo=UTC),
-        text='Record the incident facts before claim creation.',
+        text=(
+            'The base excess and any additional excess come only from the matching policy schedule.'
+        ),
     )
     retriever = StaticKnowledgeRetriever([chunk])
     provider = KnowledgeGroundedAgent(GatewayAgent(gateway), retriever)
@@ -1102,6 +1104,7 @@ def test_knowledge_grounded_agent_runs_one_scoped_lookup_and_replans_once() -> N
     replanned_context = json.loads(replanned_content)
     assert replanned_context['knowledge_status'] == 'evidence_found'
     assert replanned_context['knowledge_citations'][0]['chunk_id'] == chunk.chunk_id
+    assert replanned_context['knowledge_citations'][0]['checksum'] == chunk.checksum
     assert proposal.tool_results == [
         {
             'tool': 'knowledge_search',
