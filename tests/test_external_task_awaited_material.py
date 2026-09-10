@@ -527,3 +527,68 @@ def test_a_lost_record_under_a_surviving_link_fails_rather_than_reports_success(
         _record_awaited_material(repository, task=task, claim=claim)
 
     assert raised.value.status_code == 409
+
+
+def test_a_task_that_came_to_a_failure_is_owed_nothing(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reconciliation acts on two statuses, and states them rather than assuming them.
+
+    A failed attempt records the failure on the task and on the operation together, so
+    an accepted operation should never hold a failed task. Recovery no longer leans on
+    that pairing. The previous guard skipped every status but `prepared`, and widening
+    it to reconcile an accepted task must not also widen it to owe an assessment against
+    a task that failed, because nobody is waiting for that assessment.
+
+    The interrupted first request is what leaves the operation accepted with the claim's
+    routing unsaved, which is the only way into the recovery branch.
+    """
+
+    claim_id = _consented_claim(client)
+    original = repository.save_external_task_evidence_link
+    calls = {'n': 0}
+
+    def fail_once(link: ExternalTaskEvidenceLink, customer_id: str) -> None:
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise KeyError('link store unavailable')
+        original(link, customer_id)
+
+    monkeypatch.setattr(repository, 'save_external_task_evidence_link', fail_once)
+
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 409
+
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    evidence_id = f'evd_{task.task_id.removeprefix("tsk_")}'
+
+    # An accepted operation holding a failed task is not reachable through the API. It is
+    # constructed here because this guard is part of what keeps it unreachable.
+    repository._external_tasks[task.task_id] = task.model_copy(
+        update={'status': ExternalTaskOperationStatus.TERMINAL_FAILURE}
+    )
+    repository._evidence.pop(evidence_id, None)
+
+    retried = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+
+    assert retried.status_code in {200, 201}, retried.text
+    assert repository.get_evidence(claim_id, evidence_id, claim.customer_id) is None
+    assert repository.list_external_task_evidence_links_internal(claim_id) == []

@@ -655,9 +655,15 @@ def route_assessor(
         if task is not None:
             # An interrupted attempt can leave the task advanced but its owed material
             # half-written, so acceptance and reconciliation are decided separately. Only
-            # a still-prepared task needs the transition; every accepted task needs its
-            # owed material checked, because returning success over a missing link would
+            # a still-prepared task needs the transition; an accepted one needs its owed
+            # material checked, because returning success over a missing link would
             # report a repaired request while the provenance invariant stayed broken.
+            #
+            # Neither runs for a task that came to a failure. A failed attempt records
+            # the failure on the task and the operation together, so an accepted
+            # operation should never hold one; recording owed material against a failure
+            # would owe an assessment nobody is waiting for, so this states the two
+            # statuses it acts on rather than trusting that pairing to hold.
             if task.status is ExternalTaskOperationStatus.PREPARED:
                 provider_reference = (
                     operation.result.assessor_reference or operation.result.queue_reference
@@ -669,7 +675,8 @@ def route_assessor(
                     customer_id=claim.customer_id,
                     provider_reference=provider_reference,
                 )
-            _record_awaited_material(repository, task=task, claim=claim)
+            if task.status is ExternalTaskOperationStatus.ACCEPTED:
+                _record_awaited_material(repository, task=task, claim=claim)
         return _save_assessor_result(
             repository,
             payload.claim_id,
