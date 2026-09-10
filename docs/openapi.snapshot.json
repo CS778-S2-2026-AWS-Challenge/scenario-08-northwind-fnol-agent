@@ -4803,6 +4803,7 @@
       },
       "EvidenceRecord": {
         "additionalProperties": false,
+        "description": "One piece of material on a claim, its condition, and what it says about others.",
         "properties": {
           "claim_id": {
             "title": "Claim Id",
@@ -4904,6 +4905,14 @@
             "title": "Provenance",
             "type": "object"
           },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "maxItems": 50,
+            "title": "References",
+            "type": "array"
+          },
           "related_fields": {
             "items": {
               "type": "string"
@@ -4968,6 +4977,94 @@
         "title": "EvidenceRecord",
         "type": "object"
       },
+      "EvidenceReference": {
+        "additionalProperties": false,
+        "description": "What one record has to say about another record or a claim fact.\n\nA conflict, a supersession, and an established unavailability are all statements\nabout a *second* thing, so each names it. Without that, staff cannot be shown what is\ncontested, a claimant cannot be told what replaced what, and an unavailability cannot\nbe distinguished from a request nobody answered.\n\n`state` and `resolved_at` exist because a conflict is not settled by being recorded.\nA supersession and an established unavailability happen once and stay true, so they\nare recorded resolved at the moment they are raised; a conflict stays unresolved\nuntil a person decides it, and both surfaces need to show which of those it is.",
+        "properties": {
+          "evidence_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Id"
+          },
+          "field_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Code"
+          },
+          "raised_at": {
+            "format": "date-time",
+            "title": "Raised At",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "relation": {
+            "$ref": "#/components/schemas/EvidenceRelation"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EvidenceRelationState",
+            "default": "unresolved"
+          }
+        },
+        "required": [
+          "relation",
+          "reason",
+          "raised_at"
+        ],
+        "title": "EvidenceReference",
+        "type": "object"
+      },
+      "EvidenceRelation": {
+        "description": "What one piece of material has to say about another, or about a claim fact.\n\nEach of these exists because a condition that describes a relationship cannot be\ncarried by a status word: a reader told only the word cannot find the second thing.",
+        "enum": [
+          "conflicts_with",
+          "superseded_by",
+          "unavailability_established_by"
+        ],
+        "title": "EvidenceRelation",
+        "type": "string"
+      },
+      "EvidenceRelationState": {
+        "description": "Whether the relationship still stands open.",
+        "enum": [
+          "unresolved",
+          "resolved"
+        ],
+        "title": "EvidenceRelationState",
+        "type": "string"
+      },
       "EvidenceSource": {
         "enum": [
           "claimant",
@@ -4978,24 +5075,30 @@
         "type": "string"
       },
       "EvidenceState": {
+        "description": "One claim's evidence position, rolled up from its records.\n\nA rollup, not a second per-record vocabulary: every value here is the word one of the\nrecords uses, except `not_started`, which is what no records at all means, and\n`in_conflict`, which is not a record condition but the presence of an unresolved\nconflict reference among them.",
         "enum": [
           "not_started",
           "received",
           "unofficial",
-          "incomplete",
-          "pending_generation",
-          "inconsistent"
+          "invalid",
+          "pending",
+          "unavailable",
+          "in_conflict"
         ],
         "title": "EvidenceState",
         "type": "string"
       },
       "EvidenceStatus": {
+        "description": "The business condition of one piece of material, and nothing about its upload.\n\nEvery value answers \"what is the state of the thing itself\", so that a projection\nreading this alone can tell a claimant or a staff member something true. Where the\nmaterial is in its journey from a browser to storage is `EvidenceFileStatus`, and the\ntwo vocabularies deliberately no longer overlap.\n\n`disputed` is not here. A conflict is not an alternative to having been received: a\nmaterial can be received, readable, and contested at the same time, and a status can\nonly say one of those. Conflict is carried by `EvidenceRecord.references`, which can\nalso say what the conflict is with, whether anyone has resolved it, and when.",
         "enum": [
+          "missing",
+          "pending",
           "received",
           "unofficial",
-          "incomplete",
-          "pending_generation",
-          "inconsistent"
+          "invalid",
+          "unavailable",
+          "superseded",
+          "expired"
         ],
         "title": "EvidenceStatus",
         "type": "string"
@@ -5945,6 +6048,14 @@
               }
             ],
             "title": "Original Filename"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "maxItems": 50,
+            "title": "References",
+            "type": "array"
           },
           "related_fields": {
             "items": {

@@ -27,7 +27,7 @@
       "entry_baseline": {
         "workflow_state": "professional_review",
         "next_action": "HANDOFF",
-        "evidence_state": "inconsistent",
+        "evidence_state": "in_conflict",
         "customer_next_step_status": "professional_review_queued",
         "responsible_party": "claims_professional",
         "handoff": {
@@ -112,7 +112,7 @@
       "entry_baseline": {
         "workflow_state": "ready_for_next",
         "next_action": "PROCEED",
-        "evidence_state": "pending_generation",
+        "evidence_state": "pending",
         "customer_next_step_status": "continue_current_report",
         "responsible_party": "claimant",
         "handoff": null

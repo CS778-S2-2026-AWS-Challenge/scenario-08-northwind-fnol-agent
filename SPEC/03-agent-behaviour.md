@@ -94,7 +94,7 @@ The Agent considers:
 - **Human support:** respect the need behind a request and do not repeatedly resist
   transfer. Repeated requests, urgency, distress, or accessibility needs transfer
   immediately.
-- **Pending evidence:** record missing, unofficial, incomplete, or not-yet-generated
+- **Pending evidence:** record missing, unofficial, invalid, or not-yet-generated
   evidence while progressing unrelated safe work.
 - **Resume:** restore shared claim state, unresolved work, and prior commitments without
   restarting.

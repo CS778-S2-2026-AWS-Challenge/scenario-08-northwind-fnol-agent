@@ -1031,7 +1031,7 @@ def _pending_evidence_for_proposal(
         evidence_id=new_id('evd'),
         claim_id=claim_id,
         kind=str(pending.get('kind') or 'document'),
-        status=EvidenceStatus.PENDING_GENERATION,
+        status=EvidenceStatus.PENDING,
         file_status=EvidenceFileStatus.NOT_AVAILABLE,
         source=EvidenceSource.CLAIMANT,
         related_fields=['authorities.police_report_reference'],
@@ -1797,7 +1797,7 @@ def submit_message(
                             else {}
                         ),
                         **(
-                            {'evidence': EvidenceState.PENDING_GENERATION}
+                            {'evidence': EvidenceState.PENDING}
                             if pending_evidence is not None
                             else {}
                         ),

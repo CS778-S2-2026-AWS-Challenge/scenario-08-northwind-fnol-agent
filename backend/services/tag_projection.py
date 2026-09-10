@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from backend.domain.evidence import is_in_conflict
 from backend.domain.models import (
     AgentAction,
     AssessorRoutingStatus,
@@ -46,8 +47,9 @@ _PENDING_FILE_STATES = {
     EvidenceFileStatus.PROCESSING,
 }
 _PENDING_EVIDENCE_STATES = {
-    EvidenceStatus.PENDING_GENERATION,
-    EvidenceStatus.INCOMPLETE,
+    EvidenceStatus.PENDING,
+    EvidenceStatus.MISSING,
+    EvidenceStatus.INVALID,
     EvidenceStatus.UNOFFICIAL,
 }
 _CLOSED_HANDOFF_STATES = {HandoffStatus.RESOLVED, HandoffStatus.CANCELLED}
@@ -478,7 +480,7 @@ def _project_evidence(evidence: Sequence[EvidenceRecord], add: _TagAdder) -> Non
                 activated_at=item.created_at,
             )
     for item in evidence:
-        if item.kind == 'police_report' and item.status is EvidenceStatus.PENDING_GENERATION:
+        if item.kind == 'police_report' and item.status is EvidenceStatus.PENDING:
             add_tag(
                 'evidence.police_report_pending',
                 basis=TagBasis.VERIFIED,
@@ -646,10 +648,10 @@ def _project_attention(
             activated_at=claim.updated_at,
         )
 
-    inconsistent = [item for item in evidence if item.status is EvidenceStatus.INCONSISTENT]
-    if inconsistent:
-        refs = [f'evidence:{item.evidence_id}' for item in inconsistent]
-        activated_at = max(item.updated_at for item in inconsistent)
+    conflicted = [item for item in evidence if is_in_conflict(item.references)]
+    if conflicted:
+        refs = [f'evidence:{item.evidence_id}' for item in conflicted]
+        activated_at = max(item.updated_at for item in conflicted)
         add_tag(
             'evidence.source_conflict',
             basis=TagBasis.VERIFIED,
