@@ -550,7 +550,7 @@ def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_
         assert workbench_claim.status_code == 200, workbench_claim.text
         assert workbench_claim.json()['claim_id'] == claim_id
         assert workbench_claim.json()['revision'] == 3
-        assert workbench_claim.json()['work_summary']['queue_key'] == 'claimant_support'
+        assert workbench_claim.json()['work_summary']['queue_key'] == 'processing'
         assert workbench_claim.json()['customer_next_step']['status']
         executed_claim = repository.get_claim_internal(claim_id)
         assert executed_claim is not None
