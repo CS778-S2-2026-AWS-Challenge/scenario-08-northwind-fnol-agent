@@ -153,7 +153,7 @@ def test_pending_evidence_is_a_cross_workflow_staff_view_with_responsibility_con
 
     assert response.status_code == 200
     item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['work_summary']['queue_key'] == 'ready_to_progress'
+    assert item['work_summary']['queue_key'] == 'processing'
     assert item['workflow_state'] == 'ready_for_next'
     missing = [
         value
@@ -202,7 +202,7 @@ def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None
 
     assert listing.status_code == 200
     item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
-    assert item['work_summary']['queue_key'] == 'created_routed'
+    assert item['work_summary']['queue_key'] == 'processing'
     assert item['integration_summary']['claim_creation_status'] == 'created'
     assert item['integration_summary']['assessor_routing_status'] == 'queued'
 

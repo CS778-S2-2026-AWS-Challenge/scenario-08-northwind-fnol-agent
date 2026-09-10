@@ -14,9 +14,13 @@ const tag = {
 
 const filterMetadata = {
   views: [
-    { value: 'all', label: 'All active work' },
-    { value: 'urgent', label: 'Urgent' },
-    { value: 'incomplete_claims', label: 'Incomplete claims' },
+    { value: 'all', label: 'All active work', group: 'overview' },
+    { value: 'processing', label: 'Processing', group: 'active' },
+    { value: 'waiting_user', label: 'Waiting for claimant', group: 'active' },
+    { value: 'waiting_material', label: 'Waiting for material', group: 'active' },
+    { value: 'waiting_third_party', label: 'Waiting for third party', group: 'active' },
+    { value: 'urgent', label: 'Urgent', group: 'operational' },
+    { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
   ],
   workflow_states: [
     { value: 'collecting', label: 'Collecting' },
@@ -30,6 +34,15 @@ const filterMetadata = {
   tag_registry_version: '0.3',
 }
 
+const viewCounts = {
+  status: 'available',
+  items: filterMetadata.views.map((option) => ({
+    view: option.value,
+    count: option.value === 'all' || option.value === 'processing' ? 1 : 0,
+  })),
+  limitation: null,
+}
+
 const claim = {
   claim_id: 'clm_1',
   display_reference: 'NW-1042',
@@ -39,7 +52,7 @@ const claim = {
   workflow_state: 'collecting',
   ownership: { state: 'unassigned', current_staff_access: 'read_only' },
   priority_projection: { level: 'standard' },
-  work_summary: { queue_key: 'incomplete', current_work_item: null },
+  work_summary: { queue_key: 'processing', current_work_item: null },
   updated_at: '2026-09-03T01:00:00Z',
   tags: [tag],
 }
@@ -52,6 +65,7 @@ function renderQueue(overrides = {}) {
     onRetry: vi.fn(),
     selectedId: null,
     filterMetadata,
+    viewCounts,
     view: 'all',
     onView: vi.fn(),
     workflowState: '',
@@ -62,6 +76,7 @@ function renderQueue(overrides = {}) {
     onTag: vi.fn(),
     search: '',
     onSearch: vi.fn(),
+    additionalFiltersActive: false,
     onClearFilters: vi.fn(),
     nextCursor: null,
     onLoadMore: vi.fn(),
@@ -91,8 +106,20 @@ describe('QueuePanel', () => {
 
     await user.selectOptions(screen.getByLabelText('Current work'), 'incomplete_claims')
 
-    expect(screen.getByRole('option', { name: 'Incomplete claims' })).toHaveValue('incomplete_claims')
+    expect(screen.getByRole('option', { name: 'Incomplete claims (0)' })).toHaveValue('incomplete_claims')
     expect(onView).toHaveBeenCalledWith('incomplete_claims')
+  })
+
+  it('renders server-published queue groups and authoritative counts', () => {
+    renderQueue()
+
+    expect(screen.getByRole('group', { name: 'Active' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Operational' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Processing (1)' })).toHaveValue('processing')
+    expect(screen.getByRole('option', { name: 'Waiting for third party (0)' })).toHaveValue(
+      'waiting_third_party',
+    )
+    expect(screen.getByText('1 total')).toBeInTheDocument()
   })
 
   it('exposes supported status and priority filters and visible queue values', async () => {
@@ -131,14 +158,37 @@ describe('QueuePanel', () => {
     expect(onClearFilters).toHaveBeenCalledOnce()
   })
 
-  it('keeps queue navigation available when the current view has no claims', () => {
-    renderQueue({ claims: [] })
+  it('hides irrelevant filters only when the authoritative all count is zero', () => {
+    renderQueue({
+      claims: [],
+      viewCounts: {
+        status: 'available',
+        items: viewCounts.items.map((item) => ({ ...item, count: 0 })),
+        limitation: null,
+      },
+    })
 
-    expect(screen.getByText('No claims are currently in this queue.')).toBeInTheDocument()
+    expect(screen.getByText('No claims currently need active work.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Current work')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Search claims')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Claim status')).not.toBeInTheDocument()
+  })
+
+  it('keeps controls visible when non-view filters produce an empty all count', () => {
+    renderQueue({
+      claims: [],
+      search: 'NW-4040',
+      viewCounts: {
+        status: 'available',
+        items: viewCounts.items.map((item) => ({ ...item, count: 0 })),
+        limitation: null,
+      },
+    })
+
+    expect(screen.getByText('No claims match the current filters.')).toBeInTheDocument()
     expect(screen.getByLabelText('Current work')).toBeInTheDocument()
     expect(screen.getByLabelText('Search claims')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('Claim status')).not.toBeInTheDocument()
   })
 
   it('uses an accessible disclosure for secondary filters', async () => {
@@ -162,10 +212,24 @@ describe('QueuePanel', () => {
     expect(onLoadMore).toHaveBeenCalledOnce()
   })
 
-  it('labels the visible count as loaded when more filtered results are available', () => {
+  it('never substitutes the loaded page size for the authoritative total', () => {
     renderQueue({ priority: 'high', nextCursor: 'cursor-2' })
 
-    expect(screen.getByText('1 loaded')).toBeInTheDocument()
+    expect(screen.getByText('1 total')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Load more Claims' })).toBeInTheDocument()
+  })
+
+  it('labels unavailable totals without replacing them with zero', () => {
+    renderQueue({
+      viewCounts: {
+        status: 'unavailable',
+        items: [],
+        limitation: 'Queue totals are temporarily unavailable.',
+      },
+    })
+
+    expect(screen.getByText('Total unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('0 total')).not.toBeInTheDocument()
+    expect(screen.getByText('NW-1042')).toBeInTheDocument()
   })
 })

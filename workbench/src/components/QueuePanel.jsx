@@ -3,12 +3,24 @@ import { useEffect, useRef, useState } from 'react'
 import { formatDateTime, words } from '../format.js'
 import { TagList } from './TagList.jsx'
 
-export default function QueuePanel({ claims, loading, error, onRetry, selectedId, filterMetadata, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, onClearFilters, nextCursor, onLoadMore, onOpen }) {
+export default function QueuePanel({ claims, loading, error, onRetry, selectedId, filterMetadata, viewCounts, view, onView, workflowState, onWorkflowState, priority, onPriority, tagFilter, onTag, search, onSearch, additionalFiltersActive, onClearFilters, nextCursor, onLoadMore, onOpen }) {
   const hasSecondaryFilters = Boolean(workflowState || priority || tagFilter)
   const [filtersOpen, setFiltersOpen] = useState(hasSecondaryFilters)
   const searchInput = useRef(null)
   const searchTimer = useRef(null)
-  const hasActiveFilters = view !== 'all' || hasSecondaryFilters || search
+  const hasActiveFilters = view !== 'all' || hasSecondaryFilters || search || additionalFiltersActive
+  const countByView = new Map(
+    viewCounts?.status === 'available'
+      ? viewCounts.items.map((item) => [item.view, item.count])
+      : [],
+  )
+  const selectedCount = countByView.get(view)
+  const allCount = countByView.get('all')
+  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && allCount === 0
+  const countLabel = selectedCount === undefined
+    ? 'Total unavailable'
+    : `${selectedCount} total${error ? ' · stale' : loading ? ' · updating' : ''}`
+  const viewGroups = groupViews(filterMetadata.views)
 
   useEffect(() => {
     window.clearTimeout(searchTimer.current)
@@ -35,13 +47,21 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
           <p className="eyebrow">My work</p>
           <h2>Claim queue</h2>
         </div>
-        <span className="queue-count">{claims.length} loaded</span>
+        <span className="queue-count">{countLabel}</span>
       </header>
-      <>
+      {!trulyEmpty && <>
         <label className="queue-work-view">
           <span>Current work</span>
           <select value={view} onChange={(event) => onView(event.target.value)}>
-            {filterMetadata.views.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+            {viewGroups.map(({ group, options }) => (
+              <optgroup label={words(group)} key={group}>
+                {options.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}{countByView.has(option.value) ? ` (${countByView.get(option.value)})` : ''}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         </label>
         <label className="search-field">
@@ -79,7 +99,7 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             <label><span className="sr-only">Staff tag</span><select value={tagFilter} onChange={(event) => onTag(event.target.value)}><option value="">All classifications</option>{filterMetadata.tags.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
           </div>}
         </div>
-      </>
+      </>}
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
         {loading && <p className="queue-state" role="status">{claims.length ? 'Updating current work...' : 'Loading current work...'}</p>}
         {!loading && error && (
@@ -95,7 +115,11 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
         {!loading && !error && !claims.length && (
           <div className="queue-state">
             <Inbox size={20} aria-hidden="true" />
-            <p>{hasActiveFilters ? 'No claims match the current filters.' : 'No claims are currently in this queue.'}</p>
+            <p>{trulyEmpty
+              ? 'No claims currently need active work.'
+              : hasActiveFilters
+                ? 'No claims match the current filters.'
+                : 'No claims are currently in this queue.'}</p>
             {hasActiveFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
           </div>
         )}
@@ -129,6 +153,16 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
       </div>
     </aside>
   )
+}
+
+function groupViews(views) {
+  const groups = []
+  for (const option of views) {
+    const existing = groups.find((entry) => entry.group === option.group)
+    if (existing) existing.options.push(option)
+    else groups.push({ group: option.group, options: [option] })
+  }
+  return groups
 }
 
 function ownershipLabel(ownership) {

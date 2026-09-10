@@ -46,6 +46,13 @@ from backend.domain.models import (
 )
 from backend.domain.retrieval import RetrievalSource
 from backend.domain.staff_identity import StaffPresenceUpdate
+from backend.domain.workbench import (
+    ClaimLifecycleState,
+    MissingInformationAttention,
+    WorkbenchGapStatus,
+    WorkbenchMissingInformation,
+    WorkbenchResponsibility,
+)
 from backend.repositories.fixture import FixtureRepository
 from backend.services.staff_access import (
     ClaimStaffAccess,
@@ -54,7 +61,7 @@ from backend.services.staff_access import (
 )
 from backend.services.staff_presence import list_online_staff, read_presence, update_presence
 from backend.services.support import now_utc
-from backend.services.workbench import _external_lifecycle
+from backend.services.workbench import _active_queue_key, _external_lifecycle
 
 
 def test_public_claim_and_workbench_detail_use_role_safe_contents_projection(
@@ -925,7 +932,7 @@ def test_staff_lists_claims_for_workbench_queue(
     assert payload['page'] == {'next_cursor': None}
     item = next(item for item in payload['items'] if item['claim_id'] == claim_id)
     assert item['claimant']['customer_id'] == 'cus_demo'
-    assert item['work_summary']['queue_key'] == 'professional_review'
+    assert item['work_summary']['queue_key'] == 'processing'
     assert item['priority_projection']['level'] == 'standard'
     assert item['work_summary']['primary_action_code'] is None
     assert item['work_summary']['primary_action_target_ref'] is None
@@ -1012,6 +1019,268 @@ def test_workbench_filter_metadata_and_query_include_routine_priority(
     assert filtered.json()['items'][0]['priority_projection']['level'] == 'routine'
 
 
+def test_workbench_publishes_grouped_active_views_before_operational_views(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.get(
+        '/api/v1/workbench/claims/filter-metadata',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    views = response.json()['views']
+    assert views[:5] == [
+        {'value': 'all', 'label': 'All active work', 'group': 'overview'},
+        {'value': 'processing', 'label': 'Processing', 'group': 'active'},
+        {'value': 'waiting_user', 'label': 'Waiting for claimant', 'group': 'active'},
+        {'value': 'waiting_material', 'label': 'Waiting for material', 'group': 'active'},
+        {
+            'value': 'waiting_third_party',
+            'label': 'Waiting for third party',
+            'group': 'active',
+        },
+    ]
+    assert all(view['group'] == 'operational' for view in views[5:])
+
+
+def test_active_queue_mapping_applies_wait_precedence_without_operational_keys() -> None:
+    required_material = WorkbenchMissingInformation(
+        kind='evidence',
+        code='repair_quote',
+        label='Repair quote',
+        status=WorkbenchGapStatus.PENDING,
+        attention=MissingInformationAttention.REQUIRED_NOW,
+        responsible_party=WorkbenchResponsibility.CLAIMANT,
+    )
+
+    assert _active_queue_key(ClaimLifecycleState.WAITING_EXTERNAL, [required_material]).value == (
+        'waiting_third_party'
+    )
+    assert _active_queue_key(ClaimLifecycleState.WAITING_CUSTOMER, [required_material]).value == (
+        'waiting_material'
+    )
+    assert _active_queue_key(ClaimLifecycleState.WAITING_CUSTOMER, []).value == 'waiting_user'
+    for lifecycle in (
+        ClaimLifecycleState.DRAFT_ACTIVE,
+        ClaimLifecycleState.STAFF_SUPPORT,
+        ClaimLifecycleState.PROFESSIONAL_REVIEW,
+        ClaimLifecycleState.READY_TO_CREATE,
+        ClaimLifecycleState.CREATING,
+        ClaimLifecycleState.CREATED,
+    ):
+        assert _active_queue_key(lifecycle, []).value == 'processing'
+    with pytest.raises(RuntimeError, match='has no active Workbench queue'):
+        _active_queue_key(ClaimLifecycleState.WITHDRAWN, [])
+
+
+def test_workbench_active_views_and_counts_share_filtered_authorised_projection(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_ids = []
+    for suffix in ('processing', 'user', 'material', 'third-party'):
+        created = client.post(
+            '/api/v1/claims',
+            headers={**auth_headers, 'Idempotency-Key': f'active-queue-{suffix}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_ids.append(created.json()['claim']['claim_id'])
+
+    for claim_id in claim_ids[1:]:
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        repository._claims[claim_id] = claim.model_copy(
+            update={
+                'claim_state': claim.claim_state.model_copy(
+                    update={'workflow_state': WorkflowState.AWAITING_EVIDENCE}
+                )
+            }
+        )
+
+    for index, needed_for in ((2, 'current_action'), (3, 'later_action')):
+        claim = repository.get_claim_internal(claim_ids[index])
+        assert claim is not None
+        evidence = client.post(
+            f'/api/v1/claims/{claim.claim_id}/evidence',
+            headers={
+                **auth_headers,
+                'Idempotency-Key': f'active-queue-evidence-{index}',
+                'If-Match': str(claim.revision),
+            },
+            json={
+                'kind': 'repair_quote',
+                'status': 'pending',
+                'related_fields': [],
+                'needed_for': [needed_for],
+                'claimant_note': 'Synthetic queue material.',
+            },
+        )
+        assert evidence.status_code == 201
+        if index == 3:
+            evidence_id = evidence.json()['evidence']['evidence_id']
+            stored_evidence = repository.get_evidence(claim.claim_id, evidence_id, 'cus_demo')
+            assert stored_evidence is not None
+            repository.save_evidence(
+                stored_evidence.model_copy(
+                    update={'responsible_party': ResponsibleParty.EXTERNAL_PARTY}
+                ),
+                'cus_demo',
+            )
+
+    response = client.get(
+        '/api/v1/workbench/claims?view=waiting_material&limit=1',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item['claim_id'] for item in payload['items']] == [claim_ids[2]]
+    counts = {item['view']: item['count'] for item in payload['view_counts']['items']}
+    metadata = client.get(
+        '/api/v1/workbench/claims/filter-metadata', headers=staff_auth_headers
+    ).json()
+    assert payload['view_counts']['status'] == 'available'
+    assert [item['view'] for item in payload['view_counts']['items']] == [
+        item['value'] for item in metadata['views']
+    ]
+    assert counts['all'] == 4
+    assert counts['processing'] == 1
+    assert counts['waiting_user'] == 1
+    assert counts['waiting_material'] == 1
+    assert counts['waiting_third_party'] == 1
+
+
+def test_workbench_operational_views_overlap_one_active_queue(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, _, _ = _request_staff_support(
+        client,
+        auth_headers,
+        repository,
+        key_suffix='active-operational-overlap',
+    )
+
+    response = client.get(
+        '/api/v1/workbench/claims?view=human_requests',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 200
+    item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
+    counts = {entry['view']: entry['count'] for entry in response.json()['view_counts']['items']}
+    assert item['work_summary']['queue_key'] == 'processing'
+    assert counts['processing'] == 1
+    assert counts['human_requests'] == 1
+
+
+def test_workbench_filters_counts_by_assignee_next_action_and_update_window(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_ids = []
+    for index in range(2):
+        created = client.post(
+            '/api/v1/claims',
+            headers={**auth_headers, 'Idempotency-Key': f'queue-contract-filter-{index}'},
+            json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+        )
+        assert created.status_code == 201
+        claim_ids.append(created.json()['claim']['claim_id'])
+
+    early = datetime(2026, 9, 9, 10, tzinfo=UTC)
+    late = datetime(2026, 9, 9, 12, tzinfo=UTC)
+    for claim_id, updated_at, assignee_id, next_action in (
+        (claim_ids[0], early, 'stf_demo', AgentAction.ASK),
+        (claim_ids[1], late, None, AgentAction.PROCEED),
+    ):
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+        repository._claims[claim_id] = claim.model_copy(
+            update={
+                'assignee_id': assignee_id,
+                'updated_at': updated_at,
+                'claim_state': claim.claim_state.model_copy(update={'next_action': next_action}),
+            }
+        )
+
+    response = client.get(
+        '/api/v1/workbench/claims',
+        headers=staff_auth_headers,
+        params={
+            'workflow_state': 'collecting',
+            'priority': 'routine',
+            'assignee_id': 'unassigned',
+            'next_action': 'PROCEED',
+            'search': claim_ids[1],
+            'updated_after': '2026-09-09T11:00:00Z',
+            'updated_before': '2026-09-09T13:00:00Z',
+        },
+    )
+
+    assert response.status_code == 200
+    assert [item['claim_id'] for item in response.json()['items']] == [claim_ids[1]]
+    counts = {item['view']: item['count'] for item in response.json()['view_counts']['items']}
+    assert counts['all'] == counts['processing'] == 1
+
+    missing_timezone = client.get(
+        '/api/v1/workbench/claims?updated_before=2026-09-09T13:00:00',
+        headers=staff_auth_headers,
+    )
+    assert missing_timezone.status_code == 422
+    assert missing_timezone.json()['error']['details'][0]['field'] == 'updated_before'
+
+
+def test_workbench_preserves_rows_when_view_counts_are_unavailable(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    staff_auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={**auth_headers, 'Idempotency-Key': 'unavailable-view-counts'},
+        json={'channel': 'web_agent', 'locale': 'en-NZ', 'incident_type': 'motor'},
+    )
+    assert created.status_code == 201
+
+    def unavailable(*_: object) -> None:
+        raise RuntimeError('count projection unavailable')
+
+    monkeypatch.setattr('backend.services.workbench._calculate_view_counts', unavailable)
+    response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()['items']
+    assert response.json()['view_counts'] == {
+        'status': 'unavailable',
+        'items': [],
+        'limitation': 'Queue totals are temporarily unavailable.',
+    }
+
+
+def test_workbench_rejects_unpublished_view_without_falling_back_to_all(
+    client: TestClient,
+    staff_auth_headers: dict[str, str],
+) -> None:
+    response = client.get(
+        '/api/v1/workbench/claims?view=retired_queue',
+        headers=staff_auth_headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()['error']['code'] == 'VALIDATION_ERROR'
+    assert response.json()['error']['details'][0]['field'] == 'query.view'
+
+
 def test_created_claim_route_does_not_override_workbench_queue(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -1039,7 +1308,7 @@ def test_created_claim_route_does_not_override_workbench_queue(
 
     assert response.status_code == 200
     item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['work_summary']['queue_key'] == 'created_routed'
+    assert item['work_summary']['queue_key'] == 'processing'
     assert item['lifecycle_state'] == 'created'
 
 
