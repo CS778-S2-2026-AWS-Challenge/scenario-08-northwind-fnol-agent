@@ -120,15 +120,28 @@ def test_validation_seed_creates_three_cross_role_graphs() -> None:
                 f'/api/v1/workbench/claims/{claim_id}/evidence', headers=STAFF_AUTH
             )
             assert len(messages.json()['items']) == 4
-            assert len(evidence.json()['items']) == 1
-            assert {item['evidence_id'] for item in claimant_evidence.json()['items']} == {
-                evidence.json()['items'][0]['evidence_id']
-            }
-            assert messages.json()['items'][-1]['evidence_refs'] == [
-                evidence.json()['items'][0]['evidence_id']
+            # The seed carries two kinds of evidence now. This one is the synthetic
+            # cross-role reference this seed creates; the rest are the produced
+            # demonstration materials attached by `associate_materials`, which is what
+            # gives the claim something real to project.
+            synthetic = [
+                item for item in evidence.json()['items'] if item['kind'] == 'claimant_attachment'
             ]
-            assert staff_claim.json()['claim_state']['evidence'] == 'unofficial'
-            assert staff_claim.json()['section_summaries']['evidence']['needs_attention'] == 1
+            assert len(synthetic) == 1
+            assert synthetic[0]['status'] == 'unofficial'
+            assert messages.json()['items'][-1]['evidence_refs'] == [synthetic[0]['evidence_id']]
+            # The claimant sees their own material and the synthetic reference, never the
+            # assessor and authority documents, which stay staff-only by source.
+            claimant_ids = {item['evidence_id'] for item in claimant_evidence.json()['items']}
+            assert synthetic[0]['evidence_id'] in claimant_ids
+            assert claimant_ids < {item['evidence_id'] for item in evidence.json()['items']}
+            # Derived from the records rather than asserted: a claim holding a contested
+            # material is in conflict, and one holding an unusable file is invalid.
+            assert staff_claim.json()['claim_state']['evidence'] in {
+                'in_conflict',
+                'invalid',
+            }
+            assert staff_claim.json()['section_summaries']['evidence']['needs_attention'] >= 1
 
         contents_id = body['claim_ids'][2]
         contents = client.get(f'/api/v1/claims/{contents_id}', headers=CLAIMANT_AUTH).json()
@@ -284,8 +297,20 @@ def test_validation_seed_uses_the_same_graph_boundary_for_mongodb() -> None:
 
     assert response.status_code == 200
     assert len(repository.list_claims_internal()) == 3
+    # One synthetic cross-role reference per claim, plus that family's produced materials.
     assert all(
-        len(repository.list_evidence(claim.claim_id, claim.customer_id)) == 1
+        len(
+            [
+                record
+                for record in repository.list_evidence(claim.claim_id, claim.customer_id)
+                if record.kind == 'claimant_attachment'
+            ]
+        )
+        == 1
+        for claim in repository.list_claims_internal()
+    )
+    assert all(
+        len(repository.list_evidence(claim.claim_id, claim.customer_id)) > 1
         for claim in repository.list_claims_internal()
     )
 
