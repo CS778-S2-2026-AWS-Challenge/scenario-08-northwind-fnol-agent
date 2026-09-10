@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from types import MappingProxyType
 
 from backend.adapters.evidence_storage import (
@@ -24,6 +25,7 @@ from backend.domain.knowledge import KnowledgeDocumentStore, KnowledgeRetriever
 from backend.repositories.fixture import FixtureRepository
 from backend.repositories.mongodb import MongoDBConnectionConfig, connect_mongodb_repository
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.knowledge_ingestion import KnowledgeIngestionService
 from backend.services.knowledge_manifest import load_approved_sources
 
 
@@ -154,6 +156,28 @@ _START_CAPABLE_CONNECTION_STATES = frozenset(
     }
 )
 
+_KNOWLEDGE_CORPUS_DIRECTORY = (
+    Path(__file__).resolve().parents[2] / 'config' / 'knowledge-source-corpus'
+)
+
+
+def _build_fixture_knowledge_documents() -> FixtureKnowledgeDocumentStore:
+    """Build the fixture knowledge store from the approved synthetic corpus."""
+
+    sources = load_approved_sources()
+    store = FixtureKnowledgeDocumentStore()
+    ingestion = KnowledgeIngestionService(store, sources)
+    for source in sources.values():
+        corpus_path = _KNOWLEDGE_CORPUS_DIRECTORY / Path(source.source_key).name
+        store.write(
+            source.source_key,
+            corpus_path.read_bytes(),
+            content_type='text/markdown',
+            metadata={'document-id': source.document_id, 'version': source.version},
+        )
+        ingestion.ingest(source)
+    return store
+
 
 def _require_start_capable_bundle(bundle: DataRuntimeBundle) -> DataRuntimeBundle:
     """Refuse a configured bundle when any selected provider is unavailable.
@@ -210,7 +234,7 @@ def build_data_runtime_bundle(settings: Settings) -> DataRuntimeBundle:
     """Build exactly one profile; unsupported profiles fail instead of mixing adapters."""
 
     if settings.data_runtime_profile is DataRuntimeProfile.FIXTURE:
-        knowledge_documents = FixtureKnowledgeDocumentStore()
+        knowledge_documents = _build_fixture_knowledge_documents()
         evidence_storage: EvidenceStorage
         if settings.object_storage_adapter is ObjectStorageAdapter.S3_COMPATIBLE:
             evidence_storage = MinioEvidenceStorage(

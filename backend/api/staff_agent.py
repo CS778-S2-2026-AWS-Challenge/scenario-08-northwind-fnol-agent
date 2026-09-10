@@ -16,6 +16,7 @@ from backend.domain.staff_agent import (
     StaffAgentTurnResponse,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_profiles import model_catalog, select_model_profile
 from backend.services.staff_agent import (
     StaffAgentTurnProvider,
@@ -52,6 +53,25 @@ def retriever_for(request: Request) -> KnowledgeRetriever:
 
 def provider_for(request: Request) -> StaffAgentTurnProvider | None:
     return cast(StaffAgentTurnProvider | None, request.app.state.staff_agent_turn_provider)
+
+
+def knowledge_version_for(request: Request, product: str) -> str | None:
+    """Resolve the active approved knowledge version for one product family.
+
+    Args:
+        request: FastAPI request carrying the runtime configuration resolver.
+        product: Canonical product family to resolve.
+
+    Returns:
+        The selected version or the fixture manifest version.
+
+    Raises:
+        RuntimeConfigurationResolutionError: If an active release cannot provide
+            a version for the requested product.
+    """
+
+    selected = request.app.state.runtime_configuration_resolver.resolve_knowledge(product)
+    return selected.version if selected is not None else approved_version_for_product(product)
 
 
 @router.post(
@@ -138,4 +158,5 @@ def create_message(
         principal,
         session_id,
         payload,
+        knowledge_version_for=lambda product: knowledge_version_for(request, product),
     )

@@ -376,7 +376,7 @@ def test_staff_agent_context_includes_claim_operational_records_and_limitations(
             headers=STAFF_HEADERS,
             json={
                 'client_message_id': 'context-question',
-                'content': 'Summarise the current Claim context and any operational blockers.',
+                'content': 'The base excess',
                 'claim_ids': [claim_id],
             },
         )
@@ -399,6 +399,12 @@ def test_staff_agent_context_includes_claim_operational_records_and_limitations(
         'context_limitations',
     } <= set(claim_context)
     assert context.references == ()
+    assert context.knowledge_status == 'evidence_found'
+    assert context.knowledge[0]['document_id'] == 'nw-policy-motor-standard-mvp-2026-1'
+    assert context.knowledge[0]['chunk_id'].endswith('#MTR-EXC-01')
+    assert context.knowledge[0]['checksum'] == (
+        'a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989'
+    )
     assert context.review_signals == ()
     assert context.handoffs == ()
     assert context.staff_actions == ()
