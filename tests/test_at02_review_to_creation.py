@@ -191,6 +191,53 @@ def test_the_coverage_question_is_not_confirmed_away() -> None:
     assert claim.claim_state.coverage.value == 'ambiguous'
 
 
+def test_the_handoff_packet_is_a_snapshot_of_the_whole_claim_form() -> None:
+    """Staff receive what the claim holds, not a subset frozen before it was filled in.
+
+    `handoffs.py` snapshots `claim.form` entire, so a fixture whose packet carries fewer
+    fields than its claim describes a handoff the code could not have produced — and the
+    staff member reviewing it would be deciding on a partial record without being told.
+    Adding confirmed facts without syncing the packet is exactly how that happens.
+    """
+
+    scenario = load_scenario(SCENARIO_PATH)
+    packet = scenario.handoffs[0].packet
+
+    assert set(packet.form_snapshot) == set(scenario.claim.form)
+    for code, field in scenario.claim.form.items():
+        assert packet.form_snapshot[code].value == field.value, code
+        assert packet.form_snapshot[code].status == field.status, code
+        assert packet.form_snapshot[code].source_refs == field.source_refs, code
+
+
+def test_the_packet_cites_every_record_its_fields_cite() -> None:
+    """`source_refs` is the union of the fields' own references, plus the retrievals.
+
+    The two claimant turns that carry the new facts have to appear here, or the packet
+    points staff at provenance it does not include.
+    """
+
+    scenario = load_scenario(SCENARIO_PATH)
+    packet = scenario.handoffs[0].packet
+    field_refs = {ref for field in scenario.claim.form.values() for ref in field.source_refs}
+
+    assert field_refs <= set(packet.source_refs)
+    assert {'msg_at02_claimant_2', 'msg_at02_claimant_3'} <= set(packet.source_refs)
+
+
+def test_the_acceptance_metadata_matches_the_fixture_it_describes() -> None:
+    """`expected` is read by humans, so a stale value is a false statement about the fixture."""
+
+    scenario = load_scenario(SCENARIO_PATH)
+    confirmed = sorted(
+        code for code, field in scenario.claim.form.items() if field.status.value == 'confirmed'
+    )
+
+    assert sorted(scenario.expected['confirmed_fields']) == confirmed
+    # Renamed when the evidence condition and file lifecycle were separated.
+    assert scenario.expected['evidence_state'] == scenario.claim.claim_state.evidence.value
+
+
 def test_creation_is_refused_while_the_professional_review_is_open(
     client: TestClient,
 ) -> None:
