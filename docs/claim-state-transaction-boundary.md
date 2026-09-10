@@ -283,3 +283,18 @@ The #237 implementation is complete when another contributor can repeat tests pr
 
 A green provider-specific happy-path test alone is insufficient. The acceptance result
 must include failure atomicity and cross-record mismatch cases.
+
+## P17.1 Recovery Follow-up Clarification
+
+The pause/checkpoint mutation binds its idempotency request fingerprint to the accepted Claim
+revision and persists one open recovery Follow-up per Claim and purpose. The Follow-up carries its
+purpose, source references, channel/due metadata, attempt count, and explicit contact-permission
+condition; a browser-anonymous claimant without an authorised durable channel is `blocked`, not
+scheduled.
+
+Activating a new claimant Session for a Claim with an open `resume_incomplete_claim` Follow-up
+must resolve that Follow-up in the same provider-neutral mutation. A resolved historical record no
+longer makes the Claim incomplete and does not prevent a later interruption from creating a new
+open record for the same purpose. Workbench incomplete state is therefore a projection of the
+Claim active-session pointer plus persisted paused recovery and open Follow-up records, never a
+status inferred from `WorkflowState.COLLECTING` alone.

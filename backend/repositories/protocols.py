@@ -160,8 +160,9 @@ class ClaimRepository(Protocol):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
     ) -> None:
-        """Atomically persist a resumed session, claim revision, and retry metadata."""
+        """Atomically activate a session and resolve recovery work when supplied."""
         raise NotImplementedError
 
     def get_follow_up(

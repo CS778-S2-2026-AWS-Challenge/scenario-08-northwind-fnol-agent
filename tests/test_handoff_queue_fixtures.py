@@ -150,7 +150,6 @@ def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> Non
 @pytest.mark.parametrize(
     ('view', 'scenario_id'),
     [
-        ('incomplete_claims', 'AT-08-resume'),
         ('ready_to_progress', 'AT-01-clear-motor'),
         ('awaiting_evidence', 'AT-06-pending-evidence'),
         ('professional_review', 'AT-02-coverage-ambiguity'),
@@ -174,7 +173,7 @@ def test_staff_queue_views_use_authoritative_projected_work(
     assert [item['claim_id'] for item in response.json()['items']] == [claim_id]
 
 
-def test_incomplete_claims_view_and_metadata_describe_collecting_work() -> None:
+def test_active_resumed_claim_is_not_classified_as_incomplete() -> None:
     repository, claim_id = _load('AT-08-resume')
     headers = {'Authorization': 'Bearer synthetic-staff'}
 
@@ -187,9 +186,7 @@ def test_incomplete_claims_view_and_metadata_describe_collecting_work() -> None:
         )
 
     assert {'value': 'incomplete_claims', 'label': 'Incomplete claims'} in metadata.json()['views']
-    assert [item['claim_id'] for item in response.json()['items']] == [claim_id]
-    assert response.json()['items'][0]['workflow_state'] == 'collecting'
-    assert response.json()['items'][0]['work_summary']['queue_key'] == 'incomplete_claims'
+    assert claim_id not in [item['claim_id'] for item in response.json()['items']]
 
 
 def test_staff_queue_filters_by_status_priority_and_combined_state() -> None:

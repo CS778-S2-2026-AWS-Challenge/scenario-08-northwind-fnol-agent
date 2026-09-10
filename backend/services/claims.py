@@ -28,6 +28,7 @@ from backend.domain.models import (
     CreateClaimResponse,
     CustomerNextStep,
     FieldSelectionState,
+    FollowUpContactPermission,
     FollowUpRecord,
     FollowUpStatus,
     FormConfirmationRequest,
@@ -39,6 +40,7 @@ from backend.domain.models import (
     NeededFor,
     PageInfo,
     PauseSessionResponse,
+    PreferredChannel,
     ProposedFormChange,
     ResponsibleParty,
     ResumePackage,
@@ -219,6 +221,8 @@ def _claimant_incomplete_context(
         record
         for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
         if record.source_session_id == source.session_id
+        and record.purpose == 'resume_incomplete_claim'
+        and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
     ]
     if not follow_ups:
         return None
@@ -323,7 +327,9 @@ def pause_session(
     key = require_idempotency_key(idempotency_key)
     expected_revision = parse_if_match(if_match)
     route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'
-    fingerprint = request_fingerprint({'operation': 'pause'})
+    fingerprint = request_fingerprint(
+        {'operation': 'pause', 'expected_revision': expected_revision}
+    )
 
     existing = repository.find_idempotency(principal.subject, route, key)
     if existing is not None:
@@ -380,6 +386,7 @@ def pause_session(
     paused_session = session.model_copy(
         update={
             'status': SessionStatus.PAUSED,
+            'context_revision': expected_revision,
             'recovery_context': recovery,
         }
     )
@@ -390,16 +397,27 @@ def pause_session(
             'updated_at': timestamp,
         }
     )
+    contact_authorised = principal.auth_source != 'anonymous:browser_session'
     follow_up = FollowUpRecord(
         follow_up_id=new_id('fup'),
         claim_id=claim_id,
         source_session_id=session_id,
+        purpose='resume_incomplete_claim',
         responsible_party=ResponsibleParty.SYSTEM,
+        source_refs=[
+            f'claim:{claim_id}:revision:{updated_claim.revision}',
+            f'session:{session_id}',
+        ],
+        contact_permission=(
+            FollowUpContactPermission.AUTHORISED
+            if contact_authorised
+            else FollowUpContactPermission.NOT_AUTHORISED
+        ),
         attempt_count=0,
-        channel=None,
+        channel=PreferredChannel.IN_APP if contact_authorised else None,
         outcome=None,
-        status=FollowUpStatus.PENDING,
-        due_at=None,
+        status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
+        due_at=timestamp if contact_authorised else None,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -695,6 +713,27 @@ def start_session(
             ) from conflict
     else:
         timestamp = now_utc()
+        resolved_follow_up: FollowUpRecord | None = None
+        if resume_source is not None and resume_source.status is SessionStatus.PAUSED:
+            open_follow_ups = [
+                record
+                for record in repository.list_follow_ups(claim_id, principal.subject)
+                if record.source_session_id == resume_source.session_id
+                and record.purpose == 'resume_incomplete_claim'
+                and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+            ]
+            if open_follow_ups:
+                current_follow_up = max(
+                    open_follow_ups,
+                    key=lambda record: (record.created_at, record.follow_up_id),
+                )
+                resolved_follow_up = current_follow_up.model_copy(
+                    update={
+                        'status': FollowUpStatus.RESOLVED,
+                        'outcome': 'claimant_resumed',
+                        'updated_at': timestamp,
+                    }
+                )
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
@@ -757,19 +796,30 @@ def start_session(
             claim_id=claim_id,
             session_id=session.session_id,
         )
+        branch_evaluation = build_applied_branch_evaluation(
+            updated_claim,
+            repository=repository,
+            recomputation_reason='session_resumed',
+            session_id=session.session_id,
+        )
         try:
-            repository.save_session_mutation(
-                updated_claim,
-                expected_revision=claim.revision,
-                session=session,
-                idempotency=idempotency,
-                branch_evaluation=build_applied_branch_evaluation(
+            if resolved_follow_up is None:
+                repository.save_session_mutation(
                     updated_claim,
-                    repository=repository,
-                    recomputation_reason='session_resumed',
-                    session_id=session.session_id,
-                ),
-            )
+                    expected_revision=claim.revision,
+                    session=session,
+                    idempotency=idempotency,
+                    branch_evaluation=branch_evaluation,
+                )
+            else:
+                repository.save_session_mutation(
+                    updated_claim,
+                    expected_revision=claim.revision,
+                    session=session,
+                    idempotency=idempotency,
+                    branch_evaluation=branch_evaluation,
+                    resolved_follow_up=resolved_follow_up,
+                )
         except RevisionConflict as conflict:
             raise ApiError(
                 status_code=409,

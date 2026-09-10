@@ -8,8 +8,10 @@ from backend.domain.models import (
     Channel,
     ClaimState,
     CustomerNextStep,
+    FollowUpContactPermission,
     FollowUpRecord,
     FollowUpStatus,
+    PreferredChannel,
     ResponsibleParty,
     SessionRecord,
     SessionRecoveryContext,
@@ -142,7 +144,10 @@ def test_pause_checkpoint_is_durable_visible_idempotent_and_resumable(
     final_claim = repository.get_claim(claim_id, 'cus_demo')
     assert final_claim is not None
     assert final_claim.active_session_id == resumed.json()['session_id']
-    assert len(repository.list_follow_ups(claim_id, 'cus_demo')) == 1
+    resumed_follow_ups = repository.list_follow_ups(claim_id, 'cus_demo')
+    assert len(resumed_follow_ups) == 1
+    assert resumed_follow_ups[0].status is FollowUpStatus.RESOLVED
+    assert resumed_follow_ups[0].outcome == 'claimant_resumed'
 
 
 def test_pause_checkpoint_rejects_stale_revision_without_partial_write(
@@ -240,8 +245,13 @@ def _mongo_bundle() -> tuple[
         follow_up_id='fup_p17_mongo',
         claim_id=claim.claim_id,
         source_session_id=session.session_id,
+        purpose='resume_incomplete_claim',
         responsible_party=ResponsibleParty.SYSTEM,
+        source_refs=[f'session:{session.session_id}'],
+        contact_permission=FollowUpContactPermission.AUTHORISED,
+        channel=PreferredChannel.IN_APP,
         status=FollowUpStatus.PENDING,
+        due_at=timestamp,
         created_at=timestamp,
         updated_at=timestamp,
     )

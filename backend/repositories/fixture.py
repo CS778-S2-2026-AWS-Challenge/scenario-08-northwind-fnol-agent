@@ -582,7 +582,7 @@ class FixtureRepository(PersistenceRepository):
             and session.recovery_context is not None
             and follow_up.claim_id == claim.claim_id
             and follow_up.source_session_id == session.session_id
-            and follow_up.status is FollowUpStatus.PENDING
+            and follow_up.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
             and follow_up.attempt_count == 0
             and idempotency.actor_id == claim.customer_id
             and idempotency.claim_id == claim.claim_id
@@ -596,10 +596,12 @@ class FixtureRepository(PersistenceRepository):
         if follow_up.follow_up_id in self._follow_ups:
             raise IdempotencyConflict(follow_up.follow_up_id)
         if any(
-            record.claim_id == claim.claim_id and record.source_session_id == session.session_id
+            record.claim_id == claim.claim_id
+            and record.purpose == follow_up.purpose
+            and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
             for record in self._follow_ups.values()
         ):
-            raise IdempotencyConflict(session.session_id)
+            raise IdempotencyConflict(follow_up.purpose)
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
@@ -613,6 +615,7 @@ class FixtureRepository(PersistenceRepository):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(
             claim,
@@ -639,6 +642,34 @@ class FixtureRepository(PersistenceRepository):
             for existing in self._sessions.values()
         ):
             raise KeyError(claim.claim_id)
+        open_recovery = [
+            record
+            for record in self._follow_ups.values()
+            if record.claim_id == claim.claim_id
+            and record.purpose == 'resume_incomplete_claim'
+            and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+        ]
+        if open_recovery and resolved_follow_up is None:
+            raise KeyError(claim.claim_id)
+        if resolved_follow_up is not None:
+            stored_follow_up = self._follow_ups.get(resolved_follow_up.follow_up_id)
+            if (
+                stored_follow_up is None
+                or stored_follow_up not in open_recovery
+                or resolved_follow_up.status is not FollowUpStatus.RESOLVED
+                or resolved_follow_up.outcome != 'claimant_resumed'
+                or resolved_follow_up.updated_at < stored_follow_up.updated_at
+            ):
+                raise KeyError(claim.claim_id)
+            expected_follow_up = stored_follow_up.model_copy(
+                update={
+                    'status': FollowUpStatus.RESOLVED,
+                    'outcome': resolved_follow_up.outcome,
+                    'updated_at': resolved_follow_up.updated_at,
+                }
+            )
+            if resolved_follow_up != expected_follow_up:
+                raise KeyError(claim.claim_id)
         lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
         if self._idempotency.get(lookup) is not None:
             raise IdempotencyConflict(idempotency.key)
@@ -646,6 +677,8 @@ class FixtureRepository(PersistenceRepository):
 
         self._claims[claim.claim_id] = deepcopy(claim)
         self._sessions[session.session_id] = deepcopy(session)
+        if resolved_follow_up is not None:
+            self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = deepcopy(idempotency)

@@ -223,6 +223,15 @@ class MongoDBRepository:
             partialFilterExpression={'record_type': 'follow_up'},
         )
         self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('purpose', 1)],
+            unique=True,
+            name='follow_up_claim_purpose_open_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+        )
+        self._collection.create_index(
             [('record_type', 1), ('claim_id', 1), ('created_at', 1)],
             name='branch_evaluation_claim_created',
         )
@@ -2838,7 +2847,7 @@ class MongoDBRepository:
             and session.recovery_context is not None
             and follow_up.claim_id == claim.claim_id
             and follow_up.source_session_id == session.session_id
-            and follow_up.status is FollowUpStatus.PENDING
+            and follow_up.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
             and follow_up.attempt_count == 0
             and idempotency.actor_id == claim.customer_id
             and idempotency.claim_id == claim.claim_id
@@ -2857,12 +2866,13 @@ class MongoDBRepository:
             {
                 'record_type': 'follow_up',
                 'claim_id': claim.claim_id,
-                'source_session_id': session.session_id,
+                'purpose': follow_up.purpose,
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
             },
             session=mongo_session,
         )
         if existing_follow_up is not None:
-            raise IdempotencyConflict(session.session_id)
+            raise IdempotencyConflict(follow_up.purpose)
 
         if (
             self._replace_claim_revision(
@@ -2902,6 +2912,7 @@ class MongoDBRepository:
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
     ) -> None:
         self._validate_session_mutation(claim, expected_revision, session, idempotency)
         self._validate_branch_evaluation(claim, branch_evaluation)
@@ -2912,6 +2923,7 @@ class MongoDBRepository:
                 session,
                 idempotency,
                 branch_evaluation,
+                resolved_follow_up,
                 mongo_session,
             )
         )
@@ -2943,6 +2955,7 @@ class MongoDBRepository:
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None,
+        resolved_follow_up: FollowUpRecord | None,
         mongo_session: Any,
     ) -> None:
         if (
@@ -2951,6 +2964,36 @@ class MongoDBRepository:
         ):
             raise IdempotencyConflict(session.session_id)
         self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        open_follow_up_document = self._collection.find_one(
+            {
+                'record_type': 'follow_up',
+                'claim_id': claim.claim_id,
+                'purpose': 'resume_incomplete_claim',
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+            session=mongo_session,
+        )
+        open_follow_up = self._model_from_document(open_follow_up_document, FollowUpRecord)
+        if open_follow_up is not None and resolved_follow_up is None:
+            raise KeyError(claim.claim_id)
+        if resolved_follow_up is not None:
+            if (
+                open_follow_up is None
+                or open_follow_up.follow_up_id != resolved_follow_up.follow_up_id
+                or resolved_follow_up.status is not FollowUpStatus.RESOLVED
+                or resolved_follow_up.outcome != 'claimant_resumed'
+                or resolved_follow_up.updated_at < open_follow_up.updated_at
+            ):
+                raise KeyError(claim.claim_id)
+            expected_follow_up = open_follow_up.model_copy(
+                update={
+                    'status': FollowUpStatus.RESOLVED,
+                    'outcome': resolved_follow_up.outcome,
+                    'updated_at': resolved_follow_up.updated_at,
+                }
+            )
+            if resolved_follow_up != expected_follow_up:
+                raise KeyError(claim.claim_id)
         if branch_evaluation is not None:
             self._reject_branch_evaluation_identity_conflict(
                 branch_evaluation,
@@ -2987,6 +3030,15 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        if resolved_follow_up is not None:
+            self._put(
+                'follow_up',
+                resolved_follow_up.follow_up_id,
+                resolved_follow_up,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         if branch_evaluation is not None:
             self._put(
                 'branch_evaluation',

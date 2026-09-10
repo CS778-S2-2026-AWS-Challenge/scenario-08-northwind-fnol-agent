@@ -680,23 +680,32 @@ second Claim State.
 For Claim revision `N`, the checkpoint persists together:
 
 - the same authoritative `WorkingClaim` at revision `N + 1`, with `active_session_id` cleared;
-- the previously active Session changed to `paused`;
+- the previously active Session changed to `paused`, with its recovery snapshot aligned to revision
+  `N`;
 - bounded Session recovery context containing `interrupted_at`,
   `last_meaningful_activity_at`, and a plain-language `resume_point`;
-- exactly one Claim-scoped Follow-up record linked to the interrupted Session; and
-- the idempotency record for the authenticated claimant, route, key, Claim, Session, and Follow-up
-  identity.
+- exactly one open Claim-scoped Follow-up for purpose `resume_incomplete_claim`; and
+- the idempotency record for the claimant, route, key, accepted revision, Claim, Session, and
+  Follow-up identity.
 
-Follow-up IDs use the `fup_` prefix. The P17.1 Follow-up record stores its identity, Claim,
-source Session, responsible party, attempt count, optional channel/outcome/due time, status, and
-timestamps. P17.1 creates the initial pending record with zero attempts; scheduling, delivery,
-attempt processing, abandonment, and retention transitions remain P17.2/P17.3 responsibilities.
+Follow-up IDs use the `fup_` prefix. The minimum P17.1 record persists stable identity, Claim,
+source Session, purpose, source references, responsible party, channel, due time, status, attempt
+count, contact-permission condition, optional outcome, and timestamps. `pending` means P17.1 has
+an authorised current channel; `blocked` means contact is not authorised and therefore has no
+channel or schedule; `resolved` records that the claimant resumed. An authenticated in-app
+recovery record does not grant email, SMS, or phone authority. An anonymous browser interruption
+is persisted as `blocked` / `not_authorised` rather than as executable outbound work.
 
-The Fixture and MongoDB adapters must expose the same `get_follow_up`, `list_follow_ups`, and
-`save_incomplete_checkpoint` behaviour. A stale revision, mismatched Claim/Session/customer,
-non-active source Session, conflicting idempotency identity, or second Follow-up for the same
-interruption fails before any bundle member becomes authoritative.
+The Fixture and MongoDB adapters enforce at most one open (`pending` or `blocked`) Follow-up for
+the same Claim and purpose. A stale revision, mismatched Claim/Session/customer, conflicting
+idempotency identity, invalid contact-authority condition, or second open Claim+purpose record
+fails before any bundle member becomes authoritative.
 
-Resume continues to create a new active interaction Session for the same Working Claim. The
-paused Session and its recovery context remain historical continuity evidence and never supersede
-the latest Working Claim.
+Resume continues to create a new active interaction Session for the same Working Claim. The same
+atomic session-activation mutation marks the open recovery Follow-up `resolved`, so Workbench no
+longer exposes stale follow-up work after claimant recovery. The paused Session and recovery
+context remain historical continuity evidence and never supersede the latest Working Claim.
+
+P17.1 does not implement notification delivery, retry cadence, attempt processing, abandonment,
+escalation, purge, anonymisation, or retention transitions; those remain owned by later P17
+slices.

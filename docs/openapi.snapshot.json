@@ -5775,7 +5775,9 @@
       },
       "FollowUpStatus": {
         "enum": [
-          "pending"
+          "pending",
+          "blocked",
+          "resolved"
         ],
         "title": "FollowUpStatus",
         "type": "string"

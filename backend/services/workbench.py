@@ -22,6 +22,7 @@ from backend.domain.models import (
     EvidenceRecord,
     EvidenceState,
     EvidenceStatus,
+    FollowUpStatus,
     FormStatus,
     HandoffPriority,
     HandoffRecord,
@@ -31,6 +32,7 @@ from backend.domain.models import (
     NeededFor,
     ResponsibleParty,
     SessionRecord,
+    SessionStatus,
     SignalDecisionRecord,
     SignalDecisionValue,
     StaffActionRecord,
@@ -640,7 +642,7 @@ def _evidence_gap_status(evidence: EvidenceRecord) -> WorkbenchGapStatus | None:
 
     Material that arrived and cannot be used is separated from material that has not
     arrived. Before the condition and the file lifecycle were separated these shared one
-    value, so an illegible receipt was shown to staff as `pending` — that is, as
+    value, so an illegible receipt was shown to staff as `pending` 鈥?that is, as
     something a claimant still owed, when in fact they had already sent it and the
     problem was with what they sent.
 
@@ -726,7 +728,11 @@ def _current_work_item(
     )
 
 
-def _queue_key(claim: WorkingClaim, active_handoffs: Sequence[HandoffRecord]) -> str:
+def _queue_key(
+    claim: WorkingClaim,
+    active_handoffs: Sequence[HandoffRecord],
+    incomplete_context: WorkbenchIncompleteContext | None,
+) -> str:
     if active_handoffs:
         handoff = active_handoffs[-1]
         if handoff.support_need is SupportNeed.HUMAN_REQUESTED:
@@ -734,8 +740,10 @@ def _queue_key(claim: WorkingClaim, active_handoffs: Sequence[HandoffRecord]) ->
         if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
             return 'professional_review'
         return handoff.queue
+    if incomplete_context is not None:
+        return 'incomplete_claims'
     return {
-        WorkflowState.COLLECTING: 'incomplete_claims',
+        WorkflowState.COLLECTING: 'claimant_active',
         WorkflowState.READY_FOR_NEXT: 'ready_to_progress',
         WorkflowState.AWAITING_EVIDENCE: 'awaiting_evidence',
         WorkflowState.PROFESSIONAL_REVIEW: 'professional_review',
@@ -748,36 +756,49 @@ def _incomplete_context(
     claim: WorkingClaim,
     sessions: Sequence[SessionRecord],
 ) -> WorkbenchIncompleteContext | None:
-    if claim.claim_state.workflow_state is not WorkflowState.COLLECTING or not sessions:
+    if (
+        claim.claim_state.workflow_state is not WorkflowState.COLLECTING
+        or claim.active_session_id is not None
+    ):
         return None
-    last = max(sessions, key=lambda item: item.last_active_at)
-    recovery = last.recovery_context
+    paused = [
+        session
+        for session in sessions
+        if session.status is SessionStatus.PAUSED and session.recovery_context is not None
+    ]
+    if not paused:
+        return None
+    source = max(
+        paused,
+        key=lambda item: (
+            item.recovery_context.interrupted_at
+            if item.recovery_context is not None
+            else item.last_active_at
+        ),
+    )
+    recovery = source.recovery_context
+    if recovery is None:
+        return None
     follow_ups = [
         record
         for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
-        if record.source_session_id == last.session_id
+        if record.source_session_id == source.session_id
+        and record.purpose == 'resume_incomplete_claim'
+        and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
     ]
-    follow_up = (
-        max(
-            follow_ups,
-            key=lambda record: (record.created_at, record.follow_up_id),
-        )
-        if follow_ups
-        else None
+    if not follow_ups:
+        return None
+    follow_up = max(
+        follow_ups,
+        key=lambda record: (record.created_at, record.follow_up_id),
     )
     return WorkbenchIncompleteContext(
-        interrupted_at=(recovery.interrupted_at if recovery is not None else last.last_active_at),
-        last_meaningful_activity_at=(
-            recovery.last_meaningful_activity_at if recovery is not None else last.last_active_at
-        ),
-        resume_point=(
-            recovery.resume_point
-            if recovery is not None
-            else last.summary or claim.customer_next_step.summary
-        ),
-        follow_up_due_at=follow_up.due_at if follow_up is not None else None,
-        follow_up_status=(follow_up.status.value if follow_up is not None else 'not_scheduled'),
-        follow_up_attempts=(follow_up.attempt_count if follow_up is not None else 0),
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status.value,
+        follow_up_attempts=follow_up.attempt_count,
     )
 
 
@@ -1472,8 +1493,9 @@ def _build_projection(
         projected_risk_signals,
     )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
+    incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
-        queue_key=_queue_key(claim, active_handoffs),
+        queue_key=_queue_key(claim, active_handoffs, incomplete_context),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
         primary_action_target_ref=primary_action.target_ref if primary_action else None,
@@ -1487,7 +1509,7 @@ def _build_projection(
         ),
         missing_information=missing,
         risk_signals=projected_risk_signals,
-        incomplete_context=_incomplete_context(repository, claim, sessions),
+        incomplete_context=incomplete_context,
         unread_claimant_messages=0,
         last_claimant_activity_at=(
             max(item.created_at for item in claimant_messages) if claimant_messages else None
