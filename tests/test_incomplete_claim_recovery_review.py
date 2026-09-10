@@ -1,6 +1,15 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.domain.models import FollowUpContactPermission, FollowUpStatus, PreferredChannel
+from backend.domain.models import (
+    FollowUpContactPermission,
+    FollowUpRecord,
+    FollowUpStatus,
+    PreferredChannel,
+    ResponsibleParty,
+)
 from backend.repositories.fixture import FixtureRepository
 
 
@@ -141,3 +150,61 @@ def test_anonymous_pause_persists_blocked_not_authorised_follow_up(
     assert follow_up.channel is None
     assert follow_up.due_at is None
     assert follow_up.attempt_count == 0
+
+
+def test_follow_up_record_validation_paths() -> None:
+    now = datetime(2026, 9, 10, tzinfo=UTC)
+
+    default_refs = FollowUpRecord(
+        follow_up_id='fup-default-refs',
+        claim_id='clm-validation',
+        source_session_id='ses-default-refs',
+        responsible_party=ResponsibleParty.CLAIMANT,
+        created_at=now,
+        updated_at=now,
+    )
+    assert default_refs.source_refs == ['session:ses-default-refs']
+
+    with pytest.raises(ValueError, match='updated before'):
+        FollowUpRecord(
+            follow_up_id='fup-invalid-time',
+            claim_id='clm-validation',
+            source_session_id='ses-invalid-time',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            created_at=now,
+            updated_at=now - timedelta(seconds=1),
+        )
+
+    with pytest.raises(ValueError, match='source references must be unique'):
+        FollowUpRecord(
+            follow_up_id='fup-duplicate-refs',
+            claim_id='clm-validation',
+            source_session_id='ses-duplicate-refs',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            source_refs=['session:ses-duplicate-refs', 'session:ses-duplicate-refs'],
+            created_at=now,
+            updated_at=now,
+        )
+
+    with pytest.raises(ValueError, match='authorised channel and due time'):
+        FollowUpRecord(
+            follow_up_id='fup-invalid-pending',
+            claim_id='clm-validation',
+            source_session_id='ses-invalid-pending',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            status=FollowUpStatus.PENDING,
+            created_at=now,
+            updated_at=now,
+        )
+
+    with pytest.raises(ValueError, match='must not claim an authorised channel or schedule'):
+        FollowUpRecord(
+            follow_up_id='fup-invalid-blocked',
+            claim_id='clm-validation',
+            source_session_id='ses-invalid-blocked',
+            responsible_party=ResponsibleParty.CLAIMANT,
+            contact_permission=FollowUpContactPermission.AUTHORISED,
+            status=FollowUpStatus.BLOCKED,
+            created_at=now,
+            updated_at=now,
+        )
