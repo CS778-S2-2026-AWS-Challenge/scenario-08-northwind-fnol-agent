@@ -183,50 +183,6 @@ jobs:
             fi
             echo "Path coupling satisfied."
 
-  pr705-reconcile:
-    docker:
-      - image: cimg/python:3.12-node
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: Fetch current main
-          command: git fetch origin main
-      - restore_cache:
-          keys:
-            - v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
-      - run:
-          name: Install backend dependencies
-          command: python -m pip install -r backend/requirements-dev.txt
-      - save_cache:
-          key: v1-python-{{ arch }}-{{ checksum "backend/requirements-dev.txt" }}
-          paths:
-            - ~/.cache/pip
-      - run:
-          name: Restore current API prose
-          command: |
-            git checkout origin/main -- docs/api.md
-            python scripts/pr705_reconcile.py
-      - run:
-          name: Regenerate OpenAPI from current application
-          command: python scripts/export_openapi.py
-      - run:
-          name: Commit reconciled contracts back to PR branch
-          command: |
-            set -euo pipefail
-            git rm -f .github/workflows/pr705_reconcile.yml || true
-            git rm -f scripts/pr705_reconcile.py || true
-            git checkout origin/main -- .circleci/config.yml
-            git add docs/api.md docs/openapi.snapshot.json tests/test_handoff_queue_fixtures.py .circleci/config.yml
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "fix(backend): reconcile recovery contracts after main merge"
-            token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-            if [ -n "$token" ]; then
-              git remote set-url origin "https://x-access-token:${token}@github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git"
-            fi
-            git push origin "HEAD:feature/issue-629-incomplete-claim-recovery"
-
 workflows:
   quality:
     jobs:
@@ -234,7 +190,3 @@ workflows:
       - github-automation-quality
       - pr-policy
       - docs-quality
-      - pr705-reconcile:
-          filters:
-            branches:
-              only: feature/issue-629-incomplete-claim-recovery

@@ -1959,7 +1959,7 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -1979,17 +1979,36 @@ next responsibility, evidence state and counts, open handoff summary, assignee, 
 service timing, and update time. It is a projection of shared claim state, not a separately
 editable board record.
 
-The response is shaped as `{ "items": [...], "page": { "next_cursor": null } }`. A non-null
-`next_cursor` is passed back through `cursor` to read the next ordered page. Invalid cursors return
-`422 VALIDATION_ERROR`. Each item
-contains `claim_id`, `revision`, `customer_reference`, `incident_type`, `workflow_state`,
-`queue`, `priority`, `next_action`, `route`, `evidence_state`, `evidence_summary`,
-`next_action_summary`, `responsible_party`, `claim_creation_status`,
-`assessor_routing_status`, `open_handoff_count`, `assignee_id`, `tags`, `created_at`, and
-`updated_at`.
-Queue assignment, priority, and assignee are derived from the shared claim state and active
-persisted handoffs. Creation and assessor-routing statuses are nullable until those integrations
-have produced a result.
+The response is shaped as
+`{ "items": [...], "page": { "next_cursor": null }, "view_counts": { "status": "available", "items": [...], "limitation": null } }`.
+A non-null `next_cursor` is passed back through `cursor` to read the next ordered page. Invalid
+cursors return `422 VALIDATION_ERROR`. Each item contains the safe Claim, claimant and incident
+summaries; lifecycle and workflow state; ownership and priority projections; `work_summary`;
+integration status; tags; and creation and update times. It is a projection of shared Claim state,
+not a separately editable board record.
+
+`work_summary.queue_key` is exactly one of the four active lifecycle queues for every listable
+non-terminal Claim:
+
+| Active queue | Authoritative mapping |
+|---|---|
+| `processing` | `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, `creating`, or `created` lifecycle |
+| `waiting_user` | `waiting_customer` without claimant material required for the current action |
+| `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
+| `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
+
+Active handoffs and professional review therefore remain in `processing`. Operational views are
+independent, overlapping projections: the same Claim may appear in `processing` and, for example,
+`human_requests` or `professional_review`. `all` is the union of the four active queues. Terminal
+queue mappings are outside this contract.
+
+`view_counts.items` contains one entry for every server-published view in metadata order. Counts
+are computed from the same authorised Claim set after applying `workflow_state`, `priority`,
+`assignee_id`, `next_action`, `tag`, `search`, `updated_before`, and `updated_after`; they ignore
+the selected `view`, `cursor`, and `limit`. A count failure does not discard a usable page: the
+server returns its rows with `view_counts.status: "unavailable"`, an empty `items` list, and a
+non-null `limitation`. Clients must not convert unavailable totals into zero. An unknown or no
+longer published `view` returns `422 VALIDATION_ERROR` and is never treated as `all`.
 
 `tags` is a backend projection from authoritative Claim fields and branches, Evidence records,
 WorkItems, handoffs, external-operation results, and review Signals. The Workbench client MUST
@@ -2031,10 +2050,11 @@ published, filterable code returns only Claims whose computed `tags` contains th
 current endpoint accepts one code. Future grouped OR/AND filtering requires an explicit contract
 extension.
 
-`urgent` contains claims with an open `urgent` or `immediate` handoff. `human_requests`
-contains claims with an open claimant-support handoff whose support need is `human_requested`.
-`incomplete_claims` contains Claims in the existing collecting/incomplete queue. It does not
-represent or infer a triage status.
+`urgent` contains Claims whose projected priority is `urgent` or `immediate`. `human_requests`
+contains Claims with an active handoff whose support need is `human_requested`.
+`incomplete_claims` contains resumable non-terminal Claims with no authoritative active Session,
+a relevant durable paused recovery checkpoint, and an open recovery Follow-up. It is an operational
+overlay rather than an active lifecycle queue and does not infer a triage status.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
 
@@ -2042,9 +2062,11 @@ Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `
 
 Returns the backend-owned queue filter contract for authenticated staff. The response contains
 `views`, `workflow_states`, `priorities`, and all published, filterable `tags`, plus
-`tag_registry_version`. Every option contains `value` and `label`; tag options also contain
-`category`. The Workbench uses these values to validate route state and render controls instead of
-maintaining a second enum or deriving options from loaded Claim pages.
+`tag_registry_version`. Every option contains `value` and `label`; each view also contains its
+`overview`, `active`, or `operational` group, and tag options contain `category`. Array order is the
+server-owned display order. The Workbench uses these values to validate route state, group and
+render controls, and associate authoritative `view_counts` instead of maintaining a second enum or
+deriving options or totals from loaded Claim pages.
 `priorities` contains every `WorkPriorityLevel` that the queue can project, including `routine`
 for Claims whose workflow state is still `collecting`.
 
@@ -2065,7 +2087,7 @@ large resources are loaded from the dedicated sub-resources below:
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
-  "work_summary": {"queue_key": "professional_review", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [{"kind": "field", "code": "incident.description", "label": "Incident Description", "status": "disputed", "attention": "required_now", "blocked_action": "confirm", "responsible_party": "claims_professional", "source_refs": ["msg_01J4Y7T1KC"]}], "risk_signals": []},
+  "work_summary": {"queue_key": "processing", "primary_action_code": "human.accept_handoff", "primary_action_target_ref": "hnd_01J4Y7XG2C", "missing_information": [{"kind": "field", "code": "incident.description", "label": "Incident Description", "status": "disputed", "attention": "required_now", "blocked_action": "confirm", "responsible_party": "claims_professional", "source_refs": ["msg_01J4Y7T1KC"]}], "risk_signals": []},
   "integration_summary": {"external_wait_count": 0},
   "tags": [],
   "claim_state": {},
@@ -2150,7 +2172,8 @@ claimant-safe projection.
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
-contains stakeholder and service labels, request type, authority, consent, delivery and verification
+contains stakeholder and service labels, the catalogue reference and request provenance, request
+type, authority, consent, delivery and verification
 states, pending owner, status label/detail, provider reference, returned-result summary and
 provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
 next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
@@ -2162,6 +2185,23 @@ completion. `result_received_at` records ingestion time, while `result_verified_
 check. `result_evidence_ids` is empty when the returned result has no linked evidence;
 `result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
 staff without exposing storage keys or provider payloads.
+
+`catalogue_reference` names the merged third-party service catalogue row that authorises this
+service identity, so a persisted task can be traced to the entry permitting it. It is null for a
+service the catalogue does not name.
+
+`provenance` says what the request actually reached, which is not the same question as what was
+configured for it:
+
+| Value | Meaning |
+|---|---|
+| `simulated` | A fixture source. No production provider is involved, however far the request got — a delivery on a fixture records that a synthetic adapter accepted it, not that a provider did |
+| `configured` | A configured service whose request has not been submitted. Configuration is not contact |
+| `live_attempted` | A configured service whose request was submitted with delivery evidence. It states that an attempt reached a provider; it states nothing about the result, which is `result_verification_state`'s question |
+
+It is derived from `integration_source` and `delivery` rather than stored, so it cannot disagree with
+them. `live_attempted` is currently unreachable: the only implemented service identity is a
+controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
 `next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
