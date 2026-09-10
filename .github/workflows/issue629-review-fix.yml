@@ -1,0 +1,82 @@
+name: Issue 629 review repair
+
+on:
+  push:
+    branches:
+      - issue-629-fix-work
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout work branch
+        uses: actions/checkout@v4
+        with:
+          ref: issue-629-fix-work
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+
+      - name: Apply reviewed P17.1 repair
+        run: |
+          python scripts/issue629_review_fix.py
+          rm scripts/issue629_review_fix.py
+          rm .github/workflows/issue629-review-fix.yml
+
+      - name: Format Python
+        run: python -m ruff format backend tests
+
+      - name: Regenerate OpenAPI contract
+        run: python scripts/export_openapi.py
+
+      - name: Lint Python
+        run: python -m ruff check backend tests
+
+      - name: Type-check backend and tests
+        run: python -m mypy backend tests
+
+      - name: Focused incomplete-recovery regressions
+        run: >-
+          python -m pytest -q
+          tests/test_incomplete_claim_recovery.py
+          tests/test_incomplete_claim_recovery_edges.py
+          tests/test_incomplete_claim_recovery_review.py
+          tests/test_claim_session_repository.py
+          tests/test_mongodb_repository.py
+
+      - name: Full backend test and coverage
+        run: python -m pytest --cov=backend --cov-report=term-missing tests
+
+      - name: Verify generated contracts
+        run: |
+          python scripts/export_openapi.py --check
+          python scripts/export_audit_contract.py --check
+
+      - name: Lint changed documentation
+        run: >-
+          npx --yes markdownlint-cli2
+          docs/api.md
+          docs/persistence-schema.md
+          docs/claim-state-transaction-boundary.md
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Commit validated repair
+        run: |
+          git config user.name 'jxu316-arch'
+          git config user.email '252576963+jxu316-arch@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(backend): address incomplete recovery review'
+          git push origin HEAD:issue-629-fix-work
