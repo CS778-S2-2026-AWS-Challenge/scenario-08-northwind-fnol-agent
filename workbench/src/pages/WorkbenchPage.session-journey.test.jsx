@@ -332,20 +332,21 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       { session_id: 'ses_27', status: 'closed' },
     ]
     const messagesBySession = { ses_25: [], ses_26: [], ses_27: [] }
-    const { fetchMock, state } = createJourneyService({
+    let serviceState
+    const service = createJourneyService({
       pageTwoSessions,
       messagesBySession,
-      claimFactory: () => claimDetail(state.revision.value, {
+      claimFactory: () => claimDetail(serviceState.revision.value, {
         activeSessionId,
         actionTarget: activeSessionId,
       }),
-      onPost(request, serviceState) {
+      onPost(request, state) {
         postAttempt += 1
         if (postAttempt === 1) {
           activeSessionId = 'ses_27'
           pageTwoSessions[0].status = 'closed'
           pageTwoSessions[1].status = 'active'
-          serviceState.revision.value = 8
+          state.revision.value = 8
           return jsonResponse(409, {
             error: {
               code: 'REVISION_CONFLICT',
@@ -361,15 +362,16 @@ describe('WorkbenchPage staff session browser/API journey', () => {
           'msg_after_revalidation',
           'ses_27',
         )
-        serviceState.messagesBySession.ses_27.push(message)
-        serviceState.revision.value = 9
+        state.messagesBySession.ses_27.push(message)
+        state.revision.value = 9
         return jsonResponse(200, {
           message,
           claim_revision: 9,
         })
       },
     })
-    vi.stubGlobal('fetch', fetchMock)
+    serviceState = service.state
+    vi.stubGlobal('fetch', service.fetchMock)
 
     const originalConsoleError = console.error
     vi.spyOn(console, 'error').mockImplementation((...args) => {
@@ -386,15 +388,15 @@ describe('WorkbenchPage staff session browser/API journey', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Reloading the current Claim')
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
-    expect(state.postRequests).toHaveLength(1)
-    expect(state.postRequests[0].revision).toBe('7')
-    expect(state.messagesBySession.ses_26).toHaveLength(0)
-    expect(state.messagesBySession.ses_27).toHaveLength(0)
+    expect(service.state.postRequests).toHaveLength(1)
+    expect(service.state.postRequests[0].revision).toBe('7')
+    expect(service.state.messagesBySession.ses_26).toHaveLength(0)
+    expect(service.state.messagesBySession.ses_27).toHaveLength(0)
 
     const readsBeforeReload = {
-      claim: state.claimReads,
-      sessions: state.sessionReads.length,
-      messages: state.messageReads.length,
+      claim: service.state.claimReads,
+      sessions: service.state.sessionReads.length,
+      messages: service.state.messageReads.length,
     }
 
     firstPage.unmount()
@@ -404,10 +406,10 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
     expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(state.claimReads).toBeGreaterThan(readsBeforeReload.claim)
-    expect(state.sessionReads.length).toBeGreaterThan(readsBeforeReload.sessions)
-    expect(state.messageReads.length).toBeGreaterThan(readsBeforeReload.messages)
-    expect(state.postRequests).toHaveLength(1)
+    expect(service.state.claimReads).toBeGreaterThan(readsBeforeReload.claim)
+    expect(service.state.sessionReads.length).toBeGreaterThan(readsBeforeReload.sessions)
+    expect(service.state.messageReads.length).toBeGreaterThan(readsBeforeReload.messages)
+    expect(service.state.postRequests).toHaveLength(1)
 
     reloadedOldSession.unmount()
     tabs.tabs[0] = { ...tabs.tabs[0], sessionId: 'ses_27' }
@@ -416,7 +418,7 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     const revalidatedButton = await screen.findByRole('button', { name: 'Send message' })
     await waitFor(() => expect(revalidatedButton).toBeEnabled())
     expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
-    expect(state.postRequests).toHaveLength(1)
+    expect(service.state.postRequests).toHaveLength(1)
 
     await userEvent.setup().click(revalidatedButton)
 
@@ -424,12 +426,12 @@ describe('WorkbenchPage staff session browser/API journey', () => {
       expect(screen.getByText('Journey staff reply')).toBeVisible()
     })
 
-    expect(state.postRequests).toHaveLength(2)
-    expect(state.postRequests[1].revision).toBe('8')
-    expect(state.postRequests[1].key).not.toBe(state.postRequests[0].key)
-    expect(state.messagesBySession.ses_26).toHaveLength(0)
-    expect(state.messagesBySession.ses_27).toHaveLength(1)
-    expect(state.messagesBySession.ses_27[0]).toMatchObject({
+    expect(service.state.postRequests).toHaveLength(2)
+    expect(service.state.postRequests[1].revision).toBe('8')
+    expect(service.state.postRequests[1].key).not.toBe(service.state.postRequests[0].key)
+    expect(service.state.messagesBySession.ses_26).toHaveLength(0)
+    expect(service.state.messagesBySession.ses_27).toHaveLength(1)
+    expect(service.state.messagesBySession.ses_27[0]).toMatchObject({
       message_id: 'msg_after_revalidation',
       session_id: 'ses_27',
       visibility: 'shared',
