@@ -183,62 +183,6 @@ jobs:
             fi
             echo "Path coupling satisfied."
 
-  pr705-backend-diagnostic:
-    docker:
-      - image: cimg/python:3.12-node
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: Diagnose backend quality
-          command: |
-            set +e
-            git fetch origin main
-            python -m pip install -r backend/requirements-dev.txt >/tmp/install.log 2>&1
-            report=pr705-backend-diagnostic.txt
-            : > "$report"
-            mode=$(python scripts/select_backend_tests.py --mode 2>&1)
-            needs_openapi=$(python scripts/select_backend_tests.py --needs-openapi 2>&1)
-            needs_audit=$(python scripts/select_backend_tests.py --needs-audit-contract 2>&1)
-            printf 'MODE=%s\nOPENAPI=%s\nAUDIT=%s\n\n' "$mode" "$needs_openapi" "$needs_audit" >> "$report"
-            run_step() {
-              name="$1"
-              shift
-              printf '===== %s =====\n' "$name" >> "$report"
-              "$@" >/tmp/pr705-step.log 2>&1
-              code=$?
-              printf 'exit=%s\n' "$code" >> "$report"
-              tail -n 120 /tmp/pr705-step.log >> "$report"
-              printf '\n' >> "$report"
-            }
-            if [ "$mode" = "full" ]; then
-              run_step format python -m ruff format --check .
-              run_step lint python -m ruff check .
-              run_step mypy python -m mypy backend tests
-              run_step pytest bash -lc 'python -m pytest --cov=backend --cov-report=term-missing --cov-report=json:coverage.json tests'
-              if [ -f coverage.json ]; then run_step diff_coverage python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85; fi
-            else
-              pyfiles=$(python scripts/select_backend_tests.py --python-files | tr '\n' ' ')
-              tests=$(python scripts/select_backend_tests.py --tests | tr '\n' ' ')
-              run_step format bash -lc "python -m ruff format --check $pyfiles"
-              run_step lint bash -lc "python -m ruff check $pyfiles"
-              run_step mypy bash -lc "python -m mypy $pyfiles"
-              run_step pytest bash -lc "python -m pytest --cov=backend --cov-report=json:coverage.json --cov-fail-under=0 $tests"
-              if [ -f coverage.json ]; then run_step diff_coverage python scripts/check_diff_coverage.py --coverage coverage.json --base origin/main --min 85; fi
-            fi
-            if [ "$needs_openapi" = "true" ]; then run_step openapi python scripts/export_openapi.py --check; fi
-            if [ "$needs_audit" = "true" ]; then run_step audit python scripts/export_audit_contract.py --check; fi
-            git checkout origin/main -- .circleci/config.yml
-            git add "$report" .circleci/config.yml
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "ci: record PR705 backend diagnostic"
-            token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-            if [ -n "$token" ]; then
-              git remote set-url origin "https://x-access-token:${token}@github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git"
-            fi
-            git push origin "HEAD:feature/issue-629-incomplete-claim-recovery"
-
 workflows:
   quality:
     jobs:
@@ -246,7 +190,3 @@ workflows:
       - github-automation-quality
       - pr-policy
       - docs-quality
-      - pr705-backend-diagnostic:
-          filters:
-            branches:
-              only: feature/issue-629-incomplete-claim-recovery
