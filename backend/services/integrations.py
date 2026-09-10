@@ -24,6 +24,7 @@ from backend.domain.external_services import (
     ASSESSOR_SERVICE_IDENTITY,
     ExternalTaskAuthorisation,
     ExternalTaskDelivery,
+    ExternalTaskEvidenceLink,
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
@@ -46,6 +47,11 @@ from backend.domain.models import (
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceSource,
+    EvidenceStatus,
+    EvidenceWaitType,
     ExternalClaimResult,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
@@ -66,6 +72,11 @@ from backend.services.external_service_entry import (
     assert_task_matches_entry,
 )
 from backend.services.support import now_utc, request_fingerprint
+
+# The Evidence kind the awaited assessment is recorded under. `tag_projection`
+# already recognises it, so material a task owes raises the same staff signals as
+# material that arrived.
+_AWAITED_ASSESSMENT_KIND = 'assessment_report'
 
 _ASSESSOR_REQUEST_PURPOSE = (
     'Route the vehicle damage assessment request using the confirmed incident region. '
@@ -240,7 +251,7 @@ def _record_external_acceptance(
     task: ExternalTaskRecord,
     customer_id: str,
     provider_reference: str,
-) -> None:
+) -> ExternalTaskRecord:
     updated_at = now_utc()
     # Preparation and provider acceptance can occur within one clock tick. The
     # persistence contract requires every changed task state to advance time.
@@ -262,6 +273,75 @@ def _record_external_acceptance(
     assert_task_transition_is_permitted(task, accepted)
     try:
         repository.save_external_task(accepted, customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    return accepted
+
+
+def _record_awaited_material(
+    repository: PersistenceRepository,
+    *,
+    task: ExternalTaskRecord,
+    claim: WorkingClaim,
+) -> None:
+    """Record what an accepted task now owes the claim, and tie it to that task.
+
+    `ExternalTaskEvidenceLink` ties an evidence record to the task that *produced or
+    owes* it. Neither half had a producer: a claim that had requested an assessment
+    looked exactly like one that had not, and nothing in the application ever
+    constructed a link, so `external_task_for_evidence` had nothing to resolve.
+
+    This records the owed half. The material is `pending` with `not_available`, the
+    registered shape for a document that does not exist yet, and it stays that way until
+    something records a provider result. An acknowledgement is not completion, so nothing
+    here may read as an assessment that exists.
+
+    The link is written with the record rather than left optional. External-system
+    material without one is refused by `external_task_for_evidence` as untraceable, so
+    creating the evidence alone would produce exactly the state that guard exists to
+    reject.
+
+    Args:
+        repository: Authoritative persistence boundary.
+        task: The accepted task that owes the material.
+        claim: The claim the task belongs to.
+
+    Returns:
+        None.
+    """
+
+    evidence_id = f'evd_{task.task_id.removeprefix("tsk_")}'
+    if repository.get_evidence(claim.claim_id, evidence_id, claim.customer_id) is not None:
+        return
+
+    recorded_at = task.updated_at
+    awaited = EvidenceRecord(
+        evidence_id=evidence_id,
+        claim_id=claim.claim_id,
+        kind=_AWAITED_ASSESSMENT_KIND,
+        status=EvidenceStatus.PENDING,
+        file_status=EvidenceFileStatus.NOT_AVAILABLE,
+        source=EvidenceSource.EXTERNAL_SYSTEM,
+        needed_for=['later_action'],
+        provenance={'external_task_id': task.task_id, 'service': task.service_identity},
+        wait_type=EvidenceWaitType.EXTERNAL_AGENCY,
+        responsible_party=ResponsibleParty.EXTERNAL_PARTY,
+        context_summary=(
+            'The assessment requested from the controlled assessor service has not been '
+            'returned. The claim is waiting on the assessor, not on the claimant.'
+        ),
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+    link = ExternalTaskEvidenceLink(
+        task_id=task.task_id,
+        evidence_id=evidence_id,
+        claim_id=claim.claim_id,
+        linked_at=recorded_at,
+    )
+    try:
+        repository.save_evidence(awaited, claim.customer_id)
+        repository.save_external_task_evidence_link(link, claim.customer_id)
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
 
@@ -545,12 +625,13 @@ def route_assessor(
                 operation.result.assessor_reference or operation.result.queue_reference
             )
             assert provider_reference is not None
-            _record_external_acceptance(
+            accepted = _record_external_acceptance(
                 repository,
                 task=task,
                 customer_id=claim.customer_id,
                 provider_reference=provider_reference,
             )
+            _record_awaited_material(repository, task=accepted, claim=claim)
         return _save_assessor_result(
             repository,
             payload.claim_id,
@@ -759,12 +840,13 @@ def route_assessor(
     provider_reference = outcome.result.assessor_reference or outcome.result.queue_reference
     assert provider_reference is not None
     repository.save_assessor_routing_operation(accepted_operation)
-    _record_external_acceptance(
+    accepted_task = _record_external_acceptance(
         repository,
         task=task,
         customer_id=claim.customer_id,
         provider_reference=provider_reference,
     )
+    _record_awaited_material(repository, task=accepted_task, claim=claim)
     return _save_assessor_result(
         repository,
         payload.claim_id,
