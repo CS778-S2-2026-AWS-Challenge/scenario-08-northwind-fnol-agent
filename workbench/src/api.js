@@ -15,24 +15,29 @@ export class ApiError extends Error {
 export function readStoredSession() {
   try {
     const session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')
-    if (!session?.access_token || !session?.expires_at) return null
+    if (!session?.access_token || !session?.expires_at) {
+      clearStoredSession()
+      return null
+    }
     if (new Date(session.expires_at).getTime() <= Date.now()) {
-      localStorage.removeItem(SESSION_KEY)
+      clearStoredSession()
       return null
     }
     return session
   } catch {
-    localStorage.removeItem(SESSION_KEY)
+    clearStoredSession()
     return null
   }
 }
 
 export function storeSession(session) {
+  clearStaffMessageOperations()
   localStorage.setItem(SESSION_KEY, JSON.stringify(session))
 }
 
 export function clearStoredSession() {
   localStorage.removeItem(SESSION_KEY)
+  clearStaffMessageOperations()
 }
 
 async function request(path, { token, headers, ...options } = {}) {
@@ -136,6 +141,9 @@ export const workbenchApi = {
   },
   sessions(token, claimId, cursor) {
     return pagedClaimResource(token, claimId, 'sessions', cursor)
+  },
+  sessionsForTarget(token, claimId, requestedSessionId) {
+    return claimSessionsForTarget(token, claimId, requestedSessionId)
   },
   collaborationRequests(token, claimId, cursor) {
     return pagedClaimResource(token, claimId, 'collaboration-requests', cursor)
@@ -309,6 +317,58 @@ function pagedClaimResource(token, claimId, resource, cursor) {
   )
 }
 
+async function claimSessionsForTarget(token, claimId, requestedSessionId) {
+  const items = []
+  const seenCursors = new Set()
+  let cursor = null
+  let lastResponse
+
+  while (true) {
+    const response = await pagedClaimResource(
+      token,
+      claimId,
+      'sessions',
+      cursor,
+    )
+
+    lastResponse = response || {}
+    items.push(...(response?.items || []))
+
+    if (requestedSessionId) {
+      const resolvedSession = items.find(
+        (item) => item.session_id === requestedSessionId,
+      )
+
+      if (resolvedSession) {
+        return {
+          ...lastResponse,
+          items,
+          resolved_session: resolvedSession,
+        }
+      }
+    }
+
+    const nextCursor = response?.page?.next_cursor || null
+
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      return {
+        ...lastResponse,
+        items,
+        page: {
+          ...(lastResponse.page || {}),
+          next_cursor: null,
+        },
+        resolved_session: requestedSessionId
+          ? null
+          : items.at(-1) || null,
+      }
+    }
+
+    seenCursors.add(nextCursor)
+    cursor = nextCursor
+  }
+}
+
 function pagedWorkbenchResource(token, path, cursor, limit) {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
@@ -343,6 +403,16 @@ function clearPendingStaffMessageOperation(claimId) {
   if (!(claimId in operations)) return
   delete operations[claimId]
   writeStaffMessageOperations(operations)
+}
+
+function clearStaffMessageOperations() {
+  volatileStaffMessageOperations = {}
+
+  try {
+    sessionStorage.removeItem(STAFF_MESSAGE_OPERATIONS_KEY)
+  } catch {
+    // Clearing the in-memory copy still prevents cross-identity reuse.
+  }
 }
 
 function readStaffMessageOperations() {

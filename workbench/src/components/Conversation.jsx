@@ -1,6 +1,5 @@
 import { Send } from 'lucide-react'
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { formatDateTime, words } from '../format.js'
 import { canSubmitProjectedAction, findProjectedAction } from '../projected-action.js'
 import { ProjectedActionState } from './ProjectedAction.jsx'
@@ -9,14 +8,18 @@ import ResourceBoundary from './ResourceBoundary.jsx'
 export default function Conversation({ detail, resource, draft, onDraft, onSend, onRefresh = reloadWorkbench }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
-  const [searchParams] = useSearchParams()
-  const resourceSessionId = resource?.items?.find((message) => message.session_id)?.session_id
-  const displayedSessionId = searchParams.get('session') || resourceSessionId || detail.active_session_id
+  const messageSessionId = resource?.items?.find(
+    (message) => message.session_id,
+  )?.session_id
+  const displayedSessionId = resource?.resolved_session_id || messageSessionId || null
   const isCurrentSession = Boolean(
-    displayedSessionId && detail.active_session_id && displayedSessionId === detail.active_session_id,
+    displayedSessionId
+      && detail.active_session_id
+      && displayedSessionId === detail.active_session_id,
   )
   const historicalSession = Boolean(
-    displayedSessionId && detail.active_session_id && displayedSessionId !== detail.active_session_id,
+    displayedSessionId
+      && displayedSessionId !== detail.active_session_id,
   )
   const sendAction = findProjectedAction(
     detail.allowed_actions,

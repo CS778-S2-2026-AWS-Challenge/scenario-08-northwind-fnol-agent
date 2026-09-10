@@ -182,14 +182,37 @@ export default function WorkbenchPage() {
   }, [])
 
   const loadConversationResources = useCallback(async (id, requestedSessionId) => {
-    const sessions = await loadResource('sessions', () => workbenchApi.sessions(token, id))
-    const session = sessions?.items?.find((item) => item.session_id === requestedSessionId)
-      || sessions?.items?.at(-1)
-    if (session) {
-      await loadResource('messages', () => workbenchApi.messages(token, id, session.session_id))
-    } else {
-      setResources((current) => ({ ...current, messages: resourceState({ items: [] }) }))
+    const sessions = await loadResource(
+      'sessions',
+      () => workbenchApi.sessionsForTarget(token, id, requestedSessionId),
+    )
+    const session = sessions?.resolved_session || null
+
+    if (!session) {
+      setResources((current) => ({
+        ...current,
+        messages: {
+          items: [],
+          page: { next_cursor: null },
+          status: 'unavailable',
+          limitation: null,
+          loading: false,
+          error: requestedSessionId
+            ? 'The requested claimant session is not available. Return to the Claim and open an available conversation.'
+            : 'No claimant session is available for this Claim.',
+          resolved_session_id: null,
+        },
+      }))
+      return
     }
+
+    await loadResource(
+      'messages',
+      async () => ({
+        ...(await workbenchApi.messages(token, id, session.session_id)),
+        resolved_session_id: session.session_id,
+      }),
+    )
   }, [loadResource, token])
 
   const loadSectionResources = useCallback(async (id, section) => {
@@ -207,11 +230,20 @@ export default function WorkbenchPage() {
       ],
     }
     if (section === 'conversation') {
-      await loadConversationResources(id, selectedSessionId)
+      await loadConversationResources(
+        id,
+        selectedSessionId || detail?.active_session_id || null,
+      )
       return
     }
     await Promise.all((loaders[section] || []).map(([name, loader]) => loadResource(name, loader)))
-  }, [loadConversationResources, loadResource, selectedSessionId, token])
+  }, [
+    detail?.active_session_id,
+    loadConversationResources,
+    loadResource,
+    selectedSessionId,
+    token,
+  ])
 
   const loadConversations = useCallback(async () => {
     setConversationsLoading(true)
@@ -513,6 +545,7 @@ function resourceState(response = {}) {
     limitation: response.limitation || null,
     loading: false,
     error: '',
+    resolved_session_id: response.resolved_session_id || null,
   }
 }
 
