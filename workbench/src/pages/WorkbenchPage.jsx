@@ -21,6 +21,7 @@ export default function WorkbenchPage() {
   const tabs = usePersistentTabs()
   const openTab = tabs.open
   const [claims, setClaims] = useState([])
+  const [viewCounts, setViewCounts] = useState(UNAVAILABLE_VIEW_COUNTS)
   const [filterMetadata, setFilterMetadata] = useState(null)
   const [filterMetadataLoading, setFilterMetadataLoading] = useState(true)
   const [filterMetadataError, setFilterMetadataError] = useState('')
@@ -52,7 +53,18 @@ export default function WorkbenchPage() {
     () => readQueueFilters(searchParams, filterMetadata),
     [filterMetadata, searchParams],
   )
-  const { view, workflowState, priority, tagFilter, search } = queueFilters
+  const {
+    view,
+    viewAvailable,
+    workflowState,
+    priority,
+    assigneeId,
+    nextAction,
+    tagFilter,
+    search,
+    updatedBefore,
+    updatedAfter,
+  } = queueFilters
 
   const openConversation = useCallback((conversation) => {
     if (conversation.kind === 'staff_agent') {
@@ -73,7 +85,7 @@ export default function WorkbenchPage() {
   }, [navigate, queueFilters, tabs])
 
   const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
-    if (!filterMetadata) return
+    if (!filterMetadata || !viewAvailable) return
     const requestId = ++queueRequestId.current
     setQueueLoading(true)
     setQueueError('')
@@ -84,8 +96,12 @@ export default function WorkbenchPage() {
         ...(view === 'all' ? {} : { view }),
         ...(workflowState ? { workflow_state: workflowState } : {}),
         ...(priority ? { priority } : {}),
+        ...(assigneeId ? { assignee_id: assigneeId } : {}),
+        ...(nextAction ? { next_action: nextAction } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
         ...(search ? { search } : {}),
+        ...(updatedBefore ? { updated_before: updatedBefore } : {}),
+        ...(updatedAfter ? { updated_after: updatedAfter } : {}),
         limit: 25,
         ...(cursor ? { cursor } : {}),
       }
@@ -93,6 +109,7 @@ export default function WorkbenchPage() {
       if (requestId !== queueRequestId.current) return
       setClaims((current) => append ? [...current, ...response.items] : response.items)
       setNextCursor(response.page?.next_cursor || null)
+      setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
     } catch (error) {
       if (requestId !== queueRequestId.current) return
       if (append && error.code === 'VALIDATION_ERROR') {
@@ -101,13 +118,18 @@ export default function WorkbenchPage() {
             ...(view === 'all' ? {} : { view }),
             ...(workflowState ? { workflow_state: workflowState } : {}),
             ...(priority ? { priority } : {}),
+            ...(assigneeId ? { assignee_id: assigneeId } : {}),
+            ...(nextAction ? { next_action: nextAction } : {}),
             ...(tagFilter ? { tag: tagFilter } : {}),
             ...(search ? { search } : {}),
+            ...(updatedBefore ? { updated_before: updatedBefore } : {}),
+            ...(updatedAfter ? { updated_after: updatedAfter } : {}),
             limit: 25,
           })
           if (requestId !== queueRequestId.current) return
           setClaims(response.items)
           setNextCursor(response.page?.next_cursor || null)
+          setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
           setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
@@ -119,7 +141,7 @@ export default function WorkbenchPage() {
     } finally {
       if (requestId === queueRequestId.current) setQueueLoading(false)
     }
-  }, [filterMetadata, priority, search, tagFilter, token, view, workflowState])
+  }, [assigneeId, filterMetadata, nextAction, priority, search, tagFilter, token, updatedAfter, updatedBefore, view, viewAvailable, workflowState])
 
   const loadDetail = useCallback(async (id) => {
     if (!id) {
@@ -287,10 +309,10 @@ export default function WorkbenchPage() {
     return () => window.clearInterval(timer)
   }, [claimId, refreshDetail])
   useEffect(() => {
-    if (claimId && routeSection && !CLAIM_SECTIONS.has(routeSection)) {
-      navigate(`/workbench/claims/${claimId}`, { replace: true })
+    if (filterMetadata && claimId && routeSection && !CLAIM_SECTIONS.has(routeSection)) {
+      navigate(queueRoute(`/workbench/claims/${claimId}`, queueFilters), { replace: true })
     }
-  }, [claimId, navigate, routeSection])
+  }, [claimId, filterMetadata, navigate, queueFilters, routeSection])
 
   function openClaim(claim) {
     tabs.open(claim)
@@ -446,7 +468,9 @@ export default function WorkbenchPage() {
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
             {queueVisible && (filterMetadata
-              ? <QueuePanel claims={claims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+              ? viewAvailable
+                ? <QueuePanel claims={claims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+                : <QueueViewUnavailable view={view} onOpenAll={() => setQueueFilter('view', 'all')} />
               : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
@@ -468,6 +492,26 @@ export default function WorkbenchPage() {
         }}
       />
     </div>
+  )
+}
+
+function QueueViewUnavailable({ view, onOpenAll }) {
+  return (
+    <aside className="queue-panel" aria-label="Claim queue">
+      <header className="queue-panel__header">
+        <div>
+          <p className="eyebrow">My work</p>
+          <h2>Claim queue</h2>
+        </div>
+      </header>
+      <div className="queue-list">
+        <div className="queue-state" role="alert">
+          <strong>This queue view is no longer available</strong>
+          <p>The view “{view}” is not published by the Workbench service. Choose a current server-published queue to continue.</p>
+          <button className="button button--quiet" type="button" onClick={onOpenAll}>Open all active work</button>
+        </div>
+      </div>
+    </aside>
   )
 }
 
@@ -518,15 +562,21 @@ function resourceState(response = {}) {
 
 function readQueueFilters(searchParams, metadata) {
   if (!metadata) return EMPTY_QUEUE_FILTERS
+  const requestedView = (searchParams.get('view') || 'all').trim() || 'all'
   return {
-    view: validFilterValue(searchParams.get('view'), metadata.views, 'all'),
+    view: requestedView,
+    viewAvailable: metadata.views.some((option) => option.value === requestedView),
     workflowState: validFilterValue(
       searchParams.get('workflow_state'),
       metadata.workflow_states,
     ),
     priority: validFilterValue(searchParams.get('priority'), metadata.priorities),
+    assigneeId: (searchParams.get('assignee_id') || '').trim(),
+    nextAction: (searchParams.get('next_action') || '').trim(),
     tagFilter: validFilterValue(searchParams.get('tag'), metadata.tags),
     search: (searchParams.get('search') || '').trim().slice(0, 200),
+    updatedBefore: (searchParams.get('updated_before') || '').trim(),
+    updatedAfter: (searchParams.get('updated_after') || '').trim(),
   }
 }
 
@@ -537,7 +587,9 @@ function validFilterValue(value, options, fallback = '') {
 function normalizeQueueSearchParams(searchParams, metadata) {
   const next = new URLSearchParams(searchParams)
   const filters = readQueueFilters(next, metadata)
-  setNormalizedParam(next, 'view', filters.view === 'all' ? '' : filters.view)
+  if (filters.viewAvailable) {
+    setNormalizedParam(next, 'view', filters.view === 'all' ? '' : filters.view)
+  }
   setNormalizedParam(next, 'workflow_state', filters.workflowState)
   setNormalizedParam(next, 'priority', filters.priority)
   setNormalizedParam(next, 'tag', filters.tagFilter)
@@ -556,24 +608,43 @@ function queueRoute(path, filters, sessionId = null) {
   if (filters.view !== 'all') params.set('view', filters.view)
   if (filters.workflowState) params.set('workflow_state', filters.workflowState)
   if (filters.priority) params.set('priority', filters.priority)
+  if (filters.assigneeId) params.set('assignee_id', filters.assigneeId)
+  if (filters.nextAction) params.set('next_action', filters.nextAction)
   if (filters.tagFilter) params.set('tag', filters.tagFilter)
   if (filters.search) params.set('search', filters.search)
+  if (filters.updatedBefore) params.set('updated_before', filters.updatedBefore)
+  if (filters.updatedAfter) params.set('updated_after', filters.updatedAfter)
   if (sessionId) params.set('session', sessionId)
   return params.size ? `${path}?${params}` : path
 }
 
 const EMPTY_QUEUE_FILTERS = Object.freeze({
   view: 'all',
+  viewAvailable: false,
   workflowState: '',
   priority: '',
+  assigneeId: '',
+  nextAction: '',
   tagFilter: '',
   search: '',
+  updatedBefore: '',
+  updatedAfter: '',
+})
+
+const UNAVAILABLE_VIEW_COUNTS = Object.freeze({
+  status: 'unavailable',
+  items: [],
+  limitation: 'Queue totals are temporarily unavailable.',
 })
 
 const QUEUE_FILTER_PARAM_NAMES = Object.freeze([
   'view',
   'workflow_state',
   'priority',
+  'assignee_id',
+  'next_action',
   'tag',
   'search',
+  'updated_before',
+  'updated_after',
 ])

@@ -17,6 +17,7 @@ from backend.domain.external_services import (
     request_provenance,
 )
 from backend.domain.models import (
+    AgentAction,
     ClaimCollaborationRequest,
     CollaborationRequestKind,
     CollaborationRequestStatus,
@@ -62,6 +63,7 @@ from backend.domain.workbench import (
     WorkbenchActionInput,
     WorkbenchActionInputChoice,
     WorkbenchActionInputCondition,
+    WorkbenchActiveQueue,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -94,7 +96,9 @@ from backend.domain.workbench import (
     WorkbenchOwnershipProjection,
     WorkbenchPriorityProjection,
     WorkbenchPriorityReason,
+    WorkbenchQueueFilterOption,
     WorkbenchQueueView,
+    WorkbenchQueueViewGroup,
     WorkbenchResourcePage,
     WorkbenchResponsibility,
     WorkbenchRetrievalsResponse,
@@ -109,6 +113,9 @@ from backend.domain.workbench import (
     WorkbenchSourceSummaryStatus,
     WorkbenchStaffSummary,
     WorkbenchTagFilterOption,
+    WorkbenchViewCount,
+    WorkbenchViewCounts,
+    WorkbenchViewCountStatus,
     WorkbenchWaitingExternalService,
     WorkbenchWorkItemsResponse,
     WorkbenchWorkSummary,
@@ -142,8 +149,12 @@ _HANDOFF_PRIORITY = {
     HandoffPriority.STANDARD: WorkPriorityLevel.STANDARD,
 }
 
-_QUEUE_VIEW_LABELS = {
+_QUEUE_VIEW_LABELS: dict[WorkbenchQueueView, str] = {
     WorkbenchQueueView.ALL: 'All active work',
+    WorkbenchQueueView.PROCESSING: 'Processing',
+    WorkbenchQueueView.WAITING_USER: 'Waiting for claimant',
+    WorkbenchQueueView.WAITING_MATERIAL: 'Waiting for material',
+    WorkbenchQueueView.WAITING_THIRD_PARTY: 'Waiting for third party',
     WorkbenchQueueView.URGENT: 'Urgent',
     WorkbenchQueueView.HUMAN_REQUESTS: 'Staff assistance',
     WorkbenchQueueView.INCOMPLETE_CLAIMS: 'Incomplete claims',
@@ -152,6 +163,23 @@ _QUEUE_VIEW_LABELS = {
     WorkbenchQueueView.PROFESSIONAL_REVIEW: 'Professional review',
     WorkbenchQueueView.READY_TO_CREATE: 'Ready to create',
     WorkbenchQueueView.CREATED_ROUTED: 'Created and routed',
+}
+
+_ACTIVE_QUEUE_VIEWS: set[WorkbenchQueueView] = {
+    WorkbenchQueueView.PROCESSING,
+    WorkbenchQueueView.WAITING_USER,
+    WorkbenchQueueView.WAITING_MATERIAL,
+    WorkbenchQueueView.WAITING_THIRD_PARTY,
+}
+
+_QUEUE_VIEW_GROUPS: dict[WorkbenchQueueView, WorkbenchQueueViewGroup] = {
+    WorkbenchQueueView.ALL: WorkbenchQueueViewGroup.OVERVIEW,
+    **{view: WorkbenchQueueViewGroup.ACTIVE for view in _ACTIVE_QUEUE_VIEWS},
+    **{
+        view: WorkbenchQueueViewGroup.OPERATIONAL
+        for view in WorkbenchQueueView
+        if view is not WorkbenchQueueView.ALL and view not in _ACTIVE_QUEUE_VIEWS
+    },
 }
 
 
@@ -728,21 +756,34 @@ def _current_work_item(
     )
 
 
-def _queue_key(claim: WorkingClaim, active_handoffs: Sequence[HandoffRecord]) -> str:
-    if active_handoffs:
-        handoff = active_handoffs[-1]
-        if handoff.support_need is SupportNeed.HUMAN_REQUESTED:
-            return 'claimant_support'
-        if handoff.type is HandoffType.PROFESSIONAL_REVIEW:
-            return 'professional_review'
-        return handoff.queue
-    return {
-        WorkflowState.COLLECTING: 'incomplete_claims',
-        WorkflowState.READY_FOR_NEXT: 'ready_to_progress',
-        WorkflowState.AWAITING_EVIDENCE: 'awaiting_evidence',
-        WorkflowState.PROFESSIONAL_REVIEW: 'professional_review',
-        WorkflowState.CREATED: 'created_routed',
-    }[claim.claim_state.workflow_state]
+def _active_queue_key(
+    lifecycle: ClaimLifecycleState,
+    missing_information: Sequence[WorkbenchMissingInformation],
+) -> WorkbenchActiveQueue:
+    if lifecycle is ClaimLifecycleState.WAITING_EXTERNAL:
+        return WorkbenchActiveQueue.WAITING_THIRD_PARTY
+    if lifecycle is ClaimLifecycleState.WAITING_CUSTOMER:
+        claimant_material_required = any(
+            item.kind == 'evidence'
+            and item.attention is MissingInformationAttention.REQUIRED_NOW
+            and item.responsible_party is WorkbenchResponsibility.CLAIMANT
+            for item in missing_information
+        )
+        return (
+            WorkbenchActiveQueue.WAITING_MATERIAL
+            if claimant_material_required
+            else WorkbenchActiveQueue.WAITING_USER
+        )
+    if lifecycle in {
+        ClaimLifecycleState.DRAFT_ACTIVE,
+        ClaimLifecycleState.STAFF_SUPPORT,
+        ClaimLifecycleState.PROFESSIONAL_REVIEW,
+        ClaimLifecycleState.READY_TO_CREATE,
+        ClaimLifecycleState.CREATING,
+        ClaimLifecycleState.CREATED,
+    }:
+        return WorkbenchActiveQueue.PROCESSING
+    raise RuntimeError(f'Lifecycle {lifecycle.value} has no active Workbench queue.')
 
 
 def _incomplete_context(
@@ -1336,7 +1377,11 @@ def get_workbench_claim_filter_metadata(
         raise _staff_access_required()
     return WorkbenchClaimFilterMetadata(
         views=[
-            WorkbenchFilterOption(value=value.value, label=_QUEUE_VIEW_LABELS[value])
+            WorkbenchQueueFilterOption(
+                value=value.value,
+                label=_QUEUE_VIEW_LABELS[value],
+                group=_QUEUE_VIEW_GROUPS[value],
+            )
             for value in WorkbenchQueueView
         ],
         workflow_states=[
@@ -1362,26 +1407,43 @@ def get_workbench_claim_filter_metadata(
     )
 
 
-def _matches_view(item: WorkbenchClaimListItem, view: WorkbenchQueueView | None) -> bool:
+def _matches_view(
+    repository: PersistenceRepository,
+    item: WorkbenchClaimListItem,
+    view: WorkbenchQueueView | None,
+) -> bool:
     if view is None or view is WorkbenchQueueView.ALL:
-        return True
+        return item.work_summary.queue_key.value in {queue.value for queue in WorkbenchActiveQueue}
+    if view in _ACTIVE_QUEUE_VIEWS:
+        return item.work_summary.queue_key.value == view.value
     if view is WorkbenchQueueView.URGENT:
         return item.priority_projection.level in {
             WorkPriorityLevel.IMMEDIATE,
             WorkPriorityLevel.URGENT,
         }
     if view is WorkbenchQueueView.HUMAN_REQUESTS:
-        return item.work_summary.queue_key == 'claimant_support'
+        return any(
+            handoff.support_need is SupportNeed.HUMAN_REQUESTED
+            for handoff in _active_handoffs(
+                repository.list_handoffs(item.claim_id, item.claimant.customer_id)
+            )
+        )
     if view is WorkbenchQueueView.AWAITING_EVIDENCE:
         return any(
             value.kind == 'evidence' and value.status is WorkbenchGapStatus.PENDING
             for value in item.work_summary.missing_information
         )
     if view is WorkbenchQueueView.INCOMPLETE_CLAIMS:
-        return item.work_summary.queue_key == 'incomplete_claims'
+        return item.lifecycle_state is ClaimLifecycleState.DRAFT_ACTIVE
     if view is WorkbenchQueueView.READY_TO_CREATE:
         return item.lifecycle_state is ClaimLifecycleState.READY_TO_CREATE
-    return item.work_summary.queue_key == view.value
+    if view is WorkbenchQueueView.READY_TO_PROGRESS:
+        return item.workflow_state is WorkflowState.READY_FOR_NEXT
+    if view is WorkbenchQueueView.PROFESSIONAL_REVIEW:
+        return item.lifecycle_state is ClaimLifecycleState.PROFESSIONAL_REVIEW
+    if view is WorkbenchQueueView.CREATED_ROUTED:
+        return item.lifecycle_state is ClaimLifecycleState.CREATED
+    return False
 
 
 def _matches_search(item: WorkbenchClaimListItem, search: str | None) -> bool:
@@ -1452,8 +1514,9 @@ def _build_projection(
         projected_risk_signals,
     )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
+    lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
     work_summary = WorkbenchWorkSummary(
-        queue_key=_queue_key(claim, active_handoffs),
+        queue_key=_active_queue_key(lifecycle, missing),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
         primary_action_target_ref=primary_action.target_ref if primary_action else None,
@@ -1492,7 +1555,7 @@ def _build_projection(
             family=claim.incident_type,
             summary=_incident_summary(claim),
         ),
-        lifecycle_state=_lifecycle(claim, active_handoffs, pending_evidence),
+        lifecycle_state=lifecycle,
         workflow_state=claim.claim_state.workflow_state,
         ownership=ownership,
         priority_projection=_priority(claim, active_handoffs, computed_at),
@@ -1581,13 +1644,33 @@ def list_workbench_claims(
     view: WorkbenchQueueView | None = None,
     workflow_state: WorkflowState | None = None,
     priority: WorkPriorityLevel | None = None,
+    assignee_id: str | None = None,
+    next_action: AgentAction | None = None,
     tag: str | None = None,
     search: str | None = None,
+    updated_before: datetime | None = None,
+    updated_after: datetime | None = None,
     limit: int = 25,
     cursor: str | None = None,
 ) -> WorkbenchClaimListResponse:
     if principal.actor_type != 'staff':
         raise _staff_access_required()
+    for field_name, value in (
+        ('updated_before', updated_before),
+        ('updated_after', updated_after),
+    ):
+        if value is not None and value.utcoffset() is None:
+            raise ApiError(
+                status_code=422,
+                code='VALIDATION_ERROR',
+                message=f'The {field_name} filter must include a timezone offset.',
+                details=[
+                    ErrorDetail(
+                        field=field_name,
+                        reason='Use an ISO 8601 timestamp with a timezone offset.',
+                    )
+                ],
+            )
     if tag is not None:
         try:
             get_filterable_staff_tag_definition(tag)
@@ -1598,21 +1681,41 @@ def list_workbench_claims(
                 message='The requested staff tag is not available as a queue filter.',
                 details=[ErrorDetail(field='tag', reason=tag)],
             ) from error
-    items: list[WorkbenchClaimListItem] = []
+    filtered_items: list[WorkbenchClaimListItem] = []
     for claim in repository.list_claims_internal():
         projected = _build_projection(repository, principal, claim, include_detail=False)
         assert isinstance(projected, WorkbenchClaimListItem)
-        if not _matches_view(projected, view):
-            continue
         if workflow_state is not None and projected.workflow_state is not workflow_state:
             continue
         if priority is not None and projected.priority_projection.level is not priority:
+            continue
+        if assignee_id == 'unassigned' and projected.ownership.primary_assignee is not None:
+            continue
+        if assignee_id not in {None, 'unassigned'} and (
+            projected.ownership.primary_assignee is None
+            or projected.ownership.primary_assignee.staff_id != assignee_id
+        ):
+            continue
+        if next_action is not None and claim.claim_state.next_action is not next_action:
             continue
         if tag is not None and all(item.code != tag for item in projected.tags):
             continue
         if not _matches_search(projected, search):
             continue
-        items.append(projected)
+        if updated_before is not None and projected.updated_at >= updated_before:
+            continue
+        if updated_after is not None and projected.updated_at <= updated_after:
+            continue
+        filtered_items.append(projected)
+    try:
+        view_counts = _calculate_view_counts(repository, filtered_items)
+    except RuntimeError:
+        view_counts = WorkbenchViewCounts(
+            status=WorkbenchViewCountStatus.UNAVAILABLE,
+            items=[],
+            limitation='Queue totals are temporarily unavailable.',
+        )
+    items = [item for item in filtered_items if _matches_view(repository, item, view)]
     items.sort(
         key=lambda item: (
             item.priority_projection.rank,
@@ -1624,7 +1727,28 @@ def list_workbench_claims(
     page_items = items[offset : offset + limit]
     next_offset = offset + len(page_items)
     next_cursor = encode_cursor(next_offset) if next_offset < len(items) else None
-    return WorkbenchClaimListResponse(items=page_items, page={'next_cursor': next_cursor})
+    return WorkbenchClaimListResponse(
+        items=page_items,
+        page={'next_cursor': next_cursor},
+        view_counts=view_counts,
+    )
+
+
+def _calculate_view_counts(
+    repository: PersistenceRepository,
+    items: Sequence[WorkbenchClaimListItem],
+) -> WorkbenchViewCounts:
+    return WorkbenchViewCounts(
+        status=WorkbenchViewCountStatus.AVAILABLE,
+        items=[
+            WorkbenchViewCount(
+                view=view,
+                count=sum(_matches_view(repository, item, view) for item in items),
+            )
+            for view in WorkbenchQueueView
+        ],
+        limitation=None,
+    )
 
 
 def get_workbench_claim_detail(
