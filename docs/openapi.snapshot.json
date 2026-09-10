@@ -5232,6 +5232,16 @@
         "title": "ExternalClaimResult",
         "type": "object"
       },
+      "ExternalRequestProvenance": {
+        "description": "What a request actually reached, as distinct from what was configured.\n\nThe three classes are **derived** from `IntegrationSource` and the delivery the task\nalready records, not stored as a fourth thing that could disagree with them:\n\n- `simulated` \u2014 a fixture source. No production provider is involved, whatever the\n  request looks like.\n- `configured` \u2014 a configured service that has not been sent. Configuration is not\n  contact, and a demonstration that reads it as contact would claim a provider\n  relationship nobody has.\n- `live_attempted` \u2014 a configured service whose request was submitted with delivery\n  evidence. It says an attempt reached a provider; it says nothing about the result,\n  which is `ExternalTaskResultVerification`'s question.\n\nDeriving rather than storing matters here. `docs/third-party-service-consent-and-\nshared-data-contract.md` records the only implemented service identity as a\ncontrolled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is\ncurrently unreachable. Stored as an enum member on a persisted record it would be a\nvalue nothing can produce and a projection could still assert; derived, it simply\nnever occurs until a configured service actually sends something.",
+        "enum": [
+          "simulated",
+          "configured",
+          "live_attempted"
+        ],
+        "title": "ExternalRequestProvenance",
+        "type": "string"
+      },
       "ExternalServiceConsentStatus": {
         "enum": [
           "granted",
@@ -11461,6 +11471,17 @@
             "title": "Authority State",
             "type": "string"
           },
+          "catalogue_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Reference"
+          },
           "consent_state": {
             "title": "Consent State",
             "type": "string"
@@ -11491,6 +11512,9 @@
           },
           "pending_owner": {
             "$ref": "#/components/schemas/WorkbenchResponsibility"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ExternalRequestProvenance"
           },
           "provider_reference": {
             "anyOf": [
@@ -11612,6 +11636,7 @@
         "required": [
           "stakeholder",
           "service",
+          "provenance",
           "request_type",
           "authority_state",
           "consent_state",

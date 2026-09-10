@@ -13,6 +13,8 @@ from backend.domain.external_services import (
     ExternalTaskRecord,
     ExternalTaskResult,
     ExternalTaskResultVerification,
+    catalogue_reference,
+    request_provenance,
 )
 from backend.domain.models import (
     ClaimCollaborationRequest,
@@ -1940,6 +1942,8 @@ def _external_lifecycle(
     return WorkbenchExternalLifecycle(
         stakeholder='external_party',
         service=task.service_identity,
+        catalogue_reference=catalogue_reference(task),
+        provenance=request_provenance(task),
         request_type=task.requested_action,
         authority_state='recorded' if request is not None else 'not_recorded',
         consent_state=(

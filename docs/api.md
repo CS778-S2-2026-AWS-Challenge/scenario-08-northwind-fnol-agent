@@ -2143,7 +2143,8 @@ claimant-safe projection.
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
 Returns each raw external task/request together with a backend-projected `lifecycle`. The lifecycle
-contains stakeholder and service labels, request type, authority, consent, delivery and verification
+contains stakeholder and service labels, the catalogue reference and request provenance, request
+type, authority, consent, delivery and verification
 states, pending owner, status label/detail, provider reference, returned-result summary and
 provenance, result verification and checked Claim revision, linked evidence identifiers, limitation,
 next action, and attention flag. `provider_reference` is the provider's routing or acknowledgement
@@ -2155,6 +2156,23 @@ completion. `result_received_at` records ingestion time, while `result_verified_
 check. `result_evidence_ids` is empty when the returned result has no linked evidence;
 `result_evidence` projects each linked Evidence ID with its current `status` and `file_status` for
 staff without exposing storage keys or provider payloads.
+
+`catalogue_reference` names the merged third-party service catalogue row that authorises this
+service identity, so a persisted task can be traced to the entry permitting it. It is null for a
+service the catalogue does not name.
+
+`provenance` says what the request actually reached, which is not the same question as what was
+configured for it:
+
+| Value | Meaning |
+|---|---|
+| `simulated` | A fixture source. No production provider is involved, however far the request got — a delivery on a fixture records that a synthetic adapter accepted it, not that a provider did |
+| `configured` | A configured service whose request has not been submitted. Configuration is not contact |
+| `live_attempted` | A configured service whose request was submitted with delivery evidence. It states that an attempt reached a provider; it states nothing about the result, which is `result_verification_state`'s question |
+
+It is derived from `integration_source` and `delivery` rather than stored, so it cannot disagree with
+them. `live_attempted` is currently unreachable: the only implemented service identity is a
+controlled fixture, and clients MUST NOT read `simulated` as evidence of a provider relationship.
 
 The lifecycle's overall `verification_state`, `pending_owner`, `status_label`, `status_detail`, and
 `next_action` remain the backend-owned operational projection. An `unknown_outcome` remains awaiting
