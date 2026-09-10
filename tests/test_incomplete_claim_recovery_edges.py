@@ -123,3 +123,38 @@ def test_pause_rejects_an_idempotency_key_with_a_conflicting_record(
 
     assert response.status_code == 409
     assert response.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+
+
+def test_pause_same_key_with_changed_if_match_is_an_idempotency_conflict(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    claim_id, session_id, revision = _create_claim(
+        client,
+        auth_headers,
+        'p17-edge-create-if-match',
+    )
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'
+    key = 'p17-edge-if-match-key'
+
+    first = client.post(
+        route,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': key,
+            'If-Match': f'"{revision}"',
+        },
+    )
+    assert first.status_code == 200
+
+    changed_revision = client.post(
+        route,
+        headers={
+            **auth_headers,
+            'Idempotency-Key': key,
+            'If-Match': f'"{revision + 1}"',
+        },
+    )
+
+    assert changed_revision.status_code == 409
+    assert changed_revision.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
