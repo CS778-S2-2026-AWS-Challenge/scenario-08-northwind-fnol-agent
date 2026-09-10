@@ -44,6 +44,11 @@ ACCENT = (176, 92, 68)
 
 MEDIA_TYPES = {'photo': 'image/jpeg', 'document': 'application/pdf'}
 
+# Conditions where the material itself is what is wrong, so a viewer has to be able to see
+# it. `disputed` is deliberately not here: a contested photograph is perfectly readable,
+# and what it conflicts with is another record or a stated fact, not anything in the frame.
+VISIBLY_UNUSABLE = frozenset({'invalid'})
+
 # A material that is catalogued but holds no bytes of its own. `unavailable` is the
 # condition that needs one: what is unavailable is the material that never arrived, and
 # the document recording why it will not arrive is a different material that did.
@@ -1120,8 +1125,20 @@ def _write_photo(asset: Asset, target: pathlib.Path) -> None:
     for offset in range(0, 5):
         y = 210 + offset * 60
         draw.line([(110, y), (width - 110, y)], fill=MUTED, width=1)
-    draw.line([(140, 200), (width - 200, height - 190)], fill=ACCENT, width=6)
-    draw.line([(width - 220, 220), (180, height - 200)], fill=ACCENT, width=4)
+
+    # Only an unusable material is drawn unusable. The first version of this renderer put
+    # these strokes on every photograph, meaning to say "this is a stand-in, not a
+    # photograph" — but they read as "this one is spoiled", so the `invalid` instance and
+    # the `received` ones were indistinguishable by eye. Section 5.2 reaches `invalid` by
+    # artefact, which requires the artefact to demonstrate it, and a viewer could not tell
+    # which of the four motor photographs was the unusable one. What says "stand-in" is
+    # the banner, which every asset carries.
+    if asset.condition in VISIBLY_UNUSABLE:
+        draw.line([(140, 200), (width - 200, height - 190)], fill=ACCENT, width=6)
+        draw.line([(width - 220, 220), (180, height - 200)], fill=ACCENT, width=4)
+        for offset in range(0, 6):
+            y = 175 + offset * 55
+            draw.rectangle([(72, y), (width - 72, y + 16)], fill=PAPER)
 
     draw.rectangle([(0, 0), (width, 34)], fill=ACCENT)
     draw.text((14, 11), SIMULATED, fill=PAPER)
@@ -1130,8 +1147,14 @@ def _write_photo(asset: Asset, target: pathlib.Path) -> None:
     for index, line in enumerate(asset.lines):
         draw.text((24, height - 96 + index * 20), f'- {line}', fill=INK)
     # The banner is drawn for a human reader; the comment segment carries the same
-    # statement where --check can read it back with the standard library alone.
-    image.save(target, 'JPEG', quality=82, comment=SIMULATED.encode('ascii'))
+    # statement plus the condition, where --check can read both back with the standard
+    # library alone and hold the file to what the table says it demonstrates.
+    image.save(
+        target,
+        'JPEG',
+        quality=82,
+        comment=f'{SIMULATED} | condition: {asset.condition}'.encode('ascii'),
+    )
 
 
 def _pdf_bytes(asset: Asset) -> bytes:
@@ -1682,10 +1705,17 @@ def check_all() -> tuple[list[str], list[str]]:
                 if size != PHOTO_SIZE:
                     failures.append(f'{asset.path}: {size[0]}x{size[1]}, expected 900x640')
                     continue
-                if SIMULATED not in comments:
+                if not any(SIMULATED in comment for comment in comments):
                     failures.append(f'{asset.path}: no simulated-origin comment segment')
                     continue
-                detail = f'JPEG {size[0]}x{size[1]}, origin in comment segment'
+                stated = f'condition: {asset.condition}'
+                if not any(stated in comment for comment in comments):
+                    failures.append(
+                        f'{asset.path}: the file does not state the condition the table '
+                        f'gives it ({asset.condition})'
+                    )
+                    continue
+                detail = f'JPEG {size[0]}x{size[1]}, origin and condition in comment segment'
             else:
                 text = pdf_page_text(data)
                 if SIMULATED not in text:
