@@ -22,7 +22,6 @@ from backend.domain.models import (
     EvidenceRecord,
     EvidenceState,
     EvidenceStatus,
-    FollowUpStatus,
     FormStatus,
     HandoffPriority,
     HandoffRecord,
@@ -32,7 +31,6 @@ from backend.domain.models import (
     NeededFor,
     ResponsibleParty,
     SessionRecord,
-    SessionStatus,
     SignalDecisionRecord,
     SignalDecisionValue,
     StaffActionRecord,
@@ -122,6 +120,7 @@ from backend.domain.workbench_action_registry import (
     work_item_defaults,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.incomplete_claims import find_incomplete_recovery
 from backend.services.support import decode_cursor, encode_cursor, now_utc
 from backend.services.tag_projection import project_staff_tags
 
@@ -756,42 +755,21 @@ def _incomplete_context(
     claim: WorkingClaim,
     sessions: Sequence[SessionRecord],
 ) -> WorkbenchIncompleteContext | None:
-    if (
-        claim.claim_state.workflow_state is not WorkflowState.COLLECTING
-        or claim.active_session_id is not None
-    ):
-        return None
-    paused = [
-        session
-        for session in sessions
-        if session.status is SessionStatus.PAUSED and session.recovery_context is not None
-    ]
-    if not paused:
-        return None
-    source = max(
-        paused,
-        key=lambda item: (
-            item.recovery_context.interrupted_at
-            if item.recovery_context is not None
-            else item.last_active_at
-        ),
+    records = find_incomplete_recovery(
+        repository,
+        claim,
+        sessions=sessions,
     )
+
+    if records is None:
+        return None
+
+    source, follow_up = records
     recovery = source.recovery_context
+
     if recovery is None:
         return None
-    follow_ups = [
-        record
-        for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
-        if record.source_session_id == source.session_id
-        and record.purpose == 'resume_incomplete_claim'
-        and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
-    ]
-    if not follow_ups:
-        return None
-    follow_up = max(
-        follow_ups,
-        key=lambda record: (record.created_at, record.follow_up_id),
-    )
+
     return WorkbenchIncompleteContext(
         interrupted_at=recovery.interrupted_at,
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,

@@ -226,6 +226,7 @@ def _mongo_bundle() -> tuple[
     recovery = SessionRecoveryContext(
         interrupted_at=timestamp,
         last_meaningful_activity_at=timestamp,
+        last_meaningful_activity_source_ref=(f'claim:{claim.claim_id}:revision:1'),
         resume_point='Continue describing the incident.',
     )
     paused_session = session.model_copy(

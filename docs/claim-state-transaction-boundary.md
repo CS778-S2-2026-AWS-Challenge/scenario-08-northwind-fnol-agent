@@ -295,6 +295,8 @@ scheduled.
 Activating a new claimant Session for a Claim with an open `resume_incomplete_claim` Follow-up
 must resolve that Follow-up in the same provider-neutral mutation. A resolved historical record no
 longer makes the Claim incomplete and does not prevent a later interruption from creating a new
-open record for the same purpose. Workbench incomplete state is therefore a projection of the
-Claim active-session pointer plus persisted paused recovery and open Follow-up records, never a
-status inferred from `WorkflowState.COLLECTING` alone.
+open record for the same purpose. Claimant and Workbench incomplete state use one accepted
+predicate: the Claim is not `created`, `customer_next_step.can_resume=true`, there is no
+authoritative active Session, and a relevant paused recovery checkpoint plus open recovery
+Follow-up exist. The checkpoint records the exact durable source reference for its latest
+qualifying claimant message or accepted claimant business action.

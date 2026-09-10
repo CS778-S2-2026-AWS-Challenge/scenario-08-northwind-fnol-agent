@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import cast
@@ -54,6 +55,7 @@ from backend.services.resume import start_session_with_recovery
 from backend.services.runtime_agent_policy import RuntimeAgentPolicyResolver
 
 router = APIRouter(prefix='/api/v1/claims', tags=['claimant'])
+logger = logging.getLogger(__name__)
 
 
 def _sse_event(event: str, data: dict[str, object], event_id: str | None = None) -> str:
@@ -274,17 +276,68 @@ def pause_claim_session(
     session_id: str,
     request: Request,
     principal: Principal = Depends(require_claimant),
-    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
-    if_match: str | None = Header(default=None, alias='If-Match'),
+    idempotency_key: str | None = Header(
+        default=None,
+        alias='Idempotency-Key',
+    ),
+    if_match: str | None = Header(
+        default=None,
+        alias='If-Match',
+    ),
 ) -> PauseSessionResponse:
-    return pause_session(
-        repository_for(request),
-        principal,
-        claim_id,
-        session_id,
-        idempotency_key,
-        if_match,
+    request_id = str(
+        getattr(
+            request.state,
+            'request_id',
+            'unavailable',
+        )
     )
+
+    try:
+        result = pause_session(
+            repository_for(request),
+            principal,
+            claim_id,
+            session_id,
+            idempotency_key,
+            if_match,
+        )
+    except ApiError as error:
+        logger.info(
+            'claim_session.pause',
+            extra={
+                'request_id': request_id,
+                'claim_id': claim_id,
+                'session_id': session_id,
+                'outcome': 'rejected',
+                'error_code': error.code,
+            },
+        )
+        raise
+    except Exception:
+        logger.exception(
+            'claim_session.pause',
+            extra={
+                'request_id': request_id,
+                'claim_id': claim_id,
+                'session_id': session_id,
+                'outcome': 'failed',
+            },
+        )
+        raise
+
+    logger.info(
+        'claim_session.pause',
+        extra={
+            'request_id': request_id,
+            'claim_id': claim_id,
+            'session_id': session_id,
+            'outcome': 'paused',
+            'claim_revision': result.claim.revision,
+        },
+    )
+
+    return result
 
 
 @router.get('/{claim_id}/sessions/{session_id}', response_model=ClaimantSession)

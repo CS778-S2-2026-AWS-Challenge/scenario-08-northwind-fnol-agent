@@ -692,6 +692,10 @@ class SessionRecoveryContext(ContractModel):
 
     interrupted_at: datetime
     last_meaningful_activity_at: datetime
+    last_meaningful_activity_source_ref: str = Field(
+        min_length=1,
+        max_length=500,
+    )
     resume_point: str = Field(min_length=1, max_length=1000)
 
 

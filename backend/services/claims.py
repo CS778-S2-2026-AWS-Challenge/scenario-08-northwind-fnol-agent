@@ -72,6 +72,10 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import claimant_handoff
+from backend.services.incomplete_claims import (
+    find_incomplete_recovery,
+    recovery_checkpoint_allowed,
+)
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -196,37 +200,17 @@ def _claimant_incomplete_context(
     repository: PersistenceRepository,
     claim: WorkingClaim,
 ) -> ClaimantIncompleteContext | None:
-    if claim.active_session_id is not None:
+    records = find_incomplete_recovery(repository, claim)
+
+    if records is None:
         return None
-    paused_sessions = [
-        session
-        for session in repository.list_sessions_for_claim(
-            claim.claim_id,
-            claim.customer_id,
-        )
-        if session.status is SessionStatus.PAUSED and session.recovery_context is not None
-    ]
-    if not paused_sessions:
-        return None
-    source = max(
-        paused_sessions,
-        key=lambda session: session.recovery_context.interrupted_at
-        if session.recovery_context is not None
-        else session.last_active_at,
-    )
+
+    source, follow_up = records
     recovery = source.recovery_context
+
     if recovery is None:
         return None
-    follow_ups = [
-        record
-        for record in repository.list_follow_ups(claim.claim_id, claim.customer_id)
-        if record.source_session_id == source.session_id
-        and record.purpose == 'resume_incomplete_claim'
-        and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
-    ]
-    if not follow_ups:
-        return None
-    follow_up = max(follow_ups, key=lambda record: (record.created_at, record.follow_up_id))
+
     return ClaimantIncompleteContext(
         interrupted_at=recovery.interrupted_at,
         last_meaningful_activity_at=recovery.last_meaningful_activity_at,
@@ -316,6 +300,70 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
     )
 
 
+def _latest_meaningful_claimant_activity(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> tuple[datetime, str]:
+    candidates: list[tuple[datetime, str]] = [
+        (
+            claim.created_at,
+            f'claim:{claim.claim_id}:revision:1',
+        )
+    ]
+
+    for session in repository.list_sessions_for_claim(
+        claim.claim_id,
+        claim.customer_id,
+    ):
+        for message in repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        ):
+            if message.actor is ActorType.CLAIMANT:
+                candidates.append(
+                    (
+                        message.created_at,
+                        message.message_id,
+                    )
+                )
+
+    for field in claim.form.values():
+        if field.updated_by.actor_type is ActorType.CLAIMANT and field.source_refs:
+            candidates.append(
+                (
+                    field.updated_at,
+                    field.source_refs[-1],
+                )
+            )
+
+    for item in claim.contents_items:
+        if item.updated_by.actor_type is ActorType.CLAIMANT and item.source_refs:
+            candidates.append(
+                (
+                    item.updated_at,
+                    item.source_refs[-1],
+                )
+            )
+
+    for consent in claim.external_service_consents:
+        if consent.granted_by.actor_type is ActorType.CLAIMANT:
+            candidates.append(
+                (
+                    consent.granted_at,
+                    f'consent:{consent.consent_ref}',
+                )
+            )
+
+    return max(
+        candidates,
+        key=lambda candidate: (
+            candidate[0],
+            candidate[1],
+        ),
+    )
+
+
 def pause_session(
     repository: PersistenceRepository,
     principal: Principal,
@@ -353,6 +401,13 @@ def pause_session(
             current_revision=claim.revision,
         )
 
+    if not recovery_checkpoint_allowed(claim):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Only a non-terminal resumable Claim can be paused.',
+        )
+
     session = repository.get_session(claim_id, session_id, principal.subject)
     if session is None:
         raise _session_not_found()
@@ -364,23 +419,18 @@ def pause_session(
         )
 
     timestamp = now_utc()
-    claimant_messages = [
-        message
-        for message in repository.list_messages(
-            claim_id,
-            session_id,
-            principal.subject,
-        )
-        if message.actor is ActorType.CLAIMANT
-    ]
-    last_meaningful_activity_at = max(
-        (message.created_at for message in claimant_messages),
-        default=session.last_active_at,
+    (
+        last_meaningful_activity_at,
+        last_meaningful_activity_source_ref,
+    ) = _latest_meaningful_claimant_activity(
+        repository,
+        claim,
     )
     resume_point = (session.summary or claim.customer_next_step.summary).strip()
     recovery = SessionRecoveryContext(
         interrupted_at=timestamp,
         last_meaningful_activity_at=last_meaningful_activity_at,
+        last_meaningful_activity_source_ref=(last_meaningful_activity_source_ref),
         resume_point=resume_point,
     )
     paused_session = session.model_copy(
@@ -407,6 +457,7 @@ def pause_session(
         source_refs=[
             f'claim:{claim_id}:revision:{updated_claim.revision}',
             f'session:{session_id}',
+            last_meaningful_activity_source_ref,
         ],
         contact_permission=(
             FollowUpContactPermission.AUTHORISED
@@ -428,15 +479,13 @@ def pause_session(
         follow_up_due_at=follow_up.due_at,
         follow_up_status=follow_up.status,
     )
-    claimant_before = _claimant_claim(repository, claim)
+    claimant_after = _claimant_claim(
+        repository,
+        updated_claim,
+    )
+
     response = PauseSessionResponse(
-        claim=claimant_before.model_copy(
-            update={
-                'revision': updated_claim.revision,
-                'updated_at': updated_claim.updated_at,
-                'incomplete_context': incomplete_context,
-            }
-        ),
+        claim=claimant_after.model_copy(update={'incomplete_context': incomplete_context}),
         session=_claimant_session(
             paused_session,
             updated_claim.customer_next_step,

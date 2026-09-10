@@ -695,7 +695,9 @@ For Claim revision `N`, the checkpoint persists together:
 - the previously active Session changed to `paused`, with its recovery snapshot aligned to revision
   `N`;
 - bounded Session recovery context containing `interrupted_at`,
-  `last_meaningful_activity_at`, and a plain-language `resume_point`;
+  `last_meaningful_activity_at`, an exact
+  `last_meaningful_activity_source_ref`, and a plain-language
+  `resume_point`;
 - exactly one open Claim-scoped Follow-up for purpose `resume_incomplete_claim`; and
 - the idempotency record for the claimant, route, key, accepted revision, Claim, Session, and
   Follow-up identity.
@@ -711,7 +713,21 @@ is persisted as `blocked` / `not_authorised` rather than as executable outbound 
 The Fixture and MongoDB adapters enforce at most one open (`pending` or `blocked`) Follow-up for
 the same Claim and purpose. A stale revision, mismatched Claim/Session/customer, conflicting
 idempotency identity, invalid contact-authority condition, or second open Claim+purpose record
-fails before any bundle member becomes authoritative.
+fails before any bundle member becomes authoritative. The Fixture profile serializes material
+Claim mutations and repeats the authoritative revision and duplicate checks while that mutation
+lock is held. Two callers that both pass an optimistic read therefore cannot commit two recovery
+bundles.
+
+`last_meaningful_activity_at` is selected from durable claimant-authored messages or accepted
+claimant business actions such as authoritative structured-form or contents updates and explicit
+consent. Reads, polling, streaming, and an arbitrary Session activity timestamp do not qualify.
+The paired `last_meaningful_activity_source_ref` identifies the exact durable source selected for
+the recovery checkpoint.
+
+A Claim is eligible for a recovery checkpoint only when its authoritative workflow is not
+`created` and `customer_next_step.can_resume=true`. Claimant and Workbench incomplete projections
+use that same rule together with the absence of an authoritative active Session and the presence
+of a relevant paused recovery checkpoint and open recovery Follow-up.
 
 Resume continues to create a new active interaction Session for the same Working Claim. The same
 atomic session-activation mutation marks the open recovery Follow-up `resolved`, so Workbench no
