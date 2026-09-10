@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Activity, BookOpen, Boxes, ClipboardList, DatabaseZap, FileClock, Gauge, LogOut, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { getToken, setToken } from './api.js'
+import { ADMIN_ACCESS_DENIED_EVENT, adminFetch, getToken, setToken } from './api.js'
 import AccountsPage from './pages/AccountsPage.jsx'
 import AuditPage from './pages/AuditPage.jsx'
 import ConfigurationPage from './pages/ConfigurationPage.jsx'
@@ -24,6 +24,93 @@ const navigation = [
   { path: '/admin/customers', label: 'Customers', icon: Users },
   { path: '/admin/staff', label: 'Staff', icon: ShieldCheck },
 ]
+
+const accessProbe = '/internal/v1/admin/configurations?limit=1'
+
+function accessFailure(error) {
+  if (error?.status === 401) return 'unauthenticated'
+  if (error?.status === 403) return 'denied'
+  return 'unavailable'
+}
+
+function AdminAccessBoundary({ token, children }) {
+  const navigate = useNavigate()
+  const [attempt, setAttempt] = useState(0)
+  const [access, setAccess] = useState({ status: 'checking', error: null })
+
+  useEffect(() => {
+    let active = true
+    const rejectAccess = (event) => {
+      if (active) setAccess({ status: accessFailure(event.detail), error: event.detail })
+    }
+    window.addEventListener(ADMIN_ACCESS_DENIED_EVENT, rejectAccess)
+    adminFetch(accessProbe, { token })
+      .then(() => {
+        if (active) setAccess({ status: 'allowed', error: null })
+      })
+      .catch((error) => {
+        if (active) setAccess({ status: accessFailure(error), error })
+      })
+    return () => {
+      active = false
+      window.removeEventListener(ADMIN_ACCESS_DENIED_EVENT, rejectAccess)
+    }
+  }, [attempt, token])
+
+  function useAnotherToken() {
+    setToken('')
+    navigate('/admin/login', { replace: true })
+  }
+
+  function retry() {
+    setAccess({ status: 'checking', error: null })
+    setAttempt((value) => value + 1)
+  }
+
+  if (access.status === 'allowed') return children
+
+  if (access.status === 'checking') {
+    return (
+      <main className="login-page">
+        <section className="login-card" role="status" aria-live="polite">
+          <p className="eyebrow">Northwind Control Plane</p>
+          <h1>Checking administrator access</h1>
+          <p>The Admin API is verifying this identity before restricted navigation is loaded.</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (access.status === 'unauthenticated' || access.status === 'denied') {
+    const denied = access.status === 'denied'
+    return (
+      <main className="login-page">
+        <section className="login-card notice error" role="alert">
+          <p className="eyebrow">Northwind Control Plane</p>
+          <h1>{denied ? 'Access denied' : 'Sign-in failed'}</h1>
+          <p>{access.error?.message || 'The administrator identity could not be verified.'}</p>
+          <p>{denied ? 'This identity does not have administrator access.' : 'The token is missing, invalid, or expired.'} No restricted records or navigation were loaded.</p>
+          {access.error?.requestId && <p className="muted">Request ID: {access.error.requestId}</p>}
+          <button type="button" className="primary" onClick={useAnotherToken}>Use another token</button>
+        </section>
+      </main>
+    )
+  }
+
+  return (
+    <main className="login-page">
+      <section className="login-card notice error" role="alert">
+        <p className="eyebrow">Northwind Control Plane</p>
+        <h1>Admin Console unavailable</h1>
+        <p>The Admin API could not verify access, so restricted navigation was not loaded.</p>
+        <p>{access.error?.message || 'The service did not return a usable response.'}</p>
+        <p>Check the API connection, then retry.</p>
+        {access.error?.requestId && <p className="muted">Request ID: {access.error.requestId}</p>}
+        <button type="button" className="primary" onClick={retry}>Retry access check</button>
+      </section>
+    </main>
+  )
+}
 
 function Login() {
   const navigate = useNavigate()
@@ -73,24 +160,27 @@ function Overview() {
 }
 
 function ProtectedRoutes() {
-  if (!getToken()) return <Navigate to="/admin/login" replace />
+  const token = getToken()
+  if (!token) return <Navigate to="/admin/login" replace />
   return (
-    <Shell>
-      <Routes>
-        <Route path="/admin" element={<Overview />} />
-        <Route path="/admin/configurations" element={<ConfigurationPage />} />
-        <Route path="/admin/releases" element={<ReleasePage />} />
-        <Route path="/admin/runtime" element={<RuntimeSnapshotPage />} />
-        <Route path="/admin/knowledge" element={<KnowledgePage />} />
-        <Route path="/admin/evaluations" element={<EvaluationPage />} />
-        <Route path="/admin/operations" element={<OperationsPage />} />
-        <Route path="/admin/integrations" element={<IntegrationsPage />} />
-        <Route path="/admin/audit" element={<AuditPage />} />
-        <Route path="/admin/customers" element={<AccountsPage kind="customers" />} />
-        <Route path="/admin/staff" element={<AccountsPage kind="staff" />} />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
-      </Routes>
-    </Shell>
+    <AdminAccessBoundary token={token}>
+      <Shell>
+        <Routes>
+          <Route path="/admin" element={<Overview />} />
+          <Route path="/admin/configurations" element={<ConfigurationPage />} />
+          <Route path="/admin/releases" element={<ReleasePage />} />
+          <Route path="/admin/runtime" element={<RuntimeSnapshotPage />} />
+          <Route path="/admin/knowledge" element={<KnowledgePage />} />
+          <Route path="/admin/evaluations" element={<EvaluationPage />} />
+          <Route path="/admin/operations" element={<OperationsPage />} />
+          <Route path="/admin/integrations" element={<IntegrationsPage />} />
+          <Route path="/admin/audit" element={<AuditPage />} />
+          <Route path="/admin/customers" element={<AccountsPage kind="customers" />} />
+          <Route path="/admin/staff" element={<AccountsPage kind="staff" />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </Shell>
+    </AdminAccessBoundary>
   )
 }
 
