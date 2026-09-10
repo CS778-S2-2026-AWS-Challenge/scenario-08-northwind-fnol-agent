@@ -18,6 +18,7 @@ from backend.domain.staff_agent import (
 from backend.repositories.protocols import PersistenceRepository
 from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_profiles import model_catalog, select_model_profile
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.staff_agent import (
     StaffAgentTurnProvider,
     create_staff_agent_session,
