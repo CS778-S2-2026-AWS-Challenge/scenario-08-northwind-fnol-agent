@@ -24,7 +24,10 @@ os.environ.setdefault('DATA_RUNTIME_PROFILE', 'fixture')
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
-from backend.domain.external_services import external_task_for_evidence
+from backend.core.errors import ApiError
+from backend.domain.external_services import (
+    external_task_for_evidence,
+)
 from backend.domain.models import (
     EvidenceFileStatus,
     EvidenceSource,
@@ -34,6 +37,7 @@ from backend.domain.models import (
 )
 from backend.repositories.fixture import FixtureRepository
 from backend.services.agent import ControlledAgent
+from backend.services.integrations import _record_awaited_material
 
 CLAIMANT = {'Authorization': 'Bearer synthetic-claimant'}
 STAFF = {'Authorization': 'Bearer synthetic-staff'}
@@ -264,3 +268,61 @@ def test_recording_what_is_owed_is_idempotent(
 
     assert len(awaited) == 1
     assert len(repository.list_external_task_evidence_links_internal(claim_id)) == 1
+
+
+def test_the_guard_itself_refuses_a_second_record(
+    client: TestClient, repository: FixtureRepository
+) -> None:
+    """Reach the early return, rather than asserting an outcome something else produced.
+
+    `test_recording_what_is_owed_is_idempotent` passes because a retried routing request
+    is refused before it reaches the recorder, so it proves the endpoint is idempotent and
+    says nothing about this guard. Diff coverage caught that the guard's own line was
+    never executed. This calls it twice.
+    """
+
+    claim_id = _routed_claim(client)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+
+    _record_awaited_material(repository, task=task, claim=claim)
+
+    awaited = [
+        item
+        for item in repository.list_evidence(claim_id, claim.customer_id)
+        if item.source is EvidenceSource.EXTERNAL_SYSTEM
+    ]
+    assert len(awaited) == 1
+    assert len(repository.list_external_task_evidence_links_internal(claim_id)) == 1
+
+
+def test_a_failed_link_write_surfaces_rather_than_leaving_a_silent_orphan(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the link cannot be written the caller is told, not left with untraceable material.
+
+    The evidence and the link are two repository writes. A failure between them produces
+    external-system material with no link, which `external_task_for_evidence` then
+    rejects. That is the safe direction, but the caller still has to hear about it.
+    """
+
+    claim_id = _routed_claim(client)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise KeyError('link store unavailable')
+
+    monkeypatch.setattr(repository, 'save_external_task_evidence_link', refuse)
+    monkeypatch.setattr(
+        repository,
+        'get_evidence',
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(ApiError) as refused:
+        _record_awaited_material(repository, task=task, claim=claim)
+
+    assert refused.value.status_code == 409
