@@ -223,7 +223,7 @@ def create_claim_from_confirmed_report(
                     needed_for=item.needed_for,
                 )
                 for item in evidence
-                if item.status is EvidenceStatus.PENDING_GENERATION
+                if item.status is EvidenceStatus.PENDING
             ],
             route=f'standard_{claim.incident_type}_intake',
         ),

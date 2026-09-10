@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 from backend.core.auth import Principal
 from backend.core.errors import ApiError, ErrorDetail
+from backend.domain.evidence import is_in_conflict, unresolved_conflicts
 from backend.domain.external_services import (
     ExternalTaskFailureCode,
     ExternalTaskOperationStatus,
@@ -19,6 +20,7 @@ from backend.domain.models import (
     CollaborationRequestStatus,
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceState,
     EvidenceStatus,
     FormStatus,
     HandoffPriority,
@@ -267,8 +269,9 @@ def _pending_evidence(records: Sequence[EvidenceRecord]) -> list[EvidenceRecord]
         for record in records
         if record.status
         in {
-            EvidenceStatus.PENDING_GENERATION,
-            EvidenceStatus.INCOMPLETE,
+            EvidenceStatus.PENDING,
+            EvidenceStatus.MISSING,
+            EvidenceStatus.INVALID,
             EvidenceStatus.UNOFFICIAL,
         }
         or record.file_status in pending_file_states
@@ -629,13 +632,42 @@ def _missing_information(
 
 
 def _evidence_gap_status(evidence: EvidenceRecord) -> WorkbenchGapStatus | None:
-    if evidence.status is EvidenceStatus.INCONSISTENT:
+    """Say what a staff member has to do about one piece of material, or nothing.
+
+    The order matters. A contested material is the only one where the claim holds two
+    accounts, so it outranks everything, and it is read from the record's references
+    rather than from a status, because a status cannot say what the other side is.
+
+    Material that arrived and cannot be used is separated from material that has not
+    arrived. Before the condition and the file lifecycle were separated these shared one
+    value, so an illegible receipt was shown to staff as `pending` — that is, as
+    something a claimant still owed, when in fact they had already sent it and the
+    problem was with what they sent.
+
+    A superseded record is not a gap: its replacement is in the record, and the earlier
+    issue is kept for audit rather than for action.
+
+    Args:
+        evidence: The record to classify.
+
+    Returns:
+        What staff must act on, or `None` when the record asks nothing of them.
+    """
+
+    if is_in_conflict(evidence.references):
         return WorkbenchGapStatus.CONFLICTING
+    if evidence.status is EvidenceStatus.MISSING:
+        return WorkbenchGapStatus.MISSING
+    if evidence.status in {
+        EvidenceStatus.UNAVAILABLE,
+        EvidenceStatus.INVALID,
+        EvidenceStatus.EXPIRED,
+    }:
+        return WorkbenchGapStatus.UNAVAILABLE
     if evidence.file_status is EvidenceFileStatus.FAILED:
         return WorkbenchGapStatus.UNAVAILABLE
     if evidence.status in {
-        EvidenceStatus.PENDING_GENERATION,
-        EvidenceStatus.INCOMPLETE,
+        EvidenceStatus.PENDING,
         EvidenceStatus.UNOFFICIAL,
     } or evidence.file_status in {
         EvidenceFileStatus.AWAITING_UPLOAD,
@@ -1073,8 +1105,20 @@ def _source_summary(
                 label=_human_label(evidence.kind),
                 context=context,
                 source_label=source_labels[evidence.source.value],
-                status=evidence.status.value,
-                source_refs=_unique_refs([evidence.evidence_id], provenance_refs),
+                # A contested source is still a received one, so its condition alone
+                # would not tell staff it is contested. The conflict is what they have
+                # to act on, so it is what the source summary leads with, and the
+                # references carry which record or claim fact it is contested with.
+                status=(
+                    EvidenceState.IN_CONFLICT.value
+                    if is_in_conflict(evidence.references)
+                    else evidence.status.value
+                ),
+                source_refs=_unique_refs(
+                    [evidence.evidence_id],
+                    provenance_refs,
+                    list(unresolved_conflicts(evidence.references)),
+                ),
                 related_fields=evidence.related_fields,
                 needed_for=[str(value) for value in evidence.needed_for],
                 responsible_party=_responsibility(evidence.responsible_party),

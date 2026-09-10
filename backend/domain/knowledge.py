@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal, Protocol
 
@@ -141,5 +141,18 @@ class KnowledgeCitation(ContractModel):
 
 class KnowledgeSearchResponse(DataQueryProjection):
     status: Literal['evidence_found', 'no_evidence', 'timeout', 'unavailable']
+    retrieved_at: datetime = Field(
+        description=(
+            'Server-observed UTC time when this retrieval result was produced; '
+            'not a document ingestion or provider timestamp.'
+        )
+    )
     results: list[KnowledgeCitation]
     limitations: list[str]
+
+    @field_validator('retrieved_at')
+    @classmethod
+    def require_retrieved_at_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError('retrieved_at must be a UTC timestamp')
+        return value

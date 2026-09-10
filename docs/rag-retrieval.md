@@ -12,6 +12,11 @@ by ingestion. Retrieval filters that catalogue before any indexed object is read
 than one approved document in the same product/version scope, and rejects indexed chunks whose
 identity, governed metadata, or checksum no longer matches the approved source record.
 
+The default fixture runtime loads the same approved synthetic manifest and Markdown corpus. This
+keeps default API, Agent, and staff demonstrations citation-backed while preserving the explicit
+provider-neutral boundary. Missing, timed-out, or unavailable retrieval cases remain limitations
+and never become uncited evidence.
+
 The deterministic keyword ranker is an MVP retrieval implementation. It does not claim vector or
 semantic-search capability. Customer policy schedules remain structured records and must be
 queried through the authorised policy boundary.
@@ -20,8 +25,11 @@ queried through the authorised policy boundary.
 
 `POST /internal/v1/knowledge/search` requires the integration-service credential. A successful
 result retains the exact document ID, chunk ID, section path, source URI, version, checksum, and
-source text. Empty, expired, mismatched, and unavailable searches return no invented evidence and
-include a limitation.
+source text. Every returned state also carries the server-observed UTC `retrieved_at` for that
+retrieval result; it is not the document ingestion time or a provider timestamp. Empty, expired,
+mismatched, and unavailable searches return no invented evidence and include a limitation. The
+deterministic ranker does not emit a numeric confidence value because no authoritative confidence
+semantics are defined by the current contract.
 
 ## Repeatable local verification
 

@@ -29,7 +29,11 @@ function renderAgent(overrides = {}) {
 describe('StaffAgent', () => {
   it('restores a requested persistent session and its messages', async () => {
     vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({
-      items: [{ session_id: 'sas_1', title: 'Evidence review' }],
+      items: [{ session_id: 'sas_1', title: 'Evidence review', model_profile_id: 'qwen-local' }],
+    })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
     })
     vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
     vi.spyOn(workbenchApi, 'staffAgentMessages').mockResolvedValue({
@@ -53,10 +57,15 @@ describe('StaffAgent', () => {
   it('sends only the Claims explicitly selected for the next question', async () => {
     const user = userEvent.setup()
     vi.spyOn(workbenchApi, 'staffAgentSessions').mockResolvedValue({ items: [] })
+    vi.spyOn(workbenchApi, 'staffAgentCapabilities').mockResolvedValue({
+      models: [{ id: 'qwen-local', label: 'qwen3.8-27b' }],
+      default_model_profile_id: 'qwen-local',
+    })
     vi.spyOn(workbenchApi, 'claims').mockResolvedValue({ items: [claim] })
     vi.spyOn(workbenchApi, 'createStaffAgentSession').mockResolvedValue({
       session_id: 'sas_new',
       title: 'New Staff Agent session',
+      model_profile_id: 'qwen-local',
     })
     vi.spyOn(workbenchApi, 'sendStaffAgentMessage').mockResolvedValue({
       session: { session_id: 'sas_new', title: 'Question about evidence' },

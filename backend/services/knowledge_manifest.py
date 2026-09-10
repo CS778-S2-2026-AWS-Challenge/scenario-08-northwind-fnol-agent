@@ -76,3 +76,23 @@ def load_approved_sources(
             raise KnowledgeManifestError('Knowledge source manifest contains a duplicate identity.')
         sources[identity] = source
     return sources
+
+
+def approved_version_for_product(product: str) -> str | None:
+    """Return the sole approved manifest version for a product, when unambiguous.
+
+    Args:
+        product: Canonical product family to resolve from the approved manifest.
+
+    Returns:
+        The product's only approved version, or ``None`` when no version or multiple
+        versions are present.
+    """
+
+    versions = {
+        source.version
+        for source in load_approved_sources().values()
+        if source.product == product
+        and source.publication_status is KnowledgePublicationStatus.APPROVED
+    }
+    return next(iter(versions)) if len(versions) == 1 else None

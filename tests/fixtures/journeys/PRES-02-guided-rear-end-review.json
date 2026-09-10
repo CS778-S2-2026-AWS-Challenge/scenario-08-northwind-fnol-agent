@@ -26,7 +26,7 @@
       "input": "The police report will be ready next week.",
       "expected_action": "UPDATE",
       "next_step_status": "professional_review_queued",
-      "expected_evidence_status": "pending_generation"
+      "expected_evidence_status": "pending"
     }
   ],
   "policy": {

@@ -11,7 +11,15 @@ from backend.domain.evidence import (
     is_registered_evidence_shape,
     lifecycle_stage_for,
 )
-from backend.domain.models import EvidenceFileStatus, EvidenceRecord, EvidenceSource, EvidenceStatus
+from backend.domain.models import (
+    EvidenceFileStatus,
+    EvidenceRecord,
+    EvidenceReference,
+    EvidenceRelation,
+    EvidenceRelationState,
+    EvidenceSource,
+    EvidenceStatus,
+)
 from backend.repositories import scenario_loader
 from backend.repositories.scenario_loader import (
     CANONICAL_SCENARIO_DIRECTORY,
@@ -43,10 +51,10 @@ def test_one_service_answers_for_every_business_path(service: EvidenceFixtureSer
     assert len(paths) == 5
     for path in paths:
         assert path.records, f'{path.business_path.value} has no evidence'
-        entry_records = tuple(
-            record for record in path.records if record.status is not EvidenceStatus.INCONSISTENT
-        )
-        assert path.stages == tuple(lifecycle_stage_for(record) for record in entry_records)
+        # Every record resolves to an entry stage now. Conflict used to be a status
+        # with none, so contested records had to be excluded here; it is a reference,
+        # and a contested material is still a received one.
+        assert path.stages == tuple(lifecycle_stage_for(record) for record in path.records)
         # Derived state is recomputed from the records by the runtime rules, so
         # a path cannot state an evidence state its own records contradict.
         assert path.evidence_state is evidence_domain.evidence_state_for(list(path.records))
@@ -162,28 +170,79 @@ def test_an_unregistered_state_combination_is_rejected_rather_than_guessed() -> 
     assert 'awaiting_upload' in violations[0].reason
 
 
-def test_a_conflict_is_registered_but_is_not_an_entry_stage() -> None:
-    """`inconsistent` is reachable but has no entry stage, on purpose.
+def _conflicted(
+    file_status: EvidenceFileStatus = EvidenceFileStatus.READY,
+    status: EvidenceStatus = EvidenceStatus.RECEIVED,
+) -> EvidenceRecord:
+    """A record standing in one unresolved conflict with another record."""
 
-    Two settled records disagreeing on a material fact is a conflict, not a
-    state a claim can start an evidence item in. It is registered so the
-    professional-review path can use it, and excluded from the five-stage
-    catalogue so nothing treats it as an ordinary entry.
-    """
-    settled = EvidenceRecord(
-        evidence_id='evd_conflict',
+    return EvidenceRecord(
+        evidence_id=f'evd_conflict_{status.value}_{file_status.value}',
         claim_id='clm_conflict',
         kind='claimant_statement',
-        status=EvidenceStatus.INCONSISTENT,
-        file_status=EvidenceFileStatus.READY,
+        status=status,
+        file_status=file_status,
         source=EvidenceSource.CLAIMANT,
+        references=[
+            EvidenceReference(
+                relation=EvidenceRelation.CONFLICTS_WITH,
+                evidence_id='evd_other_account',
+                state=EvidenceRelationState.UNRESOLVED,
+                reason='The two accounts give different times for the same fact.',
+                raised_at=now_utc(),
+            )
+        ],
         created_at=now_utc(),
         updated_at=now_utc(),
     )
+
+
+def test_a_contested_material_is_still_a_received_one() -> None:
+    """A conflict is not an alternative to having arrived.
+
+    This is what changed. A contested record used to carry `inconsistent`, which meant
+    it had no entry stage: the status said it was in conflict and could not also say it
+    had been received. The conflict lives on a reference now, so the record keeps the
+    stage its own condition earns and the conflict is a separate, resolvable fact that
+    can also name what the other side is.
+    """
+
+    settled = _conflicted()
+
     assert is_registered_evidence_shape(settled) is True
     assert check_records([settled], origin='synthetic') == []
-    with pytest.raises(UnregisteredEvidenceShape):
-        lifecycle_stage_for(settled)
+    assert lifecycle_stage_for(settled) is EvidenceLifecycleStage.RECEIVED
+    assert evidence_domain.unresolved_conflicts(settled.references) == ('evd_other_account',)
+
+
+def test_a_resolved_conflict_no_longer_contests_anything() -> None:
+    """A conflict someone decided is history, not an open question."""
+
+    raised = now_utc()
+    resolved = EvidenceRecord(
+        evidence_id='evd_conflict_resolved',
+        claim_id='clm_conflict',
+        kind='claimant_statement',
+        status=EvidenceStatus.RECEIVED,
+        file_status=EvidenceFileStatus.READY,
+        source=EvidenceSource.CLAIMANT,
+        references=[
+            EvidenceReference(
+                relation=EvidenceRelation.CONFLICTS_WITH,
+                evidence_id='evd_other_account',
+                state=EvidenceRelationState.RESOLVED,
+                reason='Staff accepted the attending report over the recollection.',
+                raised_at=raised,
+                resolved_at=raised,
+            )
+        ],
+        created_at=raised,
+        updated_at=raised,
+    )
+
+    assert evidence_domain.unresolved_conflicts(resolved.references) == ()
+    assert evidence_domain.is_in_conflict(resolved.references) is False
+    assert is_registered_evidence_shape(resolved) is True
 
 
 @pytest.mark.parametrize(
@@ -203,23 +262,41 @@ def test_a_conflict_is_registered_but_is_not_an_entry_stage() -> None:
 def test_a_conflict_without_comparable_settled_evidence_is_rejected(
     file_status: EvidenceFileStatus,
 ) -> None:
-    """Only `inconsistent` + `ready` is a registered conflict.
+    """Only a received, readable material may stand in an unresolved conflict.
 
-    A conflict is established by comparing settled evidence, so every other
-    file status must fail the sweep rather than be blessed by it.
+    A conflict is established by comparing settled evidence, so every other file status
+    must fail the sweep rather than be blessed by it. The rule is older than the
+    reference model — it was carried by the retired `inconsistent` status, registered
+    only with a `ready` file — and moving the conflict onto a reference must not lose it.
     """
-    record = EvidenceRecord(
-        evidence_id=f'evd_conflict_{file_status.value}',
-        claim_id='clm_conflict',
-        kind='claimant_statement',
-        status=EvidenceStatus.INCONSISTENT,
-        file_status=file_status,
-        source=EvidenceSource.CLAIMANT,
-        created_at=now_utc(),
-        updated_at=now_utc(),
-    )
+
+    record = _conflicted(file_status=file_status)
 
     assert is_registered_evidence_shape(record) is False
     violations = check_records([record], origin='synthetic')
     assert len(violations) == 1
     assert file_status.value in violations[0].reason
+
+
+@pytest.mark.parametrize(
+    'status',
+    [
+        EvidenceStatus.PENDING,
+        EvidenceStatus.MISSING,
+        EvidenceStatus.INVALID,
+        EvidenceStatus.UNAVAILABLE,
+        EvidenceStatus.UNOFFICIAL,
+    ],
+)
+def test_a_conflict_on_a_material_that_did_not_settle_is_rejected(
+    status: EvidenceStatus,
+) -> None:
+    """The file half is not the only way to fail to be comparable.
+
+    A material that is missing, still awaited, unusable, or unofficial has not settled
+    into something another record can be measured against, whatever its file says.
+    """
+
+    record = _conflicted(status=status)
+
+    assert is_registered_evidence_shape(record) is False

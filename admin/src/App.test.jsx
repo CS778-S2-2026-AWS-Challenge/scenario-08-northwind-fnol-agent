@@ -6,6 +6,7 @@ import App from './App.jsx'
 
 const jsonResponse = (payload, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
 const emptyPage = { items: [], page: { next_cursor: null } }
+const accessProbe = '/internal/v1/admin/configurations?limit=1'
 
 beforeEach(() => sessionStorage.clear())
 afterEach(() => {
@@ -18,12 +19,77 @@ it('requires an administrator token before rendering the console', () => {
   expect(screen.getByRole('heading', { name: /sign in to administration/i })).toBeInTheDocument()
 })
 
+it('does not render restricted navigation while administrator access is being checked', () => {
+  sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+
+  render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
+
+  expect(screen.getByRole('heading', { name: /checking administrator access/i })).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: /administration navigation/i })).not.toBeInTheDocument()
+})
+
+it('rejects a non-administrator without leaking restricted navigation', async () => {
+  sessionStorage.setItem('northwind.admin.token', 'synthetic-staff')
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    error: { code: 'ACCESS_DENIED', message: 'Access denied for the administrator boundary.', request_id: 'req_denied', details: [], retryable: false },
+  }, 403))
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
+
+  expect(await screen.findByRole('heading', { name: /access denied/i })).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: /administration navigation/i })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /configurations/i })).not.toBeInTheDocument()
+  expect(fetchMock).toHaveBeenCalledWith(accessProbe, expect.objectContaining({ headers: expect.any(Headers) }))
+  expect(fetchMock.mock.calls[0][1].headers.get('Authorization')).toBe('Bearer synthetic-staff')
+})
+
+it('removes the shell when a later Admin API request rejects access', async () => {
+  sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
+  const fetchMock = vi.fn(async (path) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
+    return jsonResponse({
+      error: { code: 'AUTHENTICATION_REQUIRED', message: 'The administrator session expired.', request_id: 'req_expired', details: [], retryable: false },
+    }, 401)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<MemoryRouter initialEntries={['/admin/configurations']}><App /></MemoryRouter>)
+
+  expect(await screen.findByRole('heading', { name: /sign-in failed/i })).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: /administration navigation/i })).not.toBeInTheDocument()
+  expect(screen.getByText('Request ID: req_expired')).toBeInTheDocument()
+})
+
+it('keeps a failed access probe unavailable until an explicit retry succeeds', async () => {
+  const user = userEvent.setup()
+  sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
+  let attempts = 0
+  const fetchMock = vi.fn(async (path) => {
+    if (path !== accessProbe) throw new Error(`Unexpected request: GET ${path}`)
+    attempts += 1
+    if (attempts === 1) return jsonResponse({
+      error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'The Admin API dependency is unavailable.', request_id: 'req_unavailable', details: [], retryable: true },
+    }, 503)
+    return jsonResponse(emptyPage)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
+
+  expect(await screen.findByRole('heading', { name: /admin console unavailable/i })).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: /administration navigation/i })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: /retry access check/i }))
+  expect(await screen.findByRole('heading', { name: /administration overview/i })).toBeInTheDocument()
+})
+
 it('renders server-backed configuration state after administrator sign-in', async () => {
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({
     items: [{ configuration_id: 'cfg_demo', domain: 'model', state: 'published', revision: 2, allowed_actions: [] }],
     page: { next_cursor: null },
-  })))
+  }))))
 
   render(<MemoryRouter initialEntries={['/admin/configurations']}><App /></MemoryRouter>)
 
@@ -38,6 +104,7 @@ it('uses the projected revision and idempotency key for a configuration action',
   const record = { configuration_id: 'cfg_feature', domain: 'feature', state: 'draft', revision: 3, values: { feature_version: 'v1', model_assisted_turns: true, knowledge_retrieval: true }, secret_references: {}, allowed_actions: [{ action_code: 'admin.configuration.patch', availability: 'available', expected_revision: 3, reason: null }] }
   let currentRecord = record
   const fetchMock = vi.fn(async (path, options = {}) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path === '/internal/v1/admin/configurations' && options.method === 'PATCH') {
       currentRecord = { ...record, revision: 4 }
       return jsonResponse(currentRecord)
@@ -64,15 +131,16 @@ it('uses the projected revision and idempotency key for a configuration action',
 it('resolves a Runtime Snapshot using explicit environment and profile inputs', async () => {
   const user = userEvent.setup()
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ release_set_id: 'rel_active', environment: 'test', runtime_profile: 'fixture', loaded_at: '2026-09-07T00:00:00Z', configurations: {}, integrations: {}, knowledge: {} }))
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ release_set_id: 'rel_active', environment: 'test', runtime_profile: 'fixture', loaded_at: '2026-09-07T00:00:00Z', configurations: {}, integrations: {}, knowledge: {} })))
   vi.stubGlobal('fetch', fetchMock)
   render(<MemoryRouter initialEntries={['/admin/runtime']}><App /></MemoryRouter>)
 
-  await user.click(screen.getByRole('button', { name: /resolve snapshot/i }))
+  await user.click(await screen.findByRole('button', { name: /resolve snapshot/i }))
 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'rel_active' })).toBeInTheDocument())
-  expect(fetchMock.mock.calls[0][0]).toContain('environment=test')
-  expect(fetchMock.mock.calls[0][0]).toContain('runtime_profile=fixture')
+  const [snapshotPath] = fetchMock.mock.calls.find(([path]) => path.startsWith('/internal/v1/admin/runtime-snapshots'))
+  expect(snapshotPath).toContain('environment=test')
+  expect(snapshotPath).toContain('runtime_profile=fixture')
 })
 
 it('runs only the server-projected integration health action', async () => {
@@ -80,6 +148,7 @@ it('runs only the server-projected integration health action', async () => {
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
   const integration = { integration_id: 'assessor_service', label: 'Assessor service', capability: 'assessor_routing', health: 'using_fixture', implementation: 'Fixture', source: 'fixture', configuration_ids: [], latency_ms: 1, failure_code: null, allowed_actions: [{ action_code: 'admin.integration.health_check', availability: 'available', expected_revision: null, reason: null }] }
   const fetchMock = vi.fn(async (path, options = {}) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path === '/internal/v1/admin/integrations/assessor_service/health-check' && options.method === 'POST') {
       return jsonResponse({ check_id: 'ihc_1', integration_id: 'assessor_service', health: 'using_fixture' })
     }
@@ -108,6 +177,7 @@ it('does not submit customer deactivation without explicit confirmation', async 
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
   const customer = { customer_id: 'cus_demo', email: 'claimant@example.invalid', display_name: 'Demo', phone: '', active: true, revision: 1, updated_at: '2026-09-07T00:00:00Z', communication_preferences: { email: true, sms: false }, allowed_actions: [{ action_code: 'admin.customer_account.update', availability: 'available', expected_revision: 1, reason: null }] }
   const fetchMock = vi.fn(async (path, options = {}) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path === '/internal/v1/admin/accounts/customers' && !options.method) {
       return jsonResponse({ items: [customer], page: { next_cursor: null } })
     }
@@ -132,6 +202,7 @@ it('revokes only a server-projected identity session with revision and idempoten
   const session = { session_id: 'ias_demo', state: 'active', revision: 2, created_at: '2026-09-07T00:00:00Z', expires_at: '2026-09-08T00:00:00Z', revoked_at: null, updated_at: '2026-09-07T00:00:00Z', allowed_actions: [{ action_code: 'admin.account_session.revoke', availability: 'confirmation_required', expected_revision: 2, reason: null }] }
   let sessions = [session]
   const fetchMock = vi.fn(async (path, options = {}) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path.endsWith('/ias_demo/revoke') && options.method === 'POST') {
       sessions = [{ ...session, state: 'revoked', revision: 3, revoked_at: '2026-09-07T01:00:00Z', allowed_actions: [] }]
       return jsonResponse(sessions[0])
@@ -169,6 +240,7 @@ it('renders persisted model usage, configured cost, rate-limit state, and alerts
     source: 'control_plane_operation_repository',
   }
   const fetchMock = vi.fn(async (path) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path === '/internal/v1/admin/operations/metrics') return jsonResponse(metrics)
     if (path === '/internal/v1/admin/operations') return jsonResponse(emptyPage)
     throw new Error(`Unexpected request: GET ${path}`)
@@ -187,6 +259,7 @@ it('renders persisted model usage, configured cost, rate-limit state, and alerts
 it('keeps operation records usable when operational metrics cannot be loaded', async () => {
   sessionStorage.setItem('northwind.admin.token', 'synthetic-admin')
   const fetchMock = vi.fn(async (path) => {
+    if (path === accessProbe) return jsonResponse(emptyPage)
     if (path === '/internal/v1/admin/operations/metrics') throw new Error('metrics unavailable')
     if (path === '/internal/v1/admin/operations') return jsonResponse(emptyPage)
     throw new Error(`Unexpected request: GET ${path}`)

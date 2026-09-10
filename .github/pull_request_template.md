@@ -20,6 +20,9 @@
 
 ## Local validation
 
+<!-- Keep the Command and Result fields in both Draft and Ready PRs. Drafts may use explicit
+     placeholders such as `Not run - implementation in progress`; Ready PRs must record the
+     actual command and result for the current exact head. -->
 - Record focused commands that were actually run, or `Not run` with the reason. These results are
   development evidence only; CircleCI supplies the authoritative exact-head quality result.
 - Command:

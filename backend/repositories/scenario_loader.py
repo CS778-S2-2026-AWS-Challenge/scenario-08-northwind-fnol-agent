@@ -208,6 +208,13 @@ class ScenarioFixture(ContractModel):
                 raise ValueError(f'{field_code} must reference a scenario policy retrieval record.')
 
         if any(
+            not set(handoff.packet.policy_citation_refs).issubset(policy_retrieval_ids)
+            for handoff in self.handoffs
+        ):
+            raise ValueError(
+                'Every handoff policy_citation_ref must reference a scenario policy retrieval.'
+            )
+        if any(
             not set(handoff.packet.history_evidence_refs).issubset(history_retrieval_ids)
             for handoff in self.handoffs
         ):
@@ -282,6 +289,8 @@ class ScenarioFixture(ContractModel):
             )
             if linked.policy_retrieval_id not in linked_handoff.packet.source_refs:
                 raise ValueError('Linked MVP handoff sources must reference the policy retrieval.')
+            if linked.policy_retrieval_id not in linked_handoff.packet.policy_citation_refs:
+                raise ValueError('Linked MVP policy citation must reference the policy retrieval.')
             if linked.claim_history_retrieval_id not in linked_handoff.packet.history_evidence_refs:
                 raise ValueError(
                     'Linked MVP handoff history must reference the claim-history retrieval.'
@@ -302,11 +311,6 @@ class ScenarioFixture(ContractModel):
                 raise ValueError(
                     'Linked MVP policy fact must reference the structured policy retrieval.'
                 )
-            if not any(
-                policy_record.facts.policy_reference in citation
-                for citation in linked_handoff.packet.policy_citation_refs
-            ):
-                raise ValueError('Linked MVP policy citation must identify the structured policy.')
         return self
 
 
@@ -599,6 +603,10 @@ def load_evidence_path_fixtures(
 
 def claimant_evidence_for(entry: EvidencePathEntry) -> list[ClaimantEvidence]:
     staff_only_fields = {
+        # Catalogue section 7: the claimant is told a check is in progress, never which
+        # side is doubted. The references name the other side and the reason, so they
+        # stay staff-only; what the claimant sees is the claim's evidence state.
+        'references',
         'provenance',
         'wait_type',
         'responsible_party',

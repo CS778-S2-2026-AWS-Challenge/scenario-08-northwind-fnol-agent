@@ -157,19 +157,20 @@ test('accepts a Draft pull request with a valid issue reference', () => {
     owner,
     repo,
   });
-  assert.deepEqual(result, {
-    errors: [],
-    warnings: [
-      'Complete `Primary owner:` in `Summary`.',
-      'Complete `Owned behavior:` in `Summary`.',
-      'Complete `Non-goals:` in `Summary`.',
-      'Complete `Scope changed since issue:` in `Summary`.',
-      'Check the box in `Governance confirmation` after reading AGENT.md and the governance skill in full.',
-      'Check at least one box in `Documentation sync check`.',
-      'Check the box in `Impact statement` after confirming unrelated code is unaffected.',
-    ],
-    references: [192],
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.references, [192]);
+  assert.ok(result.warnings.includes('Complete `Primary owner:` in `Summary`.'));
+  assert.ok(result.warnings.includes('Complete the `## Local validation` section before requesting review.'));
+  assert.ok(result.warnings.includes('Complete `Command:` in `Local validation` (use `Not run - reason` when applicable).'));
+  assert.ok(result.warnings.includes('Check the box in `Governance confirmation` after reading AGENT.md and the governance skill in full.'));
+});
+
+test('accepts a complete Draft body with explicit pending evidence', () => {
+  const body = readyBody({
+    localValidation: '- Command: Not run - implementation in progress\n- Result: Pending - exact-head validation not started',
   });
+  const result = validatePullRequestBody({ body, isDraft: true, owner, repo });
+  assert.deepEqual(result, { errors: [], warnings: [], references: [192] });
 });
 
 test('rejects an empty placeholder Draft pull request', () => {

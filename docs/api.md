@@ -597,7 +597,7 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 {
   "severity": "standard",
   "coverage": "clear",
-  "evidence": "pending_generation",
+  "evidence": "pending",
   "fraud_signal": "none",
   "customer_support": "guided",
   "urgency": "normal",
@@ -610,7 +610,7 @@ The canonical internal claim state keeps independent dimensions. It MUST NOT col
 |---|---|---|
 | `severity` | `unassessed`, `fast_track`, `standard`, `complex` | ... |
 | `coverage` | `not_assessed`, `clear`, `ambiguous`, `review_required` | ... |
-| `evidence` | `not_started`, `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` | ... |
+| `evidence` | `not_started`, `received`, `unofficial`, `invalid`, `pending`, `unavailable`, `in_conflict` | ... |
 | `fraud_signal` | `none`, `review_required` | Internal only |
 | `customer_support` | `self_service`, `guided`, `human_requested`, `accessibility_required` | Shared when relevant |
 | `urgency` | `normal`, `urgent`, `immediate_safety_risk` | Shared, with internal routing detail excluded |
@@ -854,7 +854,7 @@ later claimant statement is resolved against existing assertions rather than sil
   "evidence_id": "evd_01J4Y7V5QJ",
   "claim_id": "clm_01J4Y7Q2AW",
   "kind": "police_report",
-  "status": "pending_generation",
+  "status": "pending",
   "file_status": "not_available",
   "original_filename": null,
   "media_type": null,
@@ -875,11 +875,39 @@ later claimant statement is resolved against existing assertions rather than sil
 | Field | Allowed values or rule |
 |---|---|
 | `kind` | Registered evidence type such as `incident_image`, `police_report`, `receipt`, `repair_quote`, or `other_document` |
-| `status` | `received`, `unofficial`, `incomplete`, `pending_generation`, `inconsistent` |
+| `status` | `missing`, `pending`, `received`, `unofficial`, `invalid`, `unavailable`, `superseded`, `expired` |
 | `file_status` | `not_available`, `awaiting_upload`, `uploading`, `uploaded`, `processing`, `ready`, `failed` |
 | `source` | `claimant`, `staff`, `external_system` |
 | `related_fields` | Registered form field codes supported or challenged by the item |
 | `needed_for` | One or more business actions; later evidence MUST NOT block an unrelated safe current action |
+| `references` | Typed statements about a second record or claim fact. **Staff-visible only** |
+
+`status` carries the condition of the material and `file_status` the upload and
+processing lifecycle. They answer different questions and MUST NOT be read as
+alternatives to each other: `pending` with `not_available` is a document that does not
+exist yet, and `pending` with `awaiting_upload` is a file on its way in.
+
+Three conditions are statements about a *second* thing and therefore cannot be carried by
+`status` alone. Each is recorded as an `EvidenceReference`:
+
+| Field | Allowed values or rule |
+|---|---|
+| `relation` | `conflicts_with`, `superseded_by`, `unavailability_established_by` |
+| `evidence_id` | The other evidence record; required for every relation except a conflict against a claim fact |
+| `field_code` | The claim field contradicted; permitted only with `conflicts_with` |
+| `state` | `unresolved` or `resolved`; exactly one of `evidence_id` and `field_code` is set |
+| `reason` | Why the relation exists, in terms a staff member can act on |
+| `raised_at` | When it was recorded |
+| `resolved_at` | Present if and only if `state` is `resolved`, and never before `raised_at` |
+
+A material can be `received`, `ready`, and contested at the same time, so conflict is a
+reference rather than a status. A record may carry an unresolved `conflicts_with` only
+when it is `received` with a `ready` file: a conflict is established by comparing settled
+evidence, and material still arriving, or that never arrived, cannot be the thing another
+record disagrees with.
+
+`references` does not appear in the claimant projection. A claimant is told a check is in
+progress; which side is doubted, and why, is staff-only.
 
 Extracted facts use the structured form envelope with `source` set to `image` or `document`. They remain `proposed` until claimant confirmation or an authorised staff decision.
 
@@ -968,7 +996,7 @@ Signal status is `proposed`, `review_required`, `confirmed`, `dismissed`, `overr
       {
         "evidence_id": "evd_01J4Y7V5QJ",
         "kind": "police_report",
-        "status": "pending_generation",
+        "status": "pending",
         "file_status": "not_available",
         "source": "claimant",
         "visibility": "shared",
@@ -1004,6 +1032,32 @@ Priority is `standard`, `high`, `urgent`, or `immediate`. Queue is a configured 
 The staff-only packet carries the evidence list with its source, lifecycle and file state,
 visibility, related fields, and purpose. It does not copy storage keys, checksums, or extraction
 provenance.
+
+`policy_citation_refs` contains opaque `retrieval_id` values for persisted
+`PolicyRetrievalRecord` records that were authoritative and relevant at transfer time.
+`history_evidence_refs` uses the same rule for persisted
+`ClaimHistoryRetrievalRecord` records. These fields do not copy human-readable policy
+wording or mutable provider output into the Handoff packet.
+
+`source_refs` may additionally retain the bounded transfer-time provenance required to
+reconstruct why the handoff was created: authoritative message or Evidence references,
+relevant active Review Signal identities and their source references, and immutable Staff
+Tag Registry coordinates in the form
+`tag_registry:<registry_id>:<registry_version>:<tag_code>`. The packet does not copy the
+complete mutable Workbench tag or signal projection.
+
+An empty policy or history reference list is not evidence that retrieval succeeded. When
+a source was not relevant, the surrounding handoff context must make that interpretation
+clear. When retrieval failed or the source was unavailable, the handoff reason,
+`reason_codes`, requested action, or promised next step must preserve that limitation
+explicitly. An unexplained empty list is insufficient when a required source was
+unavailable.
+
+Current responsibility remains authoritative in live Claim and Workbench state. The
+transfer packet records the requested action and transfer-time responsibility context but
+does not create a second mutable ownership field. The receiving Workbench therefore
+presents the immutable handoff-time context separately from current responsibility and
+current signal state.
 
 Claimant routes use this customer-safe handoff projection:
 
@@ -1448,7 +1502,7 @@ consent rules, retention, and a dedicated typed acceptance contract before it ma
 an electronic signature.
 
 When the claimant continues without any supporting file, the guided Motor client registers one
-claimant-owned `incomplete` evidence item needed for a `later_action`. The created claim therefore
+claimant-owned `pending` evidence item needed for a `later_action`. The created claim therefore
 remains visible in the Workbench `awaiting_evidence` view without blocking controlled creation.
 The `standard_motor_intake` fixture route assigns the created Working Claim deterministically to
 `stf_demo`. This is a repeatable prototype allocation rule, not an approved Northwind workforce
@@ -1619,7 +1673,7 @@ Request:
 ```json
 {
   "kind": "police_report",
-  "status": "pending_generation",
+  "status": "pending",
   "related_fields": ["authorities.police_report_reference"],
   "needed_for": ["later_action"],
   "claimant_note": "Police said the report will be available next week."
@@ -1628,9 +1682,11 @@ Request:
 
 This request requires `Idempotency-Key` and `If-Match`. Response `201` returns
 the evidence resource, new claim revision, and customer next step. A
-`pending_generation` item MUST NOT block an action that does not require it.
-Evidence with a received file must use the upload flow rather than being
-registered directly as `received`.
+`pending` item MUST NOT block an action that does not require it. Evidence with a
+received file must use the upload flow rather than being registered directly as
+`received`, and a condition that describes content that exists — `invalid`,
+`superseded`, `expired` — cannot be registered at all, because registration records
+material that has not arrived.
 
 ### `POST /api/v1/claims/{claim_id}/evidence/uploads`
 
@@ -1832,6 +1888,7 @@ Returns staff and system updates visible to the claimant. Each update includes `
 | `GET` | `/workbench/claims/{claim_id}/events` | Read the claim audit timeline |
 | `POST` | `/workbench/agent/sessions` | Create a private persistent Staff Agent session |
 | `GET` | `/workbench/agent/sessions` | List the authenticated staff member's Staff Agent sessions |
+| `GET` | `/workbench/agent/capabilities` | Read published Staff Agent model profiles |
 | `GET` | `/workbench/agent/sessions/{session_id}/messages` | Read one owned Staff Agent session |
 | `POST` | `/workbench/agent/sessions/{session_id}/messages` | Ask the Staff Agent with an explicit Claim scope |
 | `GET` | `/workbench/conversations` | List accessible Claim conversations and owned Staff Agent sessions |
@@ -1844,7 +1901,10 @@ Workbench pages and browser refreshes. They are not Claim conversation sessions 
 exposed through claimant routes. `GET /api/v1/workbench/conversations` includes them with
 `kind: "staff_agent"` so the staff member can resume them from Claim conversations.
 
-`POST /api/v1/workbench/agent/sessions` accepts an optional `title` and creates a `sas_` session.
+`POST /api/v1/workbench/agent/sessions` accepts an optional `title` and published
+`model_profile_id`, and creates a `sas_` session. The selected profile is persisted on that
+session; omitting it selects the published default. A message cannot override the session's
+profile.
 `GET /api/v1/workbench/agent/sessions` lists only sessions owned by the authenticated staff
 member. `GET /api/v1/workbench/agent/sessions/{session_id}/messages` returns that session's
 ordered `staff` and `assistant` messages; another staff identity receives `404` rather than an
@@ -1869,7 +1929,8 @@ customer updates, and external-service tasks), and authorised knowledge retrieva
 preserves source and availability limitations while building that context. It invokes the distinct
 `staff_assistant` model purpose under the
 `staff_internal_fnol` privacy class and prompt `northwind-fnol-staff-assistant-v1`. The response
-returns the saved session, the staff message and the assistant message. Assistant messages may
+returns the saved session, the staff message and the assistant message. Each assistant message
+records the provider model used for the session profile. Assistant messages may
 include source references and editable drafts of `claimant_message`, `internal_note`, or
 `external_request` kind. A draft can name only a Claim in the request scope.
 
@@ -1879,6 +1940,9 @@ move an accepted draft into the applicable revision-checked business-action rout
 performs permission, consent, idempotency and audit checks. Model unavailability, malformed output,
 or an out-of-scope draft fails the complete turn before either message is persisted. When no Staff
 Agent model profile is configured, message submission returns `503 DEPENDENCY_UNAVAILABLE`.
+
+`GET /api/v1/workbench/agent/capabilities` returns the credential-free published model profile
+catalog for Staff authentication.
 
 ### `GET /api/v1/workbench/claims`
 
@@ -1929,13 +1993,17 @@ text. Each tag has this shape:
 {
   "tag_instance_id": "clm_01J4Y7Q2AW:impact.vehicle_not_drivable",
   "code": "impact.vehicle_not_drivable",
-  "registry_version": "0.2",
+  "registry_version": "0.3",
   "label": "Vehicle not drivable",
   "description": "Summarises the reported practical impact: Vehicle not drivable.",
   "category": "impact",
   "status": "active",
-  "visibility": "safe_summary_only",
+  "visibility": "staff_only",
   "basis": "reported",
+  "source_actor": "claimant",
+  "freshness": "current",
+  "projection_mode": "deterministic",
+  "attention_level": null,
   "source_refs": ["msg_01J4Y7RPN8", "field:vehicle.drivable"],
   "activated_at": "2026-08-10T03:45:00Z",
   "display_weight": 30
@@ -1943,7 +2011,8 @@ text. Each tag has this shape:
 ```
 
 Stable codes are an API concern; staff interfaces display the natural-language `label` and make
-the basis and sources available through progressive disclosure. Tags classify a Claim for staff
+the basis, source actor, freshness, status, attention level, activation time, and sources available
+through progressive disclosure. Tags classify a Claim for staff
 and do not independently determine queue priority. Staff cannot directly edit a tag: a correction,
 Signal decision, handoff, Evidence change, WorkItem transition, or authorised business action
 changes the source record and the backend recomputes the projection. Claimant routes MUST NOT
@@ -2059,7 +2128,10 @@ transitions. Ownership actions project their complete mutation inputs: cowork ac
 requeue require `reason`; cowork invitations require `staff_id` and `reason`; transfer requests
 require `target_staff_id` and `reason`; and cowork or transfer decisions require a registered
 `decision` choice. Ownership mutation routes reject fields that are not present in the exact
-projected action input set.
+projected action input set. Reusing an `Idempotency-Key` replays the original response. A new
+key cannot create a second pending cowork request for the same target or a second pending transfer
+to the same target; these attempts return `409 OWNERSHIP_CONFLICT` without changing the Claim
+revision or creating another request.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised. The pair always identifies the exact same
@@ -2204,7 +2276,8 @@ active handoff owner or Claim assignee, is another staff member.
 
 After a handoff is accepted, both parties may continue using the persisted session message
 history. A claimant message during an open handoff is routed to staff without an automatic Agent
-reply. Prefixing claimant text with `@agent` explicitly requests an Agent turn. Staff messages use
+reply. Claimants continue through the ordinary message route; there is no claimant command prefix.
+Staff messages use
 `POST /api/v1/workbench/claims/{claim_id}/messages`; they move an accepted handoff to
 `in_progress` but do not resolve it. `resolve` remains a separate, explicit lifecycle operation.
 
@@ -2278,6 +2351,44 @@ Response `200`:
     "clm_fixture_at02",
     "clm_fixture_at05",
     "clm_fixture_at10"
+  ]
+}
+```
+
+### `POST /api/v1/workbench/demo/seed-validation`
+
+Seeds the three Sprint 3 field-state validation paths: motor, home, and contents. The endpoint
+is available only in development and test environments, requires an active staff account, and
+uses the canonical scenarios `AT-14-field-states-motor`, `AT-15-field-states-home`, and
+`AT-16-field-states-contents`. It creates new opaque Claim, Session, Message, and Evidence
+identifiers for each request, assigns the current staff member, and provisions the synthetic
+claimant account `claimant.one@example.invalid` when the normal local identity store does not
+already contain it. The route uses the existing Claim, Session, Message, Evidence,
+`StaffPresenceRecord`, and idempotency contracts; it does not add fields or replace the older
+`seed-scenarios` queue.
+
+The request has no body and requires an `Idempotency-Key`. The first accepted request persists all
+three graphs, presence lease, and retry response atomically. Repeating the same key replays the
+original response without creating records. A different key is rejected with
+`409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` when any Claim already exists. Persistence failure leaves no
+partial Claim graph. The synthetic Evidence records are explicitly `unofficial` with
+`file_status=not_available`; the endpoint never fabricates an object-storage key, checksum, or
+file.
+
+Response `200`:
+
+```json
+{
+  "status": "seeded",
+  "scenario_ids": [
+    "AT-14-field-states-motor",
+    "AT-15-field-states-home",
+    "AT-16-field-states-contents"
+  ],
+  "claim_ids": [
+    "clm_opaque_motor",
+    "clm_opaque_home",
+    "clm_opaque_contents"
   ]
 }
 ```
@@ -2486,12 +2597,42 @@ Request:
 }
 ```
 
-An `evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
+Every response contains `retrieved_at`, the server-observed UTC time at which that retrieval result
+was produced. It is present for `evidence_found`, `no_evidence`, `timeout`, and `unavailable`, and
+is distinct from a document's ingestion time or a provider-supplied timestamp. An
+`evidence_found` response contains exact `document_id`, `chunk_id`, `section_path`, source URI,
 version, checksum, and source text for every result. `no_evidence` returns no results and an honest
 scope limitation. `timeout` and `unavailable` return no results, include the shared connection and
 structured-error projection described below, and remain retryable. Provider errors, traceback
 content, credentials, endpoints, and object-store identifiers are not exposed. Missing
-applicability fields fail request validation rather than broadening the search.
+applicability fields fail request validation rather than broadening the search. The deterministic
+knowledge retriever does not expose a numeric confidence value because the current contract has no
+authoritative confidence semantics.
+
+Response excerpt:
+
+```json
+{
+  "status": "evidence_found",
+  "retrieved_at": "2026-09-09T10:55:00Z",
+  "connection_state": "configured_service",
+  "errors": [],
+  "results": [
+    {
+      "document_id": "nw-policy-motor-standard-mvp-2026-1",
+      "chunk_id": "nw-policy-motor-standard-mvp-2026-1#MTR-EXC-01",
+      "title": "Northwind Motor Standard Policy",
+      "section_path": "MTR-EXC-01 - Excesses",
+      "source_uri": "northwind://synthetic-policy/motor/MVP-2026.1",
+      "version": "MVP-2026.1",
+      "checksum": "a7e4d4782f90571c7a711823fe14b1d580e13a867613a9a833a33a1fdc1ad989",
+      "text": "The base excess and any driver, age, use, or other additional excess come only from the matching policy schedule."
+    }
+  ],
+  "limitations": []
+}
+```
+
 When a structured Policy Schedule supplies a wording document identifier, the caller includes
 `document_id`; retrieval then fails closed unless the indexed wording matches that exact document.
 The approved document catalogue comes from the controlled publication manifest. Applicability is
@@ -2945,6 +3086,8 @@ All errors use one envelope:
 | `RESOURCE_CONFLICT` | `409` | A unique account or resource already exists |
 | `SESSION_NOT_ACTIVE` | `409` | Session is expired or already revoked |
 | `IDEMPOTENCY_CONFLICT` | `409` | Key was reused with a different request |
+| `DEMO_SEED_REQUIRES_EMPTY_QUEUE` | `409` | Controlled demo seed requires an empty Claim queue |
+| `DEMO_CLAIMANT_UNAVAILABLE` | `409` | Synthetic claimant identity is unavailable for a controlled demo seed |
 | `VALIDATION_FAILED` | `422` | One or more requested validation scenarios failed |
 | `CONFIGURATION_APPROVER_CONFLICT` | `403` | A high-impact configuration's sole author attempted publication |
 | `PROVIDER_CONFIGURATION_INVALID` | `422` | Provider configuration is incomplete or structurally invalid |

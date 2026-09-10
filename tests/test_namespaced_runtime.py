@@ -27,6 +27,7 @@ from backend.repositories.fixture import FixtureRepository
 from backend.services.model_profiles import (
     _settings_configuration,
     model_catalog,
+    model_configuration,
     select_model_profile,
 )
 from backend.services.runtime_configuration import (
@@ -241,6 +242,11 @@ def test_session_model_catalog_exposes_qwen_default_and_gpt_selection() -> None:
         configuration_repository=configurations,
         model_gateway_registry=registry,
     )
+    request = SimpleNamespace(app=app)
+    selected = model_configuration(request, 'nowcoding-gpt54mini')
+    assert selected is not None
+    assert selected.model_identifier == 'gpt-5.4-mini'
+    assert model_configuration(request, 'missing-profile') is None
     with TestClient(app) as client:
         headers = {'Authorization': 'Bearer synthetic-claimant'}
         capabilities = client.get('/api/v1/claims/capabilities', headers=headers)

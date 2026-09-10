@@ -8,11 +8,11 @@
     "revision": 4,
     "channel": "web_agent",
     "locale": "en-NZ",
-    "incident_type": "property",
+    "incident_type": "home",
     "claim_state": {
       "severity": "standard",
       "coverage": "ambiguous",
-      "evidence": "inconsistent",
+      "evidence": "in_conflict",
       "fraud_signal": "none",
       "customer_support": "guided",
       "urgency": "normal",
@@ -23,35 +23,201 @@
       "incident.description": {
         "value": "Water entered the ground floor after several days of heavy rain.",
         "source": "claimant",
-        "source_refs": ["msg_at02_claimant_1"],
+        "source_refs": [
+          "msg_at02_claimant_1"
+        ],
         "status": "confirmed",
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-13T11:05:00Z",
-        "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        }
       },
       "incident.cause": {
         "value": "gradual_water_ingress",
         "source": "inference",
-        "source_refs": ["msg_at02_claimant_1"],
+        "source_refs": [
+          "msg_at02_claimant_1"
+        ],
         "status": "disputed",
         "needed_for": "current_action",
         "confidence": 0.55,
         "updated_at": "2026-08-13T11:05:00Z",
-        "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+        "updated_by": {
+          "actor_type": "system",
+          "actor_id": "sys_agent"
+        }
       },
       "policy.policy_number": {
         "value": "POL-MVP-HOME-2048",
         "source": "policy",
-        "source_refs": ["ret_fixture_at02_policy"],
+        "source_refs": [
+          "ret_fixture_at02_policy"
+        ],
         "status": "confirmed",
         "needed_for": "current_action",
         "confidence": 1.0,
         "updated_at": "2026-08-13T11:04:20Z",
-        "updated_by": {"actor_type": "system", "actor_id": "sys_policy_adapter"}
+        "updated_by": {
+          "actor_type": "system",
+          "actor_id": "sys_policy_adapter"
+        }
+      },
+      "claim.product_family": {
+        "value": "home",
+        "source": "policy",
+        "source_refs": [
+          "ret_fixture_at02_policy"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "system",
+          "actor_id": "sys_policy_adapter"
+        },
+        "precision": "exact"
+      },
+      "incident.injury_or_danger": {
+        "value": false,
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_3"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "incident.location": {
+        "value": "18 Rimu Street, Auckland",
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_2"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "incident.occurred_at": {
+        "value": "2026-08-14T19:00:00Z",
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_2"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "approximate"
+      },
+      "loss.description": {
+        "value": "Ground-floor flooring, skirting boards, and lower wall linings are water damaged.",
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_2"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "property.address": {
+        "value": "18 Rimu Street, Auckland",
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_2"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "property.affected_areas": {
+        "value": [
+          "ground floor living area",
+          "hallway"
+        ],
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_2"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "property.habitable": {
+        "value": true,
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_3"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
+      },
+      "property.ongoing_risk": {
+        "value": "active_leak",
+        "source": "claimant",
+        "source_refs": [
+          "msg_at02_claimant_3"
+        ],
+        "status": "confirmed",
+        "needed_for": "current_action",
+        "confidence": 1.0,
+        "updated_at": "2026-08-13T11:05:00Z",
+        "updated_by": {
+          "actor_type": "claimant",
+          "actor_id": "cus_demo"
+        },
+        "precision": "exact"
       }
     },
-    "evidence_summary": {"received": 2, "pending": 0, "needs_attention": 1},
+    "evidence_summary": {
+      "received": 2,
+      "pending": 0,
+      "needs_attention": 1
+    },
     "route": "professional_review",
     "active_session_id": "ses_fixture_at02",
     "external_claim": null,
@@ -72,7 +238,9 @@
       "customer_id": "cus_demo",
       "status": "active",
       "summary": "The claimant confirmed water damage to the ground floor after heavy rain; the cause of ingress is disputed.",
-      "unresolved_questions": ["confirm:incident.cause"],
+      "unresolved_questions": [
+        "confirm:incident.cause"
+      ],
       "pending_items": [],
       "prior_commitments": [],
       "context_revision": 4,
@@ -92,9 +260,15 @@
       "media_type": "image/jpeg",
       "size_bytes": 184000,
       "source": "claimant",
-      "related_fields": ["incident.description"],
-      "needed_for": ["current_action"],
-      "provenance": {"storage_key": "fixture/at02/ground-floor-water-damage"},
+      "related_fields": [
+        "incident.description"
+      ],
+      "needed_for": [
+        "current_action"
+      ],
+      "provenance": {
+        "storage_key": "fixture/at02/ground-floor-water-damage"
+      },
       "claimant_note": "Photos taken after the water was discovered on the ground floor.",
       "created_at": "2026-08-13T11:03:00Z",
       "updated_at": "2026-08-13T11:03:00Z"
@@ -109,9 +283,15 @@
       "media_type": "application/pdf",
       "size_bytes": 92000,
       "source": "claimant",
-      "related_fields": ["incident.cause"],
-      "needed_for": ["current_action"],
-      "provenance": {"storage_key": "fixture/at02/plumber-site-note"},
+      "related_fields": [
+        "incident.cause"
+      ],
+      "needed_for": [
+        "current_action"
+      ],
+      "provenance": {
+        "storage_key": "fixture/at02/plumber-site-note"
+      },
       "claimant_note": "An unsigned note supplied after the plumber's first visit.",
       "created_at": "2026-08-13T11:04:00Z",
       "updated_at": "2026-08-13T11:04:00Z"
@@ -120,15 +300,30 @@
       "evidence_id": "evd_fixture_at02_weather_capture",
       "claim_id": "clm_fixture_at02",
       "kind": "other_document",
-      "status": "inconsistent",
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "evidence_id": "evd_fixture_at02_plumber_note",
+          "state": "unresolved",
+          "reason": "The recorded weather does not support the cause the attending plumber reported, and both answer incident.cause.",
+          "raised_at": "2026-08-13T11:04:30Z"
+        }
+      ],
+      "status": "received",
       "file_status": "ready",
       "original_filename": "synthetic-weather-history-capture.png",
       "media_type": "image/png",
       "size_bytes": 76000,
       "source": "claimant",
-      "related_fields": ["incident.cause"],
-      "needed_for": ["current_action"],
-      "provenance": {"storage_key": "fixture/at02/weather-history-capture"},
+      "related_fields": [
+        "incident.cause"
+      ],
+      "needed_for": [
+        "current_action"
+      ],
+      "provenance": {
+        "storage_key": "fixture/at02/weather-history-capture"
+      },
       "claimant_note": "The date displayed in this capture does not match the reported incident period.",
       "created_at": "2026-08-13T11:04:30Z",
       "updated_at": "2026-08-13T11:04:30Z"
@@ -200,6 +395,36 @@
       "created_at": "2026-08-13T11:02:00Z"
     },
     {
+      "message_id": "msg_at02_claimant_2",
+      "claim_id": "clm_fixture_at02",
+      "session_id": "ses_fixture_at02",
+      "client_message_id": "at02-detail-2",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {
+        "type": "text",
+        "text": "It's our place at 18 Rimu Street, Auckland. We first saw water coming in on the evening of 14 August. It is the ground floor living area and the hallway that are affected — the flooring, the skirting boards and the bottom of the wall linings are all soaked."
+      },
+      "evidence_refs": [],
+      "in_reply_to": "msg_at02_claimant_1",
+      "created_at": "2026-08-13T11:02:40Z"
+    },
+    {
+      "message_id": "msg_at02_claimant_3",
+      "claim_id": "clm_fixture_at02",
+      "session_id": "ses_fixture_at02",
+      "client_message_id": "at02-detail-3",
+      "actor": "claimant",
+      "visibility": "shared",
+      "content": {
+        "type": "text",
+        "text": "Nobody was hurt and nothing is dangerous — no electrics are involved. Water is still seeping in along the same wall whenever it rains. We are still living here; upstairs is dry and the kitchen and bathroom are fine."
+      },
+      "evidence_refs": [],
+      "in_reply_to": "msg_at02_claimant_1",
+      "created_at": "2026-08-13T11:03:20Z"
+    },
+    {
       "message_id": "msg_at02_policy_signal",
       "claim_id": "clm_fixture_at02",
       "session_id": "ses_fixture_at02",
@@ -212,7 +437,9 @@
         "code": "POLICY_CAUSE_REVIEW",
         "status": "review_required",
         "summary": "Does the available evidence support sudden storm damage rather than gradual water ingress?",
-        "reason_codes": ["COVERAGE_AMBIGUITY_REVIEW"],
+        "reason_codes": [
+          "COVERAGE_AMBIGUITY_REVIEW"
+        ],
         "source_refs": [
           "evd_fixture_at02_damage_photos",
           "evd_fixture_at02_plumber_note"
@@ -238,10 +465,16 @@
         "code": "WEATHER_DATE_CONFLICT",
         "status": "review_required",
         "summary": "Is the weather-history capture relevant when its displayed date differs from the reported incident period?",
-        "reason_codes": ["EVIDENCE_DATE_CONFLICT"],
-        "source_refs": ["evd_fixture_at02_weather_capture"]
+        "reason_codes": [
+          "EVIDENCE_DATE_CONFLICT"
+        ],
+        "source_refs": [
+          "evd_fixture_at02_weather_capture"
+        ]
       },
-      "evidence_refs": ["evd_fixture_at02_weather_capture"],
+      "evidence_refs": [
+        "evd_fixture_at02_weather_capture"
+      ],
       "in_reply_to": null,
       "created_at": "2026-08-13T11:04:50Z"
     }
@@ -257,7 +490,9 @@
       "support_need": null,
       "trigger": "professional_review_required",
       "preferred_channel": null,
-      "reason_codes": ["COVERAGE_AMBIGUITY_REVIEW"],
+      "reason_codes": [
+        "COVERAGE_AMBIGUITY_REVIEW"
+      ],
       "reason": "Policy coverage for gradual water ingress is ambiguous and requires professional judgment before the claim can proceed.",
       "requested_action": "Review the cited policy clause and confirm whether the reported peril is covered before the claim is created.",
       "applied_rule": "prototype_professional_review",
@@ -268,32 +503,194 @@
           "incident.description": {
             "value": "Water entered the ground floor after several days of heavy rain.",
             "source": "claimant",
-            "source_refs": ["msg_at02_claimant_1"],
+            "source_refs": [
+              "msg_at02_claimant_1"
+            ],
             "status": "confirmed",
             "needed_for": "current_action",
             "confidence": 1.0,
             "updated_at": "2026-08-13T11:05:00Z",
-            "updated_by": {"actor_type": "claimant", "actor_id": "cus_demo"}
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            }
           },
           "incident.cause": {
             "value": "gradual_water_ingress",
             "source": "inference",
-            "source_refs": ["msg_at02_claimant_1"],
+            "source_refs": [
+              "msg_at02_claimant_1"
+            ],
             "status": "disputed",
             "needed_for": "current_action",
             "confidence": 0.55,
             "updated_at": "2026-08-13T11:05:00Z",
-            "updated_by": {"actor_type": "system", "actor_id": "sys_agent"}
+            "updated_by": {
+              "actor_type": "system",
+              "actor_id": "sys_agent"
+            }
           },
           "policy.policy_number": {
             "value": "POL-MVP-HOME-2048",
             "source": "policy",
-            "source_refs": ["ret_fixture_at02_policy"],
+            "source_refs": [
+              "ret_fixture_at02_policy"
+            ],
             "status": "confirmed",
             "needed_for": "current_action",
             "confidence": 1.0,
             "updated_at": "2026-08-13T11:04:20Z",
-            "updated_by": {"actor_type": "system", "actor_id": "sys_policy_adapter"}
+            "updated_by": {
+              "actor_type": "system",
+              "actor_id": "sys_policy_adapter"
+            }
+          },
+          "claim.product_family": {
+            "value": "home",
+            "source": "policy",
+            "source_refs": [
+              "ret_fixture_at02_policy"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "system",
+              "actor_id": "sys_policy_adapter"
+            },
+            "precision": "exact"
+          },
+          "incident.injury_or_danger": {
+            "value": false,
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_3"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "incident.location": {
+            "value": "18 Rimu Street, Auckland",
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_2"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "incident.occurred_at": {
+            "value": "2026-08-14T19:00:00Z",
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_2"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "approximate"
+          },
+          "loss.description": {
+            "value": "Ground-floor flooring, skirting boards, and lower wall linings are water damaged.",
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_2"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "property.address": {
+            "value": "18 Rimu Street, Auckland",
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_2"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "property.affected_areas": {
+            "value": [
+              "ground floor living area",
+              "hallway"
+            ],
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_2"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "property.habitable": {
+            "value": true,
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_3"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
+          },
+          "property.ongoing_risk": {
+            "value": "active_leak",
+            "source": "claimant",
+            "source_refs": [
+              "msg_at02_claimant_3"
+            ],
+            "status": "confirmed",
+            "needed_for": "current_action",
+            "confidence": 1.0,
+            "updated_at": "2026-08-13T11:05:00Z",
+            "updated_by": {
+              "actor_type": "claimant",
+              "actor_id": "cus_demo"
+            },
+            "precision": "exact"
           }
         },
         "evidence_refs": [
@@ -303,14 +700,24 @@
         ],
         "missing_items": [],
         "pending_items": [],
-        "conflicts": ["incident.cause"],
-        "low_confidence_items": ["incident.cause"],
-        "policy_citation_refs": ["POL-MVP-HOME-2048: gradual damage exclusion"],
-        "history_evidence_refs": ["ret_fixture_at02_history"],
+        "conflicts": [
+          "incident.cause"
+        ],
+        "low_confidence_items": [
+          "incident.cause"
+        ],
+        "policy_citation_refs": [
+          "ret_fixture_at02_policy"
+        ],
+        "history_evidence_refs": [
+          "ret_fixture_at02_history"
+        ],
         "source_refs": [
           "msg_at02_claimant_1",
-          "ret_fixture_at02_policy",
-          "ret_fixture_at02_history"
+          "msg_at02_claimant_2",
+          "msg_at02_claimant_3",
+          "ret_fixture_at02_history",
+          "ret_fixture_at02_policy"
         ],
         "prior_customer_updates": [],
         "promised_next_step": "A claims professional is reviewing the relevant information and policy wording before the claim can proceed."
@@ -335,6 +742,8 @@
     "handoff_id": "hnd_fixture_at02",
     "message_ids": [
       "msg_at02_claimant_1",
+      "msg_at02_claimant_2",
+      "msg_at02_claimant_3",
       "msg_at02_policy_signal",
       "msg_at02_weather_signal"
     ]
@@ -342,10 +751,24 @@
   "expected": {
     "workflow_state": "professional_review",
     "customer_status": "professional_review_queued",
-    "confirmed_fields": ["incident.description"],
+    "confirmed_fields": [
+      "claim.product_family",
+      "incident.description",
+      "incident.injury_or_danger",
+      "incident.location",
+      "incident.occurred_at",
+      "loss.description",
+      "policy.policy_number",
+      "property.address",
+      "property.affected_areas",
+      "property.habitable",
+      "property.ongoing_risk"
+    ],
     "handoff_priority": "high",
     "handoff_queue": "professional_review",
-    "handoff_gaps": ["incident.cause"],
-    "evidence_state": "inconsistent"
+    "handoff_gaps": [
+      "incident.cause"
+    ],
+    "evidence_state": "in_conflict"
   }
 }

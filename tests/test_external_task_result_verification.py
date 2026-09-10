@@ -28,6 +28,9 @@ from backend.domain.models import (
     CustomerNextStep,
     EvidenceFileStatus,
     EvidenceRecord,
+    EvidenceReference,
+    EvidenceRelation,
+    EvidenceRelationState,
     EvidenceSource,
     EvidenceStatus,
     IntegrationSource,
@@ -134,8 +137,29 @@ def _evidence(
     evidence_id: str = 'evd_1',
     claim_id: str = CLAIM,
     status: EvidenceStatus = EvidenceStatus.RECEIVED,
+    conflicted: bool = False,
     updated_at: datetime = RECEIVED_AT,
 ) -> EvidenceRecord:
+    """One received assessment, optionally standing in an unresolved conflict.
+
+    A contested material is a received one now, so the conflict is a reference rather
+    than a status. The record stays `received` and `ready`, which is also the only shape
+    a conflict may be recorded on.
+    """
+
+    references = (
+        [
+            EvidenceReference(
+                relation=EvidenceRelation.CONFLICTS_WITH,
+                evidence_id='evd_claimant_account',
+                state=EvidenceRelationState.UNRESOLVED,
+                reason='The provider answer and the claimant account disagree.',
+                raised_at=RECEIVED_AT,
+            )
+        ]
+        if conflicted
+        else []
+    )
     return EvidenceRecord(
         evidence_id=evidence_id,
         claim_id=claim_id,
@@ -143,6 +167,7 @@ def _evidence(
         status=status,
         file_status=EvidenceFileStatus.READY,
         source=EvidenceSource.EXTERNAL_SYSTEM,
+        references=references,
         created_at=RECEIVED_AT,
         updated_at=updated_at,
     )
@@ -208,7 +233,7 @@ def test_consistent_is_never_produced() -> None:
         _verify(
             _result(evidence_ids=['evd_1']),
             links=[_link()],
-            evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+            evidence=[_evidence(conflicted=True)],
         ),
         _verify(
             _result(evidence_ids=['evd_1']),
@@ -236,7 +261,7 @@ def test_material_the_result_names_being_inconsistent_makes_it_inconsistent() ->
     checked = _verify(
         _result(evidence_ids=['evd_1']),
         links=[_link()],
-        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+        evidence=[_evidence(conflicted=True)],
     )
 
     assert checked.verification is ExternalTaskResultVerification.INCONSISTENT
@@ -250,7 +275,7 @@ def test_a_conflict_in_material_this_result_does_not_name_is_not_attributed_to_i
         links=[_link()],
         evidence=[
             _evidence(),
-            _evidence(evidence_id='evd_unrelated', status=EvidenceStatus.INCONSISTENT),
+            _evidence(evidence_id='evd_unrelated', conflicted=True),
         ],
     )
 
@@ -260,7 +285,7 @@ def test_a_conflict_in_material_this_result_does_not_name_is_not_attributed_to_i
 def test_a_result_naming_no_material_cannot_be_inconsistent() -> None:
     checked = _verify(
         _result(),
-        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+        evidence=[_evidence(conflicted=True)],
     )
 
     assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
@@ -273,7 +298,7 @@ def test_unknown_outcome_outranks_a_conflict_in_named_material() -> None:
         _result(evidence_ids=['evd_1']),
         task=_task(status=ExternalTaskOperationStatus.UNKNOWN_OUTCOME),
         links=[_link()],
-        evidence=[_evidence(status=EvidenceStatus.INCONSISTENT)],
+        evidence=[_evidence(conflicted=True)],
     )
 
     assert checked.verification is ExternalTaskResultVerification.REVIEW_REQUIRED
@@ -283,7 +308,7 @@ def test_evidence_order_does_not_change_the_answer() -> None:
     """Two records for one claim must resolve the same way whichever order they arrive in."""
 
     clean = _evidence(evidence_id='evd_2')
-    conflicting = _evidence(status=EvidenceStatus.INCONSISTENT)
+    conflicting = _evidence(conflicted=True)
 
     forward = _verify(
         _result(evidence_ids=['evd_1']), links=[_link()], evidence=[clean, conflicting]
@@ -372,7 +397,7 @@ def test_evidence_owned_by_another_claim_is_refused() -> None:
         _verify(
             _result(evidence_ids=['evd_1']),
             links=[_link()],
-            evidence=[_evidence(claim_id='clm_2', status=EvidenceStatus.INCONSISTENT)],
+            evidence=[_evidence(claim_id='clm_2', conflicted=True)],
         )
 
 

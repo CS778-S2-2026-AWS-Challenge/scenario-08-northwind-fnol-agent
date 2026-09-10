@@ -11,7 +11,7 @@
     "claim_state": {
       "severity": "standard",
       "coverage": "clear",
-      "evidence": "pending_generation",
+      "evidence": "pending",
       "fraud_signal": "none",
       "customer_support": "guided",
       "urgency": "normal",
@@ -89,7 +89,7 @@
       "evidence_id": "evd_fixture_at08_police",
       "claim_id": "clm_fixture_at08",
       "kind": "police_report",
-      "status": "pending_generation",
+      "status": "pending",
       "file_status": "not_available",
       "original_filename": null,
       "media_type": null,

@@ -5,13 +5,17 @@ import { TagList } from './TagList.jsx'
 const backendTag = {
   tag_instance_id: 'clm_1:impact.vehicle_not_drivable',
   code: 'impact.vehicle_not_drivable',
-  registry_version: '0.2',
+  registry_version: '0.3',
   label: 'Vehicle not drivable',
   description: 'Summarises the reported practical impact.',
   category: 'impact',
   status: 'active',
-  visibility: 'safe_summary_only',
+  visibility: 'staff_only',
   basis: 'reported',
+  source_actor: 'claimant',
+  freshness: 'current',
+  projection_mode: 'deterministic',
+  attention_level: null,
   source_refs: ['field:vehicle.drivable'],
   activated_at: '2026-09-03T01:00:00Z',
   display_weight: 30,
@@ -23,10 +27,9 @@ describe('TagList', () => {
 
     expect(screen.getByText('Vehicle not drivable')).toBeInTheDocument()
     expect(screen.queryByText('impact.vehicle_not_drivable')).not.toBeInTheDocument()
-    expect(screen.getByTitle(/Basis: reported/)).toHaveAttribute(
-      'title',
-      expect.stringContaining('field:vehicle.drivable'),
-    )
+    expect(screen.getByText('Basis')).toBeInTheDocument()
+    expect(screen.getByText('claimant')).toBeInTheDocument()
+    expect(screen.getByText('field:vehicle.drivable')).toBeInTheDocument()
   })
 
   it('does not create a tag when the backend projection is empty', () => {

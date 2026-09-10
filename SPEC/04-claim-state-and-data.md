@@ -46,7 +46,7 @@ path:
 ```text
 severity: fast_track | standard | complex
 coverage: clear | ambiguous | review_required
-evidence: received | unofficial | incomplete | pending_generation | inconsistent
+evidence: not_started | received | unofficial | invalid | pending | unavailable | in_conflict
 fraud_signal: none | review_required
 customer_support: self_service | guided | human_requested | accessibility_required
 urgency: normal | urgent | immediate_safety_risk

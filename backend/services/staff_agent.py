@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -39,7 +39,9 @@ from backend.domain.staff_agent import (
 )
 from backend.prompts import STAFF_ASSISTANT_PROMPT_ID, load_staff_assistant_prompt
 from backend.repositories.protocols import IdempotencyConflict, PersistenceRepository
+from backend.services.knowledge_manifest import approved_version_for_product
 from backend.services.model_operations import ModelOperationsRecorder
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.support import now_utc
 
 
@@ -50,6 +52,7 @@ class StaffAgentContext:
     conversation: tuple[Mapping[str, Any], ...]
     knowledge: tuple[Mapping[str, Any], ...]
     knowledge_status: str
+    model_profile_id: str = 'qwen-local'
     references: tuple[Mapping[str, Any], ...] = ()
     review_signals: tuple[Mapping[str, Any], ...] = ()
     handoffs: tuple[Mapping[str, Any], ...] = ()
@@ -83,6 +86,7 @@ class GatewayStaffAgent:
 
     def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
         request = ModelRequest(
+            model_profile_id=context.model_profile_id,
             purpose=STAFF_AGENT_PURPOSE,
             privacy_class=STAFF_AGENT_PRIVACY_CLASS,
             prompt_version=STAFF_ASSISTANT_PROMPT_ID,
@@ -152,6 +156,33 @@ class GatewayStaffAgent:
         return result
 
 
+class ProfileSelectingStaffAgent:
+    """Resolve the session-bound published profile before each staff turn."""
+
+    def __init__(
+        self,
+        gateway_for_profile: Callable[[str], ModelGateway],
+        operations: ModelOperationsRecorder | None = None,
+    ) -> None:
+        self._gateway_for_profile = gateway_for_profile
+        self._operations = operations
+
+    def respond(self, context: StaffAgentContext) -> StaffAgentProviderResult:
+        gateway = self._gateway_for_profile(context.model_profile_id)
+        return GatewayStaffAgent(gateway, self._operations).respond(context)
+
+
+_KNOWLEDGE_CONFIGURATION_LIMITATION = (
+    'The active runtime release does not select an approved knowledge version.'
+)
+_KNOWLEDGE_UNAVAILABLE_LIMITATION = 'The knowledge service is temporarily unavailable.'
+_KNOWLEDGE_TIMEOUT_LIMITATION = 'The knowledge service did not respond within the request budget.'
+
+
+def _knowledge_retrieval_timed_out(code: str) -> bool:
+    return code.strip().casefold() in {'timeout', 'provider_timeout', 'request_timeout'}
+
+
 def _require_staff(principal: Principal) -> None:
     if principal.actor_type != 'staff':
         raise ApiError(status_code=403, code='ACCESS_DENIED', message='Staff access is required.')
@@ -174,13 +205,20 @@ def create_staff_agent_session(
     repository: PersistenceRepository,
     principal: Principal,
     payload: CreateStaffAgentSessionRequest,
+    model_profile_selector: Callable[[str | None], str] | None = None,
 ) -> StaffAgentSession:
     _require_staff(principal)
     timestamp = now_utc()
+    selected_profile = (
+        model_profile_selector(payload.model_profile_id)
+        if model_profile_selector is not None
+        else (payload.model_profile_id or 'qwen-local')
+    )
     session = StaffAgentSession(
         session_id=new_id('sas'),
         staff_id=principal.subject,
         title=payload.title,
+        model_profile_id=selected_profile,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -271,7 +309,8 @@ def _knowledge_context(
     retriever: KnowledgeRetriever,
     question: str,
     claims: Sequence[WorkingClaim],
-) -> tuple[tuple[Mapping[str, Any], ...], str]:
+    knowledge_version_for: Callable[[str], str | None] | None = None,
+) -> tuple[tuple[Mapping[str, Any], ...], str, tuple[str, ...]]:
     products: list[str | None] = list(
         sorted({claim.incident_type for claim in claims if claim.incident_type})
     )
@@ -280,12 +319,22 @@ def _knowledge_context(
     citations: dict[str, Mapping[str, Any]] = {}
     try:
         for product in products:
+            version = (
+                knowledge_version_for(product)
+                if knowledge_version_for is not None and product is not None
+                else approved_version_for_product(product)
+                if product is not None
+                else None
+            )
+            if version is None and product is not None:
+                return (), 'unavailable', (_KNOWLEDGE_CONFIGURATION_LIMITATION,)
             for chunk in retriever.search(
                 KnowledgeSearch(
                     text=question,
                     jurisdiction='NZ',
                     visibility='customer_and_staff',
                     authority='northwind_synthetic_demo',
+                    version=version,
                     insurer='Northwind Insurance',
                     product=product,
                     effective_at=datetime.now(UTC),
@@ -299,11 +348,20 @@ def _knowledge_context(
                     'section_path': chunk.section_path,
                     'source_uri': chunk.source_uri,
                     'version': chunk.version,
+                    'checksum': chunk.checksum,
                     'text': chunk.text,
                 }
-    except KnowledgeRetrievalUnavailable:
-        return (), 'unavailable'
-    return tuple(citations.values()), 'evidence_found' if citations else 'no_evidence'
+    except KnowledgeRetrievalUnavailable as error:
+        if _knowledge_retrieval_timed_out(error.code):
+            return (), 'timeout', (_KNOWLEDGE_TIMEOUT_LIMITATION,)
+        return (), 'unavailable', (_KNOWLEDGE_UNAVAILABLE_LIMITATION,)
+    except RuntimeConfigurationResolutionError:
+        return (), 'unavailable', (_KNOWLEDGE_CONFIGURATION_LIMITATION,)
+    return (
+        tuple(citations.values()),
+        'evidence_found' if citations else 'no_evidence',
+        (),
+    )
 
 
 def submit_staff_agent_message(
@@ -313,6 +371,8 @@ def submit_staff_agent_message(
     principal: Principal,
     session_id: str,
     payload: CreateStaffAgentMessageRequest,
+    *,
+    knowledge_version_for: Callable[[str], str | None] | None = None,
 ) -> StaffAgentTurnResponse:
     _require_staff(principal)
     session = _session(repository, principal, session_id)
@@ -371,15 +431,24 @@ def submit_staff_agent_message(
         claims.append(claim)
 
     history = repository.list_staff_agent_messages(session_id, principal.subject)[-12:]
-    knowledge, knowledge_status = _knowledge_context(retriever, payload.content, claims)
+    knowledge, knowledge_status, knowledge_limitations = _knowledge_context(
+        retriever,
+        payload.content,
+        claims,
+        knowledge_version_for,
+    )
     claim_contexts = tuple(_claim_context(repository, claim) for claim in claims)
     context_limitations = tuple(
-        limitation
-        for context in claim_contexts
-        for limitation in context.get('context_limitations', [])
+        knowledge_limitations
+        + tuple(
+            limitation
+            for context in claim_contexts
+            for limitation in context.get('context_limitations', [])
+        )
     )
     agent_context = StaffAgentContext(
         question=payload.content,
+        model_profile_id=session.model_profile_id,
         claims=claim_contexts,
         conversation=tuple(
             {

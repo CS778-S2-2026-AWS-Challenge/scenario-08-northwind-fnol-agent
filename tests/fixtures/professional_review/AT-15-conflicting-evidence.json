@@ -10,7 +10,7 @@
     "incident_type": "motor",
     "claim_state": {
       "coverage": "review_required",
-      "evidence": "inconsistent",
+      "evidence": "in_conflict",
       "workflow_state": "professional_review",
       "next_action": "HANDOFF"
     },
@@ -42,7 +42,16 @@
       "evidence_id": "evd_fixture_at15_statement",
       "claim_id": "clm_fixture_at15",
       "kind": "claimant_statement",
-      "status": "inconsistent",
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "evidence_id": "evd_fixture_at15_report",
+          "state": "unresolved",
+          "reason": "The claimant statement and the incident report give different times for incident.occurred_at.",
+          "raised_at": "2026-08-19T02:05:00Z"
+        }
+      ],
+      "status": "received",
       "file_status": "ready",
       "source": "claimant",
       "related_fields": ["incident.occurred_at"],
@@ -55,7 +64,16 @@
       "evidence_id": "evd_fixture_at15_report",
       "claim_id": "clm_fixture_at15",
       "kind": "incident_report",
-      "status": "inconsistent",
+      "references": [
+        {
+          "relation": "conflicts_with",
+          "evidence_id": "evd_fixture_at15_statement",
+          "state": "unresolved",
+          "reason": "The incident report and the claimant statement give different times for incident.occurred_at.",
+          "raised_at": "2026-08-19T02:05:00Z"
+        }
+      ],
+      "status": "received",
       "file_status": "ready",
       "source": "external_system",
       "related_fields": ["incident.occurred_at"],
@@ -90,7 +108,7 @@
   ],
   "expected": {
     "action": "HANDOFF",
-    "evidence_state": "inconsistent",
+    "evidence_state": "in_conflict",
     "review_reason": "EVIDENCE_CONFLICT",
     "visibility": {
       "claimant_message_count": 1,

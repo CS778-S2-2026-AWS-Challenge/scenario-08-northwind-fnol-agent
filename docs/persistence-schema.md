@@ -66,7 +66,7 @@ projections, fixtures, and transaction tests change together.
 | Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
-| Staff Agent interaction | staff-owned persistent sessions, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
+| Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
 | Agent turn | Target TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelopes plus the implemented bounded Runtime Trace, ToolRequests and results, TurnResult, policy and Registry versions, usage, latency, limitations | `turn_id`/`trace_id`, linked to session and optional Claim |
 | Evidence | evidence metadata, provenance, lifecycle state, protected object reference, extracted proposals | `claim_id` and `evidence_id` |
 | Retrieval | structured policy/history results, knowledge citations, limitations, source versions | `claim_id` and retrieval identity |
@@ -367,7 +367,15 @@ the append-only audit collection through a bounded, filterable projection.
   authoritative Claim aggregation; only a `ready` file can contribute received
   Evidence. Retry reuses the same Evidence identity and revision-checked
   mutation rather than creating a duplicate record.
-- Pending, incomplete, unofficial, and not-yet-generated evidence remain distinct states.
+- Pending, invalid, unofficial, and not-yet-generated evidence remain distinct states.
+  `EvidenceStatus` carries the business condition of the material and
+  `EvidenceFileStatus` the upload and processing lifecycle alone, so the two
+  vocabularies cannot drift into describing the same thing differently. A condition
+  that is a statement about a second record or a claim fact — conflict, supersession,
+  established unavailability — is carried by a typed `EvidenceReference` with its own
+  unresolved or resolved state, reason, and timing, never by the status alone.
+  References are staff-visible only: a claimant is told a check is in progress, not
+  which side is doubted.
 
 Anonymous browser sessions may own a temporary conversation Claim, but Evidence
 upload mutations require an authenticated claimant. Selecting a file before
@@ -411,6 +419,18 @@ Evidence record or protected object.
 
 - A handoff retains immutable identity, type, reason, priority, requested action, source
   context, transfer packet, and creation time.
+- Policy and claim-history context in the transfer packet references authoritative persisted
+  Retrieval records by stable `retrieval_id`; the packet does not duplicate policy wording,
+  claim-history facts, or mutable provider output as a second source of truth.
+- Transfer-time Review Signal provenance retains only relevant stable signal/source references.
+  Derived Staff Tags retain the minimum immutable Registry coordinate needed to reconstruct their
+  basis: tag code, Registry version, and source references. Current mutable tag and signal state is
+  recomputed from authoritative Claim-linked records.
+- The transfer packet does not persist a second mutable current-responsibility or ownership field.
+  Current responsibility remains authoritative in live Claim and Workbench state.
+- Policy/history absence remains distinguishable from provider or source unavailability. A failed
+  or unavailable required retrieval must remain explicit in durable handoff context rather than
+  being represented as an unexplained empty reference list.
 - Lifecycle changes may update status, owner, and applicable timestamps through a
   revision-checked claim mutation.
 - Acceptance records one owner. Active work cannot be reassigned by a blind overwrite.
@@ -609,6 +629,14 @@ provider-neutral lease revision is the transaction conflict point.
 Staff logout revokes the server-side auth session even when this best-effort presence cleanup
 cannot be persisted; presence failure must never leave the bearer session active.
 An acceptance using a stale presence revision is rejected before the Claim assignment is stored.
+
+The development/test validation seed uses the provider-neutral `ValidationSeedGraph` boundary.
+It writes three Claim graphs, their active Sessions, Messages, Evidence metadata, the current
+staff presence lease, and one Idempotency record as one operation. Fixture persistence snapshots
+and restores all affected stores on failure; MongoDB uses the existing transaction boundary.
+The seed reuses the logical records above and adds no fields, provider keys, object-storage
+references, or alternate Claim schema. A repeated key replays the stored response, while a
+different key requires an empty Claim queue.
 
 - Draft configuration is separate from the active published version.
 - Runtime reads resolve only the latest active `published` record for a `(domain, configuration_key)` and fail closed
