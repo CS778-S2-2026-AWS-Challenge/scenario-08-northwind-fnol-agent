@@ -161,8 +161,16 @@ def test_all_resumable_non_terminal_states_share_incomplete_projection(
 
     summary = workbench.json()['work_summary']
 
-    assert summary['queue_key'] == 'incomplete_claims'
     assert summary['incomplete_context'] is not None
+
+    incomplete_view = client.get(
+        '/api/v1/workbench/claims',
+        params={'view': 'incomplete_claims'},
+        headers=staff_auth_headers,
+    )
+
+    assert incomplete_view.status_code == 200
+    assert claim_id in {item['claim_id'] for item in incomplete_view.json()['items']}
 
 
 @pytest.mark.parametrize(
