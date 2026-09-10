@@ -41,6 +41,7 @@ from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
 )
+from backend.services.handoff_context import build_handoff_transfer_context
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
 from backend.services.support import (
     now_utc,
@@ -184,6 +185,13 @@ def build_handoff(
     )
     timestamp = now_utc()
     evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
+    existing_handoffs = repository.list_handoffs(claim.claim_id, claim.customer_id)
+    transfer_context = build_handoff_transfer_context(
+        repository,
+        claim,
+        evidence=evidence,
+        handoffs=existing_handoffs,
+    )
     messages = (
         repository.list_messages(
             claim.claim_id,
@@ -198,6 +206,9 @@ def build_handoff(
     source_refs = sorted(
         {source_ref for field in claim.form.values() for source_ref in field.source_refs}
         | ({source_message_id} if source_message_id else set())
+        | set(transfer_context.policy_retrieval_refs)
+        | set(transfer_context.history_retrieval_refs)
+        | set(transfer_context.provenance_refs)
     )
     packet = assemble_evidence_handoff_packet(
         HandoffPacket(
@@ -226,6 +237,8 @@ def build_handoff(
                 for code, field in form_values
                 if field.confidence is not None and field.confidence < 0.8
             ],
+            policy_citation_refs=transfer_context.policy_retrieval_refs,
+            history_evidence_refs=transfer_context.history_retrieval_refs,
             source_refs=source_refs,
             prior_customer_updates=[
                 str(message.content.get('text'))

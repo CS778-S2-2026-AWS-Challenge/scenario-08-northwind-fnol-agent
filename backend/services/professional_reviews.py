@@ -19,6 +19,7 @@ from backend.services.evidence_handoff import (
     assemble_evidence_handoff_packet,
     default_handoff_visibility,
 )
+from backend.services.handoff_context import build_handoff_transfer_context
 from backend.services.support import now_utc
 
 PROFESSIONAL_REVIEW_NEXT_STEP_STATUS = 'professional_review_queued'
@@ -45,16 +46,30 @@ def build_policy_review_handoff(
     evidence = repository.list_evidence(claim.claim_id, claim.customer_id)
     if pending_evidence is not None:
         evidence.append(pending_evidence)
+    transfer_context = build_handoff_transfer_context(
+        repository,
+        claim,
+        evidence=evidence,
+        handoffs=repository.list_handoffs(claim.claim_id, claim.customer_id),
+    )
     form_values = list(claim.form.items())
     incident_field = claim.form.get('incident.description')
     promised_next_step = (
         'A claims specialist is checking one policy point. You can add the police report when it '
         'becomes available; the current review can continue now.'
     )
-    policy_citations = [
-        f'{retrieval.facts.policy_reference}: {section}'
-        for section in retrieval.facts.coverage_sections
-    ] or [retrieval.facts.policy_reference]
+    source_refs = list(
+        dict.fromkeys(
+            [
+                retrieval.retrieval_id,
+                signal.signal_id,
+                *signal.source_refs,
+                source_message_id,
+                *transfer_context.history_retrieval_refs,
+                *transfer_context.provenance_refs,
+            ]
+        )
+    )
     packet = HandoffPacket(
         incident_summary=str(incident_field.value) if incident_field is not None else None,
         form_revision=claim.revision,
@@ -69,8 +84,9 @@ def build_policy_review_handoff(
             for code, field in form_values
             if field.confidence is not None and field.confidence < 0.8
         ],
-        policy_citation_refs=policy_citations,
-        source_refs=list(dict.fromkeys([signal.signal_id, *signal.source_refs, source_message_id])),
+        policy_citation_refs=[retrieval.retrieval_id],
+        history_evidence_refs=transfer_context.history_retrieval_refs,
+        source_refs=source_refs,
         prior_customer_updates=[
             str(message.content.get('text'))
             for message in messages

@@ -85,16 +85,14 @@ def test_scenario_rejects_a_handoff_link_to_unknown_policy_data(tmp_path: Path) 
         load_scenario(invalid)
 
 
-def test_scenario_rejects_a_policy_citation_for_another_policy(tmp_path: Path) -> None:
+def test_scenario_rejects_an_unknown_policy_retrieval_reference(tmp_path: Path) -> None:
     source = CANONICAL_SCENARIO_DIRECTORY / 'AT-02-coverage-ambiguity.json'
     payload = json.loads(source.read_text(encoding='utf-8'))
-    payload['handoffs'][0]['packet']['policy_citation_refs'] = [
-        'POL-OTHER: gradual damage exclusion'
-    ]
+    payload['handoffs'][0]['packet']['policy_citation_refs'] = ['ret_missing']
     invalid = tmp_path / source.name
     invalid.write_text(json.dumps(payload), encoding='utf-8')
 
-    with pytest.raises(ValueError, match='policy citation must identify'):
+    with pytest.raises(ValueError, match='policy_citation_ref'):
         load_scenario(invalid)
 
 
