@@ -1553,6 +1553,21 @@ def test_non_owner_cowork_request_owner_approval_and_coworker_message(
     assert request_body['request']['target_staff_id'] == coworker_id
     assert request_body['request']['primary_owner_id'] == 'stf_demo'
 
+    duplicate_request = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/cowork-requests',
+        headers={
+            **coworker_headers,
+            'Idempotency-Key': 'cowork-request-retry-with-new-key',
+            'If-Match': str(request_body['revision']),
+        },
+        json={'reason': 'Retry the still-pending cowork request.'},
+    )
+    assert duplicate_request.status_code == 409
+    assert duplicate_request.json()['error']['code'] == 'OWNERSHIP_CONFLICT'
+    unchanged = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=coworker_headers)
+    assert unchanged.status_code == 200
+    assert unchanged.json()['revision'] == request_body['revision']
+
     approved = client.patch(
         f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
         f'{request_body["request"]["request_id"]}',
@@ -1655,6 +1670,24 @@ def test_transfer_acceptance_updates_handoff_and_revokes_existing_coworkers(
     )
     assert transfer.status_code == 201
     transfer_body = transfer.json()
+
+    duplicate_transfer = client.post(
+        f'/api/v1/workbench/claims/{claim_id}/transfer-requests',
+        headers={
+            **staff_auth_headers,
+            'Idempotency-Key': 'owner-transfer-request-retry-with-new-key',
+            'If-Match': str(transfer_body['revision']),
+        },
+        json={
+            'target_staff_id': target_id,
+            'reason': 'Retry the still-pending transfer request.',
+        },
+    )
+    assert duplicate_transfer.status_code == 409
+    assert duplicate_transfer.json()['error']['code'] == 'OWNERSHIP_CONFLICT'
+    unchanged = client.get(f'/api/v1/workbench/claims/{claim_id}', headers=staff_auth_headers)
+    assert unchanged.status_code == 200
+    assert unchanged.json()['revision'] == transfer_body['revision']
 
     transfer_accepted = client.patch(
         f'/api/v1/workbench/claims/{claim_id}/collaboration-requests/'
