@@ -1033,6 +1033,32 @@ The staff-only packet carries the evidence list with its source, lifecycle and f
 visibility, related fields, and purpose. It does not copy storage keys, checksums, or extraction
 provenance.
 
+`policy_citation_refs` contains opaque `retrieval_id` values for persisted
+`PolicyRetrievalRecord` records that were authoritative and relevant at transfer time.
+`history_evidence_refs` uses the same rule for persisted
+`ClaimHistoryRetrievalRecord` records. These fields do not copy human-readable policy
+wording or mutable provider output into the Handoff packet.
+
+`source_refs` may additionally retain the bounded transfer-time provenance required to
+reconstruct why the handoff was created: authoritative message or Evidence references,
+relevant active Review Signal identities and their source references, and immutable Staff
+Tag Registry coordinates in the form
+`tag_registry:<registry_id>:<registry_version>:<tag_code>`. The packet does not copy the
+complete mutable Workbench tag or signal projection.
+
+An empty policy or history reference list is not evidence that retrieval succeeded. When
+a source was not relevant, the surrounding handoff context must make that interpretation
+clear. When retrieval failed or the source was unavailable, the handoff reason,
+`reason_codes`, requested action, or promised next step must preserve that limitation
+explicitly. An unexplained empty list is insufficient when a required source was
+unavailable.
+
+Current responsibility remains authoritative in live Claim and Workbench state. The
+transfer packet records the requested action and transfer-time responsibility context but
+does not create a second mutable ownership field. The receiving Workbench therefore
+presents the immutable handoff-time context separately from current responsibility and
+current signal state.
+
 Claimant routes use this customer-safe handoff projection:
 
 ```json

@@ -111,10 +111,7 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
         assert [item['handoff_id'] for item in handoffs] == [linked.handoff_id]
         packet = handoffs[0]['packet']
         assert linked.policy_retrieval_id in packet['source_refs']
-        assert (
-            retrievals[linked.policy_retrieval_id]['facts']['policy_reference']
-            in (packet['policy_citation_refs'][0])
-        )
+        assert packet['policy_citation_refs'] == [linked.policy_retrieval_id]
         assert packet['history_evidence_refs'] == [linked.claim_history_retrieval_id]
         assert set(packet['evidence_refs']) == set(linked.evidence_ids)
 
