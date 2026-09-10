@@ -138,6 +138,45 @@ uses it.
 | `P3-EN-CONVERSATION` | Generic chat/support capability only. | A conversation provider does not gain access to Claim content without an approved channel, identity mapping, visibility boundary, purpose, and data scope. | Procurement, region, provider retention, deletion, and production access remain unresolved. | Do not show a standalone provider-consent card for ordinary Northwind conversation. |
 | `P3-EN-DAMAGE-AI` | Unavailable or labelled simulation only. | Vehicle-image analysis capability does not establish Northwind access, permitted data use, thresholds, or operational authority. | Commercial access, region, retention, deletion, result semantics, and production fitness remain unresolved. | Use unavailable/simulation wording. Do not represent Tractable or another damage-analysis vendor as a live Northwind service. |
 
+## Preserve provenance and evidence status
+
+Use this mapping to audit each P5 service boundary back to the accepted P3.3/P3.4 research record.
+P3.1 source coordinates identify the public evidence, P3.3 disposition records the independent
+challenge result, and the P3.4 closure coordinate identifies the gap disposition that constrains
+Northwind use. Evidence status describes public-fact support separately from Northwind production
+authority and access.
+
+`blocked`, `unavailable`, and `simulation-only` in this table are research or access labels. They
+are not `ExternalTaskOperationStatus` values and do not create a second Runtime lifecycle.
+
+| P3 ID | P3.1 provenance | P3.3 disposition | P3.4 closure | Evidence and Northwind access status |
+| --- | --- | --- | --- | --- |
+| `P3-NZP-REPORT` | S01 | Accepted with qualification | `P3.4-G04` — `blocked` | Public reporting and result forms are supported. Direct Northwind read access is `unavailable`; claimant-supplied evidence is the baseline and synthetic evidence may be `simulation-only`. |
+| `P3-NZP-TCR` | S02-S03 | Accepted with qualification | `P3.4-G01`, `P3.4-G04` — `blocked` | Public representative-request rules are supported. Direct Northwind request and response access is `unavailable`; manual handling remains authoritative. |
+| `P3-VEHICLE-RECOVERY` | S04-S05 | Accepted with qualification | `P3.4-G02`, `P3.4-G04` — `blocked` | Distinct collision-towing and roadside forms are supported. Northwind dispatch and telemetry are `unavailable`; a configured demonstration may be `simulation-only`. |
+| `P3-REPAIRER` | S06-S07 | Accepted with qualification | `P3.4-G03`, `P3.4-G04` — `blocked` | Repair roles and public result forms are supported. Northwind appointment and provider-status access are `unavailable`; supplied documents or synthetic records may provide `simulation-only` evidence. |
+| `P3-ASSESSOR` | S06-S07 | Accepted with qualification | `P3.4-G03`, `P3.4-G04` — `blocked` | Assessment roles and public result forms are supported. Production provider-status access is `unavailable`; the controlled `vehicle_damage_assessment_routing` fixture remains `simulation-only`. |
+| `P3-EMERGENCY-WORKS` | S06, S08 | Accepted with qualification | `P3.4-G04` — `blocked` | Public mitigation result forms are supported. Northwind contractor dispatch/status is `unavailable`; claimant- or staff-supplied work evidence is required. |
+| `P3-FENZ-INFO` | S09-S10 | Accepted with qualification | `P3.4-G05`, `P3.4-G04` — `blocked` | Public request inputs and asynchronous outcomes are supported. Northwind authority and direct response access are `unavailable`; the exchange stays manual or `simulation-only`. |
+| `P3-METSERVICE` | S11 | Accepted with qualification | `P3.4-G06`, `P3.4-G04` — `blocked` | Public report categories and result forms are supported. A selected Northwind product and purchased-report access are `unavailable`; a synthetic report may be `simulation-only`. |
+| `P3-NHC` | S12-S14 | Accepted with qualification | `P3.4-G07A` — `resolved`; `P3.4-G07B`, `P3.4-G04` — `blocked` | The Home building/land versus contents boundary is resolved. Northwind partner exchange remains `unavailable`; a labelled insurer-mediated demonstration may be `simulation-only`. |
+| `P3-CONTENTS-EVIDENCE` | S06 | Accepted with qualification | `P3.4-G07A` — `resolved`; `P3.4-G10`, `P3.4-G04` — `blocked` | Claimant-supplied contents evidence forms are supported. Direct Northwind retrieval is `unavailable`; claimant upload is the baseline and synthetic material may be `simulation-only`. |
+| `P3-BROKER` | S07, S12-S14 | Accepted with qualification | `P3.4-G08`, `P3.4-G04` — `blocked` | Public broker participation and bounded delegation are supported. A Northwind broker channel or delegation remains `unavailable`; a synthetic handoff may be `simulation-only`. |
+| `P3-ACC-PROVIDER` | S15 | Accepted with qualification | `P3.4-G09`, `P3.4-G04` — `blocked` | The registered-provider ACC pathway is supported. Northwind diagnosis, lodgement, and status access are `unavailable` and must not be simulated as a Northwind action. |
+| `P3-EN-MESSAGING` | S16 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic messaging capability is supported. Northwind production access is `unavailable`; a controlled scenario may be `simulation-only`. |
+| `P3-EN-DOC-AZURE` | S17 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic asynchronous document analysis is supported. Northwind production access is `unavailable`; extracted candidates may be `simulation-only`. |
+| `P3-EN-IDENTITY` | S18 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic identity capability is supported. Northwind production tenant/procurement access is `unavailable`; repository identity contracts remain authoritative locally. |
+| `P3-EN-ROUTES` | S19-S20 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic route computation is supported. Northwind production project access is `unavailable`; route planning may be `simulation-only`. |
+| `P3-EN-MODEL` | S21-S23 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic provider inference capability is supported. Generic Northwind production use is `unavailable`; only an individually approved model profile may be configured. |
+| `P3-EN-DOC-AWS` | S24 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic document/image extraction is supported. Northwind production access is `unavailable`; machine-derived candidates may be `simulation-only`. |
+| `P3-EN-CONVERSATION` | S25 | Accepted with qualification | `P3.4-G11` — `blocked` | Generic chat/support capability is supported. Northwind production access is `unavailable`; repository conversation fixtures remain separate development evidence. |
+| `P3-EN-DAMAGE-AI` | S26-S27 | Unresolved for Northwind use | `P3.4-G11` — `blocked` | Vendor-described vehicle-damage analysis is supported only as a generic capability. Northwind production access is `unavailable`; Validation Prototype use is `simulation-only`. |
+
+The authoritative research detail remains
+`docs/research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md`.
+This compact mapping does not promote a public capability, P3.3 qualification, or P3.4 research
+closure into Northwind authority, claimant consent, provider access, or production readiness.
+
 ## Use final claimant copy fragments
 
 This current engineering reference is the final P5 service-level contract.
