@@ -1732,7 +1732,7 @@ class FixtureRepository(PersistenceRepository):
             claim_id: Working Claim whose tasks are requested.
 
         Returns:
-            Deep-copied task records in stable creation order.
+            Deep-copied tasks in stable creation order.
 
         Raises:
             RuntimeError: The in-memory fixture cannot complete the read.
@@ -2108,3 +2108,33 @@ class FixtureRepository(PersistenceRepository):
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+
+
+def _serialize_material_claim_mutation(method_name: str) -> None:
+    """Wrap an existing Fixture mutation in the shared Claim mutation lock."""
+    method = getattr(FixtureRepository, method_name)
+
+    def serialized(self: FixtureRepository, *args: Any, **kwargs: Any) -> Any:
+        with self._claim_mutation_lock:
+            return method(self, *args, **kwargs)
+
+    serialized.__name__ = method.__name__
+    serialized.__qualname__ = method.__qualname__
+    serialized.__doc__ = method.__doc__
+    setattr(FixtureRepository, method_name, serialized)
+
+
+for _material_claim_mutation in (
+    'promote_claim_owner',
+    'save_claim_mutation_with_audit',
+    'save_message_mutation',
+    'save_agent_turn',
+    'save_runtime_turn',
+    'save_evidence_mutation',
+    'save_ownership_mutation',
+    'save_staff_mutation',
+    'save_handoff_mutation',
+):
+    _serialize_material_claim_mutation(_material_claim_mutation)
+
+del _material_claim_mutation
