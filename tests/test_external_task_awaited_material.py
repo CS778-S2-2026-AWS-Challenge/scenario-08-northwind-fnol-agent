@@ -24,8 +24,11 @@ os.environ.setdefault('DATA_RUNTIME_PROFILE', 'fixture')
 
 from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
+from backend.core.errors import ApiError
 from backend.domain.external_services import (
     ExternalTaskEvidenceLink,
+    ExternalTaskOperationStatus,
+    ExternalTaskRecord,
     external_task_for_evidence,
 )
 from backend.domain.models import (
@@ -427,3 +430,100 @@ def test_a_write_that_returns_quietly_is_not_taken_as_proof(
     )
 
     assert response.status_code == 409, response.text
+
+
+def test_a_task_left_behind_by_an_interrupted_acceptance_is_carried_forward(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other partial-write shape: the operation advanced, the task did not.
+
+    Acceptance is three writes — the routing operation, the task transition, then the
+    owed material. An interruption at the second leaves the operation `accepted` while
+    its task is still `prepared`, which is the state the recovery branch exists for.
+    Nothing exercised it, so this states what recovery owes: finish the transition it
+    finds unfinished, and record what the task then owes, rather than reporting a
+    request whose task never left `prepared`.
+    """
+
+    claim_id = _consented_claim(client)
+    original = repository.save_external_task
+    calls = {'n': 0}
+
+    def fail_the_transition(task: ExternalTaskRecord, customer_id: str) -> None:
+        calls['n'] += 1
+        if task.status is ExternalTaskOperationStatus.ACCEPTED and calls['n'] > 1:
+            raise KeyError('task store unavailable')
+        original(task, customer_id)
+
+    monkeypatch.setattr(repository, 'save_external_task', fail_the_transition)
+
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 409
+
+    stranded = repository.list_external_tasks_internal(claim_id)[0]
+    assert stranded.status is ExternalTaskOperationStatus.PREPARED
+
+    monkeypatch.setattr(repository, 'save_external_task', original)
+    retried = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+
+    assert retried.status_code in {200, 201}, retried.text
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    assert task.status is ExternalTaskOperationStatus.ACCEPTED
+    links = repository.list_external_task_evidence_links_internal(claim_id)
+    records = [
+        item
+        for item in repository.list_evidence(claim_id, claim.customer_id)
+        if item.source is EvidenceSource.EXTERNAL_SYSTEM
+    ]
+    assert len(records) == 1
+    assert len(links) == 1
+    assert external_task_for_evidence(records[0], links) == task.task_id
+
+
+def test_a_lost_record_under_a_surviving_link_fails_rather_than_reports_success(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The read-back covers the record too, on the one path nothing else guards.
+
+    `save_external_task_evidence_link` refuses a link whose evidence is missing, so a
+    lost record is normally caught by that write. It is not caught when the link is the
+    half that survived: the recorder then has no link to write, and a store that accepts
+    the record and keeps nothing raises nothing. Without the read-back the recorder
+    would return quietly, having reconciled nothing.
+    """
+
+    claim_id = _routed_claim(client)
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    evidence_id = f'evd_{task.task_id.removeprefix("tsk_")}'
+    repository._evidence.pop(evidence_id, None)
+    assert repository.list_external_task_evidence_links_internal(claim_id) != []
+
+    def drop(record: object, customer_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(repository, 'save_evidence', drop)
+
+    with pytest.raises(ApiError) as raised:
+        _record_awaited_material(repository, task=task, claim=claim)
+
+    assert raised.value.status_code == 409
