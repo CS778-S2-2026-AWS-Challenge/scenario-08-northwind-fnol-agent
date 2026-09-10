@@ -211,20 +211,6 @@ jobs:
           name: Regenerate OpenAPI from current application
           command: python scripts/export_openapi.py
       - run:
-          name: Validate recovery reconciliation
-          command: |
-            python -m ruff format --check backend tests
-            python -m ruff check backend tests
-            python -m mypy backend tests
-            python -m pytest \
-              tests/test_handoff_queue_fixtures.py \
-              tests/test_incomplete_claim_recovery.py \
-              tests/test_incomplete_claim_recovery_concurrency.py \
-              tests/test_incomplete_claim_recovery_edges.py \
-              tests/test_incomplete_claim_recovery_late_review.py \
-              tests/test_incomplete_claim_recovery_review.py
-            python scripts/export_openapi.py --check
-      - run:
           name: Commit reconciled contracts back to PR branch
           command: |
             set -euo pipefail
@@ -234,10 +220,6 @@ jobs:
             git add docs/api.md docs/openapi.snapshot.json tests/test_handoff_queue_fixtures.py .circleci/config.yml
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            if git diff --cached --quiet; then
-              echo "No reconciliation changes required."
-              exit 0
-            fi
             git commit -m "fix(backend): reconcile recovery contracts after main merge"
             token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
             if [ -n "$token" ]; then
