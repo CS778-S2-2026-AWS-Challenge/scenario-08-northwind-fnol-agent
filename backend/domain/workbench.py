@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import Field
 
 from backend.domain.external_services import (
+    ExternalRequestProvenance,
     ExternalTaskRecord,
     ExternalTaskRequest,
     ExternalTaskResultVerification,
@@ -456,6 +457,8 @@ class WorkbenchExternalResultEvidence(ContractModel):
 class WorkbenchExternalLifecycle(ContractModel):
     stakeholder: str
     service: str
+    catalogue_reference: str | None = None
+    provenance: ExternalRequestProvenance
     request_type: str
     authority_state: str
     consent_state: str

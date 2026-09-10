@@ -18,6 +18,14 @@ from backend.domain.models import (
 from backend.domain.retrieval import RetrievalSource
 
 ASSESSOR_SERVICE_IDENTITY = 'vehicle_damage_assessment_routing'
+
+# The merged P3 catalogue row each implemented service identity answers to. Without it a
+# persisted task cannot cite the entry that authorises it, and a reader of
+# `docs/research/third-party-stakeholder-unified-service-catalogue-and-implementation-brief.md`
+# cannot get from a row to the code or back.
+CATALOGUE_REFERENCE_BY_SERVICE: dict[str, str] = {
+    ASSESSOR_SERVICE_IDENTITY: 'P3-ASSESSOR',
+}
 ASSESSOR_REQUESTED_ACTION = 'vehicle_damage_assessment'
 ASSESSOR_CONSENT_FIELDS = frozenset(
     {
@@ -36,6 +44,34 @@ ASSESSOR_SHARED_DATA_SUMMARY = (
     'The vehicle damage assessment request',
     'Your confirmed incident region',
 )
+
+
+class ExternalRequestProvenance(str, Enum):
+    """What a request actually reached, as distinct from what was configured.
+
+    The three classes are **derived** from `IntegrationSource` and the delivery the task
+    already records, not stored as a fourth thing that could disagree with them:
+
+    - `simulated` — a fixture source. No production provider is involved, whatever the
+      request looks like.
+    - `configured` — a configured service that has not been sent. Configuration is not
+      contact, and a demonstration that reads it as contact would claim a provider
+      relationship nobody has.
+    - `live_attempted` — a configured service whose request was submitted with delivery
+      evidence. It says an attempt reached a provider; it says nothing about the result,
+      which is `ExternalTaskResultVerification`'s question.
+
+    Deriving rather than storing matters here. `docs/third-party-service-consent-and-
+    shared-data-contract.md` records the only implemented service identity as a
+    controlled fixture and `P3-ASSESSOR` as simulation-only, so `live_attempted` is
+    currently unreachable. Stored as an enum member on a persisted record it would be a
+    value nothing can produce and a projection could still assert; derived, it simply
+    never occurs until a configured service actually sends something.
+    """
+
+    SIMULATED = 'simulated'
+    CONFIGURED = 'configured'
+    LIVE_ATTEMPTED = 'live_attempted'
 
 
 class ExternalTaskDelivery(str, Enum):
@@ -182,6 +218,42 @@ def classify_external_task_failure(
         recovery=ExternalTaskRecovery.RETRY_SAME_OPERATION,
         retryable=True,
     )
+
+
+def request_provenance(task: 'ExternalTaskRecord') -> ExternalRequestProvenance:
+    """Say what this request actually reached, not what was configured for it.
+
+    A fixture is simulated however far it got: the delivery says a synthetic adapter
+    accepted it, not that a provider did. A configured service is only `live_attempted`
+    once its request was submitted *and* the delivery evidence naming how it reached the
+    provider is present — `ExternalTaskRecord` already refuses `submitted` without that
+    evidence, so this reads a guarantee rather than restating it.
+
+    Args:
+        task: The task to classify.
+
+    Returns:
+        The provenance class a projection may state.
+    """
+
+    if task.integration_source is not IntegrationSource.CONFIGURED_SERVICE:
+        return ExternalRequestProvenance.SIMULATED
+    if task.delivery is ExternalTaskDelivery.SUBMITTED:
+        return ExternalRequestProvenance.LIVE_ATTEMPTED
+    return ExternalRequestProvenance.CONFIGURED
+
+
+def catalogue_reference(task: 'ExternalTaskRecord') -> str | None:
+    """The merged P3 catalogue row that authorises this task's service.
+
+    Args:
+        task: The task to resolve.
+
+    Returns:
+        The catalogue identifier, or `None` for a service the catalogue does not name.
+    """
+
+    return CATALOGUE_REFERENCE_BY_SERVICE.get(task.service_identity)
 
 
 class ExternalTaskRecord(ContractModel):
