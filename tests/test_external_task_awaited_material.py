@@ -262,13 +262,27 @@ def test_the_claimant_is_not_shown_the_internal_placeholder(client: TestClient) 
     assert action.get('status') in {'queued', 'assigned'}
 
 
-def test_recording_what_is_owed_is_idempotent(
+def test_a_refused_repeat_request_leaves_the_record_alone(
     client: TestClient, repository: FixtureRepository
 ) -> None:
-    """A retried routing request continues its task rather than owing a second assessment."""
+    """A repeat request is refused before the recorder, and refusal writes nothing.
+
+    Consent is spent by the request that uses it, so a second one is refused for want of
+    permission rather than for being a duplicate. What is worth asserting is that the
+    refusal is clean: no second assessment is owed, and no second link appears.
+
+    This is not an idempotency test, and an earlier version of it claimed to be one. It
+    asserted only that no second record existed, which holds for any refusal whatever its
+    reason, so it read as evidence that a retry continues its task when in fact the
+    request never reached the recorder. The status is asserted here so the test cannot
+    quietly change meaning if the reason for refusal does.
+    """
 
     claim_id = _routed_claim(client)
-    client.post(
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+
+    repeated = client.post(
         f'/api/v1/claims/{claim_id}/assessor-routing',
         headers={
             **CLAIMANT,
@@ -278,9 +292,14 @@ def test_recording_what_is_owed_is_idempotent(
         json={},
     )
 
-    records = repository.list_evidence(claim_id, 'cus_demo')
-    awaited = [item for item in records if item.source is EvidenceSource.EXTERNAL_SYSTEM]
+    assert repeated.status_code == 409
+    assert repeated.json()['error']['code'] == 'INVALID_STATE_TRANSITION'
 
+    awaited = [
+        item
+        for item in repository.list_evidence(claim_id, claim.customer_id)
+        if item.source is EvidenceSource.EXTERNAL_SYSTEM
+    ]
     assert len(awaited) == 1
     assert len(repository.list_external_task_evidence_links_internal(claim_id)) == 1
 
@@ -290,10 +309,9 @@ def test_the_guard_itself_refuses_a_second_record(
 ) -> None:
     """Reach the early return, rather than asserting an outcome something else produced.
 
-    `test_recording_what_is_owed_is_idempotent` passes because a retried routing request
-    is refused before it reaches the recorder, so it proves the endpoint is idempotent and
-    says nothing about this guard. Diff coverage caught that the guard's own line was
-    never executed. This calls it twice.
+    A repeat request through the API is refused before it reaches the recorder, so it
+    says nothing about this guard; diff coverage caught that the guard's own line was
+    never executed by anything. This calls the recorder twice.
     """
 
     claim_id = _routed_claim(client)
