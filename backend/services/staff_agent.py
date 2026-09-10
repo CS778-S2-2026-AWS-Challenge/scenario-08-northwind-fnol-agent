@@ -175,6 +175,12 @@ class ProfileSelectingStaffAgent:
 _KNOWLEDGE_CONFIGURATION_LIMITATION = (
     'The active runtime release does not select an approved knowledge version.'
 )
+_KNOWLEDGE_UNAVAILABLE_LIMITATION = 'The knowledge service is temporarily unavailable.'
+_KNOWLEDGE_TIMEOUT_LIMITATION = 'The knowledge service did not respond within the request budget.'
+
+
+def _knowledge_retrieval_timed_out(code: str) -> bool:
+    return code.strip().casefold() in {'timeout', 'provider_timeout', 'request_timeout'}
 
 
 def _require_staff(principal: Principal) -> None:
@@ -345,8 +351,10 @@ def _knowledge_context(
                     'checksum': chunk.checksum,
                     'text': chunk.text,
                 }
-    except KnowledgeRetrievalUnavailable:
-        return (), 'unavailable', ('Approved knowledge retrieval is temporarily unavailable.',)
+    except KnowledgeRetrievalUnavailable as error:
+        if _knowledge_retrieval_timed_out(error.code):
+            return (), 'timeout', (_KNOWLEDGE_TIMEOUT_LIMITATION,)
+        return (), 'unavailable', (_KNOWLEDGE_UNAVAILABLE_LIMITATION,)
     except RuntimeConfigurationResolutionError:
         return (), 'unavailable', (_KNOWLEDGE_CONFIGURATION_LIMITATION,)
     return (

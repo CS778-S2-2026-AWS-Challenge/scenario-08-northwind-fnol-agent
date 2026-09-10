@@ -211,9 +211,9 @@ class ModelTurnContext(ModelContract):
     professional_review_required: bool = False
     provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
     branch: ModelBranchContext | None = None
-    knowledge_status: Literal['not_requested', 'evidence_found', 'no_evidence', 'unavailable'] = (
-        'not_requested'
-    )
+    knowledge_status: Literal[
+        'not_requested', 'evidence_found', 'no_evidence', 'timeout', 'unavailable'
+    ] = 'not_requested'
     knowledge_citations: list[ModelKnowledgeCitation] = Field(default_factory=list)
     knowledge_limitations: list[str] = Field(default_factory=list)
     tool_results: list[dict[str, Any]] = Field(default_factory=list)

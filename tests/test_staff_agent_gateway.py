@@ -132,10 +132,14 @@ def test_gateway_staff_agent_fails_for_unknown_or_malformed_response() -> None:
 
 class StubRetriever:
     def __init__(
-        self, chunks: list[KnowledgeChunk] | None = None, unavailable: bool = False
+        self,
+        chunks: list[KnowledgeChunk] | None = None,
+        unavailable: bool = False,
+        unavailable_code: str = 'PROVIDER_UNAVAILABLE',
     ) -> None:
         self.chunks = chunks or []
         self.unavailable = unavailable
+        self.unavailable_code = unavailable_code
         self.search_calls = 0
 
     def connection_status(self) -> str:
@@ -144,7 +148,9 @@ class StubRetriever:
     def search(self, request: Any) -> list[KnowledgeChunk]:
         self.search_calls += 1
         if self.unavailable:
-            raise KnowledgeRetrievalUnavailable('The knowledge provider is unavailable.')
+            raise KnowledgeRetrievalUnavailable(
+                'The knowledge provider is unavailable.', code=self.unavailable_code
+            )
         return self.chunks
 
 
@@ -179,7 +185,16 @@ def test_staff_agent_knowledge_context_preserves_citations_and_failure_status() 
     )
     assert unavailable == ()
     assert unavailable_status == 'unavailable'
-    assert unavailable_limitations == ('Approved knowledge retrieval is temporarily unavailable.',)
+    assert unavailable_limitations == ('The knowledge service is temporarily unavailable.',)
+
+    timed_out, timeout_status, timeout_limitations = _knowledge_context(
+        StubRetriever(unavailable=True, unavailable_code='provider_timeout'), 'safety', []
+    )
+    assert timed_out == ()
+    assert timeout_status == 'timeout'
+    assert timeout_limitations == (
+        'The knowledge service did not respond within the request budget.',
+    )
 
 
 def test_staff_agent_knowledge_context_preserves_release_resolution_failure() -> None:
