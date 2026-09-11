@@ -78,9 +78,9 @@ them:
 - [Third-party Service Consent and Shared-data Contract](third-party-service-consent-and-shared-data-contract.md)
 - [Repository layout, start commands, and verification](../README.md#repository-layout)
 
-Task-specific implementation and decision records requested by the maintainer live under
-`work_record/`. They preserve delivery context but do not override `SPEC/` or current engineering
-contracts.
+Task-specific implementation and decision records belong in the relevant Issue, Discussion, or
+current engineering document. The repository no longer keeps a root `work_record/` directory;
+durable records must be discoverable from the current documentation index or GitHub discussion.
 
 Generated contract snapshots are mechanical drift sentinels. The current AuditEvent
 envelope snapshot is [audit-event.schema.json](contracts/audit-event.schema.json) and is
