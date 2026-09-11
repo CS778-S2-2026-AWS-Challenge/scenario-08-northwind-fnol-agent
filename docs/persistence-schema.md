@@ -683,3 +683,61 @@ Candidate physical services and open provider decisions are recorded in
 `docs/data-architecture.md`. Availability, schema, identity, region, limits, retention,
 transactions, backup, recovery, and migration remain unconfirmed until verified for the
 selected profile.
+
+## P17.1 Incomplete Claim Checkpoint
+
+The explicit incomplete-Claim checkpoint is a provider-neutral atomic mutation. It does not add a
+second Claim State.
+
+For Claim revision `N`, the checkpoint persists together:
+
+- the same authoritative `WorkingClaim` at revision `N + 1`, with `active_session_id` cleared;
+- the previously active Session changed to `paused`, with its recovery snapshot aligned to revision
+  `N`;
+- bounded Session recovery context containing `interrupted_at`,
+  `last_meaningful_activity_at`, an exact
+  `last_meaningful_activity_source_ref`, and a plain-language
+  `resume_point`;
+- exactly one open Claim-scoped Follow-up for purpose `resume_incomplete_claim`; and
+- the idempotency record for the claimant, route, key, accepted revision, Claim, Session, and
+  Follow-up identity.
+
+Follow-up IDs use the `fup_` prefix. The minimum P17.1 record persists stable identity, Claim,
+source Session, purpose, source references, responsible party, channel, due time, status, attempt
+count, contact-permission condition, optional outcome, and timestamps. `pending` means P17.1 has
+an authorised current channel; `blocked` means contact is not authorised and therefore has no
+channel or schedule; `resolved` records that the claimant resumed. An authenticated in-app
+recovery record does not grant email, SMS, or phone authority. An anonymous browser interruption
+is persisted as `blocked` / `not_authorised` rather than as executable outbound work.
+
+The Fixture and MongoDB adapters enforce at most one open (`pending` or `blocked`) Follow-up for
+the same Claim and purpose. A stale revision, mismatched Claim/Session/customer, conflicting
+idempotency identity, invalid contact-authority condition, or second open Claim+purpose record
+fails before any bundle member becomes authoritative. The Fixture profile serializes material
+Claim mutations and repeats the authoritative revision and duplicate checks while that mutation
+lock is held. Two callers that both pass an optimistic read therefore cannot commit two recovery
+bundles. When a new claimant Session replaces an existing active Session, the stored active-session
+pointer is revision-checked and the prior Session closure is committed in the same activation
+mutation; a stale activation therefore cannot overwrite a pause checkpoint or its recovery context.
+
+`last_meaningful_activity_at` is selected from durable claimant-authored messages or accepted
+claimant business actions such as authoritative structured-form or contents updates and explicit
+consent. Reads, polling, streaming, and an arbitrary Session activity timestamp do not qualify.
+The paired `last_meaningful_activity_source_ref` identifies the exact durable source selected for
+the recovery checkpoint. Explicit form and contents confirmations append a revision-scoped
+confirmation source reference in the same Claim mutation that records their confirmation timestamp,
+so recovery chronology never pairs a later confirmation time with an earlier proposal source.
+
+A Claim is eligible for a recovery checkpoint only when its authoritative workflow is not
+`created` and `customer_next_step.can_resume=true`. Claimant and Workbench incomplete projections
+use that same rule together with the absence of an authoritative active Session and the presence
+of a relevant paused recovery checkpoint and open recovery Follow-up.
+
+Resume continues to create a new active interaction Session for the same Working Claim. The same
+atomic session-activation mutation marks the open recovery Follow-up `resolved`, so Workbench no
+longer exposes stale follow-up work after claimant recovery. The paused Session and recovery
+context remain historical continuity evidence and never supersede the latest Working Claim.
+
+P17.1 does not implement notification delivery, retry cadence, attempt processing, abandonment,
+escalation, purge, anonymisation, or retention transitions; those remain owned by later P17
+slices.

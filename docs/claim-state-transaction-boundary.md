@@ -62,9 +62,10 @@ Rules:
   by more than one revision;
 - child records do not maintain a second concurrency counter that can overwrite the
   claim independently;
-- `WorkingClaim.active_session_id` may change only through the explicit resume/start
-  claimant-session mutation; every other material mutation must preserve the stored
-  authoritative active-session pointer;
+- `WorkingClaim.active_session_id` may change only through the explicit claimant-session
+  lifecycle mutations: resume/start may establish a new active Session, while the
+  pause/checkpoint mutation may clear the current active Session; every other material
+  mutation must preserve the stored authoritative active-session pointer;
 - a session `context_revision` may identify the claim snapshot it represents but cannot
   supersede `WorkingClaim.revision`;
 - non-material evidence retrieval may be persisted without advancing Claim State when it
@@ -77,7 +78,8 @@ sequence of unrelated `save_*` calls.
 
 | Mutation | Atomic bundle | Required revision behaviour |
 | --- | --- | --- |
-| Resume/start claimant session | claim + new/updated session + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; this is the only mutation family allowed to change `active_session_id` |
+| Resume/start claimant session | claim + new/updated session + optional prior-active Session closure + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; may establish the new `active_session_id`; when replacing an active Session, closing that prior Session occurs inside the same revision-checked atomic bundle |
+| Pause/checkpoint claimant session | claim + paused session + bounded recovery context + initial Follow-up + idempotency | claim `N -> N+1`; source session must be the current active session; clears `active_session_id`; creates one Claim-scoped Follow-up for the interruption |
 | Message-only claimant continuation | claim + session + message + idempotency | claim `N -> N+1`; session context updated to the resulting claim revision; stored `active_session_id` is preserved |
 | Validated Agent turn | claim + session question accounting + claimant message + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision/evaluation links agree; stored `active_session_id` is preserved; failed retrieval or validation writes none of the bundle |
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary; stored `active_session_id` is preserved |
@@ -94,9 +96,9 @@ Every material mutation follows this logical order regardless of physical provid
 
 1. **Resolve current claim** and verify the caller is permitted to operate on it.
 2. **Check expected revision** against the stored `WorkingClaim.revision`.
-3. **Validate next revision** is exactly `expected_revision + 1` and, unless this is the
-   dedicated resume/start mutation, validate the proposed `active_session_id` equals the
-   stored authoritative pointer.
+3. **Validate next revision** is exactly `expected_revision + 1` and, unless this is a
+   dedicated resume/start or pause/checkpoint Session-lifecycle mutation, validate the
+   proposed `active_session_id` equals the stored authoritative pointer.
 4. **Validate cross-record ownership and links** for claim/customer/session/message/
    decision/evidence/handoff/staff records.
 5. **Validate idempotency identity**: actor, operation/route, key, fingerprint, claim and
@@ -134,9 +136,10 @@ valid against current Claim State.
 
 - at most one claimant interaction session is active for a claim under the current
   contract;
-- only the explicit resume/start claimant-session mutation may replace the authoritative
-  `active_session_id`; message, Agent, evidence, handoff, and staff mutation families
-  must reject an attempted session-pointer switch before any write;
+- only explicit claimant-session lifecycle mutations may change the authoritative
+  `active_session_id`: resume/start establishes a new active Session and pause/checkpoint
+  clears the interrupted active Session; message, Agent, evidence, handoff, and staff
+  mutation families must reject an attempted session-pointer switch before any write;
 - message ordering is deterministic by accepted timestamp with a stable identifier as a
   tie-break where needed;
 - a resume package may be older than the claim, but the resumed interaction loads the
@@ -264,8 +267,8 @@ The #237 implementation is complete when another contributor can repeat tests pr
 1. every material mutation accepts `N -> N+1` and rejects a revision jump;
 2. stale expected revision leaves claim, child records, and idempotency state unchanged;
 3. all non-session material mutation families reject a proposed `active_session_id`
-   change, while the dedicated resume/start mutation remains the only authority allowed
-   to establish a new active session;
+   change, while dedicated resume/start and pause/checkpoint mutations respectively
+   establish and clear the authoritative active Session;
 4. cross-claim/customer/session/message/handoff/idempotency links fail before any write;
 5. an invalid Agent or staff bundle does not leave a message, decision, update, handoff,
    or idempotency record behind;
@@ -280,3 +283,20 @@ The #237 implementation is complete when another contributor can repeat tests pr
 
 A green provider-specific happy-path test alone is insufficient. The acceptance result
 must include failure atomicity and cross-record mismatch cases.
+
+## P17.1 Recovery Follow-up Clarification
+
+The pause/checkpoint mutation binds its idempotency request fingerprint to the accepted Claim
+revision and persists one open recovery Follow-up per Claim and purpose. The Follow-up carries its
+purpose, source references, channel/due metadata, attempt count, and explicit contact-permission
+condition; a browser-anonymous claimant without an authorised durable channel is `blocked`, not
+scheduled.
+
+Activating a new claimant Session for a Claim with an open `resume_incomplete_claim` Follow-up
+must resolve that Follow-up in the same provider-neutral mutation. A resolved historical record no
+longer makes the Claim incomplete and does not prevent a later interruption from creating a new
+open record for the same purpose. Claimant and Workbench incomplete state use one accepted
+predicate: the Claim is not `created`, `customer_next_step.can_resume=true`, there is no
+authoritative active Session, and a relevant paused recovery checkpoint plus open recovery
+Follow-up exist. The checkpoint records the exact durable source reference for its latest
+qualifying claimant message or accepted claimant business action.

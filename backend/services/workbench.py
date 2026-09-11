@@ -129,6 +129,7 @@ from backend.domain.workbench_action_registry import (
     work_item_defaults,
 )
 from backend.repositories.protocols import PersistenceRepository
+from backend.services.incomplete_claims import find_incomplete_recovery
 from backend.services.support import decode_cursor, encode_cursor, now_utc
 from backend.services.tag_projection import project_staff_tags
 
@@ -787,18 +788,24 @@ def _active_queue_key(
 
 
 def _incomplete_context(
+    repository: PersistenceRepository,
     claim: WorkingClaim,
     sessions: Sequence[SessionRecord],
 ) -> WorkbenchIncompleteContext | None:
-    if claim.claim_state.workflow_state is not WorkflowState.COLLECTING or not sessions:
+    records = find_incomplete_recovery(repository, claim, sessions=sessions)
+    if records is None:
         return None
-    last = max(sessions, key=lambda item: item.last_active_at)
-    resume_point = last.summary or claim.customer_next_step.summary
+    source, follow_up = records
+    recovery = source.recovery_context
+    if recovery is None:
+        return None
     return WorkbenchIncompleteContext(
-        interrupted_at=last.last_active_at,
-        last_meaningful_activity_at=last.last_active_at,
-        resume_point=resume_point,
-        follow_up_status='not_scheduled',
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status.value,
+        follow_up_attempts=follow_up.attempt_count,
     )
 
 
@@ -1148,10 +1155,6 @@ def _source_summary(
                 label=_human_label(evidence.kind),
                 context=context,
                 source_label=source_labels[evidence.source.value],
-                # A contested source is still a received one, so its condition alone
-                # would not tell staff it is contested. The conflict is what they have
-                # to act on, so it is what the source summary leads with, and the
-                # references carry which record or claim fact it is contested with.
                 status=(
                     EvidenceState.IN_CONFLICT.value
                     if is_in_conflict(evidence.references)
@@ -1434,7 +1437,7 @@ def _matches_view(
             for value in item.work_summary.missing_information
         )
     if view is WorkbenchQueueView.INCOMPLETE_CLAIMS:
-        return item.lifecycle_state is ClaimLifecycleState.DRAFT_ACTIVE
+        return item.work_summary.incomplete_context is not None
     if view is WorkbenchQueueView.READY_TO_CREATE:
         return item.lifecycle_state is ClaimLifecycleState.READY_TO_CREATE
     if view is WorkbenchQueueView.READY_TO_PROGRESS:
@@ -1515,6 +1518,7 @@ def _build_projection(
     )
     claimant_messages = [item for item in messages if item.actor.value == 'claimant']
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
+    incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
         queue_key=_active_queue_key(lifecycle, missing),
         current_work_item=current_work,
@@ -1530,7 +1534,7 @@ def _build_projection(
         ),
         missing_information=missing,
         risk_signals=projected_risk_signals,
-        incomplete_context=_incomplete_context(claim, sessions),
+        incomplete_context=incomplete_context,
         unread_claimant_messages=0,
         last_claimant_activity_at=(
             max(item.created_at for item in claimant_messages) if claimant_messages else None
