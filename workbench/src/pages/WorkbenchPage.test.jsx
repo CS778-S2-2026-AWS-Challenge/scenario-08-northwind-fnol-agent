@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -308,5 +308,59 @@ describe('WorkbenchPage queue routing', () => {
     ))
     await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
     expect(api.claim).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards a late background refresh after a controlled action loads a newer revision', async () => {
+    const user = userEvent.setup()
+    const interval = vi.spyOn(window, 'setInterval').mockReturnValue(20)
+    const clearInterval = vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
+    let resolveBackgroundRefresh
+    const delayedBackgroundRefresh = new Promise((resolve) => {
+      resolveBackgroundRefresh = resolve
+    })
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      work_summary: { ...claim.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+      allowed_actions: [acceptAction],
+    }
+    const latest = {
+      ...actionable,
+      revision: 2,
+      work_summary: { ...actionable.work_summary, primary_action_code: null, primary_action_target_ref: null },
+      allowed_actions: [],
+    }
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockReturnValueOnce(delayedBackgroundRefresh)
+      .mockResolvedValueOnce(latest)
+    api.acceptHandoff.mockResolvedValue({})
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected accept' })
+    await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 20000))
+    const runBackgroundRefresh = interval.mock.calls.find(([, delay]) => delay === 20000)[0]
+    let backgroundRequest
+    await act(async () => {
+      backgroundRequest = runBackgroundRefresh()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(api.claim).toHaveBeenCalledTimes(2))
+
+    await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2'))
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveBackgroundRefresh(actionable)
+      await backgroundRequest
+    })
+
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 2')
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
+    interval.mockRestore()
+    clearInterval.mockRestore()
   })
 })

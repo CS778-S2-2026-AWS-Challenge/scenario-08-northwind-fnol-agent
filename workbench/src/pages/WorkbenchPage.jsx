@@ -43,6 +43,7 @@ export default function WorkbenchPage() {
   const currentClaimIdRef = useRef(claimId)
   currentClaimIdRef.current = claimId
   const detailRequestId = useRef(0)
+  const backgroundRefreshId = useRef(0)
   const resourceRequestIds = useRef({})
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
@@ -206,9 +207,15 @@ export default function WorkbenchPage() {
 
   const refreshDetail = useCallback(async (id) => {
     if (!id) return
+    const refreshId = ++backgroundRefreshId.current
+    const detailGeneration = detailRequestId.current
     try {
       const response = await workbenchApi.claim(token, id)
-      if (currentClaimIdRef.current !== id) return
+      if (
+        currentClaimIdRef.current !== id
+        || detailRequestId.current !== detailGeneration
+        || isOlderClaimProjection(response, detailRef.current)
+      ) return
       detailRef.current = response
       setDetail((current) => {
         const notice = buildRevisionNotice(current, response)
@@ -219,7 +226,11 @@ export default function WorkbenchPage() {
       setDetailStale(false)
       openTab(response)
     } catch (error) {
-      if (currentClaimIdRef.current !== id) return
+      if (
+        currentClaimIdRef.current !== id
+        || detailRequestId.current !== detailGeneration
+        || backgroundRefreshId.current !== refreshId
+      ) return
       if (isInaccessibleError(error)) {
         detailRef.current = null
         setDetail(null)
@@ -462,6 +473,7 @@ export default function WorkbenchPage() {
   async function runClaimMutation(label, operation) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
+    ++detailRequestId.current
     try {
       await operation(previous)
     } catch (error) {
@@ -585,6 +597,7 @@ export default function WorkbenchPage() {
       throw new Error('The projected reopen action no longer matches this Claim revision. Refresh the Claim and review the current action.')
     }
 
+    ++detailRequestId.current
     let accepted = false
     try {
       await workbenchApi.reopenClaim(
@@ -795,6 +808,11 @@ function isInaccessibleError(error) {
     || error?.status === 404
     || error?.code === 'ACCESS_DENIED'
     || error?.code === 'RESOURCE_NOT_FOUND'
+}
+
+function isOlderClaimProjection(candidate, current) {
+  return candidate?.claim_id === current?.claim_id
+    && candidate.revision < current.revision
 }
 
 function queueRequestFilters(filters, cursor = null) {
