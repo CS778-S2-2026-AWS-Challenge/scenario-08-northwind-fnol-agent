@@ -848,7 +848,6 @@ class MongoDBRepository:
         """
         if (
             claim.revision != expected_revision + 1
-            or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != (claim.active_session_id or '')
         ):

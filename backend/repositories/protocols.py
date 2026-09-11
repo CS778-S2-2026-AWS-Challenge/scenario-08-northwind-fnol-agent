@@ -296,7 +296,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         Args:
             claim: Resulting authoritative Claim State.
             expected_revision: Revision that must still be current.
-            idempotency: Retry metadata for the accepted mutation.
+            idempotency: Retry metadata scoped to the authenticated claimant or staff actor.
             audit_events: Immutable audit facts produced by the same mutation.
             branch_evaluation: Optional applied Dynamic Form evaluation for the resulting revision.
 

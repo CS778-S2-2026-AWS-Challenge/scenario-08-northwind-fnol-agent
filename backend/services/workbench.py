@@ -19,6 +19,7 @@ from backend.domain.external_services import (
 from backend.domain.models import (
     AgentAction,
     ClaimCollaborationRequest,
+    ClaimCreationStatus,
     CollaborationRequestKind,
     CollaborationRequestStatus,
     EvidenceFileStatus,
@@ -39,6 +40,7 @@ from backend.domain.models import (
     StaffActionRecord,
     StaffActionStatus,
     SupportNeed,
+    TerminalDispositionValue,
     WorkbenchHandoff,
     WorkbenchSession,
     WorkflowState,
@@ -63,7 +65,6 @@ from backend.domain.workbench import (
     WorkbenchActionInput,
     WorkbenchActionInputChoice,
     WorkbenchActionInputCondition,
-    WorkbenchActiveQueue,
     WorkbenchActivityEvent,
     WorkbenchAllowedAction,
     WorkbenchClaimantSummary,
@@ -97,6 +98,7 @@ from backend.domain.workbench import (
     WorkbenchPriorityProjection,
     WorkbenchPriorityReason,
     WorkbenchQueueFilterOption,
+    WorkbenchQueueKey,
     WorkbenchQueueView,
     WorkbenchQueueViewGroup,
     WorkbenchResourcePage,
@@ -156,6 +158,9 @@ _QUEUE_VIEW_LABELS: dict[WorkbenchQueueView, str] = {
     WorkbenchQueueView.WAITING_USER: 'Waiting for claimant',
     WorkbenchQueueView.WAITING_MATERIAL: 'Waiting for material',
     WorkbenchQueueView.WAITING_THIRD_PARTY: 'Waiting for third party',
+    WorkbenchQueueView.COMPLETED: 'Completed',
+    WorkbenchQueueView.ABANDONED: 'Abandoned',
+    WorkbenchQueueView.CLOSED: 'Closed',
     WorkbenchQueueView.URGENT: 'Urgent',
     WorkbenchQueueView.HUMAN_REQUESTS: 'Staff assistance',
     WorkbenchQueueView.INCOMPLETE_CLAIMS: 'Incomplete claims',
@@ -173,13 +178,22 @@ _ACTIVE_QUEUE_VIEWS: set[WorkbenchQueueView] = {
     WorkbenchQueueView.WAITING_THIRD_PARTY,
 }
 
+_TERMINAL_QUEUE_VIEWS: set[WorkbenchQueueView] = {
+    WorkbenchQueueView.COMPLETED,
+    WorkbenchQueueView.ABANDONED,
+    WorkbenchQueueView.CLOSED,
+}
+
 _QUEUE_VIEW_GROUPS: dict[WorkbenchQueueView, WorkbenchQueueViewGroup] = {
     WorkbenchQueueView.ALL: WorkbenchQueueViewGroup.OVERVIEW,
     **{view: WorkbenchQueueViewGroup.ACTIVE for view in _ACTIVE_QUEUE_VIEWS},
+    **{view: WorkbenchQueueViewGroup.TERMINAL for view in _TERMINAL_QUEUE_VIEWS},
     **{
         view: WorkbenchQueueViewGroup.OPERATIONAL
         for view in WorkbenchQueueView
-        if view is not WorkbenchQueueView.ALL and view not in _ACTIVE_QUEUE_VIEWS
+        if view is not WorkbenchQueueView.ALL
+        and view not in _ACTIVE_QUEUE_VIEWS
+        and view not in _TERMINAL_QUEUE_VIEWS
     },
 }
 
@@ -760,9 +774,9 @@ def _current_work_item(
 def _active_queue_key(
     lifecycle: ClaimLifecycleState,
     missing_information: Sequence[WorkbenchMissingInformation],
-) -> WorkbenchActiveQueue:
+) -> WorkbenchQueueKey:
     if lifecycle is ClaimLifecycleState.WAITING_EXTERNAL:
-        return WorkbenchActiveQueue.WAITING_THIRD_PARTY
+        return WorkbenchQueueKey.WAITING_THIRD_PARTY
     if lifecycle is ClaimLifecycleState.WAITING_CUSTOMER:
         claimant_material_required = any(
             item.kind == 'evidence'
@@ -771,9 +785,9 @@ def _active_queue_key(
             for item in missing_information
         )
         return (
-            WorkbenchActiveQueue.WAITING_MATERIAL
+            WorkbenchQueueKey.WAITING_MATERIAL
             if claimant_material_required
-            else WorkbenchActiveQueue.WAITING_USER
+            else WorkbenchQueueKey.WAITING_USER
         )
     if lifecycle in {
         ClaimLifecycleState.DRAFT_ACTIVE,
@@ -781,10 +795,51 @@ def _active_queue_key(
         ClaimLifecycleState.PROFESSIONAL_REVIEW,
         ClaimLifecycleState.READY_TO_CREATE,
         ClaimLifecycleState.CREATING,
-        ClaimLifecycleState.CREATED,
     }:
-        return WorkbenchActiveQueue.PROCESSING
-    raise RuntimeError(f'Lifecycle {lifecycle.value} has no active Workbench queue.')
+        return WorkbenchQueueKey.PROCESSING
+    raise ApiError(
+        status_code=503,
+        code='PROJECTION_UNAVAILABLE',
+        message='The Claim cannot be placed in an authoritative Workbench queue.',
+        details=[
+            ErrorDetail(
+                field='lifecycle_state',
+                reason=f'No terminal disposition exists for {lifecycle.value}.',
+            )
+        ],
+        retryable=False,
+    )
+
+
+def _queue_key(
+    claim: WorkingClaim,
+    lifecycle: ClaimLifecycleState,
+    missing_information: Sequence[WorkbenchMissingInformation],
+) -> WorkbenchQueueKey:
+    terminal = claim.terminal_disposition
+    if terminal is not None:
+        created_external_claim = (
+            claim.external_claim is not None
+            and claim.external_claim.creation_status is ClaimCreationStatus.CREATED
+        )
+        contradictory = (
+            terminal.value is TerminalDispositionValue.COMPLETED and not created_external_claim
+        ) or (terminal.value is not TerminalDispositionValue.COMPLETED and created_external_claim)
+        if contradictory:
+            raise ApiError(
+                status_code=503,
+                code='PROJECTION_UNAVAILABLE',
+                message='The Claim has conflicting terminal projection data.',
+                details=[
+                    ErrorDetail(
+                        field='terminal_disposition',
+                        reason='The disposition conflicts with the external Claim result.',
+                    )
+                ],
+                retryable=False,
+            )
+        return WorkbenchQueueKey(terminal.value.value)
+    return _active_queue_key(lifecycle, missing_information)
 
 
 def _incomplete_context(
@@ -792,6 +847,8 @@ def _incomplete_context(
     claim: WorkingClaim,
     sessions: Sequence[SessionRecord],
 ) -> WorkbenchIncompleteContext | None:
+    if claim.terminal_disposition is not None:
+        return None
     records = find_incomplete_recovery(repository, claim, sessions=sessions)
     if records is None:
         return None
@@ -920,6 +977,35 @@ def _allowed_actions(
     external_tasks: Sequence[ExternalTaskRecord],
     principal: Principal,
 ) -> list[WorkbenchAllowedAction]:
+    terminal = claim.terminal_disposition
+    if terminal is not None:
+        if terminal.value is TerminalDispositionValue.COMPLETED:
+            return []
+        blocker = None
+        if (
+            claim.external_claim is not None
+            and claim.external_claim.creation_status is ClaimCreationStatus.CREATED
+        ):
+            blocker = 'A created external Claim cannot be reopened from FNOL intake.'
+        elif claim.claim_state.workflow_state is WorkflowState.CREATED:
+            blocker = 'The retained Claim state has no resumable intake position.'
+        elif ownership.current_staff_access is not CurrentStaffAccess.PRIMARY:
+            blocker = 'Only the primary owner can reopen this Claim.'
+        return [
+            _registered_action(
+                'claim.reopen',
+                claim.claim_id,
+                claim.revision,
+                availability=(
+                    ActionAvailability.BLOCKED
+                    if blocker is not None
+                    else ActionAvailability.CONFIRMATION_REQUIRED
+                ),
+                blocked_reason=blocker,
+                source_refs=terminal.source_refs,
+                result_state=('blocked' if blocker is not None else 'pending_confirmation'),
+            )
+        ]
     actions: list[WorkbenchAllowedAction] = []
     if active_handoffs:
         handoff = active_handoffs[-1]
@@ -1326,6 +1412,17 @@ def _primary_action(
     current_work: WorkbenchCurrentWorkItem | None,
     risk_signals: Sequence[WorkbenchRiskSignal],
 ) -> WorkbenchAllowedAction | None:
+    reopen = next(
+        (
+            action
+            for action in allowed_actions
+            if action.action_code == 'claim.reopen'
+            and action.availability is not ActionAvailability.BLOCKED
+        ),
+        None,
+    )
+    if reopen is not None:
+        return reopen
     preferred: list[tuple[str, str | None]] = []
     if active_handoffs:
         handoff = active_handoffs[-1]
@@ -1416,8 +1513,8 @@ def _matches_view(
     view: WorkbenchQueueView | None,
 ) -> bool:
     if view is None or view is WorkbenchQueueView.ALL:
-        return item.work_summary.queue_key.value in {queue.value for queue in WorkbenchActiveQueue}
-    if view in _ACTIVE_QUEUE_VIEWS:
+        return item.work_summary.queue_key.value in {queue.value for queue in _ACTIVE_QUEUE_VIEWS}
+    if view in _ACTIVE_QUEUE_VIEWS or view in _TERMINAL_QUEUE_VIEWS:
         return item.work_summary.queue_key.value == view.value
     if view is WorkbenchQueueView.URGENT:
         return item.priority_projection.level in {
@@ -1520,7 +1617,7 @@ def _build_projection(
     lifecycle = _lifecycle(claim, active_handoffs, pending_evidence)
     incomplete_context = _incomplete_context(repository, claim, sessions)
     work_summary = WorkbenchWorkSummary(
-        queue_key=_active_queue_key(lifecycle, missing),
+        queue_key=_queue_key(claim, lifecycle, missing),
         current_work_item=current_work,
         primary_action_code=primary_action.action_code if primary_action else None,
         primary_action_target_ref=primary_action.target_ref if primary_action else None,
@@ -1560,6 +1657,7 @@ def _build_projection(
             summary=_incident_summary(claim),
         ),
         lifecycle_state=lifecycle,
+        terminal_disposition=claim.terminal_disposition,
         workflow_state=claim.claim_state.workflow_state,
         ownership=ownership,
         priority_projection=_priority(claim, active_handoffs, computed_at),
@@ -1755,15 +1853,36 @@ def _calculate_view_counts(
     )
 
 
+def project_workbench_claim_detail(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim: WorkingClaim,
+) -> WorkbenchClaimDetail:
+    """Build a staff-safe detail response from a supplied authoritative Claim.
+
+    Args:
+        repository: Persistence boundary for related Workbench records.
+        principal: Authenticated staff principal used for action and ownership projection.
+        claim: Authoritative Claim version to project.
+
+    Returns:
+        The complete Workbench detail at the supplied Claim revision.
+
+    Raises:
+        ApiError: The Claim cannot be placed in an authoritative queue.
+    """
+    projected = _build_projection(repository, principal, claim, include_detail=True)
+    assert isinstance(projected, WorkbenchClaimDetail)
+    return projected
+
+
 def get_workbench_claim_detail(
     repository: PersistenceRepository,
     principal: Principal,
     claim_id: str,
 ) -> WorkbenchClaimDetail:
     claim = _authorised_claim(repository, principal, claim_id)
-    projected = _build_projection(repository, principal, claim, include_detail=True)
-    assert isinstance(projected, WorkbenchClaimDetail)
-    return projected
+    return project_workbench_claim_detail(repository, principal, claim)
 
 
 def list_workbench_fields(

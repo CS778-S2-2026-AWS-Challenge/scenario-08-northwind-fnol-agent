@@ -119,6 +119,18 @@ class ActorType(str, Enum):
     SYSTEM = 'system'
 
 
+class TerminalDispositionValue(str, Enum):
+    COMPLETED = 'completed'
+    ABANDONED = 'abandoned'
+    CLOSED = 'closed'
+
+
+class TerminalDispositionReasonCode(str, Enum):
+    CLAIM_CREATED = 'CLAIM_CREATED'
+    ABANDONMENT_POLICY_APPLIED = 'ABANDONMENT_POLICY_APPLIED'
+    AUTHORISED_CLOSURE = 'AUTHORISED_CLOSURE'
+
+
 class MessageVisibility(str, Enum):
     CLAIMANT_VISIBLE = 'claimant_visible'
     SHARED = 'shared'
@@ -364,6 +376,32 @@ class ClaimState(ContractModel):
 class ActorReference(ContractModel):
     actor_type: ActorType
     actor_id: str
+
+
+class ClaimTerminalDisposition(ContractModel):
+    value: TerminalDispositionValue
+    reason_code: TerminalDispositionReasonCode
+    source_refs: list[str] = Field(min_length=1, max_length=20)
+    recorded_by: ActorReference
+    recorded_at: datetime
+    recorded_revision: int = Field(ge=1)
+
+    @model_validator(mode='after')
+    def validate_terminal_reason(self) -> 'ClaimTerminalDisposition':
+        expected_reason = {
+            TerminalDispositionValue.COMPLETED: TerminalDispositionReasonCode.CLAIM_CREATED,
+            TerminalDispositionValue.ABANDONED: (
+                TerminalDispositionReasonCode.ABANDONMENT_POLICY_APPLIED
+            ),
+            TerminalDispositionValue.CLOSED: TerminalDispositionReasonCode.AUTHORISED_CLOSURE,
+        }[self.value]
+        if self.reason_code is not expected_reason:
+            raise ValueError('The terminal disposition reason must match its registered value.')
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError('Terminal disposition source references must be unique.')
+        if self.recorded_at.utcoffset() is None:
+            raise ValueError('Terminal disposition time must include a timezone offset.')
+        return self
 
 
 class CustomerNextStep(ContractModel):
@@ -649,6 +687,7 @@ class WorkingClaim(ContractModel):
     external_service_consents: list[ExternalServiceConsent] = Field(default_factory=list)
     assessor_routing: AssessorRoutingResult | None = None
     assessor_routing_fingerprint: str | None = None
+    terminal_disposition: ClaimTerminalDisposition | None = None
     customer_next_step: CustomerNextStep
     created_at: datetime
     updated_at: datetime
@@ -661,6 +700,21 @@ class WorkingClaim(ContractModel):
         item_ids = [item.item_id for item in self.contents_items]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError('Contents item identifiers must be unique within a Claim.')
+        terminal = self.terminal_disposition
+        if terminal is None:
+            return self
+        if terminal.recorded_revision > self.revision:
+            raise ValueError('Terminal disposition revision cannot exceed the Claim revision.')
+        if terminal.recorded_at > self.updated_at:
+            raise ValueError('Terminal disposition time cannot exceed the Claim update time.')
+        created_external_claim = (
+            self.external_claim is not None
+            and self.external_claim.creation_status is ClaimCreationStatus.CREATED
+        )
+        if terminal.value is TerminalDispositionValue.COMPLETED and not created_external_claim:
+            raise ValueError('A completed Claim requires a created external Claim result.')
+        if terminal.value is not TerminalDispositionValue.COMPLETED and created_external_claim:
+            raise ValueError('A created external Claim cannot be abandoned or closed.')
         return self
 
 
@@ -1179,6 +1233,10 @@ class DecideCollaborationRequest(ContractModel):
 
 
 class RequeueClaimRequest(ContractModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReopenClaimRequest(ContractModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 

@@ -1041,7 +1041,12 @@ def test_workbench_publishes_grouped_active_views_before_operational_views(
             'group': 'active',
         },
     ]
-    assert all(view['group'] == 'operational' for view in views[5:])
+    assert views[5:8] == [
+        {'value': 'completed', 'label': 'Completed', 'group': 'terminal'},
+        {'value': 'abandoned', 'label': 'Abandoned', 'group': 'terminal'},
+        {'value': 'closed', 'label': 'Closed', 'group': 'terminal'},
+    ]
+    assert all(view['group'] == 'operational' for view in views[8:])
 
 
 def test_active_queue_mapping_applies_wait_precedence_without_operational_keys() -> None:
@@ -1067,11 +1072,16 @@ def test_active_queue_mapping_applies_wait_precedence_without_operational_keys()
         ClaimLifecycleState.PROFESSIONAL_REVIEW,
         ClaimLifecycleState.READY_TO_CREATE,
         ClaimLifecycleState.CREATING,
-        ClaimLifecycleState.CREATED,
     ):
         assert _active_queue_key(lifecycle, []).value == 'processing'
-    with pytest.raises(RuntimeError, match='has no active Workbench queue'):
-        _active_queue_key(ClaimLifecycleState.WITHDRAWN, [])
+    for lifecycle in (
+        ClaimLifecycleState.CREATED,
+        ClaimLifecycleState.WITHDRAWN,
+        ClaimLifecycleState.EXPIRED,
+        ClaimLifecycleState.PURGED_OR_ANONYMISED,
+    ):
+        with pytest.raises(ApiError, match='cannot be placed'):
+            _active_queue_key(lifecycle, [])
 
 
 def test_workbench_active_views_and_counts_share_filtered_authorised_projection(
@@ -1281,7 +1291,7 @@ def test_workbench_rejects_unpublished_view_without_falling_back_to_all(
     assert response.json()['error']['details'][0]['field'] == 'query.view'
 
 
-def test_created_claim_route_does_not_override_workbench_queue(
+def test_created_lifecycle_without_terminal_source_is_projection_unavailable(
     client: TestClient,
     auth_headers: dict[str, str],
     staff_auth_headers: dict[str, str],
@@ -1306,10 +1316,8 @@ def test_created_claim_route_does_not_override_workbench_queue(
         headers=staff_auth_headers,
     )
 
-    assert response.status_code == 200
-    item = next(item for item in response.json()['items'] if item['claim_id'] == claim_id)
-    assert item['work_summary']['queue_key'] == 'processing'
-    assert item['lifecycle_state'] == 'created'
+    assert response.status_code == 503
+    assert response.json()['error']['code'] == 'PROJECTION_UNAVAILABLE'
 
 
 def test_workbench_claim_detail_returns_documented_not_found(
@@ -1633,10 +1641,21 @@ def test_workbench_detail_reads_shared_claim_creation_and_routing_results(
     assert detail['integration_summary']['assessor_routing_status'] == 'assigned'
     assert detail['customer_next_step']['status'] == 'assessor_assigned'
     assert detail['customer_next_step']['expected_by'] == routing['expected_by']
-    queue_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+    assert detail['terminal_disposition']['value'] == 'completed'
+    assert detail['terminal_disposition']['reason_code'] == 'CLAIM_CREATED'
+    assert detail['terminal_disposition']['source_refs'] == [
+        create_decision.decision_id,
+        creation['external_claim_id'],
+    ]
+    active_response = client.get('/api/v1/workbench/claims', headers=staff_auth_headers)
+    assert all(item['claim_id'] != claim_id for item in active_response.json()['items'])
+    queue_response = client.get(
+        '/api/v1/workbench/claims?view=completed', headers=staff_auth_headers
+    )
     queue_item = next(
         item for item in queue_response.json()['items'] if item['claim_id'] == claim_id
     )
+    assert queue_item['work_summary']['queue_key'] == 'completed'
     assert queue_item['ownership']['primary_assignee']['staff_id'] == 'stf_demo'
 
 

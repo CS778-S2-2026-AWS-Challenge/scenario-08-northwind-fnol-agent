@@ -14,6 +14,10 @@ not prescribe a MongoDB, DynamoDB, Cloudflare, or other provider transaction API
 
 `WorkingClaim` is the single authoritative current FNOL state for a claim.
 
+Its optional `terminal_disposition` is the authoritative source-linked completed, abandoned, or
+closed fact. It remains part of the same Claim record and revision; lifecycle projections, missing
+Sessions, free text, and action history cannot substitute for it.
+
 Sessions, messages, evidence, retrievals, handoffs, staff work, claimant updates, and
 integration records are durable child or evidence records. They may carry a snapshot of
 the claim revision that produced or consumed them, but they do not own a competing
@@ -85,6 +89,7 @@ sequence of unrelated `save_*` calls.
 | Evidence state mutation | claim + evidence + idempotency | claim `N -> N+1`; evidence belongs to the claim and active interaction boundary; stored `active_session_id` is preserved |
 | Handoff mutation | claim + handoff + idempotency | claim `N -> N+1`; handoff identity and idempotency handoff reference agree; stored `active_session_id` is preserved |
 | Staff write-back | claim + one or more authorised staff/handoff/message/customer-update records + idempotency | claim `N -> N+1`; all supplied records belong to the claim; non-interaction staff records may be session-agnostic, while staff messages bind the active session and staff actor; stored `active_session_id` is preserved |
+| Reopen terminal Claim | claim + staff-scoped idempotency response + internal audit event | claim `N -> N+1`; exact `claim.reopen` action/target/revision and primary ownership are re-resolved; only `terminal_disposition` is cleared; retained `claim_state` and `active_session_id` are preserved |
 | Retrieval + directly derived review signals | retrieval + zero or more source-linked review signals | no claim revision change merely for recording evidence; the bundle itself is atomic |
 
 A caller must not emulate these bundles by writing the claim first and then appending
@@ -119,6 +124,8 @@ and relevant child records.
 
 - same actor + route + key + same request may return the recorded authoritative result;
 - same actor + route + key + changed request is an `IdempotencyConflict`;
+- where the operation contract includes the expected Claim revision in its fingerprint (including
+  `claim.reopen`), changing `If-Match` under the same key is changed input rather than a stale retry;
 - a key cannot be reused to attach a result from another claim or from another relevant
   session/message/handoff child;
 - a session-agnostic operation leaves the session identity empty rather than fabricating
@@ -174,6 +181,9 @@ A handoff is a child work record, not a second claim status store.
   may be committed in one transaction;
 - a failed staff or handoff mutation leaves the claim and every supplied child record at
   the previous snapshot.
+- terminal reopen is a staff mutation with no new child work record: it atomically clears the
+  embedded terminal record, stores the first Workbench response, and appends one internal audit
+  fact carrying the prior terminal sources and resulting revision.
 
 ## Visibility Boundary
 

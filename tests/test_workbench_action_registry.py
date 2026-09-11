@@ -19,8 +19,9 @@ from backend.services.support import now_utc
 
 
 def test_action_registry_owns_every_projected_action_contract_dimension() -> None:
-    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-04.2'
+    assert WORKBENCH_ACTION_REGISTRY_VERSION == '2026-09-11.1'
     assert set(WORKBENCH_ACTION_REGISTRY) == {
+        'claim.reopen',
         'conversation.send_claimant_message',
         'human.accept_handoff',
         'human.resolve_handoff',
@@ -67,6 +68,14 @@ def test_registry_owns_ownership_inputs_and_conditional_completion_requirements(
     )
     assert result_summary.required is False
     assert result_summary.required_when == ('status', 'completed')
+
+    reopen = WORKBENCH_ACTION_REGISTRY['claim.reopen']
+    assert [item.field_code for item in reopen.inputs] == ['reason']
+    assert reopen.expected_effects == (
+        'terminal_disposition.clear',
+        'claim.revision.advance',
+        'audit.append',
+    )
 
 
 def test_registered_target_variants_own_fixed_completion_effects() -> None:

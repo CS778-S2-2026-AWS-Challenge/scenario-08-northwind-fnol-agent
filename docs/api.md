@@ -1966,7 +1966,7 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -1981,7 +1981,8 @@ and summary, current requested outcome, and projected tag codes and labels. Clai
 is not searchable until an authorised staff-safe identity projection populates it. Search does not
 inspect unprojected Claim fields or change the backend rank order.
 
-Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
+Each item includes claim ID, safe display reference, state dimensions, terminal disposition,
+priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
 service timing, and update time. It is a projection of shared claim state, not a separately
 editable board record.
@@ -1994,20 +1995,33 @@ summaries; lifecycle and workflow state; ownership and priority projections; `wo
 integration status; tags; and creation and update times. It is a projection of shared Claim state,
 not a separately editable board record.
 
-`work_summary.queue_key` is exactly one of the four active lifecycle queues for every listable
-non-terminal Claim:
+`work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
+Claim. The server applies terminal precedence before active placement:
 
-| Active queue | Authoritative mapping |
+| Queue | Authoritative mapping |
 |---|---|
-| `processing` | `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, `creating`, or `created` lifecycle |
+| `completed` | `terminal_disposition.value=completed` |
+| `abandoned` | `terminal_disposition.value=abandoned` |
+| `closed` | `terminal_disposition.value=closed` |
+| `processing` | Non-terminal `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, or `creating` lifecycle |
 | `waiting_user` | `waiting_customer` without claimant material required for the current action |
 | `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
 | `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
 
 Active handoffs and professional review therefore remain in `processing`. Operational views are
 independent, overlapping projections: the same Claim may appear in `processing` and, for example,
-`human_requests` or `professional_review`. `all` is the union of the four active queues. Terminal
-queue mappings are outside this contract.
+`human_requests` or `professional_review`; a completed Claim may also match `created_routed`.
+`all` is the union of the four active queues and excludes all three terminal queues.
+
+`terminal_disposition` is the P17-owned authoritative record embedded in `WorkingClaim`. It is
+either null or contains `value`, registered `reason_code`, one or more immutable `source_refs`,
+typed `recorded_by`, `recorded_at`, and `recorded_revision`. It is not a second lifecycle enum and
+does not rewrite the retained `claim_state`. A successful external Claim creation records
+`completed` with reason `CLAIM_CREATED` and references both the authorising decision and created
+external Claim in the same Claim revision. `abandoned` and `closed` are never inferred from
+`withdrawn`, `expired`, free text, action history, or a missing session. A `created` lifecycle
+without its authoritative terminal record, or a terminal record that contradicts the external
+Claim result, returns `503 PROJECTION_UNAVAILABLE` rather than falling through to `processing`.
 
 `view_counts.items` contains one entry for every server-published view in metadata order. Counts
 are computed from the same authorised Claim set after applying `workflow_state`, `priority`,
@@ -2070,7 +2084,7 @@ Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `
 Returns the backend-owned queue filter contract for authenticated staff. The response contains
 `views`, `workflow_states`, `priorities`, and all published, filterable `tags`, plus
 `tag_registry_version`. Every option contains `value` and `label`; each view also contains its
-`overview`, `active`, or `operational` group, and tag options contain `category`. Array order is the
+`overview`, `active`, `terminal`, or `operational` group, and tag options contain `category`. Array order is the
 server-owned display order. The Workbench uses these values to validate route state, group and
 render controls, and associate authoritative `view_counts` instead of maintaining a second enum or
 deriving options or totals from loaded Claim pages.
@@ -2091,6 +2105,7 @@ large resources are loaded from the dedicated sub-resources below:
   "claimant": {"customer_id": "customer-1042"},
   "incident": {"family": "motor", "summary": "Rear-end collision; vehicle remains drivable."},
   "lifecycle_state": "staff_support",
+  "terminal_disposition": null,
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
@@ -2168,6 +2183,13 @@ projected action input set. Reusing an `Idempotency-Key` replays the original re
 key cannot create a second pending cowork request for the same target or a second pending transfer
 to the same target; these attempts return `409 OWNERSHIP_CONFLICT` without changing the Claim
 revision or creating another request.
+For an `abandoned` or `closed` terminal Claim, the primary owner receives `claim.reopen` as
+`confirmation_required` only when the retained workflow is resumable and no created external Claim
+exists. Other staff may receive the same exact action as `blocked`; a `completed` Claim never
+publishes a reopen action. Terminal Claims publish no ordinary active-work mutations. The reopen
+action targets the Claim, requires the projected `reason` textarea, carries the prior terminal
+sources, and declares `terminal_disposition.clear`, `claim.revision.advance`, and `audit.append`
+as its expected effects.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised. The pair always identifies the exact same
@@ -2175,6 +2197,33 @@ non-blocked `allowed_actions` entry. Clients display a Staff next action only wh
 exactly resolve to a non-blocked entry; they do not fall back to another action or infer one from
 tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
 claimant-safe projection.
+
+### `POST /api/v1/workbench/claims/{claim_id}/reopen`
+
+Executes only the exact non-blocked `claim.reopen` action from the current terminal Claim detail.
+The route requires staff authentication, `Idempotency-Key`, and `If-Match`. Unknown request fields
+are rejected; the body is:
+
+```json
+{
+  "reason": "The claimant supplied the information needed to continue."
+}
+```
+
+The authenticated staff member must be the primary owner. Only `abandoned` and `closed` are
+reopenable; `completed`, a created external Claim, a non-resumable retained workflow, a missing
+target, and an absent or blocked exact action fail explicitly. On success, the server clears only
+`terminal_disposition`, preserves the retained `claim_state` and `active_session_id`, advances the
+Claim revision exactly once, and atomically stores the staff-scoped idempotency result plus one
+internal `action.completed` audit event containing the prior terminal source references, actor,
+permission, reason, and resulting revision. The response is the updated
+`WorkbenchClaimDetail`; its server-derived `work_summary.queue_key` is the destination queue.
+
+The idempotency fingerprint includes both the request body and expected revision. Replaying the
+same operation returns the first response. Reusing the key with a changed reason or `If-Match`
+returns `409 IDEMPOTENCY_CONFLICT`; an unseen key with a stale revision returns
+`409 REVISION_CONFLICT`. An absent/blocked action returns `403 ACCESS_DENIED`, and a missing Claim
+returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
@@ -3146,6 +3195,7 @@ Reason codes are stable machine-readable identifiers. The initial registry inclu
 | Safety | `INJURY_REPORTED`, `CONTINUING_DANGER`, `IMMEDIATE_SAFETY_RISK` |
 | Review | `COMPLEX_EVENT_REVIEW`, `CONFLICT_REQUIRES_REVIEW`, `HISTORY_INCONSISTENCY_REVIEW`, `SOURCE_RECORD_NOT_COMPARABLE` |
 | Workflow | `NEXT_ACTION_READY`, `CLAIM_CREATION_AUTHORISED`, `CLAIM_CREATED`, `ASSESSOR_RULE_AUTHORISED`, `HANDOFF_ACCEPTED` |
+| Terminal disposition | `CLAIM_CREATED`, `ABANDONMENT_POLICY_APPLIED`, `AUTHORISED_CLOSURE` |
 | Integration | `POLICY_SERVICE_UNAVAILABLE`, `HISTORY_SERVICE_UNAVAILABLE`, `CLAIMS_SERVICE_UNAVAILABLE`, `EVIDENCE_PROCESSING_FAILED` |
 
 New codes require documentation and contract tests. Free-text explanations may accompany a code but MUST NOT replace it.
@@ -3202,6 +3252,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |
 

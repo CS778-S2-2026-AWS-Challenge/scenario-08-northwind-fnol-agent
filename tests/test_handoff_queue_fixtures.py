@@ -316,10 +316,14 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
 
     repository, claim_id = _load('AT-10-controlled-assessor')
     with _staff_client(repository) as client:
-        item = client.get('/api/v1/workbench/claims', headers=headers).json()['items'][0]
+        item = client.get(
+            '/api/v1/workbench/claims',
+            params={'view': 'completed'},
+            headers=headers,
+        ).json()['items'][0]
         response = client.get(
             '/api/v1/workbench/claims',
-            params={'search': item['display_reference'].lower()},
+            params={'view': 'completed', 'search': item['display_reference'].lower()},
             headers=headers,
         )
     assert item['display_reference'] != claim_id
