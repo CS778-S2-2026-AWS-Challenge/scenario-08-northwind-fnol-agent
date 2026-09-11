@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient
@@ -2728,7 +2728,7 @@ class MongoDBRepository:
         )
         return result.matched_count
 
-    def _raise_revision_conflict(self, claim_id: str, *, mongo_session: Any) -> None:
+    def _raise_revision_conflict(self, claim_id: str, *, mongo_session: Any) -> NoReturn:
         current = self._collection.find_one(
             {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
             projection={'revision': 1},
