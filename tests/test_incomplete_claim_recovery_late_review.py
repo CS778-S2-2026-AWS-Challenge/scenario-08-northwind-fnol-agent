@@ -7,10 +7,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.domain.models import (
+    ActorReference,
+    ActorType,
+    ContentsLossType,
+    ContentsOwnership,
     FollowUpContactPermission,
     FollowUpRecord,
     FollowUpStatus,
+    FormStatus,
     PreferredChannel,
+    ProposedContentsItem,
     ResponsibleParty,
     SessionRecord,
     SessionRecoveryContext,
@@ -24,6 +30,7 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     RevisionConflict,
 )
+from backend.services.fact_resolution import resolve_contents_item_change
 
 CheckpointBundle = tuple[
     WorkingClaim,
@@ -357,6 +364,183 @@ def test_pause_response_revision_provenance_and_logging(
     assert getattr(record, 'claim_revision', None) == returned_revision
 
 
+def test_confirmation_recovery_activity_pairs_timestamp_with_confirmation_source(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, session_id, revision = _create_claim(
+        client,
+        auth_headers,
+        'late-confirmation-provenance-create',
+    )
+
+    proposed = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={
+            **auth_headers,
+            'If-Match': f'"{revision}"',
+        },
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.description',
+                    'value': 'Rear-ended while stopped.',
+                    'status': 'proposed',
+                }
+            ]
+        },
+    )
+    assert proposed.status_code == 200
+    proposed_revision = int(proposed.json()['revision'])
+
+    proposed_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert proposed_claim is not None
+    proposal_ref = proposed_claim.form['incident.description'].source_refs[-1]
+
+    confirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'late-confirmation-provenance-confirm',
+            'If-Match': f'"{proposed_revision}"',
+        },
+        json={'field_codes': ['incident.description']},
+    )
+    assert confirmed.status_code == 200
+    confirmed_revision = int(confirmed.json()['revision'])
+
+    confirmed_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert confirmed_claim is not None
+    field = confirmed_claim.form['incident.description']
+
+    confirmation_ref = f'claim:{claim_id}:revision:{confirmed_revision}:field:incident.description'
+    assert field.source_refs[-1] == confirmation_ref
+    assert field.source_refs[-1] != proposal_ref
+
+    paused = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'late-confirmation-provenance-pause',
+            'If-Match': f'"{confirmed_revision}"',
+        },
+    )
+    assert paused.status_code == 200
+
+    stored_session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert stored_session is not None
+    assert stored_session.recovery_context is not None
+    assert stored_session.recovery_context.last_meaningful_activity_at == field.updated_at
+    assert stored_session.recovery_context.last_meaningful_activity_source_ref == confirmation_ref
+
+
+def test_contents_confirmation_recovery_activity_uses_confirmation_source(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, session_id, revision = _create_claim(
+        client,
+        auth_headers,
+        'late-contents-confirmation-create',
+    )
+
+    claim = repository.get_claim(
+        claim_id,
+        'cus_demo',
+    )
+    assert claim is not None
+
+    proposal_time = datetime.now(UTC)
+    proposal_ref = f'claim:{claim_id}:revision:{revision + 1}:contents-item:item_recovery:proposal'
+
+    proposed_item = resolve_contents_item_change(
+        existing=None,
+        proposal=ProposedContentsItem(
+            description='Laptop',
+            category='electronics',
+            quantity=1,
+            loss_type=ContentsLossType.DAMAGED,
+            ownership=ContentsOwnership.OWNED,
+            confidence=0.9,
+        ),
+        item_id='item_recovery',
+        source_ref=proposal_ref,
+        message_text='My laptop was damaged.',
+        timestamp=proposal_time,
+        accepted_status=FormStatus.PROPOSED,
+        updated_by=ActorReference(
+            actor_type=ActorType.CLAIMANT,
+            actor_id='cus_demo',
+        ),
+    )
+
+    proposed_claim = claim.model_copy(
+        update={
+            'contents_items': [proposed_item],
+            'revision': claim.revision + 1,
+            'updated_at': proposal_time,
+        }
+    )
+
+    repository.save_claim(
+        proposed_claim,
+        expected_revision=claim.revision,
+    )
+
+    confirmation = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'late-contents-confirmation',
+            'If-Match': f'"{proposed_claim.revision}"',
+        },
+        json={'field_codes': ['contents.items']},
+    )
+
+    assert confirmation.status_code == 200
+
+    confirmation_revision = int(confirmation.json()['revision'])
+
+    confirmed_claim = repository.get_claim(
+        claim_id,
+        'cus_demo',
+    )
+    assert confirmed_claim is not None
+    assert len(confirmed_claim.contents_items) == 1
+
+    confirmed_item = confirmed_claim.contents_items[0]
+
+    confirmation_ref = f'claim:{claim_id}:revision:{confirmation_revision}:field:contents.items'
+
+    assert confirmed_item.source_refs[-1] == confirmation_ref
+    assert confirmed_item.source_refs[-1] != proposal_ref
+
+    pause = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'late-contents-confirmation-pause',
+            'If-Match': f'"{confirmation_revision}"',
+        },
+    )
+
+    assert pause.status_code == 200
+
+    stored_session = repository.get_session(
+        claim_id,
+        session_id,
+        'cus_demo',
+    )
+
+    assert stored_session is not None
+    assert stored_session.recovery_context is not None
+
+    assert stored_session.recovery_context.last_meaningful_activity_at == confirmed_item.updated_at
+    assert stored_session.recovery_context.last_meaningful_activity_source_ref == confirmation_ref
+
+
 def _checkpoint_bundle(
     repository: FixtureRepository,
     claim_id: str,
@@ -440,6 +624,138 @@ def _checkpoint_bundle(
         follow_up,
         idempotency,
     )
+
+
+def test_stale_new_session_activation_cannot_overwrite_acknowledged_pause(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    claim_id, session_id, _ = _create_claim(
+        client,
+        auth_headers,
+        'late-stale-new-session-create',
+    )
+
+    original_claim = repository.get_claim(
+        claim_id,
+        'cus_demo',
+    )
+    original_session = repository.get_session(
+        claim_id,
+        session_id,
+        'cus_demo',
+    )
+
+    assert original_claim is not None
+    assert original_session is not None
+
+    pause_bundle = _checkpoint_bundle(
+        repository,
+        claim_id,
+        session_id,
+        'stale-new-session',
+    )
+
+    (
+        paused_claim,
+        expected_revision,
+        paused_session,
+        follow_up,
+        pause_idempotency,
+    ) = pause_bundle
+
+    timestamp = datetime.now(UTC)
+
+    replacement_session = original_session.model_copy(
+        update={
+            'session_id': 'ses_stale_activation',
+            'status': SessionStatus.ACTIVE,
+            'context_revision': original_claim.revision,
+            'started_at': timestamp,
+            'last_active_at': timestamp,
+            'closed_at': None,
+            'recovery_context': None,
+        }
+    )
+
+    stale_closed_source = original_session.model_copy(
+        update={
+            'status': SessionStatus.CLOSED,
+            'closed_at': timestamp,
+        }
+    )
+
+    stale_activation_claim = original_claim.model_copy(
+        update={
+            'active_session_id': replacement_session.session_id,
+            'revision': original_claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+
+    activation_idempotency = IdempotencyRecord(
+        actor_id='cus_demo',
+        route=f'/api/v1/claims/{claim_id}/sessions',
+        key='stale-session-activation',
+        request_fingerprint='stale-session-activation',
+        claim_id=claim_id,
+        session_id=replacement_session.session_id,
+    )
+
+    # Pause wins the revision first.
+    repository.save_incomplete_checkpoint(
+        paused_claim,
+        expected_revision=expected_revision,
+        session=paused_session,
+        follow_up=follow_up,
+        idempotency=pause_idempotency,
+    )
+
+    # The stale activation must now fail without touching the paused Session.
+    with pytest.raises(RevisionConflict):
+        repository.save_session_mutation(
+            stale_activation_claim,
+            expected_revision=original_claim.revision,
+            session=replacement_session,
+            idempotency=activation_idempotency,
+            replaced_active_session=stale_closed_source,
+        )
+
+    stored_claim = repository.get_claim(
+        claim_id,
+        'cus_demo',
+    )
+    stored_source_session = repository.get_session(
+        claim_id,
+        session_id,
+        'cus_demo',
+    )
+    stored_replacement = repository.get_session(
+        claim_id,
+        replacement_session.session_id,
+        'cus_demo',
+    )
+
+    assert stored_claim == paused_claim
+    assert stored_source_session == paused_session
+    assert stored_source_session.recovery_context is not None
+    assert stored_source_session.status is SessionStatus.PAUSED
+    assert stored_replacement is None
+
+    open_follow_ups = [
+        record
+        for record in repository.list_follow_ups(
+            claim_id,
+            'cus_demo',
+        )
+        if record.status
+        in {
+            FollowUpStatus.PENDING,
+            FollowUpStatus.BLOCKED,
+        }
+    ]
+    assert len(open_follow_ups) == 1
 
 
 def test_fixture_checkpoint_race_commits_exactly_one_bundle(

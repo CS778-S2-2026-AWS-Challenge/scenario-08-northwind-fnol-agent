@@ -655,6 +655,7 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
         with self._claim_mutation_lock:
             stored_claim = self._validate_claim_mutation(
@@ -677,11 +678,42 @@ class FixtureRepository(PersistenceRepository):
                 raise KeyError(claim.claim_id)
             if session.session_id in self._sessions:
                 raise IdempotencyConflict(session.session_id)
-            if any(
-                existing.claim_id == claim.claim_id and existing.status is SessionStatus.ACTIVE
+
+            active_sessions = [
+                existing
                 for existing in self._sessions.values()
-            ):
-                raise KeyError(claim.claim_id)
+                if existing.claim_id == claim.claim_id
+                and existing.customer_id == claim.customer_id
+                and existing.status is SessionStatus.ACTIVE
+            ]
+            if replaced_active_session is None:
+                if stored_claim.active_session_id is not None or active_sessions:
+                    raise KeyError(claim.claim_id)
+            else:
+                stored_replaced_session = self._sessions.get(replaced_active_session.session_id)
+                if (
+                    stored_claim.active_session_id != replaced_active_session.session_id
+                    or stored_replaced_session is None
+                    or stored_replaced_session.claim_id != claim.claim_id
+                    or stored_replaced_session.customer_id != claim.customer_id
+                    or stored_replaced_session.status is not SessionStatus.ACTIVE
+                    or replaced_active_session.status is not SessionStatus.CLOSED
+                    or replaced_active_session.closed_at is None
+                    or any(
+                        existing.session_id != replaced_active_session.session_id
+                        for existing in active_sessions
+                    )
+                ):
+                    raise KeyError(claim.claim_id)
+                expected_replaced_session = stored_replaced_session.model_copy(
+                    update={
+                        'status': SessionStatus.CLOSED,
+                        'closed_at': replaced_active_session.closed_at,
+                    }
+                )
+                if replaced_active_session != expected_replaced_session:
+                    raise KeyError(claim.claim_id)
+
             open_recovery = [
                 record
                 for record in self._follow_ups.values()
@@ -716,6 +748,10 @@ class FixtureRepository(PersistenceRepository):
             self._validate_branch_evaluation(claim, branch_evaluation)
 
             self._claims[claim.claim_id] = deepcopy(claim)
+            if replaced_active_session is not None:
+                self._sessions[replaced_active_session.session_id] = deepcopy(
+                    replaced_active_session
+                )
             self._sessions[session.session_id] = deepcopy(session)
             if resolved_follow_up is not None:
                 self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)

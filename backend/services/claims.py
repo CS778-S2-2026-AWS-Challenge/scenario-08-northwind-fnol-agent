@@ -822,13 +822,12 @@ def start_session(
             started_at=timestamp,
             last_active_at=timestamp,
         )
+        replaced_active_session = None
         if active_session is not None and active_session.status is SessionStatus.ACTIVE:
-            # A claim has one active conversation at a time. Preserve the old
-            # transcript while closing it before promoting the new session.
-            repository.save_session(
-                active_session.model_copy(
-                    update={'status': SessionStatus.CLOSED, 'closed_at': timestamp}
-                )
+            # Closing the previous active Session is part of the same
+            # revision-checked mutation that activates the replacement.
+            replaced_active_session = active_session.model_copy(
+                update={'status': SessionStatus.CLOSED, 'closed_at': timestamp}
             )
         updated_claim = claim.model_copy(
             update={
@@ -859,6 +858,7 @@ def start_session(
                     session=session,
                     idempotency=idempotency,
                     branch_evaluation=branch_evaluation,
+                    replaced_active_session=replaced_active_session,
                 )
             else:
                 repository.save_session_mutation(
@@ -868,6 +868,7 @@ def start_session(
                     idempotency=idempotency,
                     branch_evaluation=branch_evaluation,
                     resolved_follow_up=resolved_follow_up,
+                    replaced_active_session=replaced_active_session,
                 )
         except RevisionConflict as conflict:
             raise ApiError(
@@ -1135,6 +1136,7 @@ def confirm_form_fields(
         )
 
     timestamp = now_utc()
+    confirmation_revision = claim.revision + 1
     confirmed_fields = {
         field_code: confirm_form_field(
             claim.form[field_code],
@@ -1142,6 +1144,9 @@ def confirm_form_fields(
             updated_by=ActorReference(
                 actor_type=ActorType.CLAIMANT,
                 actor_id=principal.subject,
+            ),
+            source_ref=(
+                f'claim:{claim.claim_id}:revision:{confirmation_revision}:field:{field_code}'
             ),
         )
         for field_code in payload.field_codes
@@ -1154,6 +1159,9 @@ def confirm_form_fields(
             updated_by=ActorReference(
                 actor_type=ActorType.CLAIMANT,
                 actor_id=principal.subject,
+            ),
+            source_ref=(
+                f'claim:{claim.claim_id}:revision:{confirmation_revision}:field:contents.items'
             ),
         )
         if item.status is FormStatus.PROPOSED and 'contents.items' in payload.field_codes

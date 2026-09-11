@@ -78,7 +78,7 @@ sequence of unrelated `save_*` calls.
 
 | Mutation | Atomic bundle | Required revision behaviour |
 | --- | --- | --- |
-| Resume/start claimant session | claim + new/updated session + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; may establish the new `active_session_id` |
+| Resume/start claimant session | claim + new/updated session + optional prior-active Session closure + idempotency | claim `N -> N+1`; session linked to the same claim/customer; one active claimant session; may establish the new `active_session_id`; when replacing an active Session, closing that prior Session occurs inside the same revision-checked atomic bundle |
 | Pause/checkpoint claimant session | claim + paused session + bounded recovery context + initial Follow-up + idempotency | claim `N -> N+1`; source session must be the current active session; clears `active_session_id`; creates one Claim-scoped Follow-up for the interruption |
 | Message-only claimant continuation | claim + session + message + idempotency | claim `N -> N+1`; session context updated to the resulting claim revision; stored `active_session_id` is preserved |
 | Validated Agent turn | claim + session question accounting + claimant message + Agent message + decision + applied Branch Evaluation + optional handoff/evidence + idempotency | claim `N -> N+1`; all trigger/reply/decision/evaluation links agree; stored `active_session_id` is preserved; failed retrieval or validation writes none of the bundle |

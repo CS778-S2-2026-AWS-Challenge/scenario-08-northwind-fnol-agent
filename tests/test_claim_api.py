@@ -1971,9 +1971,8 @@ def test_resume_creates_new_session_with_saved_context(
     first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
     assert first_session is not None
 
-    paused_session = first_session.model_copy(
+    prepared_session = first_session.model_copy(
         update={
-            'status': SessionStatus.PAUSED,
             'summary': 'The claimant confirmed a synthetic rear-end incident.',
             'unresolved_questions': ['confirm:vehicle.drivable'],
             'pending_items': ['police_report'],
@@ -1982,7 +1981,25 @@ def test_resume_creates_new_session_with_saved_context(
             ],
         }
     )
-    repository.save_session(paused_session)
+    repository.save_session(prepared_session)
+
+    pause = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'resume-context-pause',
+            'If-Match': f'"{created["claim"]["revision"]}"',
+        },
+    )
+    assert pause.status_code == 200
+
+    paused_session = repository.get_session(
+        claim_id,
+        first_session_id,
+        'cus_demo',
+    )
+    assert paused_session is not None
+    assert paused_session.status is SessionStatus.PAUSED
 
     response = client.post(
         f'/api/v1/claims/{claim_id}/sessions',

@@ -716,13 +716,17 @@ idempotency identity, invalid contact-authority condition, or second open Claim+
 fails before any bundle member becomes authoritative. The Fixture profile serializes material
 Claim mutations and repeats the authoritative revision and duplicate checks while that mutation
 lock is held. Two callers that both pass an optimistic read therefore cannot commit two recovery
-bundles.
+bundles. When a new claimant Session replaces an existing active Session, the stored active-session
+pointer is revision-checked and the prior Session closure is committed in the same activation
+mutation; a stale activation therefore cannot overwrite a pause checkpoint or its recovery context.
 
 `last_meaningful_activity_at` is selected from durable claimant-authored messages or accepted
 claimant business actions such as authoritative structured-form or contents updates and explicit
 consent. Reads, polling, streaming, and an arbitrary Session activity timestamp do not qualify.
 The paired `last_meaningful_activity_source_ref` identifies the exact durable source selected for
-the recovery checkpoint.
+the recovery checkpoint. Explicit form and contents confirmations append a revision-scoped
+confirmation source reference in the same Claim mutation that records their confirmation timestamp,
+so recovery chronology never pairs a later confirmation time with an earlier proposal source.
 
 A Claim is eligible for a recovery checkpoint only when its authoritative workflow is not
 `created` and `customer_next_step.can_resume=true`. Claimant and Workbench incomplete projections

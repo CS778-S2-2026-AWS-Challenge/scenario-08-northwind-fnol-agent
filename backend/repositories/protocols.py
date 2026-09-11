@@ -161,8 +161,9 @@ class ClaimRepository(Protocol):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        """Atomically activate a session and resolve recovery work when supplied."""
+        """Atomically replace/activate a session and resolve recovery work when supplied."""
         raise NotImplementedError
 
     def get_follow_up(

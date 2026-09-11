@@ -2913,8 +2913,15 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
         resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        self._validate_session_mutation(claim, expected_revision, session, idempotency)
+        self._validate_session_mutation(
+            claim,
+            expected_revision,
+            session,
+            idempotency,
+            replaced_active_session,
+        )
         self._validate_branch_evaluation(claim, branch_evaluation)
         self._atomic(
             lambda mongo_session: self._save_session_mutation(
@@ -2924,6 +2931,7 @@ class MongoDBRepository:
                 idempotency,
                 branch_evaluation,
                 resolved_follow_up,
+                replaced_active_session,
                 mongo_session,
             )
         )
@@ -2934,6 +2942,7 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        replaced_active_session: SessionRecord | None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -2945,6 +2954,15 @@ class MongoDBRepository:
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
+            or (
+                replaced_active_session is not None
+                and (
+                    replaced_active_session.claim_id != claim.claim_id
+                    or replaced_active_session.customer_id != claim.customer_id
+                    or replaced_active_session.status is not SessionStatus.CLOSED
+                    or replaced_active_session.closed_at is None
+                )
+            )
         ):
             raise KeyError(claim.claim_id)
 
@@ -2956,14 +2974,73 @@ class MongoDBRepository:
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None,
         resolved_follow_up: FollowUpRecord | None,
+        replaced_active_session: SessionRecord | None,
         mongo_session: Any,
     ) -> None:
-        if (
-            self.get_active_session(claim.claim_id, claim.customer_id, mongo_session=mongo_session)
-            is not None
-        ):
-            raise IdempotencyConflict(session.session_id)
-        self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        stored_claim_document = self._collection.find_one(
+            {
+                '_id': self._record_id('claim', claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': claim.customer_id,
+                'revision': expected_revision,
+            },
+            projection={'revision': 1, 'active_session_id': 1},
+            session=mongo_session,
+        )
+        if stored_claim_document is None:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+
+        self._reject_session_identity_conflict(
+            session,
+            mongo_session=mongo_session,
+        )
+
+        stored_active_session_id = stored_claim_document.get('active_session_id')
+        active_session_documents = list(
+            self._collection.find(
+                {
+                    'record_type': 'session',
+                    'claim_id': claim.claim_id,
+                    'customer_id': claim.customer_id,
+                    'status': SessionStatus.ACTIVE.value,
+                },
+                projection={'session_id': 1},
+                session=mongo_session,
+            )
+        )
+        active_session_ids = {str(document['session_id']) for document in active_session_documents}
+
+        if replaced_active_session is None:
+            if stored_active_session_id is not None or active_session_ids:
+                raise KeyError(claim.claim_id)
+        else:
+            if (
+                stored_active_session_id != replaced_active_session.session_id
+                or active_session_ids != {replaced_active_session.session_id}
+            ):
+                raise KeyError(claim.claim_id)
+            stored_replaced_session = self._get(
+                'session',
+                replaced_active_session.session_id,
+                SessionRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if (
+                stored_replaced_session is None
+                or stored_replaced_session.claim_id != claim.claim_id
+                or stored_replaced_session.status is not SessionStatus.ACTIVE
+            ):
+                raise KeyError(claim.claim_id)
+            expected_replaced_session = stored_replaced_session.model_copy(
+                update={
+                    'status': SessionStatus.CLOSED,
+                    'closed_at': replaced_active_session.closed_at,
+                }
+            )
+            if replaced_active_session != expected_replaced_session:
+                raise KeyError(claim.claim_id)
+
         open_follow_up_document = self._collection.find_one(
             {
                 'record_type': 'follow_up',
@@ -3022,6 +3099,15 @@ class MongoDBRepository:
                 session=mongo_session,
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
+        if replaced_active_session is not None:
+            self._put(
+                'session',
+                replaced_active_session.session_id,
+                replaced_active_session,
+                customer_id=replaced_active_session.customer_id,
+                claim_id=replaced_active_session.claim_id,
+                session=mongo_session,
+            )
         self._put(
             'session',
             session.session_id,
