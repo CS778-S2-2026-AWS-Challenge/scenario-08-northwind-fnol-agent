@@ -1632,6 +1632,13 @@ four leave the consented Working Claim revision unchanged, do not report assignm
 the same operation identity for an unchanged permitted retry. Automatic retry counts remain
 unapproved; the claimant client offers only an explicit retry for retryable failures.
 
+A replay of an accepted request succeeds only when its operational task ended accepted and the owed
+assessment material resolves to that task. Where an interrupted attempt left that state incomplete in a
+way the replay can finish — the task still prepared, or the owed material or its link missing — the
+replay completes it before responding. Where the task is missing or recorded as failed, the replay
+returns `409 IDEMPOTENCY_CONFLICT` with `retryable: false`, saves nothing to the claim, and does not
+report assignment.
+
 After a failed attempt the claimant state does not return to `ready_to_request`.
 `external_service_action.status` becomes `retryable_failure` for a timeout or unavailable
 response and `terminal_failure` for an access-denied or malformed one, and `failure_code`
