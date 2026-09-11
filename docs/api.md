@@ -3084,6 +3084,55 @@ Provider acceptance is recorded before the Claim State compare-and-set. If a con
 mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
 the latest claim revision without creating a second provider task.
 
+### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/result`
+
+Receives the bounded result for one accepted assessor task through the configured assessor
+adapter. The route requires integration-service authentication, an `Idempotency-Key` header, and
+an `If-Match` header naming the current Working Claim revision; it accepts no request body. The task
+must belong to the named Claim, use `P3-ASSESSOR`, have an accepted provider acknowledgement, and
+match the assigned assessor record on the current Working Claim. An identical replay returns the
+stored result even though the first receipt advanced the Claim revision.
+
+Response `201`, or `200` when the task result already exists:
+
+```json
+{
+  "result_id": "res_01J4YERESULT",
+  "task_id": "tsk_01J4YETASK",
+  "claim_id": "clm_01J4Y7Q2AW",
+  "source": {
+    "system": "controlled_assessment_fixture",
+    "reference": "fixture-assessment/2d711642b726",
+    "retrieved_at": "2026-08-11T05:00:00Z"
+  },
+  "summary": "The controlled assessment fixture returned a simulation-only vehicle damage report for Northwind review.",
+  "verification": "review_required",
+  "verified_at": "2026-08-11T05:00:01Z",
+  "verified_against_revision": 5,
+  "evidence_ids": ["evd_01J4YETASK"],
+  "received_at": "2026-08-11T05:00:01Z"
+}
+```
+
+The controlled fixture produces a JSON report marked `simulation_only`. Runtime stores its bytes
+through the active Evidence storage profile, completes the task's existing `assessment_report`
+Evidence record, links the Evidence to the immutable task, and verifies the result against that
+link and the resulting Claim revision. The source timestamp records when the adapter says the
+report was produced. `received_at` records when Northwind bound the report to Evidence, and
+`verified_at` records the later verification operation.
+
+The provider acknowledgement on the task remains separate from the returned result. Receipt does
+not alter Claim facts, workflow state, coverage, repair authority, or the claimant-visible assessor
+status. A controlled result is `review_required` until a separate authorised staff path promotes
+any supported fact. Workbench reads can show the result summary, provenance, verification state,
+checked revision, and Evidence lifecycle without exposing storage keys or raw provider payloads.
+
+An unknown Claim or task returns `404`. A missing or stale Claim revision, a task that is not the
+matching accepted assignment, an Evidence-origin conflict, or a changed replay returns `409`.
+Malformed or incorrectly labelled adapter output returns non-retryable `502`. A temporary Evidence
+storage outage returns retryable `503`; an unchanged retry resumes without creating a second
+result, Evidence record, or Claim revision.
+
 ## Reason Codes
 
 Reason codes are stable machine-readable identifiers. The initial registry includes:

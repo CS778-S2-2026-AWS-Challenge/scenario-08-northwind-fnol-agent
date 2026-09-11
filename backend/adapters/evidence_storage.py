@@ -39,6 +39,10 @@ class EvidenceUploadSizeMismatch(EvidenceStorageError):
     pass
 
 
+class EvidenceContentConflict(EvidenceStorageError):
+    """The same evidence identity already names different immutable content."""
+
+
 class EvidenceStorageUnavailable(EvidenceStorageError):
     """The configured object store could not be reached.
 
@@ -173,6 +177,33 @@ class EvidenceStorage(Protocol):
     ) -> bytes | None:
         raise NotImplementedError
 
+    def store_generated_content(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        content: bytes,
+        media_type: str,
+    ) -> StoredUpload:
+        """Store immutable content produced by an authorised backend integration.
+
+        Args:
+            claim_id: Claim that owns the generated evidence.
+            evidence_id: Evidence record the content belongs to.
+            content: Complete bounded payload to persist.
+            media_type: Media type recorded with the object.
+
+        Returns:
+            Stable storage identity and checksum for the persisted content.
+
+        Raises:
+            EvidenceContentConflict: The evidence identity already holds other content.
+            EvidenceUploadTooLarge: The content exceeds the configured size boundary.
+            EvidenceStorageUnavailable: The configured object store cannot be reached.
+        """
+
+        raise NotImplementedError
+
 
 @dataclass(frozen=True, slots=True)
 class _PendingUpload:
@@ -274,6 +305,53 @@ class MockEvidenceStorage(EvidenceStorage):
             return None
         return self._content.get((claim_id, evidence_id))
 
+    def store_generated_content(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        content: bytes,
+        media_type: str,
+    ) -> StoredUpload:
+        """Persist deterministic integration output without a claimant upload session.
+
+        Args:
+            claim_id: Claim that owns the generated evidence.
+            evidence_id: Evidence record the content belongs to.
+            content: Complete bounded payload to persist.
+            media_type: Media type recorded with the object.
+
+        Returns:
+            Stable storage identity and checksum for the persisted content.
+
+        Raises:
+            EvidenceContentConflict: The evidence identity already holds other content.
+            EvidenceUploadTooLarge: The content exceeds the configured size boundary.
+            EvidenceStorageUnavailable: The fixture is configured to simulate an outage.
+        """
+
+        self._guard()
+        if not content or not media_type.strip():
+            raise EvidenceContentConflict(evidence_id)
+        if len(content) > self.max_size_bytes:
+            raise EvidenceUploadTooLarge(len(content))
+        identity = (claim_id, evidence_id)
+        checksum = f'sha256:{sha256(content).hexdigest()}'
+        storage_key = f'claims/{claim_id}/evidence/{evidence_id}/generated/{checksum[7:]}'
+        existing = self._completed.get(identity)
+        if existing is not None:
+            if existing.checksum != checksum or self._content.get(identity) != content:
+                raise EvidenceContentConflict(evidence_id)
+            return existing
+        stored = StoredUpload(
+            storage_key=storage_key,
+            checksum=checksum,
+            source_id='fixture_generated_evidence',
+        )
+        self._content[identity] = content
+        self._completed[identity] = stored
+        return stored
+
     def complete_upload(
         self,
         *,
@@ -343,6 +421,11 @@ class MinioEvidenceStorage(EvidenceStorage):
             raise EvidenceUploadNotFound(evidence_id)
         staging_key = cls._storage_key(claim_id, evidence_id)
         return f'{staging_key.removesuffix("/staging")}/finalised/{digest}'
+
+    @classmethod
+    def _generated_storage_key(cls, claim_id: str, evidence_id: str) -> str:
+        staging_key = cls._storage_key(claim_id, evidence_id)
+        return f'{staging_key.removesuffix("/staging")}/finalised/generated'
 
     @staticmethod
     def _metadata(
@@ -443,6 +526,82 @@ class MinioEvidenceStorage(EvidenceStorage):
         if not isinstance(content, bytes) or len(content) > self.max_size_bytes:
             return None
         return content
+
+    def store_generated_content(
+        self,
+        *,
+        claim_id: str,
+        evidence_id: str,
+        content: bytes,
+        media_type: str,
+    ) -> StoredUpload:
+        """Write integration-produced evidence directly to the final object location.
+
+        Args:
+            claim_id: Claim that owns the generated evidence.
+            evidence_id: Evidence record the content belongs to.
+            content: Complete bounded payload to persist.
+            media_type: Media type recorded with the object.
+
+        Returns:
+            Stable storage identity and checksum for the persisted content.
+
+        Raises:
+            EvidenceContentConflict: The evidence identity already holds other content.
+            EvidenceUploadTooLarge: The content exceeds the configured size boundary.
+            EvidenceStorageUnavailable: The configured object store cannot be reached.
+        """
+
+        if not content or not media_type.strip():
+            raise EvidenceContentConflict(evidence_id)
+        if len(content) > self.max_size_bytes:
+            raise EvidenceUploadTooLarge(len(content))
+        checksum = f'sha256:{sha256(content).hexdigest()}'
+        final_key = self._generated_storage_key(claim_id, evidence_id)
+        try:
+            self._verify_object(
+                storage_key=final_key,
+                evidence_id=evidence_id,
+                claim_id=claim_id,
+                checksum=checksum,
+                media_type=media_type,
+                size_bytes=len(content),
+            )
+        except EvidenceUploadNotFound:
+            if (
+                self.read_upload(
+                    claim_id=claim_id,
+                    evidence_id=evidence_id,
+                    storage_key=final_key,
+                )
+                is not None
+            ):
+                raise EvidenceContentConflict(evidence_id) from None
+            try:
+                self._client.put_object(
+                    Bucket=self._config.bucket,
+                    Key=final_key,
+                    Body=content,
+                    ContentType=media_type,
+                    Metadata=self._metadata(claim_id, evidence_id, media_type, len(content)),
+                )
+                self._verify_object(
+                    storage_key=final_key,
+                    evidence_id=evidence_id,
+                    claim_id=claim_id,
+                    checksum=checksum,
+                    media_type=media_type,
+                    size_bytes=len(content),
+                )
+            except ClientError as error:
+                raise self._unavailable('store generated evidence', error) from error
+            except BotoCoreError as error:
+                raise self._unavailable('store generated evidence', error) from error
+        return StoredUpload(
+            storage_key=final_key,
+            checksum=checksum,
+            source_id='s3_compatible_generated_evidence',
+        )
 
     def complete_upload(
         self,
