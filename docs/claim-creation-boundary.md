@@ -139,6 +139,17 @@ from Claim State. A changed retry is rejected even before any success, and a pro
 result can be reconciled after a concurrent Claim revision advance without invoking a second
 external task.
 
+An accepted and assigned `P3-ASSESSOR` task can receive one later report through the installed
+assessor adapter. The controlled adapter returns deterministic JSON marked `simulation_only`;
+Runtime validates the task identity, provider acknowledgement, source class, source timestamp,
+current Claim revision, and receipt idempotency before storing the bytes through the active
+Evidence storage profile. The resulting `ExternalTaskResult` remains separate from the routing
+acknowledgement, links to the task's immutable `assessment_report` Evidence, and records the Claim
+revision used by the verification operation. Its initial checked state is `review_required`.
+Receipt updates only the Claim's Evidence lifecycle projection; it cannot change material facts,
+workflow, coverage, repair authority, or claimant-visible routing state. This path does not contact
+or claim the existence of a production assessor provider.
+
 The claimant experience uses two versioned public mutations. The first records a fixed,
 task-specific consent scope; the second derives the current decision, consent, external claim,
 requested action, and confirmed region from the shared Working Claim before invoking this

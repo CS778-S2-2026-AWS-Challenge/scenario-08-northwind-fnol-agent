@@ -5568,6 +5568,90 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "ExternalTaskResult": {
+        "additionalProperties": false,
+        "description": "What a third-party returned for one task, and how far it has been checked.\n\nA result is separate from the material it may have produced. A task can\nreturn an answer and no material at all, such as a provider reporting no\nrecord found, and it can return material whose consistency with the claim is\nstill unknown. Collapsing the two would make an absent answer and an\nunverified one indistinguishable.\n\nVerification starts at `UNVERIFIED` and a checked result must say when it was\nchecked, so an unchecked result cannot be presented as a checked one.",
+        "properties": {
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "result_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Result Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/RetrievalSource"
+          },
+          "summary": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/ExternalTaskResultVerification",
+            "default": "unverified"
+          },
+          "verified_against_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Against Revision"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "result_id",
+          "task_id",
+          "claim_id",
+          "source",
+          "summary",
+          "received_at"
+        ],
+        "title": "ExternalTaskResult",
+        "type": "object"
+      },
       "ExternalTaskResultVerification": {
         "description": "How far a provider result has been checked against the claim.\n\nThere is deliberately no value meaning \"this is now a confirmed claim fact\".\nA provider answer is evidence about the claim, never the claim's own record\nof what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts\nproposed until the claim's own confirmation path accepts them. Promotion to a\nconfirmed fact is a claim-level decision made elsewhere, so this enum cannot\nexpress it and no caller can shortcut to it.",
         "enum": [
@@ -24622,6 +24706,106 @@
           }
         },
         "summary": "Read External Tasks Integration",
+        "tags": [
+          "internal-integrations"
+        ]
+      }
+    },
+    "/internal/v1/claims/{claim_id}/external-tasks/{task_id}/result": {
+      "post": {
+        "description": "Receive and verify the controlled result for one accepted assessor task.\n\nArgs:\n    claim_id: Working Claim that owns the external task.\n    task_id: Accepted task whose provider-neutral result is being received.\n    request: Authenticated HTTP request and configured Runtime dependencies.\n    response: HTTP response whose status distinguishes creation from replay.\n    idempotency_key: Required identity for replaying this result receipt safely.\n    if_match: Expected Working Claim revision before a first receipt.\n    principal: Verified integration-service principal that scopes idempotency.\n\nReturns:\n    Persisted result after authoritative verification against its Evidence and Claim.\n\nRaises:\n    ApiError: The task cannot receive a result, the returned provenance conflicts,\n        Evidence storage is unavailable, or persistence cannot complete safely.",
+        "operationId": "receive_assessor_result_integration_internal_v1_claims__claim_id__external_tasks__task_id__result_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalTaskResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Assessor Result Integration",
         "tags": [
           "internal-integrations"
         ]

@@ -4,8 +4,15 @@ from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
     AssessorAdapterFailure,
     AssessorFixtureFailure,
+    AssessorResultRequest,
     AssessorServiceAdapter,
     ClaimsServiceAdapter,
+)
+from backend.adapters.evidence_storage import (
+    EvidenceContentConflict,
+    EvidenceStorage,
+    EvidenceStorageUnavailable,
+    EvidenceUploadTooLarge,
 )
 from backend.core.errors import ApiError, ErrorDetail
 from backend.domain.audit import (
@@ -19,6 +26,7 @@ from backend.domain.audit import (
     AuditSubjectType,
     AuditVisibility,
 )
+from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.external_services import (
     ASSESSOR_CONSENT_FIELDS,
     ASSESSOR_SERVICE_IDENTITY,
@@ -29,12 +37,15 @@ from backend.domain.external_services import (
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
     ExternalTaskRequest,
+    ExternalTaskResult,
+    ExternalTaskResultVerification,
     UntraceableExternalEvidenceError,
     assert_disclosure_within_consent,
     assert_request_matches_task,
     assert_task_transition_is_permitted,
     classify_external_task_failure,
     external_task_for_evidence,
+    verify_external_task_result,
 )
 from backend.domain.models import (
     ActorType,
@@ -58,11 +69,13 @@ from backend.domain.models import (
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
     FormStatus,
+    IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
     WorkflowState,
     WorkingClaim,
 )
+from backend.domain.retrieval import RetrievalSource
 from backend.repositories.protocols import (
     IdempotencyConflict,
     PersistenceRepository,
@@ -73,7 +86,7 @@ from backend.services.external_service_entry import (
     ExternalServiceEntryDecision,
     assert_task_matches_entry,
 )
-from backend.services.support import now_utc, request_fingerprint
+from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
 # The Evidence kind the awaited assessment is recorded under. `tag_projection`
 # already recognises it, so material a task owes raises the same staff signals as
@@ -130,6 +143,10 @@ def _external_task_id(operation_id: str) -> str:
 
 def _external_request_id(operation_id: str) -> str:
     return f'erq_{request_fingerprint({"operation_id": operation_id})[:24]}'
+
+
+def _external_result_id(task_id: str) -> str:
+    return f'res_{request_fingerprint({"task_id": task_id})[:24]}'
 
 
 def _external_service_unavailable(decision: ExternalServiceEntryDecision) -> ApiError:
@@ -379,6 +396,411 @@ def _record_awaited_material(
         )
     except UntraceableExternalEvidenceError as untraceable:
         raise _idempotency_error() from untraceable
+
+
+def _find_external_task(
+    repository: PersistenceRepository,
+    *,
+    claim_id: str,
+    task_id: str,
+) -> ExternalTaskRecord | None:
+    return next(
+        (
+            task
+            for task in repository.list_external_tasks_internal(claim_id)
+            if task.task_id == task_id
+        ),
+        None,
+    )
+
+
+def _bind_returned_evidence_to_claim(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    evidence: EvidenceRecord,
+) -> WorkingClaim:
+    records = repository.list_evidence(claim.claim_id, claim.customer_id)
+    updated_at = max(now_utc(), evidence.updated_at)
+    updated_claim = claim.model_copy(
+        update={
+            'revision': claim.revision + 1,
+            'updated_at': updated_at,
+            'evidence_summary': evidence_summary_for(records),
+            'claim_state': claim.claim_state.model_copy(
+                update={'evidence': evidence_state_for(records)}
+            ),
+        }
+    )
+    _save_claim(repository, updated_claim, claim.revision)
+    return updated_claim
+
+
+def _checked_external_result(
+    repository: PersistenceRepository,
+    *,
+    result: ExternalTaskResult,
+    task: ExternalTaskRecord,
+    claim: WorkingClaim,
+    receipt_fingerprint: str,
+) -> ExternalTaskResult:
+    evidence = [
+        record
+        for evidence_id in result.evidence_ids
+        if (
+            record := repository.get_evidence(
+                claim.claim_id,
+                evidence_id,
+                claim.customer_id,
+            )
+        )
+        is not None
+    ]
+    if len(evidence) != len(result.evidence_ids):
+        raise _idempotency_error()
+    if any(
+        record.provenance.get('result_receipt_fingerprint') != receipt_fingerprint
+        for record in evidence
+    ):
+        raise _idempotency_error()
+    if result.verification is not ExternalTaskResultVerification.UNVERIFIED:
+        return result
+    links = repository.list_external_task_evidence_links_internal(claim.claim_id)
+    checked = verify_external_task_result(
+        result,
+        task=task,
+        links=links,
+        claim=claim,
+        evidence=evidence,
+        checked_at=now_utc(),
+    )
+    try:
+        repository.save_external_task_result(checked, claim.customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    return checked
+
+
+def receive_assessor_result(
+    repository: PersistenceRepository,
+    storage: EvidenceStorage,
+    adapter: AssessorServiceAdapter,
+    claim_id: str,
+    task_id: str,
+    idempotency_key: str,
+    expected_revision: int,
+    actor_id: str,
+) -> tuple[ExternalTaskResult, bool]:
+    """Receive, persist, and verify one result from the controlled assessor path.
+
+    The result is obtained through the installed adapter rather than invented from the
+    routing acknowledgement. Its report is persisted as the material the accepted task
+    already owes, then checked through the authoritative result-verification function.
+    The only Claim mutation binds the Evidence lifecycle to a new revision; report
+    content never changes a Claim fact, workflow state, or coverage decision.
+
+    Args:
+        repository: Authoritative Claim, task, Evidence, and result persistence boundary.
+        storage: Configured object store for the returned report bytes.
+        adapter: Assessor adapter that supplies the provider-neutral returned report.
+        claim_id: Claim whose accepted external task is returning a result.
+        task_id: Immutable external-task identity for the receive operation.
+        idempotency_key: Required client identity for unchanged receipt retries.
+        expected_revision: Working Claim revision the first receipt expects to update.
+        actor_id: Authenticated integration-service identity that scopes the retry key.
+
+    Returns:
+        The checked result and whether an earlier receive operation was replayed.
+
+    Raises:
+        ApiError: The Claim/task state is invalid, provenance conflicts, storage is
+            unavailable, or persistence cannot preserve idempotency and traceability.
+    """
+
+    key = require_idempotency_key(idempotency_key)
+    receipt_fingerprint = request_fingerprint(
+        {
+            'claim_id': claim_id,
+            'task_id': task_id,
+            'idempotency_key': key,
+            'expected_revision': expected_revision,
+            'actor_id': actor_id,
+        }
+    )
+    claim = repository.get_claim_internal(claim_id)
+    if claim is None:
+        raise _claim_not_found()
+    task = _find_external_task(repository, claim_id=claim_id, task_id=task_id)
+    if task is None:
+        raise ApiError(
+            status_code=404,
+            code='RESOURCE_NOT_FOUND',
+            message='The external task was not found.',
+        )
+    if (
+        task.status is not ExternalTaskOperationStatus.ACCEPTED
+        or task.service_identity != ASSESSOR_SERVICE_IDENTITY
+        or task.provider_reference is None
+    ):
+        raise _authorisation_error(
+            'An assessor result requires an accepted task with provider acknowledgement.'
+        )
+    if (
+        claim.assessor_routing is None
+        or claim.assessor_routing.routing_status is not AssessorRoutingStatus.ASSIGNED
+        or claim.assessor_routing.assessor_reference != task.provider_reference
+    ):
+        raise _authorisation_error(
+            'An assessor result requires the matching assigned assessor record.'
+        )
+
+    existing = next(
+        (
+            result
+            for result in repository.list_external_task_results_internal(claim_id)
+            if result.task_id == task_id
+        ),
+        None,
+    )
+    if existing is not None:
+        checked = _checked_external_result(
+            repository,
+            result=existing,
+            task=task,
+            claim=claim,
+            receipt_fingerprint=receipt_fingerprint,
+        )
+        return checked, True
+
+    evidence_id = f'evd_{task.task_id.removeprefix("tsk_")}'
+    partial_evidence = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    has_partial_receipt = (
+        partial_evidence is not None
+        and partial_evidence.status is EvidenceStatus.RECEIVED
+        and partial_evidence.file_status is EvidenceFileStatus.READY
+    )
+    if (
+        has_partial_receipt
+        and partial_evidence is not None
+        and partial_evidence.provenance.get('result_receipt_fingerprint') != receipt_fingerprint
+    ):
+        raise _idempotency_error()
+    resumes_partial_receipt = has_partial_receipt
+    if claim.revision != expected_revision and not resumes_partial_receipt:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed before the assessment result was received.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+
+    fingerprint = request_fingerprint(
+        {
+            'task_id': task.task_id,
+            'claim_id': task.claim_id,
+            'provider_reference': task.provider_reference,
+            'accepted_at': task.updated_at.isoformat(),
+            'result_receipt_fingerprint': receipt_fingerprint,
+        }
+    )
+    try:
+        outcome = adapter.receive_result(
+            AssessorResultRequest(
+                task_id=task.task_id,
+                claim_id=task.claim_id,
+                provider_reference=task.provider_reference,
+                accepted_at=task.updated_at,
+            ),
+            fingerprint,
+        )
+    except AdapterIdempotencyConflict as conflict:
+        raise _idempotency_error() from conflict
+    except (AssessorAdapterFailure, ValueError) as failure:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The assessment service returned an unusable result.',
+            retryable=False,
+        ) from failure
+    report = outcome.report
+    bounded_text = (
+        (report.summary, 500),
+        (report.source_system, 100),
+        (report.source_reference, 200),
+        (report.original_filename, 255),
+        (report.media_type, 200),
+    )
+    if (
+        any(not value.strip() or len(value) > maximum for value, maximum in bounded_text)
+        or not isinstance(report.content, bytes)
+        or not report.content
+    ):
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The assessment service returned an unusable result.',
+            retryable=False,
+        )
+    try:
+        source_time_is_valid = (
+            report.source_timestamp.tzinfo is not None
+            and report.source_timestamp.utcoffset() is not None
+            and report.source_timestamp >= task.updated_at
+        )
+    except (AttributeError, TypeError):
+        source_time_is_valid = False
+    if (
+        adapter.integration_source is not task.integration_source
+        or task.integration_source is not IntegrationSource.FIXTURE
+        or not report.simulation_only
+        or not source_time_is_valid
+    ):
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The assessment result provenance does not match the accepted task.',
+            retryable=False,
+        )
+    source = RetrievalSource(
+        system=report.source_system,
+        reference=report.source_reference,
+        retrieved_at=report.source_timestamp,
+    )
+
+    _record_awaited_material(repository, task=task, claim=claim)
+    awaited = repository.get_evidence(claim_id, evidence_id, claim.customer_id)
+    if awaited is None:
+        raise _idempotency_error()
+    try:
+        linked_task_id = external_task_for_evidence(
+            awaited,
+            repository.list_external_task_evidence_links_internal(claim_id),
+        )
+    except UntraceableExternalEvidenceError as conflict:
+        raise _idempotency_error() from conflict
+    if linked_task_id != task.task_id:
+        raise _idempotency_error()
+    try:
+        stored = storage.store_generated_content(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            content=report.content,
+            media_type=report.media_type,
+        )
+    except EvidenceStorageUnavailable as error:
+        raise ApiError(
+            status_code=503,
+            code='DEPENDENCY_UNAVAILABLE',
+            message='Evidence storage is temporarily unavailable. The result was not recorded.',
+            retryable=True,
+        ) from error
+    except EvidenceUploadTooLarge as error:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The assessment service returned a report larger than the storage limit.',
+            retryable=False,
+        ) from error
+    except EvidenceContentConflict as conflict:
+        raise _idempotency_error() from conflict
+
+    ready = awaited.file_status is EvidenceFileStatus.READY
+    if ready:
+        expected_provenance = {
+            'storage_key': stored.storage_key,
+            'upload_checksum': stored.checksum,
+            'source_system': report.source_system,
+            'source_reference': report.source_reference,
+            'source_timestamp': report.source_timestamp.isoformat(),
+            'simulation_only': report.simulation_only,
+            'result_receipt_fingerprint': receipt_fingerprint,
+        }
+        if (
+            awaited.status is not EvidenceStatus.RECEIVED
+            or awaited.original_filename != report.original_filename
+            or awaited.media_type != report.media_type
+            or awaited.size_bytes != len(report.content)
+            or any(
+                awaited.provenance.get(key) != value for key, value in expected_provenance.items()
+            )
+        ):
+            raise _idempotency_error()
+        arrived = awaited
+    else:
+        if (
+            awaited.status is not EvidenceStatus.PENDING
+            or awaited.file_status is not EvidenceFileStatus.NOT_AVAILABLE
+            or awaited.source is not EvidenceSource.EXTERNAL_SYSTEM
+        ):
+            raise _authorisation_error(
+                'The assessment result cannot replace the current Evidence state.'
+            )
+        received_at = max(now_utc(), report.source_timestamp, awaited.updated_at)
+        arrived = awaited.model_copy(
+            update={
+                'status': EvidenceStatus.RECEIVED,
+                'file_status': EvidenceFileStatus.READY,
+                'original_filename': report.original_filename,
+                'media_type': report.media_type,
+                'size_bytes': len(report.content),
+                'provenance': {
+                    **awaited.provenance,
+                    'storage_key': stored.storage_key,
+                    'upload_checksum': stored.checksum,
+                    'source_system': report.source_system,
+                    'source_reference': report.source_reference,
+                    'source_timestamp': report.source_timestamp.isoformat(),
+                    'simulation_only': report.simulation_only,
+                    'result_receipt_fingerprint': receipt_fingerprint,
+                },
+                'wait_type': None,
+                'responsible_party': None,
+                'expected_by': None,
+                'expected_timing': None,
+                'context_summary': (
+                    'A controlled simulation-only assessment report was returned and requires '
+                    'Northwind review.'
+                ),
+                'updated_at': received_at,
+            }
+        )
+        try:
+            repository.save_evidence(arrived, claim.customer_id)
+        except KeyError as conflict:
+            raise _idempotency_error() from conflict
+
+    evidence_records = repository.list_evidence(claim.claim_id, claim.customer_id)
+    if claim.evidence_summary != evidence_summary_for(
+        evidence_records
+    ) or claim.claim_state.evidence != evidence_state_for(evidence_records):
+        claim = _bind_returned_evidence_to_claim(
+            repository,
+            claim=claim,
+            evidence=arrived,
+        )
+    received_at = arrived.updated_at
+    unverified = ExternalTaskResult(
+        result_id=_external_result_id(task.task_id),
+        task_id=task.task_id,
+        claim_id=claim.claim_id,
+        source=source,
+        summary=report.summary,
+        evidence_ids=[arrived.evidence_id],
+        received_at=received_at,
+    )
+    try:
+        repository.save_external_task_result(unverified, claim.customer_id)
+    except (IdempotencyConflict, KeyError) as conflict:
+        raise _idempotency_error() from conflict
+    checked = _checked_external_result(
+        repository,
+        result=unverified,
+        task=task,
+        claim=claim,
+        receipt_fingerprint=receipt_fingerprint,
+    )
+    return checked, outcome.replayed
 
 
 def _record_external_failure(
