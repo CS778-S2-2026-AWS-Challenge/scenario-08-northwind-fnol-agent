@@ -547,16 +547,17 @@ def test_a_lost_record_under_a_surviving_link_fails_rather_than_reports_success(
     assert raised.value.status_code == 409
 
 
-def test_a_task_that_came_to_a_failure_is_owed_nothing(
+def test_a_failed_task_under_an_accepted_operation_does_not_report_success(
     client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reconciliation acts on two statuses, and states them rather than assuming them.
+    """A failed task is owed nothing, and the replay does not report it as routed.
 
     A failed attempt records the failure on the task and on the operation together, so
-    an accepted operation should never hold a failed task. Recovery no longer leans on
-    that pairing. The previous guard skipped every status but `prepared`, and widening
-    it to reconcile an accepted task must not also widen it to owe an assessment against
-    a task that failed, because nobody is waiting for that assessment.
+    an accepted operation should never hold a failed task. Recovery does not lean on that
+    pairing. An earlier revision skipped reconciliation for such a task and still saved
+    the routing, so the claim reported an accepted assessor request over a task that had
+    failed. Owing an assessment against it would be wrong too, because nobody is waiting
+    for that assessment; the replay is refused and saves nothing.
 
     The interrupted first request is what leaves the operation accepted with the claim's
     routing unsaved, which is the only way into the recovery branch.
@@ -607,6 +608,69 @@ def test_a_task_that_came_to_a_failure_is_owed_nothing(
         json={},
     )
 
-    assert retried.status_code in {200, 201}, retried.text
+    assert retried.status_code == 409, retried.text
     assert repository.get_evidence(claim_id, evidence_id, claim.customer_id) is None
     assert repository.list_external_task_evidence_links_internal(claim_id) == []
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.assessor_routing is None
+
+
+def test_an_accepted_operation_whose_task_was_lost_does_not_report_success(
+    client: TestClient, repository: FixtureRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replay over a missing task is refused, not reported as a routed request.
+
+    The task is written before the provider is called, so an accepted operation should
+    always have one. If it has been lost, the recovery branch has nothing to transition
+    and nothing to reconcile material against. An earlier revision skipped both and still
+    saved the routing, so the claim reported an accepted assessor request with no task
+    and no owed material behind it, which is exactly the state the traceability invariant
+    rules out. The task is not rebuilt: its integration source was decided at send time.
+    """
+
+    claim_id = _consented_claim(client)
+    original = repository.save_external_task_evidence_link
+    calls = {'n': 0}
+
+    def fail_once(link: ExternalTaskEvidenceLink, customer_id: str) -> None:
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise KeyError('link store unavailable')
+        original(link, customer_id)
+
+    monkeypatch.setattr(repository, 'save_external_task_evidence_link', fail_once)
+
+    interrupted = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+    assert interrupted.status_code == 409
+
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    # An accepted operation with no task is not reachable through the API. It is
+    # constructed here because this refusal is part of what keeps it unreachable.
+    repository._external_tasks.pop(task.task_id)
+
+    retried = client.post(
+        f'/api/v1/claims/{claim_id}/assessor-routing',
+        headers={
+            **CLAIMANT,
+            'Idempotency-Key': 'aw-r',
+            'If-Match': _revision(client, claim_id),
+        },
+        json={},
+    )
+
+    assert retried.status_code == 409, retried.text
+    assert retried.json()['error']['retryable'] is False
+    assert repository.list_external_tasks_internal(claim_id) == []
+    assert repository.list_external_task_evidence_links_internal(claim_id) == []
+    stored = repository.get_claim_internal(claim_id)
+    assert stored is not None
+    assert stored.assessor_routing is None

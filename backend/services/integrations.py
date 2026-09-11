@@ -79,6 +79,9 @@ from backend.services.support import now_utc, request_fingerprint
 # already recognises it, so material a task owes raises the same staff signals as
 # material that arrived.
 _AWAITED_ASSESSMENT_KIND = 'assessment_report'
+_REPLAYABLE_TASK_STATUSES = frozenset(
+    {ExternalTaskOperationStatus.PREPARED, ExternalTaskOperationStatus.ACCEPTED}
+)
 
 _ASSESSOR_REQUEST_PURPOSE = (
     'Route the vehicle damage assessment request using the confirmed incident region. '
@@ -652,31 +655,36 @@ def route_assessor(
             ),
             None,
         )
-        if task is not None:
-            # An interrupted attempt can leave the task advanced but its owed material
-            # half-written, so acceptance and reconciliation are decided separately. Only
-            # a still-prepared task needs the transition; an accepted one needs its owed
-            # material checked, because returning success over a missing link would
-            # report a repaired request while the provenance invariant stayed broken.
-            #
-            # Neither runs for a task that came to a failure. A failed attempt records
-            # the failure on the task and the operation together, so an accepted
-            # operation should never hold one; recording owed material against a failure
-            # would owe an assessment nobody is waiting for, so this states the two
-            # statuses it acts on rather than trusting that pairing to hold.
-            if task.status is ExternalTaskOperationStatus.PREPARED:
-                provider_reference = (
-                    operation.result.assessor_reference or operation.result.queue_reference
-                )
-                assert provider_reference is not None
-                task = _record_external_acceptance(
-                    repository,
-                    task=task,
-                    customer_id=claim.customer_id,
-                    provider_reference=provider_reference,
-                )
-            if task.status is ExternalTaskOperationStatus.ACCEPTED:
-                _record_awaited_material(repository, task=task, claim=claim)
+        # A replay reports success only over a task that ended accepted with its owed
+        # material resolvable. An interrupted attempt can leave the task advanced but
+        # its material half-written, so acceptance and reconciliation are decided
+        # separately: a still-prepared task takes the transition, and every accepted
+        # task has its owed material reconciled and read back.
+        #
+        # Anything else is refused rather than skipped. A task that is missing, or that
+        # came to a failure, should not sit under an accepted operation: the task is
+        # written before the provider is called, and a failed attempt records the
+        # failure on the task and the operation together. Skipping reconciliation there
+        # would still save the routing and report an accepted request whose task, and
+        # whose owed material, do not exist. The task is not rebuilt either: its
+        # integration source comes from the entry decision at send time, and rebuilding
+        # it now would record today's source as the one the request went through.
+        # Nothing a retry can do recreates that record, so the refusal is not offered
+        # as retryable.
+        if task is None or task.status not in _REPLAYABLE_TASK_STATUSES:
+            raise _idempotency_error()
+        if task.status is ExternalTaskOperationStatus.PREPARED:
+            provider_reference = (
+                operation.result.assessor_reference or operation.result.queue_reference
+            )
+            assert provider_reference is not None
+            task = _record_external_acceptance(
+                repository,
+                task=task,
+                customer_id=claim.customer_id,
+                provider_reference=provider_reference,
+            )
+        _record_awaited_material(repository, task=task, claim=claim)
         return _save_assessor_result(
             repository,
             payload.claim_id,
