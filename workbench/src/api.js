@@ -203,6 +203,17 @@ export const workbenchApi = {
   requeue(token, claimId, revision, payload) {
     return ownershipRequest(token, claimId, 'requeue', revision, payload)
   },
+  reopenClaim(token, claimId, revision, payload, idempotencyKey = crypto.randomUUID()) {
+    return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/reopen`, {
+      method: 'POST',
+      token,
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        'If-Match': String(revision),
+      },
+      body: JSON.stringify(payload),
+    })
+  },
   resolveHandoff(token, claimId, handoffId, revision, payload) {
     return request(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/handoffs/${encodeURIComponent(handoffId)}/resolve`,

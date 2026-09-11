@@ -30,6 +30,7 @@ export default function WorkbenchPage() {
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueError, setQueueError] = useState('')
   const [queueNotice, setQueueNotice] = useState('')
+  const [movementNotice, setMovementNotice] = useState(null)
   const queueRequestId = useRef(0)
   const [conversations, setConversations] = useState([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
@@ -443,6 +444,66 @@ export default function WorkbenchPage() {
     await Promise.all([loadDetail(detail.claim_id), loadClaims()])
   }
 
+  async function reopenClaim(action, payload, idempotencyKey) {
+    const current = detail
+    if (
+      action.action_code !== 'claim.reopen'
+      || action.target_type !== 'claim'
+      || action.target_ref !== current.claim_id
+      || action.based_on_revision !== current.revision
+    ) {
+      throw new Error('The projected reopen action no longer matches this Claim revision. Refresh the Claim and review the current action.')
+    }
+
+    let accepted = false
+    try {
+      await workbenchApi.reopenClaim(
+        token,
+        current.claim_id,
+        action.based_on_revision,
+        payload,
+        idempotencyKey,
+      )
+      accepted = true
+      const latest = await workbenchApi.claim(token, current.claim_id)
+      applyReopenProjection(latest, true)
+    } catch (error) {
+      try {
+        const latest = await workbenchApi.claim(token, current.claim_id)
+        applyReopenProjection(latest, accepted, error)
+        if (accepted) return
+        error.projectionReloaded = true
+      } catch {
+        // The dialog keeps the original actionable mutation error when resynchronisation fails.
+      }
+      throw error
+    }
+  }
+
+  function applyReopenProjection(latest, accepted, error = null) {
+    setDetail(latest)
+    openTab(latest)
+    const queueKey = latest.work_summary?.queue_key
+    const queueOption = filterMetadata?.views.find((option) => option.value === queueKey)
+    if (queueOption) {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        if (queueKey === 'all') next.delete('view')
+        else next.set('view', queueKey)
+        next.delete('cursor')
+        return next
+      }, { replace: true })
+    }
+    setMovementNotice({
+      claimId: latest.claim_id,
+      revision: latest.revision,
+      kind: accepted ? 'status' : 'error',
+      message: accepted
+        ? `Claim ${latest.display_reference || latest.claim_id} reopened at revision ${latest.revision} and moved to ${queueOption?.label || queueKey || 'its server-projected queue'}.`
+        : reopenFailureNotice(error, latest, queueOption?.label || queueKey),
+    })
+  }
+
   return (
     <div className="workbench-app">
       <NavigationRail profile={profile} onLogout={async () => { await logout(); navigate('/workbench/login', { replace: true }) }} onAgent={() => setAgentOpen(true)} />
@@ -456,6 +517,12 @@ export default function WorkbenchPage() {
           </div>
         </header>
         {queueNotice && <div className="global-error" role="status">{queueNotice}</div>}
+        {movementNotice && (
+          <div className={`movement-notice${movementNotice.kind === 'error' ? ' movement-notice--error' : ''}`} role={movementNotice.kind === 'error' ? 'alert' : 'status'}>
+            <span>{movementNotice.message}</span>
+            <button type="button" className="icon-button icon-button--small" aria-label="Dismiss Claim movement notice" onClick={() => setMovementNotice(null)}>×</button>
+          </div>
+        )}
         {revisionNotice && revisionNotice.claimId === claimId && (
           <div className="revision-notice" role="status">
             <span>This Claim changed in another session (revision {revisionNotice.revision}).</span>
@@ -475,7 +542,7 @@ export default function WorkbenchPage() {
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
               </div>
             </section>
           </div>
@@ -493,6 +560,15 @@ export default function WorkbenchPage() {
       />
     </div>
   )
+}
+
+function reopenFailureNotice(error, latest, queueLabel) {
+  const identity = latest.display_reference || latest.claim_id
+  const location = `${queueLabel || 'the current queue'} at revision ${latest.revision}`
+  if (error?.code === 'REVISION_CONFLICT') return `Claim ${identity} was not reopened because the loaded revision was stale. The latest server projection is in ${location}; review it and try again.`
+  if (error?.code === 'ACCESS_DENIED') return `Claim ${identity} was not reopened because this staff identity is not authorised for the action. The latest server projection is in ${location}; ask the primary owner to review it.`
+  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `Claim ${identity} was not reopened because this request no longer matches the original attempt. The latest server projection is in ${location}; review it before retrying.`
+  return `The reopen outcome for Claim ${identity} was unclear. The latest server projection is in ${location}; review it before trying again.`
 }
 
 function QueueViewUnavailable({ view, onOpenAll }) {

@@ -107,6 +107,9 @@ p { line-height: 1.55; }
 .revision-notice { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-bottom: var(--border-component); background: var(--color-warning-soft); color: var(--color-warning); font-size: var(--workbench-font-meta); }
 .revision-notice span { flex: 1; }
 .revision-notice button:not(.icon-button) { min-height: var(--workbench-row-compact); padding: 0 var(--space-3); border: var(--border-component); border-color: var(--color-warning); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-warning); font-weight: var(--font-weight-semibold); }
+.movement-notice { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-bottom: var(--border-component); background: var(--color-accent-soft); color: var(--color-accent-strong); font-size: var(--workbench-font-meta); }
+.movement-notice span { flex: 1; }
+.movement-notice--error { background: var(--color-danger-soft); color: var(--color-danger); }
 
 .workbench-layout { display: grid; min-width: 0; min-height: 0; flex: 1; grid-template-columns: var(--workbench-queue-width) minmax(0, 1fr); overflow: hidden; }
 .workbench-layout.queue-hidden { grid-template-columns: minmax(0, 1fr); }
@@ -198,6 +201,10 @@ p { line-height: 1.55; }
 .summary-callout p { margin-bottom: 0; }
 .summary-callout__label { color: var(--color-info); font-size: var(--workbench-font-meta); font-weight: var(--font-weight-bold); text-transform: uppercase; }
 .summary-callout time { color: var(--color-text-muted); font-size: var(--workbench-font-meta); }
+.terminal-summary { margin-top: var(--space-4); padding: var(--space-3) var(--space-4); border-left: var(--border-action); background: var(--color-accent-soft); color: var(--color-text-secondary); }
+.terminal-summary p { margin-bottom: 0; }
+.terminal-summary__label { color: var(--color-accent-strong); font-size: var(--workbench-font-meta); font-weight: var(--font-weight-bold); text-transform: uppercase; }
+.terminal-summary small { color: var(--color-text-muted); font-size: var(--workbench-font-meta); overflow-wrap: anywhere; }
 .primary-action { display: grid; align-items: center; gap: 14px; padding: 18px 20px; border: 1px solid #aea89d; border-radius: var(--radius-lg); background: #ece8e0; grid-template-columns: 42px minmax(0, 1fr) auto; }
 .primary-action__icon { display: inline-grid; width: 42px; height: 42px; place-items: center; border-radius: var(--radius-md); background: var(--color-surface); }
 .primary-action__copy h2, .primary-action__copy p { margin-bottom: 2px; }
@@ -205,6 +212,13 @@ p { line-height: 1.55; }
 .primary-action__confirm, .primary-action__form { grid-column: 1 / -1; }
 .primary-action__confirm p { max-width: 65ch; color: var(--color-text-secondary); }
 .primary-action__form .ownership-action { background: var(--color-surface); }
+.confirmation-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; padding: var(--space-4); place-items: center; background: var(--color-overlay); }
+.confirmation-dialog { width: min(100%, var(--workbench-agent-width)); max-height: calc(100vh - var(--space-8)); padding: var(--space-5); overflow: auto; border: var(--border-component); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-modal); }
+.confirmation-dialog header > p:last-child { max-width: var(--measure-reading); margin-bottom: var(--space-4); color: var(--color-text-secondary); }
+.confirmation-dialog form, .confirmation-dialog label { display: grid; gap: var(--space-2); }
+.confirmation-dialog label { color: var(--color-text-secondary); font-size: var(--workbench-font-meta); font-weight: var(--font-weight-semibold); }
+.confirmation-dialog textarea { min-height: calc(var(--space-12) + var(--space-6)); padding: var(--space-2) var(--space-3); }
+.confirmation-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .action-details { margin-top: var(--space-3); color: var(--color-text-secondary); }
 .action-details > summary, .purpose-disclosure > summary, .disclosure-button { min-height: var(--workbench-row-compact); padding: var(--space-2) 0; cursor: pointer; font-weight: var(--font-weight-semibold); }
 .action-details dl, .missing-item-details { display: grid; margin: var(--space-2) 0 0; grid-template-columns: var(--workbench-record-label-width) minmax(0, 1fr); gap: var(--space-2) var(--space-4); }

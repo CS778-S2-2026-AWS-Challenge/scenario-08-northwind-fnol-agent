@@ -19,6 +19,9 @@ const filterMetadata = {
     { value: 'waiting_user', label: 'Waiting for claimant', group: 'active' },
     { value: 'waiting_material', label: 'Waiting for material', group: 'active' },
     { value: 'waiting_third_party', label: 'Waiting for third party', group: 'active' },
+    { value: 'completed', label: 'Completed', group: 'terminal' },
+    { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
+    { value: 'closed', label: 'Closed', group: 'terminal' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
     { value: 'incomplete_claims', label: 'Incomplete claims', group: 'operational' },
   ],
@@ -114,6 +117,7 @@ describe('QueuePanel', () => {
     renderQueue()
 
     expect(screen.getByRole('group', { name: 'Active' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Terminal' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Operational' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Processing (1)' })).toHaveValue('processing')
     expect(screen.getByRole('option', { name: 'Waiting for third party (0)' })).toHaveValue(
@@ -189,6 +193,38 @@ describe('QueuePanel', () => {
     expect(screen.getByText('No claims match the current filters.')).toBeInTheDocument()
     expect(screen.getByLabelText('Current work')).toBeInTheDocument()
     expect(screen.getByLabelText('Search claims')).toBeInTheDocument()
+  })
+
+  it('keeps terminal queues reachable when no active Claims remain', () => {
+    renderQueue({
+      claims: [],
+      viewCounts: {
+        status: 'available',
+        items: viewCounts.items.map((item) => ({
+          ...item,
+          count: item.view === 'completed' ? 1 : 0,
+        })),
+        limitation: null,
+      },
+    })
+
+    expect(screen.getByText('No claims are currently in this queue.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Current work')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Completed (1)' })).toHaveValue('completed')
+  })
+
+  it('distinguishes terminal disposition from the retained workflow state in a queue row', () => {
+    renderQueue({
+      claims: [{
+        ...claim,
+        terminal_disposition: { value: 'closed' },
+        workflow_state: 'collecting',
+        work_summary: { ...claim.work_summary, queue_key: 'closed' },
+      }],
+      view: 'closed',
+    })
+
+    expect(screen.getByText('Motor · Terminal: Closed · Retained status: Collecting')).toBeInTheDocument()
   })
 
   it('uses an accessible disclosure for secondary filters', async () => {
