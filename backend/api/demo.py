@@ -64,4 +64,5 @@ def seed_validation(
         request.app.state.staff_identity_repository,
         principal.subject,
         idempotency_key,
+        evidence_storage=request.app.state.evidence_storage,
     )
