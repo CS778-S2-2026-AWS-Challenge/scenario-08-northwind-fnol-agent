@@ -363,4 +363,67 @@ describe('WorkbenchPage queue routing', () => {
     interval.mockRestore()
     clearInterval.mockRestore()
   })
+
+  it('discards a late action-failure recovery projection after a newer background refresh', async () => {
+    const user = userEvent.setup()
+    const interval = vi.spyOn(window, 'setInterval').mockReturnValue(20)
+    const clearInterval = vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
+    let resolveRecovery
+    const delayedRecovery = new Promise((resolve) => {
+      resolveRecovery = resolve
+    })
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', availability: 'confirmation_required', based_on_revision: 1,
+    }
+    const actionable = {
+      ...claim,
+      work_summary: { ...claim.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+      allowed_actions: [acceptAction],
+    }
+    const recovered = {
+      ...actionable,
+      revision: 2,
+      allowed_actions: [{ ...acceptAction, based_on_revision: 2 }],
+    }
+    const newest = {
+      ...recovered,
+      revision: 3,
+      work_summary: { ...recovered.work_summary, primary_action_code: null, primary_action_target_ref: null },
+      allowed_actions: [],
+    }
+    const actionError = Object.assign(new Error('The action outcome is unknown.'), {
+      code: 'DEPENDENCY_UNAVAILABLE',
+      requestId: 'req_accept_inverse_1',
+    })
+    api.claim
+      .mockResolvedValueOnce(actionable)
+      .mockReturnValueOnce(delayedRecovery)
+      .mockResolvedValueOnce(newest)
+    api.acceptHandoff.mockRejectedValue(actionError)
+
+    renderPage('/workbench/claims/clm_route_1')
+    await screen.findByRole('button', { name: 'Test projected accept' })
+    await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 20000))
+    const runBackgroundRefresh = interval.mock.calls.find(([, delay]) => delay === 20000)[0]
+
+    await user.click(screen.getByRole('button', { name: 'Test projected accept' }))
+    await waitFor(() => expect(api.claim).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      await runBackgroundRefresh()
+    })
+    await waitFor(() => expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 3'))
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveRecovery(recovered)
+      await delayedRecovery
+    })
+    await waitFor(() => expect(actionError.latestRevision).toBe(3))
+
+    expect(screen.getByTestId('claim-revision')).toHaveTextContent('Claim revision 3')
+    expect(screen.queryByRole('button', { name: 'Test projected accept' })).not.toBeInTheDocument()
+    interval.mockRestore()
+    clearInterval.mockRestore()
+  })
 })

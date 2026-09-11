@@ -97,6 +97,32 @@ export default function WorkbenchPage() {
     navigate(queueRoute(`/workbench/claims/${conversation.claim_id}/conversation`, queueFilters, conversation.session_id))
   }, [navigate, queueFilters, tabs])
 
+  const applyDetailProjection = useCallback((response, {
+    expectedClaimId,
+    requestId = null,
+    announceRevision = false,
+  }) => {
+    if (
+      currentClaimIdRef.current !== expectedClaimId
+      || response?.claim_id !== expectedClaimId
+      || (requestId !== null && detailRequestId.current !== requestId)
+    ) return null
+    if (isOlderClaimProjection(response, detailRef.current)) return detailRef.current
+
+    detailRef.current = response
+    setDetail((current) => {
+      if (announceRevision) {
+        const notice = buildRevisionNotice(current, response)
+        if (notice) setRevisionNotice(notice)
+      }
+      return response
+    })
+    setDetailError(null)
+    setDetailStale(false)
+    openTab(response)
+    return response
+  }, [openTab])
+
   const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (!filterMetadata || !viewAvailable) return
     const requestId = ++queueRequestId.current
@@ -174,12 +200,8 @@ export default function WorkbenchPage() {
     ])
     try {
       const response = await workbenchApi.claim(token, id)
-      if (requestId !== detailRequestId.current) return
-      detailRef.current = response
-      setDetail(response)
-      setDetailStale(false)
+      if (!applyDetailProjection(response, { expectedClaimId: id, requestId })) return
       setDetailLoading(false)
-      openTab(response)
       const [handoffs, collaborationRequests] = await supportingRequest
       if (requestId !== detailRequestId.current) return
       setResources((current) => ({
@@ -203,7 +225,7 @@ export default function WorkbenchPage() {
     } finally {
       if (requestId === detailRequestId.current) setDetailLoading(false)
     }
-  }, [openTab, token])
+  }, [applyDetailProjection, token])
 
   const refreshDetail = useCallback(async (id) => {
     if (!id) return
@@ -211,20 +233,11 @@ export default function WorkbenchPage() {
     const detailGeneration = detailRequestId.current
     try {
       const response = await workbenchApi.claim(token, id)
-      if (
-        currentClaimIdRef.current !== id
-        || detailRequestId.current !== detailGeneration
-        || isOlderClaimProjection(response, detailRef.current)
-      ) return
-      detailRef.current = response
-      setDetail((current) => {
-        const notice = buildRevisionNotice(current, response)
-        if (notice) setRevisionNotice(notice)
-        return response
+      applyDetailProjection(response, {
+        expectedClaimId: id,
+        requestId: detailGeneration,
+        announceRevision: true,
       })
-      setDetailError(null)
-      setDetailStale(false)
-      openTab(response)
     } catch (error) {
       if (
         currentClaimIdRef.current !== id
@@ -240,7 +253,7 @@ export default function WorkbenchPage() {
       }
       setDetailError(error)
     }
-  }, [openTab, token])
+  }, [applyDetailProjection, token])
 
   const loadResource = useCallback(async (name, ownerId, loader) => {
     const requestId = (resourceRequestIds.current[name] || 0) + 1
@@ -473,26 +486,32 @@ export default function WorkbenchPage() {
   async function runClaimMutation(label, operation) {
     const previous = detailRef.current
     if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
-    ++detailRequestId.current
+    const mutationRequestId = ++detailRequestId.current
     try {
       await operation(previous)
     } catch (error) {
       let latest = null
+      const refreshGeneration = backgroundRefreshId.current
       try {
-        latest = await workbenchApi.claim(token, previous.claim_id)
-        if (currentClaimIdRef.current === previous.claim_id) {
-          detailRef.current = latest
-          setDetail(latest)
-          setDetailError(null)
-          setDetailStale(false)
-          openTab(latest)
-        }
-        error.projectionReloaded = true
-        error.projectionChanged = latest.revision !== previous.revision
-        error.latestRevision = latest.revision
+        const response = await workbenchApi.claim(token, previous.claim_id)
+        latest = applyDetailProjection(response, {
+          expectedClaimId: previous.claim_id,
+          requestId: mutationRequestId,
+        })
+        error.projectionReloaded = Boolean(latest)
+        error.projectionChanged = latest ? latest.revision !== previous.revision : false
+        error.latestRevision = latest?.revision
         await loadClaims()
       } catch (reloadError) {
-        if (currentClaimIdRef.current === previous.claim_id) {
+        const current = detailRef.current
+        const newerProjectionIsShown = current?.claim_id === previous.claim_id
+          && current.revision > previous.revision
+        if (
+          currentClaimIdRef.current === previous.claim_id
+          && detailRequestId.current === mutationRequestId
+          && backgroundRefreshId.current === refreshGeneration
+          && !newerProjectionIsShown
+        ) {
           if (isInaccessibleError(reloadError)) {
             detailRef.current = null
             setDetail(null)
@@ -597,7 +616,7 @@ export default function WorkbenchPage() {
       throw new Error('The projected reopen action no longer matches this Claim revision. Refresh the Claim and review the current action.')
     }
 
-    ++detailRequestId.current
+    const mutationRequestId = ++detailRequestId.current
     let accepted = false
     try {
       await workbenchApi.reopenClaim(
@@ -609,15 +628,21 @@ export default function WorkbenchPage() {
       )
       accepted = true
       const latest = await workbenchApi.claim(token, current.claim_id)
-      applyReopenProjection(latest, true)
+      applyReopenProjection(latest, true, null, mutationRequestId, current.claim_id)
     } catch (error) {
       try {
         const latest = await workbenchApi.claim(token, current.claim_id)
-        applyReopenProjection(latest, accepted, error)
+        const projection = applyReopenProjection(
+          latest,
+          accepted,
+          error,
+          mutationRequestId,
+          current.claim_id,
+        )
         if (accepted) return
-        error.projectionReloaded = true
-        error.projectionChanged = latest.revision !== current.revision
-        error.latestRevision = latest.revision
+        error.projectionReloaded = Boolean(projection)
+        error.projectionChanged = projection ? projection.revision !== current.revision : false
+        error.latestRevision = projection?.revision
       } catch {
         // The dialog keeps the original actionable mutation error when resynchronisation fails.
       }
@@ -625,12 +650,9 @@ export default function WorkbenchPage() {
     }
   }
 
-  function applyReopenProjection(latest, accepted, error = null) {
-    detailRef.current = latest
-    setDetail(latest)
-    setDetailError(null)
-    setDetailStale(false)
-    openTab(latest)
+  function applyReopenProjection(response, accepted, error, requestId, expectedClaimId) {
+    const latest = applyDetailProjection(response, { expectedClaimId, requestId })
+    if (!latest) return null
     const queueKey = latest.work_summary?.queue_key
     const queueOption = filterMetadata?.views.find((option) => option.value === queueKey)
     if (queueOption) {
@@ -650,6 +672,7 @@ export default function WorkbenchPage() {
         ? `Claim ${latest.display_reference || latest.claim_id} reopened at revision ${latest.revision} and moved to ${queueOption?.label || queueKey || 'its server-projected queue'}.`
         : reopenFailureNotice(error, latest, queueOption?.label || queueKey),
     })
+    return latest
   }
 
   return (
