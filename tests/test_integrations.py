@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from typing import Any, cast
 
@@ -9,13 +10,20 @@ from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
     AssessorAdapterFailure,
     AssessorFixtureFailure,
+    AssessorResultOutcome,
+    AssessorResultRequest,
     AssessorRoutingOutcome,
     ClaimCreationOutcome,
     ClaimsServiceAdapter,
     MockAssessorServiceAdapter,
     MockClaimsServiceAdapter,
 )
+from backend.adapters.evidence_storage import (
+    EvidenceStorageUnavailable,
+    MockEvidenceStorage,
+)
 from backend.app import create_app
+from backend.domain.external_services import ExternalTaskResultVerification
 from backend.domain.models import (
     ActorReference,
     ActorType,
@@ -31,6 +39,8 @@ from backend.domain.models import (
     ClaimCreationStatus,
     CreateExternalClaimRequest,
     CustomerNextStep,
+    EvidenceFileStatus,
+    EvidenceStatus,
     ExternalClaimResult,
     ExternalServiceConsent,
     ExternalServiceConsentStatus,
@@ -44,6 +54,7 @@ from backend.repositories.protocols import IdempotencyConflict
 from backend.services.support import now_utc, request_fingerprint
 
 INTEGRATION_AUTH = {'Authorization': 'Bearer synthetic-integration'}
+STAFF_AUTH = {'Authorization': 'Bearer synthetic-staff'}
 ASSESSOR_CONSENT_FIELDS = [
     'claim_id',
     'external_claim_id',
@@ -52,6 +63,17 @@ ASSESSOR_CONSENT_FIELDS = [
     'requested_action',
     'location.region',
 ]
+
+
+def _result_auth(
+    revision: int,
+    key: str = 'receive-assessment-result',
+) -> dict[str, str]:
+    return {
+        **INTEGRATION_AUTH,
+        'Idempotency-Key': key,
+        'If-Match': str(revision),
+    }
 
 
 class CountingAssessorAdapter(MockAssessorServiceAdapter):
@@ -90,6 +112,42 @@ class TimeoutOnceAssessorAdapter(MockAssessorServiceAdapter):
         if self.invocations == 1:
             raise AssessorAdapterFailure(AssessorFixtureFailure.TIMEOUT)
         return super().route_assessor(command, request_fingerprint)
+
+
+class CountingResultAdapter(MockAssessorServiceAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.result_invocations = 0
+
+    def receive_result(
+        self,
+        command: AssessorResultRequest,
+        request_fingerprint: str,
+    ) -> AssessorResultOutcome:
+        self.result_invocations += 1
+        return super().receive_result(command, request_fingerprint)
+
+
+class MalformedResultAdapter(MockAssessorServiceAdapter):
+    def receive_result(
+        self,
+        command: AssessorResultRequest,
+        request_fingerprint: str,
+    ) -> AssessorResultOutcome:
+        """Reject every result request as malformed fixture output.
+
+        Args:
+            command: Accepted task identity supplied by Runtime.
+            request_fingerprint: Stable receive-operation fingerprint.
+
+        Returns:
+            No result because this test adapter always fails.
+
+        Raises:
+            AssessorAdapterFailure: Always, with the bounded malformed code.
+        """
+
+        raise AssessorAdapterFailure(AssessorFixtureFailure.MALFORMED)
 
 
 class AssessorCASConflictRepository(FixtureRepository):
@@ -713,6 +771,309 @@ def test_assessor_routing_requires_explicit_authorisation_and_is_idempotent(
     assert stored is not None
     assert stored.revision == 4
     assert stored.customer_next_step.status == 'assessor_assigned'
+
+
+def test_assessor_result_runs_through_runtime_storage_and_verification() -> None:
+    repository = FixtureRepository()
+    storage = MockEvidenceStorage()
+    adapter = CountingResultAdapter()
+    with TestClient(
+        create_app(
+            repository=repository,
+            assessor_service_adapter=adapter,
+            evidence_storage=storage,
+        )
+    ) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            repository,
+            key='returned-assessment-result',
+        )
+        routed = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        before = repository.get_claim_internal(claim_id)
+        assert before is not None
+
+        received = client.post(
+            f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result',
+            headers=_result_auth(before.revision),
+        )
+
+        assert received.status_code == 201, received.text
+        result = received.json()
+        assert result['task_id'] == task.task_id
+        assert result['claim_id'] == claim_id
+        assert result['source']['system'] == 'controlled_assessment_fixture'
+        assert result['source']['reference'].startswith('fixture-assessment/')
+        assert result['verification'] == ExternalTaskResultVerification.REVIEW_REQUIRED.value
+        assert result['verified_against_revision'] == before.revision + 1
+        assert result['verified_at'] is not None
+        assert len(result['evidence_ids']) == 1
+
+        evidence_id = result['evidence_ids'][0]
+        evidence = repository.get_evidence(claim_id, evidence_id, before.customer_id)
+        assert evidence is not None
+        assert evidence.status is EvidenceStatus.RECEIVED
+        assert evidence.file_status is EvidenceFileStatus.READY
+        assert evidence.provenance['simulation_only'] is True
+        content = storage.read_upload(
+            claim_id=claim_id,
+            evidence_id=evidence_id,
+            storage_key=str(evidence.provenance['storage_key']),
+        )
+        assert content is not None
+        report = json.loads(content)
+        assert report['simulation_only'] is True
+        assert report['task_id'] == task.task_id
+        assert report['provider_reference'] == task.provider_reference
+
+        after = repository.get_claim_internal(claim_id)
+        assert after is not None
+        assert after.revision == before.revision + 1
+        assert after.form == before.form
+        assert after.external_claim == before.external_claim
+        assert after.assessor_routing == before.assessor_routing
+        assert after.claim_state.workflow_state == before.claim_state.workflow_state
+
+        claimant = client.get(
+            f'/api/v1/claims/{claim_id}',
+            headers={'Authorization': 'Bearer synthetic-claimant'},
+        )
+        assert claimant.status_code == 200
+        assert claimant.json()['external_service_action']['status'] == 'assigned'
+        assert 'result' not in claimant.json()['external_service_action']
+
+        workbench = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/external-requests',
+            headers=STAFF_AUTH,
+        )
+        assert workbench.status_code == 200
+        lifecycle = workbench.json()['items'][0]['lifecycle']
+        assert lifecycle['result'] == result['summary']
+        assert lifecycle['result_source'] == result['source']
+        assert lifecycle['result_verification_state'] == 'review_required'
+        assert lifecycle['result_verified_against_revision'] == after.revision
+        assert lifecycle['result_evidence'] == [
+            {'evidence_id': evidence_id, 'status': 'received', 'file_status': 'ready'}
+        ]
+
+        downloaded = client.get(
+            f'/api/v1/workbench/claims/{claim_id}/evidence/{evidence_id}/content',
+            headers=STAFF_AUTH,
+        )
+        assert downloaded.status_code == 200
+        assert downloaded.content == content
+        assert downloaded.headers['content-type'].startswith('application/json')
+
+    assert adapter.result_invocations == 1
+
+
+def test_assessor_result_receipt_is_idempotent_without_duplicate_claim_changes() -> None:
+    repository = FixtureRepository()
+    adapter = CountingResultAdapter()
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            repository,
+            key='returned-assessment-replay',
+        )
+        routed = client.post(
+            '/internal/v1/assessors/route',
+            headers=INTEGRATION_AUTH,
+            json=payload,
+        )
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        route = f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result'
+        starting = repository.get_claim_internal(claim_id)
+        assert starting is not None
+
+        first = client.post(route, headers=_result_auth(starting.revision))
+        first_claim = repository.get_claim_internal(claim_id)
+        replay = client.post(route, headers=_result_auth(starting.revision))
+        changed_key = client.post(
+            route,
+            headers=_result_auth(starting.revision, 'changed-result-receipt'),
+        )
+        replayed_claim = repository.get_claim_internal(claim_id)
+
+    assert first.status_code == 201
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert changed_key.status_code == 409
+    assert changed_key.json()['error']['code'] == 'IDEMPOTENCY_CONFLICT'
+    assert first_claim == replayed_claim
+    assert adapter.result_invocations == 1
+    assert len(repository.list_external_task_results_internal(claim_id)) == 1
+    assert len(repository.list_evidence(claim_id, 'cus_demo')) == 1
+
+
+def test_assessor_result_retry_finishes_after_an_interrupted_result_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FixtureRepository()
+    adapter = CountingResultAdapter()
+    original = repository.save_external_task_result
+    attempts = {'count': 0}
+
+    def fail_first_result_write(result: Any, customer_id: str) -> None:
+        attempts['count'] += 1
+        if attempts['count'] == 1:
+            raise IdempotencyConflict(result.result_id)
+        original(result, customer_id)
+
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            repository,
+            key='returned-assessment-interrupted',
+        )
+        routed = client.post('/internal/v1/assessors/route', headers=INTEGRATION_AUTH, json=payload)
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        route = f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result'
+        starting = repository.get_claim_internal(claim_id)
+        assert starting is not None
+        monkeypatch.setattr(repository, 'save_external_task_result', fail_first_result_write)
+
+        interrupted = client.post(route, headers=_result_auth(starting.revision))
+        after_interruption = repository.get_claim_internal(claim_id)
+        replay = client.post(route, headers=_result_auth(starting.revision))
+        after_replay = repository.get_claim_internal(claim_id)
+
+    assert interrupted.status_code == 409
+    assert replay.status_code == 200
+    assert replay.json()['verification'] == 'review_required'
+    assert after_replay == after_interruption
+    assert adapter.result_invocations == 2
+    assert len(repository.list_external_task_results_internal(claim_id)) == 1
+
+
+def test_assessor_result_requires_assignment_and_available_storage() -> None:
+    queued_repository = FixtureRepository()
+    queued_adapter = MockAssessorServiceAdapter(routing_status=AssessorRoutingStatus.QUEUED)
+    with TestClient(
+        create_app(repository=queued_repository, assessor_service_adapter=queued_adapter)
+    ) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            queued_repository,
+            key='queued-assessment-result',
+        )
+        routed = client.post('/internal/v1/assessors/route', headers=INTEGRATION_AUTH, json=payload)
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = queued_repository.list_external_tasks_internal(claim_id)[0]
+        queued_claim = queued_repository.get_claim_internal(claim_id)
+        assert queued_claim is not None
+        queued = client.post(
+            f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result',
+            headers=_result_auth(queued_claim.revision),
+        )
+
+    assert queued.status_code == 409
+    assert queued_repository.list_external_task_results_internal(claim_id) == []
+
+    outage_repository = FixtureRepository()
+    outage_storage = MockEvidenceStorage()
+    with TestClient(
+        create_app(repository=outage_repository, evidence_storage=outage_storage)
+    ) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            outage_repository,
+            key='assessment-result-storage-outage',
+        )
+        routed = client.post('/internal/v1/assessors/route', headers=INTEGRATION_AUTH, json=payload)
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = outage_repository.list_external_tasks_internal(claim_id)[0]
+        before = outage_repository.get_claim_internal(claim_id)
+        assert before is not None
+        outage_storage.set_outage(
+            EvidenceStorageUnavailable('OBJECT_STORAGE_UNAVAILABLE', 'synthetic outage')
+        )
+        unavailable = client.post(
+            f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result',
+            headers=_result_auth(before.revision),
+        )
+
+    assert unavailable.status_code == 503
+    assert unavailable.json()['error']['retryable'] is True
+    assert outage_repository.get_claim_internal(claim_id) == before
+    assert outage_repository.list_external_task_results_internal(claim_id) == []
+    evidence = outage_repository.list_evidence(claim_id, 'cus_demo')
+    assert len(evidence) == 1
+    assert evidence[0].status is EvidenceStatus.PENDING
+    assert evidence[0].file_status is EvidenceFileStatus.NOT_AVAILABLE
+
+
+def test_assessor_result_rejects_missing_authority_identity_and_malformed_output() -> None:
+    repository = FixtureRepository()
+    adapter = MalformedResultAdapter()
+    with TestClient(create_app(repository=repository, assessor_service_adapter=adapter)) as client:
+        payload, _ = prepare_assessor_request(
+            client,
+            repository,
+            key='malformed-assessment-result',
+        )
+        routed = client.post('/internal/v1/assessors/route', headers=INTEGRATION_AUTH, json=payload)
+        assert routed.status_code == 201
+        claim_id = str(payload['claim_id'])
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        route = f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result'
+        before = repository.get_claim_internal(claim_id)
+        assert before is not None
+        before_evidence = repository.list_evidence(claim_id, 'cus_demo')
+
+        missing_auth = client.post(route)
+        missing_claim = client.post(
+            f'/internal/v1/claims/clm_missing/external-tasks/{task.task_id}/result',
+            headers=_result_auth(1),
+        )
+        missing_task = client.post(
+            f'/internal/v1/claims/{claim_id}/external-tasks/tsk_missing/result',
+            headers=_result_auth(before.revision),
+        )
+        missing_key = client.post(
+            route,
+            headers={**INTEGRATION_AUTH, 'If-Match': str(before.revision)},
+        )
+        missing_revision = client.post(
+            route,
+            headers={**INTEGRATION_AUTH, 'Idempotency-Key': 'missing-revision'},
+        )
+        stale = client.post(
+            route,
+            headers=_result_auth(before.revision + 1, 'stale-result-receipt'),
+        )
+        malformed = client.post(route, headers=_result_auth(before.revision))
+
+    assert missing_auth.status_code == 401
+    assert missing_claim.status_code == 404
+    assert missing_task.status_code == 404
+    assert missing_key.status_code == 400
+    assert missing_revision.status_code == 409
+    assert stale.status_code == 409
+    assert stale.json()['error']['code'] == 'REVISION_CONFLICT'
+    assert stale.json()['error']['current_revision'] == before.revision
+    assert malformed.status_code == 502
+    error = malformed.json()['error']
+    assert error['code'] == 'DEPENDENCY_FAILED'
+    assert error['message'] == 'The assessment service returned an unusable result.'
+    assert error['retryable'] is False
+    assert error['request_id'].startswith('req_')
+    assert repository.get_claim_internal(claim_id) == before
+    assert repository.list_external_task_results_internal(claim_id) == []
+    assert repository.list_evidence(claim_id, 'cus_demo') == before_evidence
 
 
 def test_assessor_routing_requires_consent_from_the_shared_claim_context() -> None:

@@ -4,8 +4,10 @@ from typing import cast
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from backend.adapters.claims_service import AssessorServiceAdapter, ClaimsServiceAdapter
+from backend.adapters.evidence_storage import EvidenceStorage
 from backend.adapters.policy_history import PolicyHistoryAdapter
 from backend.core.auth import Principal, require_integration_service
+from backend.domain.external_services import ExternalTaskResult
 from backend.domain.external_task_api import ExternalTaskListResponse
 from backend.domain.knowledge import (
     KnowledgeRetriever,
@@ -30,10 +32,15 @@ from backend.repositories.protocols import PersistenceRepository
 from backend.services.evidence import complete_evidence_processing
 from backend.services.external_service_entry import ExternalServiceEntryDecision
 from backend.services.external_tasks import list_external_tasks
-from backend.services.integrations import create_external_claim, route_assessor
+from backend.services.integrations import (
+    create_external_claim,
+    receive_assessor_result,
+    route_assessor,
+)
 from backend.services.knowledge_search import search_knowledge
 from backend.services.retrieval import search_claim_history, search_policy
 from backend.services.runtime_integrations import RuntimeIntegrationPolicy
+from backend.services.support import parse_if_match, require_idempotency_key
 
 router = APIRouter(prefix='/internal/v1', tags=['internal-integrations'])
 logger = logging.getLogger(__name__)
@@ -51,6 +58,23 @@ def claims_adapter_for(request: Request) -> ClaimsServiceAdapter:
 def assessor_adapter_for(request: Request) -> AssessorServiceAdapter:
     runtime_integration_policy_for(request).require('assessor_service')
     return cast(AssessorServiceAdapter, request.app.state.assessor_service_adapter)
+
+
+def evidence_storage_for(request: Request) -> EvidenceStorage:
+    """Resolve the Evidence storage selected for this Runtime profile.
+
+    Args:
+        request: Authenticated HTTP request whose application owns Runtime dependencies.
+
+    Returns:
+        The configured provider-neutral Evidence storage boundary.
+
+    Raises:
+        ApiError: The active Runtime profile does not permit Evidence storage.
+    """
+
+    runtime_integration_policy_for(request).require('evidence_storage')
+    return cast(EvidenceStorage, request.app.state.evidence_storage)
 
 
 def _assessor_entry_for(request: Request) -> ExternalServiceEntryDecision:
@@ -176,6 +200,61 @@ def route_assessor_integration(
         assessor_adapter_for(request),
         _assessor_entry_for(request),
         payload,
+    )
+    response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
+    '/claims/{claim_id}/external-tasks/{task_id}/result',
+    response_model=ExternalTaskResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def receive_assessor_result_integration(
+    claim_id: str,
+    task_id: str,
+    request: Request,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    principal: Principal = Depends(require_integration_service),
+) -> ExternalTaskResult:
+    """Receive and verify the controlled result for one accepted assessor task.
+
+    Args:
+        claim_id: Working Claim that owns the external task.
+        task_id: Accepted task whose provider-neutral result is being received.
+        request: Authenticated HTTP request and configured Runtime dependencies.
+        response: HTTP response whose status distinguishes creation from replay.
+        idempotency_key: Required identity for replaying this result receipt safely.
+        if_match: Expected Working Claim revision before a first receipt.
+        principal: Verified integration-service principal that scopes idempotency.
+
+    Returns:
+        Persisted result after authoritative verification against its Evidence and Claim.
+
+    Raises:
+        ApiError: The task cannot receive a result, the returned provenance conflicts,
+            Evidence storage is unavailable, or persistence cannot complete safely.
+    """
+
+    logger.info(
+        'external_task_result.receive',
+        extra={
+            'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+            'claim_id': claim_id,
+            'task_id': task_id,
+        },
+    )
+    result, replayed = receive_assessor_result(
+        repository_for(request),
+        evidence_storage_for(request),
+        assessor_adapter_for(request),
+        claim_id,
+        task_id,
+        require_idempotency_key(idempotency_key),
+        parse_if_match(if_match),
+        principal.subject,
     )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
     return result
