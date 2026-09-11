@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import ClaimWorkspace from './ClaimWorkspace.jsx'
@@ -38,6 +38,8 @@ const props = {
   onUpdateAction: vi.fn(),
   onLoadEvidence: vi.fn(),
   onSend: vi.fn(),
+  onOwnershipAction: vi.fn(),
+  onReopen: vi.fn(),
 }
 
 describe('ClaimWorkspace navigation', () => {
@@ -108,7 +110,7 @@ describe('ClaimWorkspace navigation', () => {
           primary_action_target_ref: 'clm_1',
         },
         allowed_actions: [
-          { action_code: 'ownership.request_cowork', target_type: 'claim', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }] },
+          { action_code: 'ownership.request_cowork', target_type: 'claim', target_ref: 'clm_1', label: 'Request cowork access', purpose: 'Ask the owner to collaborate.', availability: 'confirmation_required', result_state: 'awaiting_input', expected_effects: ['collaboration_request.create'], confirmation: { message: 'The owner will receive this request.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }], based_on_revision: 4 },
           { action_code: 'human.accept_handoff', target_ref: 'hnd_1', label: 'Accept Claim', purpose: 'Assigned to another staff member.', availability: 'blocked', blocked_reason: 'This work is assigned to another staff member.' },
         ],
       }}
@@ -151,5 +153,125 @@ describe('ClaimWorkspace navigation', () => {
       }}
     />)
     expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
+  })
+
+  it('shows terminal provenance and submits the exact projected reopen action through an accessible confirmation dialog', async () => {
+    const user = userEvent.setup()
+    const onReopen = vi.fn().mockResolvedValue(undefined)
+    const reopenAction = {
+      registry_version: '2026-09-11.1',
+      action_code: 'claim.reopen',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Reopen Claim',
+      purpose: 'Return a closed Claim to its retained intake position.',
+      availability: 'confirmation_required',
+      confirmation: { level: 'explicit', message: 'Reopening returns this Claim to active work and records your reason.' },
+      expected_effects: ['terminal_disposition.clear', 'claim.revision.advance', 'audit.append'],
+      source_refs: ['evt_closed_1'],
+      inputs: [{ field_code: 'reason', label: 'Why are you reopening this Claim?', control: 'textarea', required: true, choices: [] }],
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onReopen={onReopen}
+      detail={{
+        ...detail,
+        terminal_disposition: {
+          value: 'closed',
+          reason_code: 'AUTHORISED_CLOSURE',
+          source_refs: ['evt_closed_1'],
+          recorded_by: { actor_type: 'staff', actor_id: 'stf_1' },
+          recorded_at: '2026-09-03T00:30:00Z',
+          recorded_revision: 4,
+        },
+        work_summary: {
+          ...detail.work_summary,
+          queue_key: 'closed',
+          primary_action_code: 'claim.reopen',
+          primary_action_target_ref: 'clm_1',
+        },
+        allowed_actions: [reopenAction],
+      }}
+    />)
+
+    expect(screen.getByText('Terminal: Closed')).toBeInTheDocument()
+    expect(screen.getByText(/Authorised Closure.*revision 4/i)).toBeInTheDocument()
+    expect(screen.getByText('Sources: evt_closed_1')).toBeInTheDocument()
+
+    const trigger = screen.getByRole('button', { name: 'Review reopen' })
+    await user.click(trigger)
+    const dialog = screen.getByRole('dialog', { name: 'Reopen Claim' })
+    const reason = within(dialog).getByLabelText('Why are you reopening this Claim?')
+    expect(reason).toHaveFocus()
+    expect(within(dialog).getByRole('button', { name: 'Reopen Claim' })).toBeDisabled()
+
+    await user.type(reason, 'The claimant supplied the missing information.')
+    await user.click(within(dialog).getByRole('button', { name: 'Reopen Claim' }))
+
+    await waitFor(() => expect(onReopen).toHaveBeenCalledWith(
+      reopenAction,
+      { reason: 'The claimant supplied the missing information.' },
+      expect.any(String),
+    ))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('traps keyboard focus, closes on Escape, and returns focus to the reopen trigger', async () => {
+    const user = userEvent.setup()
+    const reopenAction = {
+      action_code: 'claim.reopen',
+      target_type: 'claim',
+      target_ref: 'clm_1',
+      label: 'Reopen Claim',
+      purpose: 'Return a closed Claim to active work.',
+      availability: 'confirmation_required',
+      confirmation: { level: 'explicit', message: 'Confirm the reopen.' },
+      inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }],
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      detail={{
+        ...detail,
+        work_summary: { ...detail.work_summary, primary_action_code: 'claim.reopen', primary_action_target_ref: 'clm_1' },
+        allowed_actions: [reopenAction],
+      }}
+    />)
+
+    const trigger = screen.getByRole('button', { name: 'Review reopen' })
+    await user.click(trigger)
+    const reason = screen.getByLabelText('Reason')
+    expect(reason).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    expect(reason).not.toBeInTheDocument()
+  })
+
+  it('explains a stale reopen and keeps the projected input available for retry', async () => {
+    const user = userEvent.setup()
+    const conflict = Object.assign(new Error('Revision mismatch.'), { code: 'REVISION_CONFLICT', projectionReloaded: true })
+    const reopenAction = {
+      action_code: 'claim.reopen', target_type: 'claim', target_ref: 'clm_1', label: 'Reopen Claim', purpose: 'Return this Claim.', availability: 'confirmation_required', confirmation: { level: 'explicit', message: 'Confirm.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }], based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onReopen={vi.fn().mockRejectedValue(conflict)}
+      detail={{ ...detail, work_summary: { ...detail.work_summary, primary_action_code: 'claim.reopen', primary_action_target_ref: 'clm_1' }, allowed_actions: [reopenAction] }}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Review reopen' }))
+    await user.type(screen.getByLabelText('Reason'), 'New material received.')
+    await user.click(screen.getByRole('button', { name: 'Reopen Claim' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/changed after you opened it.*not reopened/i)
+    expect(alert).toHaveTextContent(/latest server projection/i)
+    expect(alert).toHaveTextContent(/try again/i)
+    expect(screen.getByLabelText('Reason')).toHaveValue('New material received.')
   })
 })

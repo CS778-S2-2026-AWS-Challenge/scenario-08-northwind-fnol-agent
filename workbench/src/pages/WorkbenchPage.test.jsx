@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   claim: vi.fn(),
   handoffs: vi.fn(),
   collaborationRequests: vi.fn(),
+  reopenClaim: vi.fn(),
 }))
 
 const tabs = vi.hoisted(() => ({
@@ -32,7 +33,11 @@ vi.mock('../auth/auth-context.js', () => ({
 vi.mock('../hooks/usePersistentTabs.js', () => ({ usePersistentTabs: () => tabs }))
 vi.mock('../components/NavigationRail.jsx', () => ({ default: () => null }))
 vi.mock('../components/ClaimTabs.jsx', () => ({ default: () => null }))
-vi.mock('../components/ClaimWorkspace.jsx', () => ({ default: () => null }))
+vi.mock('../components/ClaimWorkspace.jsx', () => ({
+  default: ({ detail, onReopen }) => detail?.work_summary?.primary_action_code === 'claim.reopen'
+    ? <button type="button" onClick={() => onReopen(detail.allowed_actions[0], { reason: 'New material received.' }, 'reopen-route-key').catch(() => {})}>Test projected reopen</button>
+    : null,
+}))
 vi.mock('../components/StaffAgent.jsx', () => ({ default: () => null }))
 
 const metadata = {
@@ -42,6 +47,9 @@ const metadata = {
     { value: 'waiting_user', label: 'Waiting for claimant', group: 'active' },
     { value: 'waiting_material', label: 'Waiting for material', group: 'active' },
     { value: 'waiting_third_party', label: 'Waiting for third party', group: 'active' },
+    { value: 'completed', label: 'Completed', group: 'terminal' },
+    { value: 'abandoned', label: 'Abandoned', group: 'terminal' },
+    { value: 'closed', label: 'Closed', group: 'terminal' },
     { value: 'urgent', label: 'Urgent', group: 'operational' },
   ],
   workflow_states: [{ value: 'collecting', label: 'Collecting' }],
@@ -52,6 +60,7 @@ const metadata = {
 
 const claim = {
   claim_id: 'clm_route_1',
+  revision: 1,
   display_reference: 'NW-900',
   claimant: { customer_id: 'cus_demo' },
   incident: { family: 'motor', summary: 'Synthetic routing test.' },
@@ -60,6 +69,7 @@ const claim = {
   ownership: { state: 'unassigned', current_staff_access: 'read_only' },
   priority_projection: { level: 'routine' },
   work_summary: { queue_key: 'waiting_user', current_work_item: null },
+  allowed_actions: [],
   tags: [],
   updated_at: '2026-09-09T12:00:00Z',
 }
@@ -154,5 +164,84 @@ describe('WorkbenchPage queue routing', () => {
         '/workbench/claims/clm_route_1?view=waiting_user&assignee_id=unassigned',
       )
     })
+  })
+
+  it('returns a reopened Claim to the exact server-projected queue and reports its revision', async () => {
+    const user = userEvent.setup()
+    const terminal = {
+      ...claim,
+      revision: 7,
+      terminal_disposition: {
+        value: 'closed', reason_code: 'AUTHORISED_CLOSURE', source_refs: ['evt_closed_1'], recorded_at: '2026-09-09T12:00:00Z', recorded_revision: 7,
+      },
+      work_summary: {
+        queue_key: 'closed',
+        primary_action_code: 'claim.reopen',
+        primary_action_target_ref: 'clm_route_1',
+      },
+      allowed_actions: [{
+        action_code: 'claim.reopen', target_type: 'claim', target_ref: 'clm_route_1', availability: 'confirmation_required', based_on_revision: 7,
+      }],
+    }
+    const reopened = {
+      ...terminal,
+      revision: 8,
+      terminal_disposition: null,
+      work_summary: { queue_key: 'processing', primary_action_code: null, primary_action_target_ref: null },
+      allowed_actions: [],
+    }
+    api.claim.mockResolvedValueOnce(terminal).mockResolvedValue(reopened)
+    api.reopenClaim.mockResolvedValue(reopened)
+    api.claims.mockImplementation((token, filters) => Promise.resolve({
+      items: filters.view === 'closed' ? [terminal] : [reopened],
+      page: { next_cursor: null },
+      view_counts: availableCounts,
+    }))
+
+    renderPage('/workbench/claims/clm_route_1?view=closed')
+    await user.click(await screen.findByRole('button', { name: 'Test projected reopen' }))
+
+    await waitFor(() => expect(api.reopenClaim).toHaveBeenCalledWith(
+      'staff-token',
+      'clm_route_1',
+      7,
+      { reason: 'New material received.' },
+      'reopen-route-key',
+    ))
+    expect(api.claim).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(/reopened at revision 8.*moved to Processing/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workbench/claims/clm_route_1?view=processing',
+    ))
+    expect(api.claims).toHaveBeenLastCalledWith(
+      'staff-token',
+      expect.objectContaining({ view: 'processing' }),
+    )
+  })
+
+  it('reloads and explains the latest projection after a stale reopen is rejected', async () => {
+    const user = userEvent.setup()
+    const terminal = {
+      ...claim,
+      revision: 7,
+      terminal_disposition: { value: 'closed', reason_code: 'AUTHORISED_CLOSURE', source_refs: ['evt_closed_1'], recorded_at: '2026-09-09T12:00:00Z', recorded_revision: 7 },
+      work_summary: { queue_key: 'closed', primary_action_code: 'claim.reopen', primary_action_target_ref: 'clm_route_1' },
+      allowed_actions: [{ action_code: 'claim.reopen', target_type: 'claim', target_ref: 'clm_route_1', availability: 'confirmation_required', based_on_revision: 7 }],
+    }
+    const latest = {
+      ...terminal,
+      revision: 8,
+      allowed_actions: [{ ...terminal.allowed_actions[0], based_on_revision: 8 }],
+    }
+    api.claim.mockResolvedValueOnce(terminal).mockResolvedValue(latest)
+    api.reopenClaim.mockRejectedValue(Object.assign(new Error('Revision mismatch.'), { code: 'REVISION_CONFLICT' }))
+
+    renderPage('/workbench/claims/clm_route_1?view=closed')
+    await user.click(await screen.findByRole('button', { name: 'Test projected reopen' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/was not reopened.*loaded revision was stale/i)
+    expect(alert).toHaveTextContent(/revision 8.*review it and try again/i)
+    expect(api.claim).toHaveBeenCalledTimes(2)
   })
 })

@@ -20,7 +20,7 @@ const SECTIONS = [
   ['activity', 'Activity'],
 ]
 
-export default function ClaimWorkspace({ detail, resources = {}, loading, error, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction }) {
+export default function ClaimWorkspace({ detail, resources = {}, loading, error, section, draft, profile, onSection, onDraft, onAccept, onResolve, onSignalDecision, onUpdateAction, onLoadEvidence, onSend, onOwnershipAction, onReopen }) {
   if (loading) return <main className="claim-state"><span className="loading-mark" /><p>Loading Claim...</p></main>
   if (error) return <main className="claim-state claim-state--error"><AlertTriangle /><h2>This Claim could not be opened</h2><p>{error}</p></main>
   if (!detail) return <EmptyWorkspace />
@@ -32,7 +32,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
         {SECTIONS.map(([value, label], index) => <button className={section === value ? 'is-active' : ''} type="button" role="tab" id={`claim-tab-${value}`} aria-controls={`claim-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} key={value} onClick={() => onSection(value)} onKeyDown={(event) => moveTabFocus(event, index, onSection)}>{label}</button>)}
       </nav>
       <div role="tabpanel" id={`claim-panel-${section}`} aria-labelledby={`claim-tab-${section}`}>
-        {section === 'summary' && <Overview detail={detail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onSection={onSection} />}
+        {section === 'summary' && <Overview detail={detail} handoffs={resources.handoffs?.items || []} collaborationRequests={resources.collaborationRequests?.items || []} profile={profile} onAccept={onAccept} onResolve={onResolve} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />}
         {section === 'conversation' && <Conversation detail={detail} resource={resources.messages} draft={draft} onDraft={onDraft} onSend={onSend} />}
         {section === 'fields' && <ClaimFields resource={resources.fields} />}
         {section === 'evidence' && <ResourceBoundary resource={resources.evidence}><EvidenceRecords claimId={detail.claim_id} records={resources.evidence?.items || []} onLoadEvidence={onLoadEvidence} /></ResourceBoundary>}
@@ -46,7 +46,7 @@ export default function ClaimWorkspace({ detail, resources = {}, loading, error,
 }
 
 function ClaimHeader({ detail }) {
-  return <header className="claim-heading"><div><p className="eyebrow">Claim {detail.display_reference}</p><h1>{detail.claimant?.display_name || detail.claimant?.customer_id}</h1><div className="claim-heading__meta"><span>{words(detail.incident?.family)} claim</span><span>{words(detail.lifecycle_state)}</span><span>Revision {detail.revision}</span></div></div><div className="claim-heading__status"><span className="status-indicator"><Clock3 size={16} /> Updated {formatDateTime(detail.updated_at)}</span></div></header>
+  return <header className="claim-heading"><div><p className="eyebrow">Claim {detail.display_reference}</p><h1>{detail.claimant?.display_name || detail.claimant?.customer_id}</h1><div className="claim-heading__meta"><span>{words(detail.incident?.family)} claim</span>{detail.terminal_disposition && <span>Terminal: {words(detail.terminal_disposition.value)}</span>}<span>{words(detail.lifecycle_state)}</span><span>Revision {detail.revision}</span></div></div><div className="claim-heading__status"><span className="status-indicator"><Clock3 size={16} /> Updated {formatDateTime(detail.updated_at)}</span></div></header>
 }
 
 function moveTabFocus(event, currentIndex, onSection) {

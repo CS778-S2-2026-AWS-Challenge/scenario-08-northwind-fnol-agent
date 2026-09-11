@@ -3,8 +3,9 @@ import { useState } from 'react'
 import { canSubmitProjectedAction } from '../projected-action.js'
 import { ActionDetails } from './ProjectedAction.jsx'
 import { ProjectedOwnershipAction } from './OwnershipActions.jsx'
+import ReopenClaimDialog from './ReopenClaimDialog.jsx'
 
-export default function PrimaryAction({ action, handoff, request, onAccept, onOwnershipAction, onSection }) {
+export default function PrimaryAction({ action, handoff, request, onAccept, onOwnershipAction, onReopen, onSection }) {
   const [confirming, setConfirming] = useState(false)
   const executable = canSubmitProjectedAction(action)
   const section = actionSection(action?.action_code)
@@ -26,6 +27,9 @@ export default function PrimaryAction({ action, handoff, request, onAccept, onOw
       )}
       {action?.action_code?.startsWith('ownership.') && executable && (
         <div className="primary-action__form"><ProjectedOwnershipAction action={action} request={request} onAction={onOwnershipAction} compact /></div>
+      )}
+      {action?.action_code === 'claim.reopen' && action.availability === 'confirmation_required' && (
+        <ReopenClaimDialog key={`${action.target_ref}:${action.based_on_revision}`} action={action} onReopen={onReopen} />
       )}
       {action && executable && section && action.action_code !== 'human.accept_handoff' && (
         <button className="button button--primary" type="button" onClick={() => onSection(section)}>Open {sectionLabel(section)}</button>

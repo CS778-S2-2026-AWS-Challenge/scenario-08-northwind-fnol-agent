@@ -8,15 +8,17 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
   const [filtersOpen, setFiltersOpen] = useState(hasSecondaryFilters)
   const searchInput = useRef(null)
   const searchTimer = useRef(null)
-  const hasActiveFilters = view !== 'all' || hasSecondaryFilters || search || additionalFiltersActive
+  const hasResultFilters = hasSecondaryFilters || search || additionalFiltersActive
+  const hasActiveFilters = view !== 'all' || hasResultFilters
   const countByView = new Map(
     viewCounts?.status === 'available'
       ? viewCounts.items.map((item) => [item.view, item.count])
       : [],
   )
   const selectedCount = countByView.get(view)
-  const allCount = countByView.get('all')
-  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && allCount === 0
+  const noPublishedClaims = viewCounts?.status === 'available'
+    && viewCounts.items.every((item) => item.count === 0)
+  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && noPublishedClaims
   const countLabel = selectedCount === undefined
     ? 'Total unavailable'
     : `${selectedCount} total${error ? ' · stale' : loading ? ' · updating' : ''}`
@@ -117,10 +119,10 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             <Inbox size={20} aria-hidden="true" />
             <p>{trulyEmpty
               ? 'No claims currently need active work.'
-              : hasActiveFilters
+              : hasResultFilters
                 ? 'No claims match the current filters.'
                 : 'No claims are currently in this queue.'}</p>
-            {hasActiveFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
+            {hasResultFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
           </div>
         )}
         {claims.map((claim) => (
@@ -137,7 +139,9 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
               </span>
             </span>
             <span className="queue-item__incident">
-              {words(claim.incident?.family)} · Status: {words(claim.workflow_state)}
+              {words(claim.incident?.family)} · {claim.terminal_disposition
+                ? `Terminal: ${words(claim.terminal_disposition.value)} · Retained status: ${words(claim.workflow_state)}`
+                : `Status: ${words(claim.workflow_state)}`}
             </span>
             <span className="queue-item__summary">
               {claim.work_summary?.current_work_item?.requested_outcome || claim.incident?.summary}

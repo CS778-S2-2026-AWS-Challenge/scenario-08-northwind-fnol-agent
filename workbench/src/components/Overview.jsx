@@ -9,9 +9,9 @@ import SignalsSummary from './SignalsSummary.jsx'
 import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, profile, onAccept, onResolve, onOwnershipAction, onSection }) {
+export default function Overview({ detail, handoffs, collaborationRequests, profile, onAccept, onResolve, onOwnershipAction, onReopen, onSection }) {
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
-  const primaryAction = findPrimaryProjectedAction(detail.allowed_actions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref)
+  const primaryAction = findPrimaryProjectedAction(detail.allowed_actions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref, detail.revision)
   const resolveAction = findProjectedAction(detail.allowed_actions, 'human.resolve_handoff', openHandoff?.handoff_id)
   const primaryKey = primaryAction ? `${primaryAction.action_code}:${primaryAction.target_ref}` : null
   const summaries = detail.section_summaries || {}
@@ -19,7 +19,7 @@ export default function Overview({ detail, handoffs, collaborationRequests, prof
   return (
     <div className="claim-content">
       <WorkSummary detail={detail} profile={profile} />
-      <PrimaryAction action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onSection={onSection} />
+      <PrimaryAction action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
 
@@ -60,8 +60,21 @@ function WorkSummary({ detail, profile }) {
         <SummaryItem label="Priority" value={words(detail.priority_projection?.level)} />
         <SummaryItem label="Queue" value={words(detail.work_summary?.queue_key)} />
       </div>
+      {detail.terminal_disposition && <TerminalSummary terminal={detail.terminal_disposition} />}
       <div className="summary-callout"><div><p className="summary-callout__label">Customer-safe next step</p><p>{detail.customer_next_step?.summary || 'No next-step summary is available.'}</p></div>{detail.customer_next_step?.expected_by && <time>{formatDateTime(detail.customer_next_step.expected_by)}</time>}</div>
     </section>
+  )
+}
+
+function TerminalSummary({ terminal }) {
+  return (
+    <div className="terminal-summary" role="status">
+      <div>
+        <p className="terminal-summary__label">Terminal status · {words(terminal.value)}</p>
+        <p>{words(terminal.reason_code)} · Recorded {formatDateTime(terminal.recorded_at)} at revision {terminal.recorded_revision}.</p>
+        <small>Sources: {terminal.source_refs?.join(', ') || 'Not recorded'}</small>
+      </div>
+    </div>
   )
 }
 

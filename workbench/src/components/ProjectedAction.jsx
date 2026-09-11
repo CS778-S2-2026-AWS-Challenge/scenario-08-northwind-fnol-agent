@@ -9,22 +9,22 @@ export function ProjectedActionState({ action, absentMessage }) {
   )
 }
 
-export function ProjectedActionInput({ input, required = input.required, onChange, value }) {
+export function ProjectedActionInput({ input, required = input.required, onChange, onKeyDown, inputRef, value }) {
   const controlled = value === undefined ? {} : { value }
   if (input.control === 'select') {
     return (
       <label>
         {input.label}
-        <select name={input.field_code} required={required} onChange={onChange} {...controlled}>
+        <select ref={inputRef} name={input.field_code} required={required} onChange={onChange} onKeyDown={onKeyDown} {...controlled}>
           {input.choices.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}
         </select>
       </label>
     )
   }
   if (input.control === 'textarea') {
-    return <label>{input.label}<textarea name={input.field_code} rows="3" required={required} onChange={onChange} {...controlled} /></label>
+    return <label>{input.label}<textarea ref={inputRef} name={input.field_code} rows="3" required={required} onChange={onChange} onKeyDown={onKeyDown} {...controlled} /></label>
   }
-  return <label>{input.label}<input name={input.field_code} required={required} onChange={onChange} autoComplete="off" {...controlled} /></label>
+  return <label>{input.label}<input ref={inputRef} name={input.field_code} required={required} onChange={onChange} onKeyDown={onKeyDown} autoComplete="off" {...controlled} /></label>
 }
 
 export function ActionDetails({ action }) {
