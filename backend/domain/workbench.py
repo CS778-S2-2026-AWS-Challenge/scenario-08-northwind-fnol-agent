@@ -15,6 +15,7 @@ from backend.domain.external_services import (
 from backend.domain.models import (
     ClaimCollaborationRequest,
     ClaimState,
+    ClaimTerminalDisposition,
     ContentsItem,
     ContractModel,
     CustomerNextStep,
@@ -76,6 +77,9 @@ class WorkbenchQueueView(StrEnum):
     WAITING_USER = 'waiting_user'
     WAITING_MATERIAL = 'waiting_material'
     WAITING_THIRD_PARTY = 'waiting_third_party'
+    COMPLETED = 'completed'
+    ABANDONED = 'abandoned'
+    CLOSED = 'closed'
     URGENT = 'urgent'
     HUMAN_REQUESTS = 'human_requests'
     INCOMPLETE_CLAIMS = 'incomplete_claims'
@@ -86,16 +90,20 @@ class WorkbenchQueueView(StrEnum):
     CREATED_ROUTED = 'created_routed'
 
 
-class WorkbenchActiveQueue(StrEnum):
+class WorkbenchQueueKey(StrEnum):
     PROCESSING = 'processing'
     WAITING_USER = 'waiting_user'
     WAITING_MATERIAL = 'waiting_material'
     WAITING_THIRD_PARTY = 'waiting_third_party'
+    COMPLETED = 'completed'
+    ABANDONED = 'abandoned'
+    CLOSED = 'closed'
 
 
 class WorkbenchQueueViewGroup(StrEnum):
     OVERVIEW = 'overview'
     ACTIVE = 'active'
+    TERMINAL = 'terminal'
     OPERATIONAL = 'operational'
 
 
@@ -310,7 +318,7 @@ class WorkbenchIncompleteContext(ContractModel):
 
 
 class WorkbenchWorkSummary(ContractModel):
-    queue_key: WorkbenchActiveQueue
+    queue_key: WorkbenchQueueKey
     current_work_item: WorkbenchCurrentWorkItem | None = None
     primary_action_code: str | None = None
     primary_action_target_ref: str | None = None
@@ -416,6 +424,7 @@ class WorkbenchClaimListItem(ContractModel):
     claimant: WorkbenchClaimantSummary
     incident: WorkbenchIncidentSummary
     lifecycle_state: ClaimLifecycleState
+    terminal_disposition: ClaimTerminalDisposition | None = None
     workflow_state: WorkflowState
     ownership: WorkbenchOwnershipProjection
     priority_projection: WorkbenchPriorityProjection

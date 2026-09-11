@@ -202,7 +202,11 @@ def test_created_and_routed_scenario_exposes_staff_operational_summary() -> None
 
     assert listing.status_code == 200
     item = next(item for item in listing.json()['items'] if item['claim_id'] == claim_id)
-    assert item['work_summary']['queue_key'] == 'processing'
+    assert item['work_summary']['queue_key'] == 'completed'
+    assert item['terminal_disposition']['source_refs'] == [
+        'dec_fixture_at10_claim_creation',
+        'ext_fixture_at10',
+    ]
     assert item['integration_summary']['claim_creation_status'] == 'created'
     assert item['integration_summary']['assessor_routing_status'] == 'queued'
 

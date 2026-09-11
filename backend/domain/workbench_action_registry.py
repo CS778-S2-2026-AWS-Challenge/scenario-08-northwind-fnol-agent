@@ -9,7 +9,7 @@ from backend.domain.workbench import (
     WorkbenchActionInputControl,
 )
 
-WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-04.2'
+WORKBENCH_ACTION_REGISTRY_VERSION = '2026-09-11.1'
 
 
 class WorkbenchActionTargetType(StrEnum):
@@ -277,6 +277,37 @@ WORKBENCH_ACTION_REGISTRY = {
                 ),
             ),
             ('customer_next_step.update', 'customer_update.append'),
+        ),
+        RegisteredWorkbenchAction(
+            'claim.reopen',
+            WorkbenchActionTargetType.CLAIM,
+            'Reopen Claim',
+            'Return an abandoned or closed Claim to its retained intake position.',
+            WorkbenchActionPermission.PRIMARY_OWNER,
+            ConfirmationLevel.EXPLICIT,
+            'Reopening returns this Claim to active work and records your reason.',
+            ('terminal_disposition.clear', 'claim.revision.advance', 'audit.append'),
+            (
+                _input(
+                    'reason',
+                    'Why are you reopening this Claim?',
+                    WorkbenchActionInputControl.TEXTAREA,
+                ),
+            ),
+            failure_codes=(
+                'ACCESS_DENIED',
+                'IDEMPOTENCY_CONFLICT',
+                'RESOURCE_NOT_FOUND',
+                'REVISION_CONFLICT',
+                'VALIDATION_ERROR',
+            ),
+            audit_requirements=(
+                'action_code',
+                'target_ref',
+                'actor_id',
+                'resulting_revision',
+                'prior_terminal_source_refs',
+            ),
         ),
         RegisteredWorkbenchAction(
             'ownership.request_cowork',

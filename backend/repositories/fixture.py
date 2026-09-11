@@ -508,16 +508,26 @@ class FixtureRepository(PersistenceRepository):
             IdempotencyConflict: Retry or audit identity conflicts with stored data.
             KeyError: Claim ownership, revision linkage, or audit scope is invalid.
         """
-        self._validate_branch_evaluation(claim, branch_evaluation)
-        prepared = self._prepare_audit_events(claim, audit_events)
-        self.save_claim_mutation(
-            claim,
-            expected_revision,
-            idempotency,
-            branch_evaluation=branch_evaluation,
-        )
-        for event in prepared:
-            self._audit_events[event.event_id] = deepcopy(event)
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            prepared = self._prepare_audit_events(claim, audit_events)
+            if idempotency.claim_id != claim.claim_id or idempotency.session_id != (
+                claim.active_session_id or ''
+            ):
+                raise KeyError(claim.claim_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if branch_evaluation is not None:
+                self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
+                    branch_evaluation
+                )
+            self._idempotency[lookup] = deepcopy(idempotency)
+            for event in prepared:
+                self._audit_events[event.event_id] = deepcopy(event)
 
     def get_session(
         self,

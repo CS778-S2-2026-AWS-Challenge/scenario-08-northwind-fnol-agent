@@ -32,6 +32,13 @@ Every result contains:
 - provider reference and expected timing when available; and
 - limitations required to interpret the result honestly.
 
+When the accepted result is `created`, the same authoritative Claim compare-and-set also writes
+`terminal_disposition.value=completed` with registered reason `CLAIM_CREATED`, the authorising
+decision reference, the created external Claim reference, typed system actor, timestamp, and
+resulting Claim revision. Workbench reads this record directly; it must not later infer completion
+from `workflow_state=created` or adapter text. A `created` result without a stable external Claim
+reference is a malformed dependency result and is not committed.
+
 The public API remains unchanged when the active adapter changes.
 
 Creation is one registered Claim action within a larger turn. A model may propose
@@ -57,6 +64,8 @@ real result before creation is described to the claimant.
 - The provider-neutral operation identity and fingerprint enforce idempotency.
 - An identical retry returns the accepted claim identity and current authorised
   projection; changed input under the same key is a conflict.
+- Once a terminal disposition exists, a new Claim-creation attempt is an invalid transition;
+  replay of the already accepted creation fingerprint still returns the original external result.
 - Pending evidence remains recorded and is not silently discarded.
 - Model output, severity, retrieval, or an adapter response cannot independently
   authorise creation or assessor routing.

@@ -63,7 +63,7 @@ projections, fixtures, and transaction tests change together.
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
@@ -182,6 +182,10 @@ the append-only audit collection through a bounded, filterable projection.
     without returning bearer values or token hashes.
 33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
+34. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+    without scanning action history or inferring terminal state from a missing Session.
+35. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+    target, expected revision, and idempotency key while preserving the active-session pointer.
 
 ## Development/Test Identity Invariants
 
@@ -441,6 +445,17 @@ Evidence record or protected object.
 - Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
   exact current projected action. Its idempotency record stores the registry version, action code,
   and target alongside the resulting response.
+- `WorkingClaim.terminal_disposition` is either null or one embedded authoritative record with
+  `value`, registered `reason_code`, non-empty immutable `source_refs`, typed `recorded_by`,
+  `recorded_at`, and `recorded_revision`. It does not replace `claim_state`. `completed` requires a
+  created external Claim result; `abandoned` and `closed` cannot coexist with one.
+- Successful external Claim creation writes the created result and `completed` disposition in the
+  same one-revision Claim mutation, referencing the authorising decision and external Claim.
+- Reopen clears only an eligible `abandoned`/`closed` disposition. The Fixture and MongoDB
+  `save_claim_mutation_with_audit` boundary accepts the authenticated operation actor (claimant or
+  staff), requires the same Claim and active-session pointer, and atomically stores the resulting
+  Claim, actor-scoped idempotency response, and claim-revision-linked audit fact. It does not grant
+  authority; the service must resolve `claim.reopen` and primary ownership before calling it.
 
 ## Agent Turn and Action Invariants
 
@@ -741,3 +756,35 @@ context remain historical continuity evidence and never supersede the latest Wor
 P17.1 does not implement notification delivery, retry cadence, attempt processing, abandonment,
 escalation, purge, anonymisation, or retention transitions; those remain owned by later P17
 slices.
+
+## P17.2 Bounded Terminal Disposition and Reopen Slice
+
+This bounded slice adds the authoritative terminal fact required by Workbench without implementing
+the remaining follow-up policy, notification, automatic abandonment/expiry, retention, purge, or
+anonymisation work.
+
+`WorkingClaim.terminal_disposition` is optional and embedded in the Claim record so the existing
+Claim revision remains its only concurrency token. Its values are `completed`, `abandoned`, and
+`closed`. The registered reasons are `CLAIM_CREATED`, `ABANDONMENT_POLICY_APPLIED`, and
+`AUTHORISED_CLOSURE`; the latter two reserve the source-linked persistence vocabulary but do not
+authorise or implement a policy writer. Every record has at least one immutable source reference,
+a typed actor, a timezone-aware recording time, and the Claim revision at which it was recorded.
+
+Successful Claim creation writes `completed` in the same Claim compare-and-set as the external
+Claim result. Workbench reads the persisted record directly and never derives terminal placement
+from workflow text, session absence, or action history. `purged_or_anonymised` is not represented
+by this field and remains outside listable Workbench data.
+
+The `claim.reopen` mutation is staff-scoped and stores, in one Fixture lock or MongoDB transaction:
+
+- the same Claim at revision `N + 1` with only `terminal_disposition` cleared;
+- the unchanged authoritative `claim_state` and `active_session_id`;
+- an idempotency record keyed by authenticated staff actor, route, key, request-plus-revision
+  fingerprint, exact action registry version/code/target, and first response; and
+- an internal append-only `action.completed` audit event with the staff authentication source,
+  prior terminal sources, permission result, submitted reason, idempotency key, and resulting Claim
+  revision.
+
+Only a primary owner with an exact non-blocked action may call this boundary. `completed`, a created
+external Claim, or an underlying `created` workflow cannot be reopened. Failed authorization,
+validation, revision, idempotency, or ownership checks write none of the bundle.

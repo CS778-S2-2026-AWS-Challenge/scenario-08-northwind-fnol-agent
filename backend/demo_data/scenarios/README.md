@@ -14,7 +14,7 @@ They are the source used by the development/test demo seeding workflow.
 | `AT-06-pending-evidence.json` | Claimant-owned future evidence, expected timing, and non-blocking work |
 | `AT-08-resume.json` | Cross-session summary, unresolved work, pending evidence, and prior commitment |
 | `AT-12-signal-writeback.json` | Shared claim state with an internal-only review signal |
-| `AT-10-controlled-assessor.json` | Created claim, assessor route, evidence state, and next responsible action |
+| `AT-10-controlled-assessor.json` | Source-linked completed disposition, created claim, assessor route, evidence state, and next responsible action |
 | `AT-13-staff-action-lifecycle.json` | Completed assign, review, resolve, and claimant-safe write-back audit trail |
 
 ## Week 6 Field-State Examples
@@ -49,6 +49,8 @@ MVP path: clear, pending, urgent, professional review, and handoff.
 shared loading boundary used by the Workbench demo queue and the live evidence
 visibility check. The Workbench queue also loads AT-10 as an additional bounded
 external-service demonstration; it does not replace any of the five MVP paths.
+AT-10 carries the same authoritative `terminal_disposition=completed` record that successful
+Claim creation writes; Workbench does not infer that placement from its fixture workflow state.
 
 Path entry fixtures retain only expected entry baselines and visibility
 classifications. They derive business path, Claim State, evidence, customer next

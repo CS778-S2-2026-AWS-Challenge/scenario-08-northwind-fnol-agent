@@ -37,6 +37,7 @@ from backend.domain.external_services import (
     external_task_for_evidence,
 )
 from backend.domain.models import (
+    ActorReference,
     ActorType,
     AgentAction,
     AgentDecisionRecord,
@@ -47,6 +48,7 @@ from backend.domain.models import (
     AssessorRoutingStatus,
     AuthorityOutcome,
     ClaimCreationStatus,
+    ClaimTerminalDisposition,
     CreateExternalClaimRequest,
     CustomerNextStep,
     EvidenceFileStatus,
@@ -60,6 +62,8 @@ from backend.domain.models import (
     FormStatus,
     ResponsibleParty,
     RouteAssessorRequest,
+    TerminalDispositionReasonCode,
+    TerminalDispositionValue,
     WorkflowState,
     WorkingClaim,
 )
@@ -507,6 +511,13 @@ def create_external_claim(
             raise _idempotency_error()
         return claim.external_claim, True
 
+    if claim.terminal_disposition is not None:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='A terminal Claim cannot start Claim creation.',
+        )
+
     if claim.revision != payload.claim_revision:
         raise ApiError(
             status_code=409,
@@ -585,11 +596,40 @@ def create_external_claim(
 
     timestamp = now_utc()
     created = outcome.result.creation_status is ClaimCreationStatus.CREATED
+    external_claim_ref = outcome.result.external_claim_id or outcome.result.claim_number
+    if created and external_claim_ref is None:
+        raise ApiError(
+            status_code=502,
+            code='DEPENDENCY_FAILED',
+            message='The claims service created a Claim without a stable reference.',
+            details=[
+                ErrorDetail(
+                    field='external_claim',
+                    reason='A created result requires an external Claim identifier.',
+                )
+            ],
+        )
+    resulting_revision = claim.revision + 1
     updated_claim = claim.model_copy(
         update={
             'external_claim': outcome.result,
             'external_claim_source_revision': payload.claim_revision,
             'external_claim_fingerprint': fingerprint,
+            'terminal_disposition': (
+                ClaimTerminalDisposition(
+                    value=TerminalDispositionValue.COMPLETED,
+                    reason_code=TerminalDispositionReasonCode.CLAIM_CREATED,
+                    source_refs=[decision.decision_id, external_claim_ref],
+                    recorded_by=ActorReference(
+                        actor_type=ActorType.SYSTEM,
+                        actor_id='claims_service_integration',
+                    ),
+                    recorded_at=timestamp,
+                    recorded_revision=resulting_revision,
+                )
+                if created and external_claim_ref is not None
+                else None
+            ),
             'route': outcome.result.route,
             'assignee_id': (
                 'stf_demo' if payload.route == 'standard_motor_intake' else claim.assignee_id
@@ -608,7 +648,7 @@ def create_external_claim(
                 responsible_party=ResponsibleParty.SYSTEM,
                 expected_by=outcome.result.expected_by,
             ),
-            'revision': claim.revision + 1,
+            'revision': resulting_revision,
             'updated_at': timestamp,
         }
     )

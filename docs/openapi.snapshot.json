@@ -2184,6 +2184,49 @@
         "title": "ClaimState",
         "type": "object"
       },
+      "ClaimTerminalDisposition": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/TerminalDispositionReasonCode"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "$ref": "#/components/schemas/ActorReference"
+          },
+          "recorded_revision": {
+            "minimum": 1.0,
+            "title": "Recorded Revision",
+            "type": "integer"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "value": {
+            "$ref": "#/components/schemas/TerminalDispositionValue"
+          }
+        },
+        "required": [
+          "value",
+          "reason_code",
+          "source_refs",
+          "recorded_by",
+          "recorded_at",
+          "recorded_revision"
+        ],
+        "title": "ClaimTerminalDisposition",
+        "type": "object"
+      },
       "ClaimantClaim": {
         "additionalProperties": false,
         "properties": {
@@ -8733,6 +8776,22 @@
         "title": "ReleaseSetValidationRequest",
         "type": "object"
       },
+      "ReopenClaimRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReopenClaimRequest",
+        "type": "object"
+      },
       "RequestEvidenceUploadRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10468,6 +10527,24 @@
         "title": "TagVisibility",
         "type": "string"
       },
+      "TerminalDispositionReasonCode": {
+        "enum": [
+          "CLAIM_CREATED",
+          "ABANDONMENT_POLICY_APPLIED",
+          "AUTHORISED_CLOSURE"
+        ],
+        "title": "TerminalDispositionReasonCode",
+        "type": "string"
+      },
+      "TerminalDispositionValue": {
+        "enum": [
+          "completed",
+          "abandoned",
+          "closed"
+        ],
+        "title": "TerminalDispositionValue",
+        "type": "string"
+      },
       "TextMessageContent": {
         "additionalProperties": false,
         "properties": {
@@ -10868,16 +10945,6 @@
         "title": "WorkbenchActionResultDefaults",
         "type": "object"
       },
-      "WorkbenchActiveQueue": {
-        "enum": [
-          "processing",
-          "waiting_user",
-          "waiting_material",
-          "waiting_third_party"
-        ],
-        "title": "WorkbenchActiveQueue",
-        "type": "string"
-      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -11146,6 +11213,16 @@
             "title": "Tags",
             "type": "array"
           },
+          "terminal_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTerminalDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -11271,6 +11348,16 @@
             },
             "title": "Tags",
             "type": "array"
+          },
+          "terminal_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTerminalDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -12367,6 +12454,19 @@
         "title": "WorkbenchQueueFilterOption",
         "type": "object"
       },
+      "WorkbenchQueueKey": {
+        "enum": [
+          "processing",
+          "waiting_user",
+          "waiting_material",
+          "waiting_third_party",
+          "completed",
+          "abandoned",
+          "closed"
+        ],
+        "title": "WorkbenchQueueKey",
+        "type": "string"
+      },
       "WorkbenchQueueView": {
         "enum": [
           "all",
@@ -12374,6 +12474,9 @@
           "waiting_user",
           "waiting_material",
           "waiting_third_party",
+          "completed",
+          "abandoned",
+          "closed",
           "urgent",
           "human_requests",
           "incomplete_claims",
@@ -12390,6 +12493,7 @@
         "enum": [
           "overview",
           "active",
+          "terminal",
           "operational"
         ],
         "title": "WorkbenchQueueViewGroup",
@@ -13600,7 +13704,7 @@
             "title": "Primary Blocker"
           },
           "queue_key": {
-            "$ref": "#/components/schemas/WorkbenchActiveQueue"
+            "$ref": "#/components/schemas/WorkbenchQueueKey"
           },
           "risk_signals": {
             "items": {
@@ -18480,6 +18584,106 @@
           }
         },
         "summary": "Create Staff Message",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/reopen": {
+      "post": {
+        "operationId": "reopen_workbench_claim_api_v1_workbench_claims__claim_id__reopen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchClaimDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reopen Workbench Claim",
         "tags": [
           "workbench"
         ]
