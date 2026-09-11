@@ -43,6 +43,33 @@ const props = {
 }
 
 describe('ClaimWorkspace navigation', () => {
+  it('explains a Claim load failure with a request reference and in-place retry', async () => {
+    const onRetry = vi.fn()
+    const user = userEvent.setup()
+    render(<ClaimWorkspace
+      {...props}
+      detail={null}
+      error={Object.assign(new Error('Projection service timed out.'), { requestId: 'req_claim_1' })}
+      onRetry={onRetry}
+    />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('This Claim could not be opened')
+    expect(screen.getByRole('alert')).toHaveTextContent('Request reference: req_claim_1')
+    await user.click(screen.getByRole('button', { name: 'Retry Claim' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('uses a safe inaccessible state for a Claim that is no longer visible', () => {
+    render(<ClaimWorkspace
+      {...props}
+      detail={null}
+      error={Object.assign(new Error('Not found.'), { status: 404, code: 'RESOURCE_NOT_FOUND' })}
+    />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('This Claim is not available')
+    expect(screen.queryByRole('button', { name: 'Retry Claim' })).not.toBeInTheDocument()
+  })
+
   it('exposes one selected tab and a labelled tab panel', () => {
     render(<ClaimWorkspace {...props} />)
 
@@ -155,6 +182,57 @@ describe('ClaimWorkspace navigation', () => {
     expect(screen.getByRole('heading', { name: 'No staff action is currently authorised' })).toBeVisible()
   })
 
+  it('keeps a stale Claim readable but withdraws projected actions until refresh', () => {
+    const acceptAction = {
+      action_code: 'human.accept_handoff',
+      target_type: 'handoff',
+      target_ref: 'hnd_1',
+      label: 'Accept Claim',
+      purpose: 'Accept the projected handoff.',
+      availability: 'confirmation_required',
+      confirmation: { message: 'Accept this Claim?' },
+      based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      stale
+      error={new Error('Background refresh failed.')}
+      detail={{
+        ...detail,
+        work_summary: { ...detail.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref },
+        allowed_actions: [acceptAction],
+      }}
+      resources={{ handoffs: { items: [{ handoff_id: 'hnd_1', status: 'pending' }] } }}
+    />)
+
+    expect(screen.getByText('Showing a saved Claim snapshot')).toBeInTheDocument()
+    expect(screen.getByText('Rear-end collision.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Review acceptance' })).not.toBeInTheDocument()
+  })
+
+  it('shows an actionable failure beside a controlled handoff action', async () => {
+    const user = userEvent.setup()
+    const onAccept = vi.fn().mockRejectedValue(Object.assign(
+      new Error('Accepting the handoff was not completed. Review the latest state before trying again. Request reference: req_action_1.'),
+      { code: 'REVISION_CONFLICT' },
+    ))
+    const acceptAction = {
+      action_code: 'human.accept_handoff', target_type: 'handoff', target_ref: 'hnd_1', label: 'Accept Claim', purpose: 'Accept the projected handoff.', availability: 'confirmation_required', confirmation: { message: 'Accept this Claim?' }, based_on_revision: 4,
+    }
+    render(<ClaimWorkspace
+      {...props}
+      onAccept={onAccept}
+      detail={{ ...detail, work_summary: { ...detail.work_summary, primary_action_code: acceptAction.action_code, primary_action_target_ref: acceptAction.target_ref }, allowed_actions: [acceptAction] }}
+      resources={{ handoffs: { items: [{ handoff_id: 'hnd_1', status: 'pending' }] } }}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Review acceptance' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm Accept Claim' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Request reference: req_action_1')
+    expect(onAccept).toHaveBeenCalledWith(expect.objectContaining({ handoff_id: 'hnd_1' }))
+  })
+
   it('shows terminal provenance and submits the exact projected reopen action through an accessible confirmation dialog', async () => {
     const user = userEvent.setup()
     const onReopen = vi.fn().mockResolvedValue(undefined)
@@ -255,12 +333,13 @@ describe('ClaimWorkspace navigation', () => {
   it('explains a stale reopen and keeps the projected input available for retry', async () => {
     const user = userEvent.setup()
     const conflict = Object.assign(new Error('Revision mismatch.'), { code: 'REVISION_CONFLICT', projectionReloaded: true })
+    const onReopen = vi.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce(undefined)
     const reopenAction = {
       action_code: 'claim.reopen', target_type: 'claim', target_ref: 'clm_1', label: 'Reopen Claim', purpose: 'Return this Claim.', availability: 'confirmation_required', confirmation: { level: 'explicit', message: 'Confirm.' }, inputs: [{ field_code: 'reason', label: 'Reason', control: 'textarea', required: true, choices: [] }], based_on_revision: 4,
     }
-    render(<ClaimWorkspace
+    const { rerender } = render(<ClaimWorkspace
       {...props}
-      onReopen={vi.fn().mockRejectedValue(conflict)}
+      onReopen={onReopen}
       detail={{ ...detail, work_summary: { ...detail.work_summary, primary_action_code: 'claim.reopen', primary_action_target_ref: 'clm_1' }, allowed_actions: [reopenAction] }}
     />)
 
@@ -273,5 +352,18 @@ describe('ClaimWorkspace navigation', () => {
     expect(alert).toHaveTextContent(/latest server projection/i)
     expect(alert).toHaveTextContent(/try again/i)
     expect(screen.getByLabelText('Reason')).toHaveValue('New material received.')
+
+    const latestAction = { ...reopenAction, based_on_revision: 5 }
+    rerender(<ClaimWorkspace
+      {...props}
+      onReopen={onReopen}
+      detail={{ ...detail, revision: 5, work_summary: { ...detail.work_summary, primary_action_code: 'claim.reopen', primary_action_target_ref: 'clm_1' }, allowed_actions: [latestAction] }}
+    />)
+    expect(screen.getByLabelText('Reason')).toHaveValue('New material received.')
+    await user.click(screen.getByRole('button', { name: 'Reopen Claim' }))
+
+    await waitFor(() => expect(onReopen).toHaveBeenCalledTimes(2))
+    expect(onReopen.mock.calls[1][0]).toBe(latestAction)
+    expect(onReopen.mock.calls[1][2]).not.toBe(onReopen.mock.calls[0][2])
   })
 })

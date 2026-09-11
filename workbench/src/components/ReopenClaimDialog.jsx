@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { failureReference } from '../failure.js'
 import { ProjectedActionInput } from './ProjectedAction.jsx'
 
 export default function ReopenClaimDialog({ action, onReopen }) {
@@ -8,6 +9,7 @@ export default function ReopenClaimDialog({ action, onReopen }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [operationKey, setOperationKey] = useState('')
+  const operationRevision = useRef(action.based_on_revision)
   const trigger = useRef(null)
   const dialog = useRef(null)
   const reasonInput = useRef(null)
@@ -45,6 +47,7 @@ export default function ReopenClaimDialog({ action, onReopen }) {
   function begin() {
     setError('')
     setOperationKey(crypto.randomUUID())
+    operationRevision.current = action.based_on_revision
     setOpen(true)
   }
 
@@ -85,15 +88,22 @@ export default function ReopenClaimDialog({ action, onReopen }) {
     setReason(event.target.value)
     setError('')
     setOperationKey(crypto.randomUUID())
+    operationRevision.current = action.based_on_revision
   }
 
   async function submit(event) {
     event.preventDefault()
     if (busy || missingReason) return
+    let currentOperationKey = operationKey
+    if (operationRevision.current !== action.based_on_revision) {
+      currentOperationKey = crypto.randomUUID()
+      operationRevision.current = action.based_on_revision
+      setOperationKey(currentOperationKey)
+    }
     setBusy(true)
     setError('')
     try {
-      await onReopen(action, { reason: reason.trim() }, operationKey)
+      await onReopen(action, { reason: reason.trim() }, currentOperationKey)
       setOpen(false)
     } catch (nextError) {
       setError(reopenErrorMessage(nextError))
@@ -131,9 +141,12 @@ export default function ReopenClaimDialog({ action, onReopen }) {
 
 function reopenErrorMessage(error) {
   const reload = error?.projectionReloaded ? ' The latest server projection is now shown.' : ''
-  if (error?.code === 'REVISION_CONFLICT') return `This Claim changed after you opened it, so it was not reopened. Review the latest revision and try again.${reload}`
-  if (error?.code === 'ACCESS_DENIED') return `You are not authorised to reopen this Claim in its current state. Ask the primary owner to review it.${reload}`
-  if (error?.code === 'RESOURCE_NOT_FOUND') return 'This Claim is no longer available to your staff account. Return to the queue and refresh it.'
-  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `This reopen attempt no longer matches the original request. Review the latest Claim before trying again.${reload}`
-  return `The reopen result could not be confirmed. ${error?.message || 'The Workbench service did not return a usable result.'} Refresh the Claim before trying again.${reload}`
+  const reference = failureReference(error)
+  let message
+  if (error?.code === 'REVISION_CONFLICT') message = `This Claim changed after you opened it, so it was not reopened. Review the latest revision and try again.${reload}`
+  else if (error?.code === 'ACCESS_DENIED') message = `You are not authorised to reopen this Claim in its current state. Ask the primary owner to review it.${reload}`
+  else if (error?.code === 'RESOURCE_NOT_FOUND') message = 'This Claim is no longer available to your staff account. Return to the queue and refresh it.'
+  else if (error?.code === 'IDEMPOTENCY_CONFLICT') message = `This reopen attempt no longer matches the original request. Review the latest Claim before trying again.${reload}`
+  else message = `The reopen result could not be confirmed. ${error?.message || 'The Workbench service did not return a usable result.'} Refresh the Claim before trying again.${reload}`
+  return [message, reference].filter(Boolean).join(' ')
 }

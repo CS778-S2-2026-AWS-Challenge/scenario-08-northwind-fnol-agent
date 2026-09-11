@@ -1,5 +1,6 @@
 import { ChevronDown, Filter, Inbox, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import { TagList } from './TagList.jsx'
 
@@ -104,13 +105,20 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
       </>}
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
         {loading && <p className="queue-state" role="status">{claims.length ? 'Updating current work...' : 'Loading current work...'}</p>}
+        {!loading && !error && viewCounts?.status === 'unavailable' && (
+          <div className="queue-limitation" role="status">
+            <span><strong>Queue totals unavailable.</strong> {viewCounts.limitation || 'The current rows are usable, but the service could not calculate totals.'}</span>
+            <button className="button button--quiet" type="button" onClick={onRetry}>Refresh totals</button>
+          </div>
+        )}
         {!loading && error && (
           <div className="queue-state" role="alert">
             <strong>Claim queue unavailable</strong>
             <p>{claims.length
               ? 'The latest queue query could not be loaded. The Claims below are from the last successful load.'
               : 'Current work could not be loaded because the queue service did not return a usable projection.'}</p>
-            <p>{error}</p>
+            <p>{failureReason(error)}</p>
+            {failureReference(error) && <small>{failureReference(error)}</small>}
             <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
           </div>
         )}
@@ -127,7 +135,7 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
         )}
         {claims.map((claim) => (
           <button
-            className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}`}
+            className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}${error ? ' is-stale' : ''}`}
             type="button"
             key={claim.claim_id}
             onClick={() => onOpen(claim)}

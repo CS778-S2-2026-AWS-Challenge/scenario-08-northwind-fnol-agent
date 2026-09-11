@@ -1,4 +1,5 @@
 import { UserRoundCheck } from 'lucide-react'
+import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import OwnershipActions from './OwnershipActions.jsx'
 import { findPrimaryProjectedAction, findProjectedAction } from '../projected-action.js'
@@ -9,25 +10,42 @@ import SignalsSummary from './SignalsSummary.jsx'
 import SourceSummary from './SourceSummary.jsx'
 import { TagList } from './TagList.jsx'
 
-export default function Overview({ detail, handoffs, collaborationRequests, profile, onAccept, onResolve, onOwnershipAction, onReopen, onSection }) {
+export default function Overview({ detail, handoffs, collaborationRequests, supportingState = [], profile, onAccept, onResolve, onOwnershipAction, onReopen, onSection, onRetry }) {
+  const [handoffState, collaborationState] = supportingState
+  const allowedActions = (detail.allowed_actions || []).filter((action) => {
+    if (action.target_type === 'handoff' && actionContextUnavailable(handoffState)) return false
+    if (action.target_type === 'collaboration_request' && actionContextUnavailable(collaborationState)) return false
+    return true
+  })
   const openHandoff = [...handoffs].reverse().find((item) => !['resolved', 'cancelled'].includes(item.status))
-  const primaryAction = findPrimaryProjectedAction(detail.allowed_actions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref, detail.revision)
-  const resolveAction = findProjectedAction(detail.allowed_actions, 'human.resolve_handoff', openHandoff?.handoff_id)
+  const primaryAction = findPrimaryProjectedAction(allowedActions, detail.work_summary?.primary_action_code, detail.work_summary?.primary_action_target_ref, detail.revision)
+  const resolveAction = findProjectedAction(allowedActions, 'human.resolve_handoff', openHandoff?.handoff_id)
   const primaryKey = primaryAction ? `${primaryAction.action_code}:${primaryAction.target_ref}` : null
   const summaries = detail.section_summaries || {}
+  const supportingIssue = supportingState.find((resource) => (
+    resource?.error || ['partial', 'unavailable'].includes(resource?.status)
+  ))
+  const supportingError = supportingIssue?.error
+  const supportingLoading = supportingState.some((resource) => resource?.loading)
 
   return (
     <div className="claim-content">
       <WorkSummary detail={detail} profile={profile} />
-      <PrimaryAction action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />
+      {(supportingLoading || supportingIssue) && (
+        <div className={`resource-notice${supportingError ? ' resource-notice--error' : ''}`} role={supportingError ? 'alert' : 'status'}>
+          <div><strong>{supportingLoading ? 'Loading action context' : 'Some action context is unavailable'}</strong><p>{supportingLoading ? 'Handoff and collaboration records are loading.' : `The Claim remains readable, but affected actions stay unavailable. ${supportingIssue?.limitation || failureReason(supportingError)}`}</p>{failureReference(supportingError) && <small>{failureReference(supportingError)}</small>}</div>
+          {!supportingLoading && <button className="button button--quiet" type="button" onClick={onRetry}>Refresh Claim</button>}
+        </div>
+      )}
+      <PrimaryAction key={primaryKey || 'no-primary-action'} action={primaryAction} handoff={openHandoff} request={collaborationRequests.find((item) => item.request_id === primaryAction?.target_ref)} onAccept={onAccept} onOwnershipAction={onOwnershipAction} onReopen={onReopen} onSection={onSection} />
       <SourceSummary summary={detail.source_summary} />
       <MissingInformation items={detail.work_summary?.missing_information || []} />
 
       <details className="purpose-disclosure">
         <summary>Ownership and handoff actions</summary>
         {primaryAction?.action_code !== 'human.resolve_handoff' && <HandoffResolution handoff={openHandoff} allowedAction={resolveAction} onResolve={onResolve} />}
-        <OwnershipActions actions={detail.allowed_actions || []} requests={collaborationRequests} excludeAction={primaryKey} onAction={onOwnershipAction} />
-        {!resolveAction && !(detail.allowed_actions || []).some((action) => action.action_code.startsWith('ownership.')) && <p className="empty-note">No secondary ownership action is projected.</p>}
+        <OwnershipActions actions={allowedActions} requests={collaborationRequests} excludeAction={primaryKey} onAction={onOwnershipAction} />
+        {!resolveAction && !allowedActions.some((action) => action.action_code.startsWith('ownership.')) && <p className="empty-note">No secondary ownership action is projected.</p>}
       </details>
 
       <details className="purpose-disclosure">
@@ -47,6 +65,10 @@ export default function Overview({ detail, handoffs, collaborationRequests, prof
       </details>
     </div>
   )
+}
+
+function actionContextUnavailable(resource) {
+  return Boolean(resource?.loading || resource?.error || ['partial', 'unavailable'].includes(resource?.status))
 }
 
 function WorkSummary({ detail, profile }) {

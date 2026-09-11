@@ -9,6 +9,7 @@ import NavigationRail from '../components/NavigationRail.jsx'
 import QueuePanel from '../components/QueuePanel.jsx'
 import StaffAgent from '../components/StaffAgent.jsx'
 import { usePersistentTabs } from '../hooks/usePersistentTabs.js'
+import { actionFailureMessage, failureReason, failureReference } from '../failure.js'
 import { revisionNotice as buildRevisionNotice } from '../revision.js'
 import ConversationsPage from './ConversationsPage.jsx'
 
@@ -24,21 +25,29 @@ export default function WorkbenchPage() {
   const [viewCounts, setViewCounts] = useState(UNAVAILABLE_VIEW_COUNTS)
   const [filterMetadata, setFilterMetadata] = useState(null)
   const [filterMetadataLoading, setFilterMetadataLoading] = useState(true)
-  const [filterMetadataError, setFilterMetadataError] = useState('')
+  const [filterMetadataError, setFilterMetadataError] = useState(null)
   const [filterMetadataAttempt, setFilterMetadataAttempt] = useState(0)
   const [nextCursor, setNextCursor] = useState(null)
   const [queueLoading, setQueueLoading] = useState(false)
-  const [queueError, setQueueError] = useState('')
+  const [queueError, setQueueError] = useState(null)
   const [queueNotice, setQueueNotice] = useState('')
   const [movementNotice, setMovementNotice] = useState(null)
   const queueRequestId = useRef(0)
+  const queueSnapshotKeyRef = useRef('')
+  const [queueSnapshotKey, setQueueSnapshotKey] = useState('')
   const [conversations, setConversations] = useState([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
-  const [conversationsError, setConversationsError] = useState('')
+  const [conversationsError, setConversationsError] = useState(null)
   const [detail, setDetail] = useState(null)
+  const detailRef = useRef(null)
+  const currentClaimIdRef = useRef(claimId)
+  currentClaimIdRef.current = claimId
+  const detailRequestId = useRef(0)
+  const resourceRequestIds = useRef({})
   const [resources, setResources] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
-  const [detailError, setDetailError] = useState('')
+  const [detailError, setDetailError] = useState(null)
+  const [detailStale, setDetailStale] = useState(false)
   const [queueVisible, setQueueVisible] = useState(true)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentSessionId, setAgentSessionId] = useState(null)
@@ -66,6 +75,8 @@ export default function WorkbenchPage() {
     updatedBefore,
     updatedAfter,
   } = queueFilters
+  const currentQueueKey = queueFilterKey(queueFilters)
+  const visibleClaims = queueSnapshotKey === currentQueueKey ? claims : []
 
   const openConversation = useCallback((conversation) => {
     if (conversation.kind === 'staff_agent') {
@@ -88,86 +99,108 @@ export default function WorkbenchPage() {
   const loadClaims = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (!filterMetadata || !viewAvailable) return
     const requestId = ++queueRequestId.current
+    const snapshotKey = queueFilterKey(queueFilters)
+    const sameSnapshot = queueSnapshotKeyRef.current === snapshotKey
     setQueueLoading(true)
-    setQueueError('')
+    setQueueError(null)
     setQueueNotice('')
-    if (!append) setNextCursor(null)
-    try {
-      const requestFilters = {
-        ...(view === 'all' ? {} : { view }),
-        ...(workflowState ? { workflow_state: workflowState } : {}),
-        ...(priority ? { priority } : {}),
-        ...(assigneeId ? { assignee_id: assigneeId } : {}),
-        ...(nextAction ? { next_action: nextAction } : {}),
-        ...(tagFilter ? { tag: tagFilter } : {}),
-        ...(search ? { search } : {}),
-        ...(updatedBefore ? { updated_before: updatedBefore } : {}),
-        ...(updatedAfter ? { updated_after: updatedAfter } : {}),
-        limit: 25,
-        ...(cursor ? { cursor } : {}),
+    if (!append) {
+      setNextCursor(null)
+      if (!sameSnapshot) {
+        setClaims([])
+        setViewCounts(UNAVAILABLE_VIEW_COUNTS)
       }
-      const response = await workbenchApi.claims(token, requestFilters)
+    }
+    try {
+      const response = await workbenchApi.claims(token, queueRequestFilters(queueFilters, cursor))
       if (requestId !== queueRequestId.current) return
       setClaims((current) => append ? [...current, ...response.items] : response.items)
+      queueSnapshotKeyRef.current = snapshotKey
+      setQueueSnapshotKey(snapshotKey)
       setNextCursor(response.page?.next_cursor || null)
       setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
     } catch (error) {
       if (requestId !== queueRequestId.current) return
       if (append && error.code === 'VALIDATION_ERROR') {
         try {
-          const response = await workbenchApi.claims(token, {
-            ...(view === 'all' ? {} : { view }),
-            ...(workflowState ? { workflow_state: workflowState } : {}),
-            ...(priority ? { priority } : {}),
-            ...(assigneeId ? { assignee_id: assigneeId } : {}),
-            ...(nextAction ? { next_action: nextAction } : {}),
-            ...(tagFilter ? { tag: tagFilter } : {}),
-            ...(search ? { search } : {}),
-            ...(updatedBefore ? { updated_before: updatedBefore } : {}),
-            ...(updatedAfter ? { updated_after: updatedAfter } : {}),
-            limit: 25,
-          })
+          const response = await workbenchApi.claims(token, queueRequestFilters(queueFilters))
           if (requestId !== queueRequestId.current) return
           setClaims(response.items)
+          queueSnapshotKeyRef.current = snapshotKey
+          setQueueSnapshotKey(snapshotKey)
           setNextCursor(response.page?.next_cursor || null)
           setViewCounts(response.view_counts || UNAVAILABLE_VIEW_COUNTS)
           setQueueNotice('The saved queue page was invalid or stale, so current work was reloaded from the start.')
           return
         } catch (recoveryError) {
-          if (requestId === queueRequestId.current) setQueueError(recoveryError.message)
+          if (requestId === queueRequestId.current) setQueueError(recoveryError)
           return
         }
       }
-      setQueueError(error.message)
+      setQueueError(error)
     } finally {
       if (requestId === queueRequestId.current) setQueueLoading(false)
     }
-  }, [assigneeId, filterMetadata, nextAction, priority, search, tagFilter, token, updatedAfter, updatedBefore, view, viewAvailable, workflowState])
+  }, [filterMetadata, queueFilters, token, viewAvailable])
 
   const loadDetail = useCallback(async (id) => {
+    const requestId = ++detailRequestId.current
     if (!id) {
+      detailRef.current = null
       setDetail(null)
       return
     }
-    setDetailLoading(true)
-    setDetailError('')
-    try {
-      const [response, handoffs, collaborationRequests] = await Promise.all([
-        workbenchApi.claim(token, id),
-        workbenchApi.handoffs(token, id),
-        workbenchApi.collaborationRequests(token, id),
-      ])
-      setDetail(response)
-      setResources({
-        handoffs: resourceState(handoffs),
-        collaborationRequests: resourceState(collaborationRequests),
-      })
-      openTab(response)
-    } catch (error) {
+    const preserve = detailRef.current?.claim_id === id
+    if (!preserve) {
+      detailRef.current = null
       setDetail(null)
-      setDetailError(error.message)
-    } finally {
+      setResources({})
+    }
+    setDetailLoading(true)
+    setDetailError(null)
+    setDetailStale(false)
+    setResources((current) => {
+      const base = preserve ? current : {}
+      return {
+        ...base,
+        handoffs: { ...(base.handoffs || {}), loading: true, error: null },
+        collaborationRequests: { ...(base.collaborationRequests || {}), loading: true, error: null },
+      }
+    })
+    const supportingRequest = Promise.allSettled([
+      workbenchApi.handoffs(token, id),
+      workbenchApi.collaborationRequests(token, id),
+    ])
+    try {
+      const response = await workbenchApi.claim(token, id)
+      if (requestId !== detailRequestId.current) return
+      detailRef.current = response
+      setDetail(response)
+      setDetailStale(false)
       setDetailLoading(false)
+      openTab(response)
+      const [handoffs, collaborationRequests] = await supportingRequest
+      if (requestId !== detailRequestId.current) return
+      setResources((current) => ({
+        ...current,
+        handoffs: settledResourceState(handoffs, current.handoffs),
+        collaborationRequests: settledResourceState(
+          collaborationRequests,
+          current.collaborationRequests,
+        ),
+      }))
+    } catch (error) {
+      if (requestId !== detailRequestId.current) return
+      if (!preserve || isInaccessibleError(error)) {
+        detailRef.current = null
+        setDetail(null)
+        setResources({})
+      } else {
+        setDetailStale(true)
+      }
+      setDetailError(error)
+    } finally {
+      if (requestId === detailRequestId.current) setDetailLoading(false)
     }
   }, [openTab, token])
 
@@ -175,42 +208,86 @@ export default function WorkbenchPage() {
     if (!id) return
     try {
       const response = await workbenchApi.claim(token, id)
+      if (currentClaimIdRef.current !== id) return
+      detailRef.current = response
       setDetail((current) => {
         const notice = buildRevisionNotice(current, response)
         if (notice) setRevisionNotice(notice)
         return response
       })
+      setDetailError(null)
+      setDetailStale(false)
       openTab(response)
-    } catch {
-      // The foreground view owns actionable errors; background refresh must not erase drafts.
+    } catch (error) {
+      if (currentClaimIdRef.current !== id) return
+      if (isInaccessibleError(error)) {
+        detailRef.current = null
+        setDetail(null)
+        setResources({})
+      } else {
+        setDetailStale(true)
+      }
+      setDetailError(error)
     }
   }, [openTab, token])
 
-  const loadResource = useCallback(async (name, loader) => {
+  const loadResource = useCallback(async (name, ownerId, loader) => {
+    const requestId = (resourceRequestIds.current[name] || 0) + 1
+    resourceRequestIds.current[name] = requestId
     setResources((current) => ({
       ...current,
-      [name]: { ...(current[name] || {}), loading: true, error: '' },
+      [name]: { ...(current[name] || {}), loading: true, error: null },
     }))
     try {
       const response = await loader()
+      if (currentClaimIdRef.current !== ownerId || resourceRequestIds.current[name] !== requestId) return null
       setResources((current) => ({ ...current, [name]: resourceState(response) }))
       return response
     } catch (error) {
+      if (currentClaimIdRef.current !== ownerId || resourceRequestIds.current[name] !== requestId) return null
       setResources((current) => ({
         ...current,
-        [name]: { items: [], status: 'unavailable', limitation: null, loading: false, error: error.message },
+        [name]: {
+          ...(current[name] || {}),
+          items: current[name]?.items || [],
+          status: 'unavailable',
+          limitation: current[name]?.limitation || null,
+          loading: false,
+          stale: Boolean(current[name]?.items?.length),
+          error,
+        },
       }))
       return null
     }
   }, [])
 
   const loadConversationResources = useCallback(async (id, requestedSessionId) => {
-    const sessions = await loadResource('sessions', () => workbenchApi.sessions(token, id))
+    const sessions = await loadResource('sessions', id, () => workbenchApi.sessions(token, id))
+    if (!sessions) {
+      if (currentClaimIdRef.current === id) {
+        setResources((current) => {
+          const previous = current.messages || {}
+          return {
+            ...current,
+            messages: {
+              ...previous,
+              items: previous.items || [],
+              status: 'unavailable',
+              limitation: 'Conversation messages cannot be loaded until the session list is available.',
+              loading: false,
+              stale: Boolean(previous.items?.length),
+              error: current.sessions?.error || null,
+            },
+          }
+        })
+      }
+      return
+    }
     const session = sessions?.items?.find((item) => item.session_id === requestedSessionId)
       || sessions?.items?.at(-1)
     if (session) {
-      await loadResource('messages', () => workbenchApi.messages(token, id, session.session_id))
-    } else {
+      await loadResource('messages', id, () => workbenchApi.messages(token, id, session.session_id))
+    } else if (currentClaimIdRef.current === id) {
       setResources((current) => ({ ...current, messages: resourceState({ items: [] }) }))
     }
   }, [loadResource, token])
@@ -233,17 +310,17 @@ export default function WorkbenchPage() {
       await loadConversationResources(id, selectedSessionId)
       return
     }
-    await Promise.all((loaders[section] || []).map(([name, loader]) => loadResource(name, loader)))
+    await Promise.all((loaders[section] || []).map(([name, loader]) => loadResource(name, id, loader)))
   }, [loadConversationResources, loadResource, selectedSessionId, token])
 
   const loadConversations = useCallback(async () => {
     setConversationsLoading(true)
-    setConversationsError('')
+    setConversationsError(null)
     try {
       const response = await workbenchApi.conversations(token)
       setConversations(response.items || [])
     } catch (error) {
-      setConversationsError(error.message)
+      setConversationsError(error)
     } finally {
       setConversationsLoading(false)
     }
@@ -254,14 +331,14 @@ export default function WorkbenchPage() {
     ++queueRequestId.current
     setFilterMetadata(null)
     setFilterMetadataLoading(true)
-    setFilterMetadataError('')
+    setFilterMetadataError(null)
     setQueueLoading(false)
     workbenchApi.claimFilterMetadata(token).then(
       (response) => {
         if (active) setFilterMetadata(response)
       },
       (error) => {
-        if (active) setFilterMetadataError(error.message)
+        if (active) setFilterMetadataError(error)
       },
     ).finally(() => {
       if (active) setFilterMetadataLoading(false)
@@ -296,7 +373,12 @@ export default function WorkbenchPage() {
     if (claimId) {
       loadDetail(claimId)
     } else if (!isConversations) {
+      ++detailRequestId.current
+      detailRef.current = null
       setDetail(null)
+      setDetailError(null)
+      setDetailStale(false)
+      setResources({})
     }
   }, [claimId, isConversations, loadDetail])
   useEffect(() => {
@@ -377,41 +459,93 @@ export default function WorkbenchPage() {
     }, { replace: true })
   }
 
+  async function runClaimMutation(label, operation) {
+    const previous = detailRef.current
+    if (!previous) throw new Error('The current Claim projection is unavailable. Refresh the Claim before acting.')
+    try {
+      await operation(previous)
+    } catch (error) {
+      let latest = null
+      try {
+        latest = await workbenchApi.claim(token, previous.claim_id)
+        if (currentClaimIdRef.current === previous.claim_id) {
+          detailRef.current = latest
+          setDetail(latest)
+          setDetailError(null)
+          setDetailStale(false)
+          openTab(latest)
+        }
+        error.projectionReloaded = true
+        error.projectionChanged = latest.revision !== previous.revision
+        error.latestRevision = latest.revision
+        await loadClaims()
+      } catch (reloadError) {
+        if (currentClaimIdRef.current === previous.claim_id) {
+          if (isInaccessibleError(reloadError)) {
+            detailRef.current = null
+            setDetail(null)
+            setResources({})
+          } else {
+            setDetailStale(true)
+          }
+          setDetailError(reloadError)
+        }
+      }
+      error.message = actionFailureMessage(label, error, latest)
+      throw error
+    }
+    if (currentClaimIdRef.current === previous.claim_id) {
+      await Promise.all([loadDetail(previous.claim_id), loadClaims()])
+    } else {
+      await loadClaims()
+    }
+  }
+
   async function acceptHandoff(handoff) {
-    await workbenchApi.acceptHandoff(token, detail.claim_id, handoff.handoff_id, detail.revision)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Accepting the handoff', (current) => (
+      workbenchApi.acceptHandoff(
+        token,
+        current.claim_id,
+        handoff.handoff_id,
+        current.revision,
+      )
+    ))
   }
 
   async function resolveHandoff(handoff, payload) {
-    await workbenchApi.resolveHandoff(
-      token,
-      detail.claim_id,
-      handoff.handoff_id,
-      detail.revision,
-      payload,
-    )
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Resolving the handoff', (current) => (
+      workbenchApi.resolveHandoff(
+        token,
+        current.claim_id,
+        handoff.handoff_id,
+        current.revision,
+        payload,
+      )
+    ))
   }
 
   async function decideSignal(signalId, payload) {
-    await workbenchApi.decideSignal(token, detail.claim_id, signalId, detail.revision, payload)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Recording the signal decision', (current) => (
+      workbenchApi.decideSignal(token, current.claim_id, signalId, current.revision, payload)
+    ))
   }
 
   async function createStaffAction(payload) {
-    await workbenchApi.createStaffAction(token, detail.claim_id, detail.revision, payload)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Creating the staff action', (current) => (
+      workbenchApi.createStaffAction(token, current.claim_id, current.revision, payload)
+    ))
   }
 
   async function updateStaffAction(actionId, payload) {
-    await workbenchApi.updateStaffAction(
-      token,
-      detail.claim_id,
-      actionId,
-      detail.revision,
-      payload,
-    )
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Updating the staff action', (current) => (
+      workbenchApi.updateStaffAction(
+        token,
+        current.claim_id,
+        actionId,
+        current.revision,
+        payload,
+      )
+    ))
   }
 
   function loadEvidence(evidenceId) {
@@ -419,29 +553,25 @@ export default function WorkbenchPage() {
   }
 
   async function sendMessage(message) {
-    await workbenchApi.sendMessage(token, detail.claim_id, message, detail.revision)
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation('Sending the claimant message', (current) => (
+      workbenchApi.sendMessage(token, current.claim_id, message, current.revision)
+    ))
   }
 
   async function performOwnershipAction(action, payload) {
+    let operation
     if (action.action_code === 'ownership.request_cowork' || action.action_code === 'ownership.invite_cowork') {
-      await workbenchApi.requestCowork(token, detail.claim_id, detail.revision, payload)
+      operation = (current) => workbenchApi.requestCowork(token, current.claim_id, current.revision, payload)
     } else if (action.action_code === 'ownership.request_transfer') {
-      await workbenchApi.requestTransfer(token, detail.claim_id, detail.revision, payload)
+      operation = (current) => workbenchApi.requestTransfer(token, current.claim_id, current.revision, payload)
     } else if (action.action_code === 'ownership.requeue') {
-      await workbenchApi.requeue(token, detail.claim_id, detail.revision, payload)
+      operation = (current) => workbenchApi.requeue(token, current.claim_id, current.revision, payload)
     } else if (action.target_type === 'collaboration_request') {
-      await workbenchApi.decideCollaboration(
-        token,
-        detail.claim_id,
-        action.target_ref,
-        detail.revision,
-        payload,
-      )
+      operation = (current) => workbenchApi.decideCollaboration(token, current.claim_id, action.target_ref, current.revision, payload)
     } else {
       throw new Error('This ownership action is not connected. Refresh the Claim and try again.')
     }
-    await Promise.all([loadDetail(detail.claim_id), loadClaims()])
+    await runClaimMutation(action.label, operation)
   }
 
   async function reopenClaim(action, payload, idempotencyKey) {
@@ -473,6 +603,8 @@ export default function WorkbenchPage() {
         applyReopenProjection(latest, accepted, error)
         if (accepted) return
         error.projectionReloaded = true
+        error.projectionChanged = latest.revision !== current.revision
+        error.latestRevision = latest.revision
       } catch {
         // The dialog keeps the original actionable mutation error when resynchronisation fails.
       }
@@ -481,7 +613,10 @@ export default function WorkbenchPage() {
   }
 
   function applyReopenProjection(latest, accepted, error = null) {
+    detailRef.current = latest
     setDetail(latest)
+    setDetailError(null)
+    setDetailStale(false)
     openTab(latest)
     const queueKey = latest.work_summary?.queue_key
     const queueOption = filterMetadata?.views.find((option) => option.value === queueKey)
@@ -531,18 +666,18 @@ export default function WorkbenchPage() {
           </div>
         )}
         {isConversations ? (
-          <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onOpenConversation={openConversation} />
+          <ConversationsPage conversations={conversations} loading={conversationsLoading} error={conversationsError} onRetry={loadConversations} onOpenConversation={openConversation} />
         ) : (
           <div className={`workbench-layout${queueVisible ? '' : ' queue-hidden'}`}>
             {queueVisible && (filterMetadata
               ? viewAvailable
-                ? <QueuePanel claims={claims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
+                ? <QueuePanel claims={visibleClaims} loading={queueLoading} error={queueError} onRetry={() => loadClaims()} selectedId={claimId} filterMetadata={filterMetadata} viewCounts={viewCounts} view={view} onView={(value) => setQueueFilter('view', value)} workflowState={workflowState} onWorkflowState={(value) => setQueueFilter('workflow_state', value)} priority={priority} onPriority={(value) => setQueueFilter('priority', value)} tagFilter={tagFilter} onTag={(value) => setQueueFilter('tag', value)} search={search} onSearch={(value) => setQueueFilter('search', value)} additionalFiltersActive={Boolean(assigneeId || nextAction || updatedBefore || updatedAfter)} onClearFilters={clearQueueFilters} nextCursor={nextCursor} onLoadMore={() => loadClaims({ cursor: nextCursor, append: true })} onOpen={openClaim} />
                 : <QueueViewUnavailable view={view} onOpenAll={() => setQueueFilter('view', 'all')} />
               : <QueueMetadataState loading={filterMetadataLoading} error={filterMetadataError} onRetry={() => setFilterMetadataAttempt((attempt) => attempt + 1)} />)}
             <section className="workspace-region">
               <ClaimTabs tabs={tabs.tabs} activeId={claimId || tabs.activeId} onActivate={activateTab} onClose={closeTab} />
               <div id="open-claim-panel" className="open-claim-panel" role="tabpanel" aria-labelledby={claimId ? `open-claim-tab-${claimId}` : undefined} tabIndex={0}>
-                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
+                <ClaimWorkspace detail={detail} resources={resources} loading={detailLoading} stale={detailStale} error={detailError} section={currentSection} draft={currentTab?.draft || ''} profile={profile} onSection={changeSection} onDraft={(draft) => claimId && tabs.update(claimId, { draft })} onRetry={() => loadDetail(claimId)} onRetrySection={() => loadSectionResources(claimId, currentSection)} onAccept={acceptHandoff} onResolve={resolveHandoff} onSignalDecision={decideSignal} onCreateAction={createStaffAction} onUpdateAction={updateStaffAction} onLoadEvidence={loadEvidence} onSend={sendMessage} onOwnershipAction={performOwnershipAction} onReopen={reopenClaim} />
               </div>
             </section>
           </div>
@@ -565,10 +700,13 @@ export default function WorkbenchPage() {
 function reopenFailureNotice(error, latest, queueLabel) {
   const identity = latest.display_reference || latest.claim_id
   const location = `${queueLabel || 'the current queue'} at revision ${latest.revision}`
-  if (error?.code === 'REVISION_CONFLICT') return `Claim ${identity} was not reopened because the loaded revision was stale. The latest server projection is in ${location}; review it and try again.`
-  if (error?.code === 'ACCESS_DENIED') return `Claim ${identity} was not reopened because this staff identity is not authorised for the action. The latest server projection is in ${location}; ask the primary owner to review it.`
-  if (error?.code === 'IDEMPOTENCY_CONFLICT') return `Claim ${identity} was not reopened because this request no longer matches the original attempt. The latest server projection is in ${location}; review it before retrying.`
-  return `The reopen outcome for Claim ${identity} was unclear. The latest server projection is in ${location}; review it before trying again.`
+  const reference = failureReference(error)
+  let message
+  if (error?.code === 'REVISION_CONFLICT') message = `Claim ${identity} was not reopened because the loaded revision was stale. The latest server projection is in ${location}; review it and try again.`
+  else if (error?.code === 'ACCESS_DENIED') message = `Claim ${identity} was not reopened because this staff identity is not authorised for the action. The latest server projection is in ${location}; ask the primary owner to review it.`
+  else if (error?.code === 'IDEMPOTENCY_CONFLICT') message = `Claim ${identity} was not reopened because this request no longer matches the original attempt. The latest server projection is in ${location}; review it before retrying.`
+  else message = `The reopen outcome for Claim ${identity} was unclear. The latest server projection is in ${location}; review it before trying again.`
+  return [message, reference].filter(Boolean).join(' ')
 }
 
 function QueueViewUnavailable({ view, onOpenAll }) {
@@ -605,7 +743,9 @@ function QueueMetadataState({ loading, error, onRetry }) {
         {!loading && error && (
           <div className="queue-state" role="alert">
             <strong>Claim queue unavailable</strong>
-            <p>{error}</p>
+            <p>The Workbench could not load the server-published queue controls. The current URL has been preserved; retry when the service is available.</p>
+            <p>{failureReason(error)}</p>
+            {failureReference(error) && <small>{failureReference(error)}</small>}
             <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
           </div>
         )}
@@ -632,8 +772,49 @@ function resourceState(response = {}) {
     status: response.status || 'available',
     limitation: response.limitation || null,
     loading: false,
-    error: '',
+    stale: false,
+    error: null,
   }
+}
+
+function settledResourceState(result, previous = {}) {
+  if (result.status === 'fulfilled') return resourceState(result.value)
+  return {
+    ...previous,
+    items: previous.items || [],
+    status: 'unavailable',
+    limitation: previous.limitation || null,
+    loading: false,
+    stale: Boolean(previous.items?.length),
+    error: result.reason,
+  }
+}
+
+function isInaccessibleError(error) {
+  return error?.status === 403
+    || error?.status === 404
+    || error?.code === 'ACCESS_DENIED'
+    || error?.code === 'RESOURCE_NOT_FOUND'
+}
+
+function queueRequestFilters(filters, cursor = null) {
+  return {
+    ...(filters.view === 'all' ? {} : { view: filters.view }),
+    ...(filters.workflowState ? { workflow_state: filters.workflowState } : {}),
+    ...(filters.priority ? { priority: filters.priority } : {}),
+    ...(filters.assigneeId ? { assignee_id: filters.assigneeId } : {}),
+    ...(filters.nextAction ? { next_action: filters.nextAction } : {}),
+    ...(filters.tagFilter ? { tag: filters.tagFilter } : {}),
+    ...(filters.search ? { search: filters.search } : {}),
+    ...(filters.updatedBefore ? { updated_before: filters.updatedBefore } : {}),
+    ...(filters.updatedAfter ? { updated_after: filters.updatedAfter } : {}),
+    limit: 25,
+    ...(cursor ? { cursor } : {}),
+  }
+}
+
+function queueFilterKey(filters) {
+  return JSON.stringify(queueRequestFilters(filters))
 }
 
 function readQueueFilters(searchParams, metadata) {
