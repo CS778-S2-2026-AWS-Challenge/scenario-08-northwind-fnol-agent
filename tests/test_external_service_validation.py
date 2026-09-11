@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import (
     AssessorFixtureFailure,
+    AssessorResultOutcome,
+    AssessorResultRequest,
     AssessorRoutingOutcome,
     MockAssessorServiceAdapter,
 )
@@ -116,6 +118,27 @@ class NeverCalledAssessorAdapter:
     ) -> AssessorRoutingOutcome:
         del command, request_fingerprint
         raise AssertionError('The assessor adapter must not be called without claimant consent.')
+
+    def receive_result(
+        self,
+        command: AssessorResultRequest,
+        request_fingerprint: str,
+    ) -> AssessorResultOutcome:
+        """Reject result receipt on a double that must never be invoked.
+
+        Args:
+            command: Provider-neutral result lookup that must remain unused.
+            request_fingerprint: Idempotency identity that must remain unused.
+
+        Returns:
+            This method never returns.
+
+        Raises:
+            AssertionError: Always, because this adapter must not be called.
+        """
+
+        del command, request_fingerprint
+        raise AssertionError('The assessor adapter must not receive a result on this path.')
 
 
 def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> None:

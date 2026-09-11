@@ -48,8 +48,10 @@ slice stores the task's claim, service/action, source class, operation and deliv
 failure/provider reference, timestamps, one immutable originating task per evidence item, and
 one `erq_` request per task. The request records its purpose, disclosed field names, independent
 Northwind-authority and claimant-consent references, authorised Claim revision, preparation
-time, first send time, and stable operation identity. It does not yet store the later attempt,
-provider-result, verification, or reconciliation records.
+time, first send time, and stable operation identity. The controlled assessor path also stores one
+returned result per task, its source and receipt time, linked Evidence identifiers, verification
+state, verification time, and checked Claim revision. Later provider attempts and reconciliation
+records remain target contracts.
 The current persistence implementation still stores the legacy Agent Decision shape and must not
 be represented as supporting those target records until migrations, repository methods, API
 projections, fixtures, and transaction tests change together.
@@ -73,8 +75,8 @@ projections, fixtures, and transaction tests change together.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | integration identity, `claim_id`, or consent/operation identity |
-| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
+| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
+| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
@@ -182,9 +184,12 @@ the append-only audit collection through a bounded, filterable projection.
     without returning bearer values or token hashes.
 33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
-34. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+34. Receive one accepted assessor task's returned report through the installed adapter, store its
+    bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
+    verify the immutable result against the current Claim revision without promoting Claim facts.
+35. List authorised Claims by the server-projected completed, abandoned, or closed disposition
     without scanning action history or inferring terminal state from a missing Session.
-35. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+36. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
     target, expected revision, and idempotency key while preserving the active-session pointer.
 
 ## Development/Test Identity Invariants
@@ -244,6 +249,27 @@ the append-only audit collection through a bounded, filterable projection.
 - Provider acceptance is durable before the final Claim State compare-and-set. If another claim
   mutation advances the revision first, an unchanged retry reconciles the accepted result into a
   new claim revision without invoking or creating a second external task.
+- A controlled assessor result is fetched through the installed adapter only for an accepted,
+  assigned `P3-ASSESSOR` task. The task identity, Claim identity, provider acknowledgement, source
+  class, source timestamp, and explicit `simulation_only` label are validated before persistence.
+- Returned report bytes are stored through the active Evidence storage profile under an immutable,
+  claim-scoped final key. The Evidence record retains the storage key, checksum,
+  source system, source reference, source timestamp, and simulation-only label; the result retains
+  only provider-neutral provenance, summary, linked Evidence identities, and verification fields.
+- Result receipt completes the task's immutable `assessment_report` Evidence link and advances the
+  Working Claim revision only to bind the Evidence lifecycle. It does not change Claim facts,
+  workflow state, coverage, repair authority, or the claimant-visible external-service state. A
+  first receipt requires the current Working Claim revision; an identical replay resolves its
+  stored operation before applying that precondition again.
+- One deterministic result identity exists per task. An unchanged retry reuses the stored bytes,
+  Evidence, Claim binding, and checked result; conflicting content, origin, or task provenance is
+  rejected. The Evidence provenance retains a hash of the result-receipt idempotency scope, never
+  the raw `Idempotency-Key`, so a changed replay is rejected after process restart. A retry after
+  storage or Claim binding but before result persistence resumes without a second Claim revision.
+- A returned result begins unverified and is checked through the authoritative external-result
+  verification rule against its task, immutable Evidence link, Evidence ownership, and the current
+  Claim revision. The controlled fixture result becomes `review_required`; no result record can
+  directly promote provider content into Claim State.
 - If the Claim result is durable but the public route-idempotency response is not, an unchanged
   retry derives the same decision identity, verifies its authorised revision, restores the stored
   routing result, and then completes the missing idempotency response.
