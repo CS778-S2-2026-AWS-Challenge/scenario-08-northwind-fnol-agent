@@ -246,6 +246,7 @@ def confirm_form_field(
     *,
     timestamp: datetime,
     updated_by: ActorReference,
+    source_ref: str | None = None,
 ) -> StructuredFormField:
     """Confirm the current assertion without dropping its history."""
 
@@ -258,6 +259,11 @@ def confirm_form_field(
     ]
     return field.model_copy(
         update={
+            'source_refs': (
+                list(dict.fromkeys([*field.source_refs, source_ref]))
+                if source_ref is not None
+                else field.source_refs
+            ),
             'status': FormStatus.CONFIRMED,
             'resolution_state': FactResolutionState.RESOLVED,
             'confidence': 1.0,
@@ -420,6 +426,7 @@ def confirm_contents_item(
     *,
     timestamp: datetime,
     updated_by: ActorReference,
+    source_ref: str | None = None,
 ) -> ContentsItem:
     """Confirm the current contents assertion and retain superseded history."""
 
@@ -431,6 +438,11 @@ def confirm_contents_item(
     ]
     return item.model_copy(
         update={
+            'source_refs': (
+                list(dict.fromkeys([*item.source_refs, source_ref]))
+                if source_ref is not None
+                else item.source_refs
+            ),
             'status': FormStatus.CONFIRMED,
             'resolution_state': FactResolutionState.RESOLVED,
             'confidence': 1.0,

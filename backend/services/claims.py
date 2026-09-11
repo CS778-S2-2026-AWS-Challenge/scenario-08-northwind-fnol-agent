@@ -19,6 +19,7 @@ from backend.domain.models import (
     ClaimantClaim,
     ClaimantContentsItem,
     ClaimantHandoff,
+    ClaimantIncompleteContext,
     ClaimantSession,
     ClaimListItem,
     ClaimListResponse,
@@ -27,6 +28,9 @@ from backend.domain.models import (
     CreateClaimResponse,
     CustomerNextStep,
     FieldSelectionState,
+    FollowUpContactPermission,
+    FollowUpRecord,
+    FollowUpStatus,
     FormConfirmationRequest,
     FormConfirmationResponse,
     FormPatchRequest,
@@ -35,10 +39,13 @@ from backend.domain.models import (
     FormStatus,
     NeededFor,
     PageInfo,
+    PauseSessionResponse,
+    PreferredChannel,
     ProposedFormChange,
     ResponsibleParty,
     ResumePackage,
     SessionRecord,
+    SessionRecoveryContext,
     SessionStatus,
     StartSessionRequest,
     StructuredFormField,
@@ -65,6 +72,10 @@ from backend.services.fact_resolution import (
     resolve_form_change,
 )
 from backend.services.handoffs import claimant_handoff
+from backend.services.incomplete_claims import (
+    find_incomplete_recovery,
+    recovery_checkpoint_allowed,
+)
 from backend.services.support import (
     decode_cursor,
     encode_cursor,
@@ -185,6 +196,30 @@ def _claimant_contents_items(
     return projected
 
 
+def _claimant_incomplete_context(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimantIncompleteContext | None:
+    records = find_incomplete_recovery(repository, claim)
+
+    if records is None:
+        return None
+
+    source, follow_up = records
+    recovery = source.recovery_context
+
+    if recovery is None:
+        return None
+
+    return ClaimantIncompleteContext(
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status,
+    )
+
+
 def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> ClaimantClaim:
     claimant_evidence = claimant_visible_evidence(
         repository.list_evidence(claim.claim_id, claim.customer_id)
@@ -212,13 +247,17 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         external_service_action=claimant_assessor_action(repository, claim),
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
         customer_next_step=claim.customer_next_step,
+        incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         created_at=claim.created_at,
         updated_at=claim.updated_at,
     )
 
 
-def _claim_list_item(claim: WorkingClaim) -> ClaimListItem:
+def _claim_list_item(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> ClaimListItem:
     return ClaimListItem(
         claim_id=claim.claim_id,
         revision=claim.revision,
@@ -226,6 +265,7 @@ def _claim_list_item(claim: WorkingClaim) -> ClaimListItem:
         workflow_state=claim.claim_state.workflow_state,
         external_claim=claim.external_claim,
         customer_next_step=claim.customer_next_step,
+        incomplete_context=_claimant_incomplete_context(repository, claim),
         created_at=claim.created_at,
         updated_at=claim.updated_at,
         can_resume=claim.customer_next_step.can_resume,
@@ -258,6 +298,234 @@ def _claimant_session(session: SessionRecord, next_step: CustomerNextStep) -> Cl
         last_active_at=session.last_active_at,
         closed_at=session.closed_at,
     )
+
+
+def _latest_meaningful_claimant_activity(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> tuple[datetime, str]:
+    candidates: list[tuple[datetime, str]] = [
+        (
+            claim.created_at,
+            f'claim:{claim.claim_id}:revision:1',
+        )
+    ]
+
+    for session in repository.list_sessions_for_claim(
+        claim.claim_id,
+        claim.customer_id,
+    ):
+        for message in repository.list_messages(
+            claim.claim_id,
+            session.session_id,
+            claim.customer_id,
+        ):
+            if message.actor is ActorType.CLAIMANT:
+                candidates.append(
+                    (
+                        message.created_at,
+                        message.message_id,
+                    )
+                )
+
+    for field in claim.form.values():
+        if field.updated_by.actor_type is ActorType.CLAIMANT and field.source_refs:
+            candidates.append(
+                (
+                    field.updated_at,
+                    field.source_refs[-1],
+                )
+            )
+
+    for item in claim.contents_items:
+        if item.updated_by.actor_type is ActorType.CLAIMANT and item.source_refs:
+            candidates.append(
+                (
+                    item.updated_at,
+                    item.source_refs[-1],
+                )
+            )
+
+    for consent in claim.external_service_consents:
+        if consent.granted_by.actor_type is ActorType.CLAIMANT:
+            candidates.append(
+                (
+                    consent.granted_at,
+                    f'consent:{consent.consent_ref}',
+                )
+            )
+
+    return max(
+        candidates,
+        key=lambda candidate: (
+            candidate[0],
+            candidate[1],
+        ),
+    )
+
+
+def pause_session(
+    repository: PersistenceRepository,
+    principal: Principal,
+    claim_id: str,
+    session_id: str,
+    idempotency_key: str | None,
+    if_match: str | None,
+) -> PauseSessionResponse:
+    key = require_idempotency_key(idempotency_key)
+    expected_revision = parse_if_match(if_match)
+    route = f'/api/v1/claims/{claim_id}/sessions/{session_id}/pause'
+    fingerprint = request_fingerprint(
+        {'operation': 'pause', 'expected_revision': expected_revision}
+    )
+
+    existing = repository.find_idempotency(principal.subject, route, key)
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint or existing.response_payload is None:
+            raise ApiError(
+                status_code=409,
+                code='IDEMPOTENCY_CONFLICT',
+                message='The idempotency key was already used for another request.',
+            )
+        return PauseSessionResponse.model_validate(existing.response_payload)
+
+    claim = repository.get_claim(claim_id, principal.subject)
+    if claim is None:
+        raise _claim_not_found()
+    if claim.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed after this request was prepared.',
+            retryable=True,
+            current_revision=claim.revision,
+        )
+
+    if not recovery_checkpoint_allowed(claim):
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Only a non-terminal resumable Claim can be paused.',
+        )
+
+    session = repository.get_session(claim_id, session_id, principal.subject)
+    if session is None:
+        raise _session_not_found()
+    if claim.active_session_id != session_id or session.status is not SessionStatus.ACTIVE:
+        raise ApiError(
+            status_code=409,
+            code='INVALID_STATE_TRANSITION',
+            message='Only the current active claimant session can be paused.',
+        )
+
+    timestamp = now_utc()
+    (
+        last_meaningful_activity_at,
+        last_meaningful_activity_source_ref,
+    ) = _latest_meaningful_claimant_activity(
+        repository,
+        claim,
+    )
+    resume_point = (session.summary or claim.customer_next_step.summary).strip()
+    recovery = SessionRecoveryContext(
+        interrupted_at=timestamp,
+        last_meaningful_activity_at=last_meaningful_activity_at,
+        last_meaningful_activity_source_ref=(last_meaningful_activity_source_ref),
+        resume_point=resume_point,
+    )
+    paused_session = session.model_copy(
+        update={
+            'status': SessionStatus.PAUSED,
+            'context_revision': expected_revision,
+            'recovery_context': recovery,
+        }
+    )
+    updated_claim = claim.model_copy(
+        update={
+            'active_session_id': None,
+            'revision': claim.revision + 1,
+            'updated_at': timestamp,
+        }
+    )
+    contact_authorised = principal.auth_source != 'anonymous:browser_session'
+    follow_up = FollowUpRecord(
+        follow_up_id=new_id('fup'),
+        claim_id=claim_id,
+        source_session_id=session_id,
+        purpose='resume_incomplete_claim',
+        responsible_party=ResponsibleParty.SYSTEM,
+        source_refs=[
+            f'claim:{claim_id}:revision:{updated_claim.revision}',
+            f'session:{session_id}',
+            last_meaningful_activity_source_ref,
+        ],
+        contact_permission=(
+            FollowUpContactPermission.AUTHORISED
+            if contact_authorised
+            else FollowUpContactPermission.NOT_AUTHORISED
+        ),
+        attempt_count=0,
+        channel=PreferredChannel.IN_APP if contact_authorised else None,
+        outcome=None,
+        status=FollowUpStatus.PENDING if contact_authorised else FollowUpStatus.BLOCKED,
+        due_at=timestamp if contact_authorised else None,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    incomplete_context = ClaimantIncompleteContext(
+        interrupted_at=recovery.interrupted_at,
+        last_meaningful_activity_at=recovery.last_meaningful_activity_at,
+        resume_point=recovery.resume_point,
+        follow_up_due_at=follow_up.due_at,
+        follow_up_status=follow_up.status,
+    )
+    claimant_after = _claimant_claim(
+        repository,
+        updated_claim,
+    )
+
+    response = PauseSessionResponse(
+        claim=claimant_after.model_copy(update={'incomplete_context': incomplete_context}),
+        session=_claimant_session(
+            paused_session,
+            updated_claim.customer_next_step,
+        ),
+    )
+    idempotency = IdempotencyRecord(
+        actor_id=principal.subject,
+        route=route,
+        key=key,
+        request_fingerprint=fingerprint,
+        claim_id=claim_id,
+        session_id=session_id,
+        follow_up_id=follow_up.follow_up_id,
+        response_payload=response.model_dump(mode='json'),
+    )
+
+    try:
+        repository.save_incomplete_checkpoint(
+            updated_claim,
+            expected_revision=expected_revision,
+            session=paused_session,
+            follow_up=follow_up,
+            idempotency=idempotency,
+        )
+    except RevisionConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='REVISION_CONFLICT',
+            message='The claim changed before the interruption checkpoint was saved.',
+            retryable=True,
+            current_revision=error.current_revision,
+        ) from error
+    except IdempotencyConflict as error:
+        raise ApiError(
+            status_code=409,
+            code='IDEMPOTENCY_CONFLICT',
+            message='The interruption checkpoint conflicts with an existing request.',
+        ) from error
+
+    return response
 
 
 def start_claim(
@@ -366,7 +634,7 @@ def promote_anonymous_claim(
 
 
 def list_claims(
-    repository: ClaimRepository,
+    repository: PersistenceRepository,
     principal: Principal,
     *,
     limit: int,
@@ -398,7 +666,7 @@ def list_claims(
     next_offset = offset + len(page_claims)
     next_cursor = encode_cursor(next_offset) if next_offset < len(claims) else None
     return ClaimListResponse(
-        items=[_claim_list_item(claim) for claim in page_claims],
+        items=[_claim_list_item(repository, claim) for claim in page_claims],
         page=PageInfo(next_cursor=next_cursor),
     )
 
@@ -494,6 +762,27 @@ def start_session(
             ) from conflict
     else:
         timestamp = now_utc()
+        resolved_follow_up: FollowUpRecord | None = None
+        if resume_source is not None and resume_source.status is SessionStatus.PAUSED:
+            open_follow_ups = [
+                record
+                for record in repository.list_follow_ups(claim_id, principal.subject)
+                if record.source_session_id == resume_source.session_id
+                and record.purpose == 'resume_incomplete_claim'
+                and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+            ]
+            if open_follow_ups:
+                current_follow_up = max(
+                    open_follow_ups,
+                    key=lambda record: (record.created_at, record.follow_up_id),
+                )
+                resolved_follow_up = current_follow_up.model_copy(
+                    update={
+                        'status': FollowUpStatus.RESOLVED,
+                        'outcome': 'claimant_resumed',
+                        'updated_at': timestamp,
+                    }
+                )
         session = SessionRecord(
             session_id=new_id('ses'),
             claim_id=claim_id,
@@ -533,13 +822,12 @@ def start_session(
             started_at=timestamp,
             last_active_at=timestamp,
         )
+        replaced_active_session = None
         if active_session is not None and active_session.status is SessionStatus.ACTIVE:
-            # A claim has one active conversation at a time. Preserve the old
-            # transcript while closing it before promoting the new session.
-            repository.save_session(
-                active_session.model_copy(
-                    update={'status': SessionStatus.CLOSED, 'closed_at': timestamp}
-                )
+            # Closing the previous active Session is part of the same
+            # revision-checked mutation that activates the replacement.
+            replaced_active_session = active_session.model_copy(
+                update={'status': SessionStatus.CLOSED, 'closed_at': timestamp}
             )
         updated_claim = claim.model_copy(
             update={
@@ -556,19 +844,32 @@ def start_session(
             claim_id=claim_id,
             session_id=session.session_id,
         )
+        branch_evaluation = build_applied_branch_evaluation(
+            updated_claim,
+            repository=repository,
+            recomputation_reason='session_resumed',
+            session_id=session.session_id,
+        )
         try:
-            repository.save_session_mutation(
-                updated_claim,
-                expected_revision=claim.revision,
-                session=session,
-                idempotency=idempotency,
-                branch_evaluation=build_applied_branch_evaluation(
+            if resolved_follow_up is None:
+                repository.save_session_mutation(
                     updated_claim,
-                    repository=repository,
-                    recomputation_reason='session_resumed',
-                    session_id=session.session_id,
-                ),
-            )
+                    expected_revision=claim.revision,
+                    session=session,
+                    idempotency=idempotency,
+                    branch_evaluation=branch_evaluation,
+                    replaced_active_session=replaced_active_session,
+                )
+            else:
+                repository.save_session_mutation(
+                    updated_claim,
+                    expected_revision=claim.revision,
+                    session=session,
+                    idempotency=idempotency,
+                    branch_evaluation=branch_evaluation,
+                    resolved_follow_up=resolved_follow_up,
+                    replaced_active_session=replaced_active_session,
+                )
         except RevisionConflict as conflict:
             raise ApiError(
                 status_code=409,
@@ -835,6 +1136,7 @@ def confirm_form_fields(
         )
 
     timestamp = now_utc()
+    confirmation_revision = claim.revision + 1
     confirmed_fields = {
         field_code: confirm_form_field(
             claim.form[field_code],
@@ -842,6 +1144,9 @@ def confirm_form_fields(
             updated_by=ActorReference(
                 actor_type=ActorType.CLAIMANT,
                 actor_id=principal.subject,
+            ),
+            source_ref=(
+                f'claim:{claim.claim_id}:revision:{confirmation_revision}:field:{field_code}'
             ),
         )
         for field_code in payload.field_codes
@@ -854,6 +1159,9 @@ def confirm_form_fields(
             updated_by=ActorReference(
                 actor_type=ActorType.CLAIMANT,
                 actor_id=principal.subject,
+            ),
+            source_ref=(
+                f'claim:{claim.claim_id}:revision:{confirmation_revision}:field:contents.items'
             ),
         )
         if item.status is FormStatus.PROPOSED and 'contents.items' in payload.field_codes

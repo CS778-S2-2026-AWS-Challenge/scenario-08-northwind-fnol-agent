@@ -303,6 +303,76 @@ def test_start_session_reads_saved_claim_in_new_session(
     )
 
 
+def test_start_new_session_replaces_active_session_inside_atomic_mutation(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = client.post(
+        '/api/v1/claims',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'claim-for-atomic-new-session',
+        },
+        json={
+            'channel': 'web_agent',
+            'locale': 'en-NZ',
+            'incident_type': 'motor',
+        },
+    )
+    assert created.status_code == 201
+
+    claim_id = created.json()['claim']['claim_id']
+    original_session_id = created.json()['session']['session_id']
+
+    def reject_standalone_session_write(session: SessionRecord) -> None:
+        del session
+        raise AssertionError('start_session(intent="new") must not pre-write the old Session')
+
+    monkeypatch.setattr(
+        repository,
+        'save_session',
+        reject_standalone_session_write,
+    )
+
+    started = client.post(
+        f'/api/v1/claims/{claim_id}/sessions',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'atomic-new-session',
+        },
+        json={'intent': 'new'},
+    )
+
+    assert started.status_code == 201
+
+    new_session_id = started.json()['session_id']
+    assert new_session_id != original_session_id
+
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    old_session = repository.get_session(
+        claim_id,
+        original_session_id,
+        'cus_demo',
+    )
+    new_session = repository.get_session(
+        claim_id,
+        new_session_id,
+        'cus_demo',
+    )
+
+    assert stored_claim is not None
+    assert old_session is not None
+    assert new_session is not None
+
+    assert stored_claim.active_session_id == new_session_id
+    assert old_session.status is SessionStatus.CLOSED
+    assert old_session.closed_at is not None
+    assert old_session.recovery_context is None
+    assert new_session.status is SessionStatus.ACTIVE
+
+
 def test_resume_keeps_persisted_model_profile_for_a_fresh_client(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -389,8 +459,17 @@ def test_start_session_surfaces_repository_revision_conflict(
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: object | None = None,
+        resolved_follow_up: object | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        del claim, session, idempotency, branch_evaluation
+        del (
+            claim,
+            session,
+            idempotency,
+            branch_evaluation,
+            resolved_follow_up,
+            replaced_active_session,
+        )
         raise RevisionConflict(expected_revision + 7)
 
     monkeypatch.setattr(repository, 'save_session_mutation', reject_session_mutation)
@@ -438,8 +517,17 @@ def test_start_session_surfaces_repository_idempotency_conflict_without_partial_
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: object | None = None,
+        resolved_follow_up: object | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        del claim, expected_revision, session, branch_evaluation
+        del (
+            claim,
+            expected_revision,
+            session,
+            branch_evaluation,
+            resolved_follow_up,
+            replaced_active_session,
+        )
         raise IdempotencyConflict(idempotency.key)
 
     monkeypatch.setattr(repository, 'save_session_mutation', reject_session_mutation)

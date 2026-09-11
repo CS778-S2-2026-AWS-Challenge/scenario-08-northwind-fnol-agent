@@ -29,6 +29,8 @@ from backend.domain.models import (
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    FollowUpRecord,
+    FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     RuntimeTraceRecord,
@@ -58,9 +60,11 @@ class FixtureRepository(PersistenceRepository):
 
     def __init__(self) -> None:
         self._validation_seed_lock = RLock()
+        self._claim_mutation_lock = RLock()
         self._claims: dict[str, WorkingClaim] = {}
         self._audit_events: dict[str, AuditEventEnvelope] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
@@ -106,6 +110,7 @@ class FixtureRepository(PersistenceRepository):
             'claims': len(self._claims),
             'audit_events': len(self._audit_events),
             'sessions': len(self._sessions),
+            'follow_ups': len(self._follow_ups),
             'messages': len(self._messages),
             'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
@@ -132,6 +137,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims.clear()
         self._audit_events.clear()
         self._sessions.clear()
+        self._follow_ups.clear()
         self._messages.clear()
         self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
@@ -300,7 +306,7 @@ class FixtureRepository(PersistenceRepository):
         snapshot = {
             key: deepcopy(value)
             for key, value in self.__dict__.items()
-            if key != '_validation_seed_lock'
+            if key not in {'_validation_seed_lock', '_claim_mutation_lock'}
         }
         try:
             existing = self.find_idempotency(
@@ -353,10 +359,12 @@ class FixtureRepository(PersistenceRepository):
                 self.save_message(message, claims_by_id[message.claim_id].customer_id)
             self.save_idempotency(graph.idempotency)
         except Exception:
-            lock = self._validation_seed_lock
+            validation_seed_lock = self._validation_seed_lock
+            claim_mutation_lock = self._claim_mutation_lock
             self.__dict__.clear()
             self.__dict__.update(snapshot)
-            self._validation_seed_lock = lock
+            self._validation_seed_lock = validation_seed_lock
+            self._claim_mutation_lock = claim_mutation_lock
             raise
         return None
 
@@ -378,6 +386,7 @@ class FixtureRepository(PersistenceRepository):
         self._claims[claim_id] = claim.model_copy(update={'customer_id': customer_id})
         stores: tuple[dict[str, Any], ...] = (
             self._sessions,
+            self._follow_ups,
             self._messages,
             self._decisions,
             self._assessor_routing_operations,
@@ -416,11 +425,14 @@ class FixtureRepository(PersistenceRepository):
         expected_revision: int,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
-        self._validate_claim_mutation(claim, expected_revision)
-        self._validate_branch_evaluation(claim, branch_evaluation)
-        self._claims[claim.claim_id] = deepcopy(claim)
-        if branch_evaluation is not None:
-            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if branch_evaluation is not None:
+                self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
+                    branch_evaluation
+                )
 
     def _validate_claim_mutation(
         self,
@@ -451,22 +463,25 @@ class FixtureRepository(PersistenceRepository):
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
     ) -> None:
-        self._validate_claim_mutation(claim, expected_revision)
-        self._validate_branch_evaluation(claim, branch_evaluation)
-        if (
-            idempotency.actor_id != claim.customer_id
-            or idempotency.claim_id != claim.claim_id
-            or idempotency.session_id != (claim.active_session_id or '')
-        ):
-            raise KeyError(claim.claim_id)
-        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
-        if lookup in self._idempotency:
-            raise IdempotencyConflict(idempotency.key)
+        with self._claim_mutation_lock:
+            self._validate_claim_mutation(claim, expected_revision)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+            if (
+                idempotency.actor_id != claim.customer_id
+                or idempotency.claim_id != claim.claim_id
+                or idempotency.session_id != (claim.active_session_id or '')
+            ):
+                raise KeyError(claim.claim_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
 
-        self._claims[claim.claim_id] = deepcopy(claim)
-        if branch_evaluation is not None:
-            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
-        self._idempotency[lookup] = deepcopy(idempotency)
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if branch_evaluation is not None:
+                self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
+                    branch_evaluation
+                )
+            self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_claim_mutation_with_audit(
         self,
@@ -521,6 +536,117 @@ class FixtureRepository(PersistenceRepository):
             raise KeyError(session.claim_id)
         self._sessions[session.session_id] = deepcopy(session)
 
+    def get_follow_up(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> FollowUpRecord | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        record = self._follow_ups.get(follow_up_id)
+        if record is None or record.claim_id != claim_id:
+            return None
+        return deepcopy(record)
+
+    def list_follow_ups(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[FollowUpRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        records = [
+            deepcopy(record) for record in self._follow_ups.values() if record.claim_id == claim_id
+        ]
+        return sorted(records, key=lambda record: (record.created_at, record.follow_up_id))
+
+    def save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        self._validate_claim_mutation(
+            claim,
+            expected_revision,
+            allow_active_session_change=True,
+        )
+
+        with self._claim_mutation_lock:
+            stored_claim = self._claims.get(claim.claim_id)
+
+            if stored_claim is None:
+                raise KeyError(claim.claim_id)
+
+            if stored_claim.revision != expected_revision:
+                raise RevisionConflict(stored_claim.revision)
+
+            if (
+                stored_claim.customer_id != claim.customer_id
+                or claim.revision != expected_revision + 1
+            ):
+                raise KeyError(claim.claim_id)
+
+            stored_session = self._sessions.get(session.session_id)
+
+            lookup = (
+                idempotency.actor_id,
+                idempotency.route,
+                idempotency.key,
+            )
+
+            valid = (
+                stored_claim.active_session_id == session.session_id
+                and claim.active_session_id is None
+                and session.claim_id == claim.claim_id
+                and session.customer_id == claim.customer_id
+                and stored_session is not None
+                and stored_session.claim_id == claim.claim_id
+                and stored_session.customer_id == claim.customer_id
+                and stored_session.status is SessionStatus.ACTIVE
+                and session.status is SessionStatus.PAUSED
+                and session.context_revision == expected_revision
+                and session.recovery_context is not None
+                and follow_up.claim_id == claim.claim_id
+                and follow_up.source_session_id == session.session_id
+                and follow_up.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+                and follow_up.attempt_count == 0
+                and idempotency.actor_id == claim.customer_id
+                and idempotency.claim_id == claim.claim_id
+                and idempotency.session_id == session.session_id
+                and idempotency.follow_up_id == follow_up.follow_up_id
+            )
+
+            if not valid:
+                raise KeyError(claim.claim_id)
+
+            if lookup in self._idempotency:
+                raise IdempotencyConflict(idempotency.key)
+
+            if follow_up.follow_up_id in self._follow_ups:
+                raise IdempotencyConflict(follow_up.follow_up_id)
+
+            if any(
+                record.claim_id == claim.claim_id
+                and record.purpose == follow_up.purpose
+                and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+                for record in self._follow_ups.values()
+            ):
+                raise IdempotencyConflict(follow_up.purpose)
+
+            prepared_claim = deepcopy(claim)
+            prepared_session = deepcopy(session)
+            prepared_follow_up = deepcopy(follow_up)
+            prepared_idempotency = deepcopy(idempotency)
+
+            self._claims[claim.claim_id] = prepared_claim
+            self._sessions[session.session_id] = prepared_session
+            self._follow_ups[follow_up.follow_up_id] = prepared_follow_up
+            self._idempotency[lookup] = prepared_idempotency
+
     def save_session_mutation(
         self,
         claim: WorkingClaim,
@@ -528,42 +654,112 @@ class FixtureRepository(PersistenceRepository):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        stored_claim = self._validate_claim_mutation(
-            claim,
-            expected_revision,
-            allow_active_session_change=True,
-        )
-        records_match = (
-            stored_claim.customer_id == claim.customer_id
-            and claim.active_session_id == session.session_id
-            and session.claim_id == claim.claim_id
-            and session.customer_id == claim.customer_id
-            and session.status is SessionStatus.ACTIVE
-            and session.context_revision == expected_revision
-            and idempotency.actor_id == claim.customer_id
-            and idempotency.claim_id == claim.claim_id
-            and idempotency.session_id == session.session_id
-        )
-        if not records_match:
-            raise KeyError(claim.claim_id)
-        if session.session_id in self._sessions:
-            raise IdempotencyConflict(session.session_id)
-        if any(
-            existing.claim_id == claim.claim_id and existing.status is SessionStatus.ACTIVE
-            for existing in self._sessions.values()
-        ):
-            raise KeyError(claim.claim_id)
-        lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
-        if self._idempotency.get(lookup) is not None:
-            raise IdempotencyConflict(idempotency.key)
-        self._validate_branch_evaluation(claim, branch_evaluation)
+        with self._claim_mutation_lock:
+            stored_claim = self._validate_claim_mutation(
+                claim,
+                expected_revision,
+                allow_active_session_change=True,
+            )
+            records_match = (
+                stored_claim.customer_id == claim.customer_id
+                and claim.active_session_id == session.session_id
+                and session.claim_id == claim.claim_id
+                and session.customer_id == claim.customer_id
+                and session.status is SessionStatus.ACTIVE
+                and session.context_revision == expected_revision
+                and idempotency.actor_id == claim.customer_id
+                and idempotency.claim_id == claim.claim_id
+                and idempotency.session_id == session.session_id
+            )
+            if not records_match:
+                raise KeyError(claim.claim_id)
+            if session.session_id in self._sessions:
+                raise IdempotencyConflict(session.session_id)
 
-        self._claims[claim.claim_id] = deepcopy(claim)
-        self._sessions[session.session_id] = deepcopy(session)
-        if branch_evaluation is not None:
-            self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
-        self._idempotency[lookup] = deepcopy(idempotency)
+            active_sessions = [
+                existing
+                for existing in self._sessions.values()
+                if existing.claim_id == claim.claim_id
+                and existing.customer_id == claim.customer_id
+                and existing.status is SessionStatus.ACTIVE
+            ]
+            if replaced_active_session is None:
+                if stored_claim.active_session_id is not None or active_sessions:
+                    raise KeyError(claim.claim_id)
+            else:
+                stored_replaced_session = self._sessions.get(replaced_active_session.session_id)
+                if (
+                    stored_claim.active_session_id != replaced_active_session.session_id
+                    or stored_replaced_session is None
+                    or stored_replaced_session.claim_id != claim.claim_id
+                    or stored_replaced_session.customer_id != claim.customer_id
+                    or stored_replaced_session.status is not SessionStatus.ACTIVE
+                    or replaced_active_session.status is not SessionStatus.CLOSED
+                    or replaced_active_session.closed_at is None
+                    or any(
+                        existing.session_id != replaced_active_session.session_id
+                        for existing in active_sessions
+                    )
+                ):
+                    raise KeyError(claim.claim_id)
+                expected_replaced_session = stored_replaced_session.model_copy(
+                    update={
+                        'status': SessionStatus.CLOSED,
+                        'closed_at': replaced_active_session.closed_at,
+                    }
+                )
+                if replaced_active_session != expected_replaced_session:
+                    raise KeyError(claim.claim_id)
+
+            open_recovery = [
+                record
+                for record in self._follow_ups.values()
+                if record.claim_id == claim.claim_id
+                and record.purpose == 'resume_incomplete_claim'
+                and record.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+            ]
+            if open_recovery and resolved_follow_up is None:
+                raise KeyError(claim.claim_id)
+            if resolved_follow_up is not None:
+                stored_follow_up = self._follow_ups.get(resolved_follow_up.follow_up_id)
+                if (
+                    stored_follow_up is None
+                    or stored_follow_up not in open_recovery
+                    or resolved_follow_up.status is not FollowUpStatus.RESOLVED
+                    or resolved_follow_up.outcome != 'claimant_resumed'
+                    or resolved_follow_up.updated_at < stored_follow_up.updated_at
+                ):
+                    raise KeyError(claim.claim_id)
+                expected_follow_up = stored_follow_up.model_copy(
+                    update={
+                        'status': FollowUpStatus.RESOLVED,
+                        'outcome': resolved_follow_up.outcome,
+                        'updated_at': resolved_follow_up.updated_at,
+                    }
+                )
+                if resolved_follow_up != expected_follow_up:
+                    raise KeyError(claim.claim_id)
+            lookup = (idempotency.actor_id, idempotency.route, idempotency.key)
+            if self._idempotency.get(lookup) is not None:
+                raise IdempotencyConflict(idempotency.key)
+            self._validate_branch_evaluation(claim, branch_evaluation)
+
+            self._claims[claim.claim_id] = deepcopy(claim)
+            if replaced_active_session is not None:
+                self._sessions[replaced_active_session.session_id] = deepcopy(
+                    replaced_active_session
+                )
+            self._sessions[session.session_id] = deepcopy(session)
+            if resolved_follow_up is not None:
+                self._follow_ups[resolved_follow_up.follow_up_id] = deepcopy(resolved_follow_up)
+            if branch_evaluation is not None:
+                self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(
+                    branch_evaluation
+                )
+            self._idempotency[lookup] = deepcopy(idempotency)
 
     def _validate_branch_evaluation(
         self,
@@ -1572,7 +1768,7 @@ class FixtureRepository(PersistenceRepository):
             claim_id: Working Claim whose tasks are requested.
 
         Returns:
-            Deep-copied task records in stable creation order.
+            Deep-copied tasks in stable creation order.
 
         Raises:
             RuntimeError: The in-memory fixture cannot complete the read.
@@ -1948,3 +2144,33 @@ class FixtureRepository(PersistenceRepository):
         if branch_evaluation is not None:
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
         self._idempotency[lookup] = idempotency
+
+
+def _serialize_material_claim_mutation(method_name: str) -> None:
+    """Wrap an existing Fixture mutation in the shared Claim mutation lock."""
+    method = getattr(FixtureRepository, method_name)
+
+    def serialized(self: FixtureRepository, *args: Any, **kwargs: Any) -> Any:
+        with self._claim_mutation_lock:
+            return method(self, *args, **kwargs)
+
+    serialized.__name__ = method.__name__
+    serialized.__qualname__ = method.__qualname__
+    serialized.__doc__ = method.__doc__
+    setattr(FixtureRepository, method_name, serialized)
+
+
+for _material_claim_mutation in (
+    'promote_claim_owner',
+    'save_claim_mutation_with_audit',
+    'save_message_mutation',
+    'save_agent_turn',
+    'save_runtime_turn',
+    'save_evidence_mutation',
+    'save_ownership_mutation',
+    'save_staff_mutation',
+    'save_handoff_mutation',
+):
+    _serialize_material_claim_mutation(_material_claim_mutation)
+
+del _material_claim_mutation

@@ -687,11 +687,17 @@ Session lifecycle transitions are server-controlled.
 
 A session MAY move from `active` to `paused` after claimant inactivity or when the current interaction is interrupted.
 
-When a claimant resumes an existing working claim, the server starts a new interaction session using the current claim state and bounded resume context. A previously paused session MAY be closed when the new session is created.
+`POST /api/v1/claims/{claim_id}/sessions/{session_id}/pause` is the explicit P17.1 interruption boundary. It requires the current Claim revision through `If-Match` plus an `Idempotency-Key`, atomically marks the current session `paused`, aligns that Session's recovery snapshot to the accepted Claim revision, clears the Claim's active-session pointer, stores bounded recovery context, and creates exactly one open Claim-scoped recovery Follow-up for the `resume_incomplete_claim` purpose. The accepted Claim revision is part of the idempotency fingerprint, so reusing the same key with a different `If-Match` value returns `409 IDEMPOTENCY_CONFLICT`. It does not create a second Claim State, send a follow-up, make an abandonment decision, or apply a retention transition.
+
+The recovery Follow-up persists purpose, source references, responsible party, channel, due time, status, attempt count, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel in P17.1, so the record is persisted as `blocked` with `contact_permission=not_authorised`, no channel, and no due time. P17.2 owns any later scheduling, delivery, attempt, or escalation policy.
+
+After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe open Follow-up state. Pause is accepted only when the authoritative Claim is not `created` and `customer_next_step.can_resume=true`; terminal or explicitly non-resumable Claims return `409 INVALID_STATE_TRANSITION`. Claimant and Workbench projections use the same incomplete predicate: an eligible resumable non-terminal Claim, no authoritative active Session, a relevant paused recovery checkpoint, and an open recovery Follow-up. This applies to every resumable non-terminal workflow state, not only `collecting`. The persisted checkpoint also records the exact durable source reference for the latest qualifying claimant message or accepted claimant business action.
+
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
 
 Only one active claimant session per claim is permitted.
 
-Messages MUST NOT be accepted for a closed session.
+Messages MUST NOT be accepted for a closed or paused session.
 
 ### Message
 
@@ -1129,6 +1135,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims` | List the authenticated claimant's reports |
 | `GET` | `/claims/{claim_id}` | Read the claimant-visible claim projection |
 | `POST` | `/claims/{claim_id}/sessions` | Start or resume a session |
+| `POST` | `/claims/{claim_id}/sessions/{session_id}/pause` | Persist an interruption checkpoint and initial follow-up task; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
@@ -2052,8 +2059,9 @@ extension.
 
 `urgent` contains Claims whose projected priority is `urgent` or `immediate`. `human_requests`
 contains Claims with an active handoff whose support need is `human_requested`.
-`incomplete_claims` contains Claims in the existing collecting/incomplete queue. It does not
-represent or infer a triage status.
+`incomplete_claims` contains resumable non-terminal Claims with no authoritative active Session,
+a relevant durable paused recovery checkpoint, and an open recovery Follow-up. It is an operational
+overlay rather than an active lifecycle queue and does not infer a triage status.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
 
