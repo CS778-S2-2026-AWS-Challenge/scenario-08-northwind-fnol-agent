@@ -2425,9 +2425,15 @@ The request has no body and requires an `Idempotency-Key`. The first accepted re
 three graphs, presence lease, and retry response atomically. Repeating the same key replays the
 original response without creating records. A different key is rejected with
 `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` when any Claim already exists. Persistence failure leaves no
-partial Claim graph. The synthetic Evidence records are explicitly `unofficial` with
-`file_status=not_available`; the endpoint never fabricates an object-storage key, checksum, or
-file.
+partial Claim graph. The synthetic cross-role reference is explicitly `unofficial` with
+`file_status=not_available`, and the endpoint never invents an object-storage key, checksum, or
+file for it. The produced demonstration materials (`backend/demo_data/materials/`) are attached
+to the Claim of their family as Evidence carrying their catalogued condition. Each material that
+has a file is stored through the evidence storage adapter's `store_generated_content` before the
+graph is persisted, and its record carries the returned `storage_key` and `upload_checksum`, so
+the Workbench evidence content route serves the committed bytes. If evidence storage is
+unavailable, the request returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true` and persists
+nothing.
 
 Response `200`:
 
