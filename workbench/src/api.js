@@ -1,12 +1,23 @@
 const SESSION_KEY = 'northwind.workbench.session'
+const retryableMutationKeys = new Map()
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'NETWORK_ERROR', details = [] } = {}) {
+  constructor(message, {
+    status = 0,
+    code = 'NETWORK_ERROR',
+    details = [],
+    requestId = null,
+    retryable = false,
+    currentRevision = null,
+  } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.details = details
+    this.requestId = requestId
+    this.retryable = retryable
+    this.currentRevision = currentRevision
   }
 }
 
@@ -26,10 +37,12 @@ export function readStoredSession() {
 }
 
 export function storeSession(session) {
+  if (readStoredSession()?.access_token !== session.access_token) retryableMutationKeys.clear()
   localStorage.setItem(SESSION_KEY, JSON.stringify(session))
 }
 
 export function clearStoredSession() {
+  retryableMutationKeys.clear()
   localStorage.removeItem(SESSION_KEY)
 }
 
@@ -46,19 +59,48 @@ async function request(path, { token, headers, ...options } = {}) {
       },
     })
   } catch {
-    throw new ApiError('The Workbench service could not be reached. Try again shortly.')
+    throw new ApiError('The Workbench service could not be reached.', { retryable: true })
   }
 
   if (response.status === 204) return null
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new ApiError(payload?.error?.message || 'The request could not be completed.', {
+    const error = payload?.error || {}
+    throw new ApiError(error.message || 'The request could not be completed.', {
       status: response.status,
-      code: payload?.error?.code,
-      details: payload?.error?.details,
+      code: error.code,
+      details: error.details,
+      requestId: error.request_id,
+      retryable: error.retryable,
+      currentRevision: error.current_revision,
     })
   }
   return payload
+}
+
+async function mutationRequest(path, { headers = {}, ...options }) {
+  const fingerprint = JSON.stringify([
+    options.method,
+    path,
+    headers['If-Match'] || null,
+    options.body || null,
+  ])
+  const suppliedKey = headers['Idempotency-Key']
+  const idempotencyKey = suppliedKey || retryableMutationKeys.get(fingerprint) || crypto.randomUUID()
+  retryableMutationKeys.set(fingerprint, idempotencyKey)
+  try {
+    const response = await request(path, {
+      ...options,
+      headers: { ...headers, 'Idempotency-Key': idempotencyKey },
+    })
+    retryableMutationKeys.delete(fingerprint)
+    return response
+  } catch (error) {
+    if (!(error.retryable || error.status === 0 || error.status >= 500)) {
+      retryableMutationKeys.delete(fingerprint)
+    }
+    throw error
+  }
 }
 
 export const workbenchApi = {
@@ -167,13 +209,12 @@ export const workbenchApi = {
     return pagedClaimResource(token, claimId, 'events', cursor)
   },
   acceptHandoff(token, claimId, handoffId, revision) {
-    return request(
+    return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/handoffs/${encodeURIComponent(handoffId)}/accept`,
       {
         method: 'POST',
         token,
         headers: {
-          'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
         body: JSON.stringify({}),
@@ -187,13 +228,12 @@ export const workbenchApi = {
     return ownershipRequest(token, claimId, 'transfer-requests', revision, payload)
   },
   decideCollaboration(token, claimId, requestId, revision, payload) {
-    return request(
+    return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/collaboration-requests/${encodeURIComponent(requestId)}`,
       {
         method: 'PATCH',
         token,
         headers: {
-          'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
         body: JSON.stringify(payload),
@@ -204,7 +244,7 @@ export const workbenchApi = {
     return ownershipRequest(token, claimId, 'requeue', revision, payload)
   },
   reopenClaim(token, claimId, revision, payload, idempotencyKey = crypto.randomUUID()) {
-    return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/reopen`, {
+    return mutationRequest(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/reopen`, {
       method: 'POST',
       token,
       headers: {
@@ -215,13 +255,12 @@ export const workbenchApi = {
     })
   },
   resolveHandoff(token, claimId, handoffId, revision, payload) {
-    return request(
+    return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/handoffs/${encodeURIComponent(handoffId)}/resolve`,
       {
         method: 'POST',
         token,
         headers: {
-          'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
         body: JSON.stringify(payload),
@@ -229,13 +268,12 @@ export const workbenchApi = {
     )
   },
   decideSignal(token, claimId, signalId, revision, payload) {
-    return request(
+    return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/signals/${encodeURIComponent(signalId)}/decisions`,
       {
         method: 'POST',
         token,
         headers: {
-          'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
         body: JSON.stringify(payload),
@@ -243,24 +281,22 @@ export const workbenchApi = {
     )
   },
   createStaffAction(token, claimId, revision, payload) {
-    return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/staff-actions`, {
+    return mutationRequest(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/staff-actions`, {
       method: 'POST',
       token,
       headers: {
-        'Idempotency-Key': crypto.randomUUID(),
         'If-Match': String(revision),
       },
       body: JSON.stringify(payload),
     })
   },
   updateStaffAction(token, claimId, actionId, revision, payload) {
-    return request(
+    return mutationRequest(
       `/api/v1/workbench/claims/${encodeURIComponent(claimId)}/staff-actions/${encodeURIComponent(actionId)}`,
       {
         method: 'PATCH',
         token,
         headers: {
-          'Idempotency-Key': crypto.randomUUID(),
           'If-Match': String(revision),
         },
         body: JSON.stringify(payload),
@@ -274,11 +310,10 @@ export const workbenchApi = {
     )
   },
   sendMessage(token, claimId, message, revision) {
-    return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/messages`, {
+    return mutationRequest(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/messages`, {
       method: 'POST',
       token,
       headers: {
-        'Idempotency-Key': crypto.randomUUID(),
         'If-Match': String(revision),
       },
       body: JSON.stringify({ content: { type: 'text', text: message } }),
@@ -287,11 +322,10 @@ export const workbenchApi = {
 }
 
 function ownershipRequest(token, claimId, resource, revision, payload) {
-  return request(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/${resource}`, {
+  return mutationRequest(`/api/v1/workbench/claims/${encodeURIComponent(claimId)}/${resource}`, {
     method: 'POST',
     token,
     headers: {
-      'Idempotency-Key': crypto.randomUUID(),
       'If-Match': String(revision),
     },
     body: JSON.stringify(payload),

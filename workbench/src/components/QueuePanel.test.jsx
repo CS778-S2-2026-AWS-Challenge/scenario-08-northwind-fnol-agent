@@ -255,8 +255,11 @@ describe('QueuePanel', () => {
     expect(screen.getByRole('button', { name: 'Load more Claims' })).toBeInTheDocument()
   })
 
-  it('labels unavailable totals without replacing them with zero', () => {
+  it('labels unavailable totals without replacing them with zero', async () => {
+    const onRetry = vi.fn()
+    const user = userEvent.setup()
     renderQueue({
+      onRetry,
       viewCounts: {
         status: 'unavailable',
         items: [],
@@ -267,5 +270,30 @@ describe('QueuePanel', () => {
     expect(screen.getByText('Total unavailable')).toBeInTheDocument()
     expect(screen.queryByText('0 total')).not.toBeInTheDocument()
     expect(screen.getByText('NW-1042')).toBeInTheDocument()
+    expect(screen.getByText('Queue totals unavailable.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Refresh totals' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('retains and labels the last successful queue snapshot after refresh failure', async () => {
+    const onRetry = vi.fn()
+    const user = userEvent.setup()
+    renderQueue({
+      onRetry,
+      error: Object.assign(new Error('Queue service timed out.'), { requestId: 'req_queue_1' }),
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Claims below are from the last successful load')
+    expect(screen.getByRole('alert')).toHaveTextContent('Request reference: req_queue_1')
+    expect(screen.getByRole('button', { name: /NW-1042/ })).toHaveClass('is-stale')
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('shows loading instead of an empty-state conclusion before the first response', () => {
+    renderQueue({ claims: [], loading: true })
+
+    expect(screen.getByText('Loading current work...')).toBeInTheDocument()
+    expect(screen.queryByText(/No claims/)).not.toBeInTheDocument()
   })
 })
