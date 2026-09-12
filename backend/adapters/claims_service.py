@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Protocol
 
+from backend.domain.external_services import ExternalTaskDelivery
 from backend.domain.models import (
     AssessorRoutingFailureCode,
     AssessorRoutingResult,
@@ -24,11 +25,57 @@ class AdapterIdempotencyConflict(Exception):
 
 
 class AssessorAdapterFailure(Exception):
-    """Bounded fixture failure without a provider payload or secret."""
+    """Bounded fixture failure without a provider payload or secret.
 
-    def __init__(self, code: AssessorFixtureFailure) -> None:
+    The failure carries whether the attempt reached the provider, because only the
+    adapter can know. `docs/claim-creation-boundary.md` separates a timeout that was
+    never sent from one that may already have had an effect, and the two are the same
+    failure code. A caller that read submission out of the code would be guessing at
+    the one fact that decides whether asking again is safe.
+
+    `NOT_SUBMITTED` is the default because it is what an adapter that has not been
+    taught to observe delivery can honestly claim, and it is the reading that the
+    recovery matrix treats as retryable. An adapter that does know better says so.
+    """
+
+    def __init__(
+        self,
+        code: AssessorFixtureFailure,
+        *,
+        delivery: ExternalTaskDelivery = ExternalTaskDelivery.NOT_SUBMITTED,
+        delivery_evidence: str | None = None,
+    ) -> None:
         super().__init__(code.value)
+        submitted = delivery is ExternalTaskDelivery.SUBMITTED
+        if submitted and not (delivery_evidence or '').strip():
+            raise ValueError('A submitted failure must name what reached the provider.')
+        if not submitted and delivery_evidence is not None:
+            raise ValueError('An unsubmitted failure cannot carry delivery evidence.')
         self.code = code
+        self.delivery = delivery
+        self.delivery_evidence = delivery_evidence
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptedAssessorFailure:
+    """One scripted fixture failure, including what it observed about delivery.
+
+    The fixture's `failure_sequence` accepts a bare failure code, which keeps its
+    established meaning of an attempt that never reached the provider. This form is
+    for the other case, which has no producer otherwise: a request that was sent and
+    acknowledged before the answer was lost.
+    """
+
+    code: AssessorFixtureFailure
+    delivery: ExternalTaskDelivery = ExternalTaskDelivery.NOT_SUBMITTED
+    delivery_evidence: str | None = None
+
+    def raised(self) -> AssessorAdapterFailure:
+        return AssessorAdapterFailure(
+            self.code,
+            delivery=self.delivery,
+            delivery_evidence=self.delivery_evidence,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +243,7 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
     def __init__(
         self,
         *,
-        failure_sequence: tuple[AssessorFixtureFailure, ...] = (),
+        failure_sequence: tuple[AssessorFixtureFailure | ScriptedAssessorFailure, ...] = (),
         routing_status: AssessorRoutingStatus = AssessorRoutingStatus.ASSIGNED,
     ) -> None:
         if routing_status not in {AssessorRoutingStatus.ASSIGNED, AssessorRoutingStatus.QUEUED}:
@@ -205,7 +252,12 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
         self._returned: dict[str, tuple[str, AssessorReturnedReport]] = {}
         self._accepted_fingerprints: dict[str, str] = {}
         self._attempts: dict[str, int] = {}
-        self._failure_sequence = failure_sequence
+        self._failure_sequence = tuple(
+            scripted
+            if isinstance(scripted, ScriptedAssessorFailure)
+            else ScriptedAssessorFailure(code=scripted)
+            for scripted in failure_sequence
+        )
         self._routing_status = routing_status
 
     def reset_demo_state(self) -> dict[str, int]:
@@ -249,7 +301,7 @@ class MockAssessorServiceAdapter(AssessorServiceAdapter):
         attempt = self._attempts.get(route_key, 0)
         self._attempts[route_key] = attempt + 1
         if attempt < len(self._failure_sequence):
-            raise AssessorAdapterFailure(self._failure_sequence[attempt])
+            raise self._failure_sequence[attempt].raised()
 
         digest = sha256(route_key.encode('utf-8')).hexdigest()[:10].upper()
         timestamp = now_utc()

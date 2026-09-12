@@ -285,9 +285,18 @@ class AssessorRoutingFailureCode(str, Enum):
 
 
 class AssessorRoutingOperationStatus(str, Enum):
+    """Lifecycle of one assessor routing operation.
+
+    `UNKNOWN_OUTCOME` mirrors the external-task status of the same name so the
+    operation record cannot contradict the task it reserved. It is not a failure: the
+    request may have been accepted, and the operation is settled by reconciling it
+    rather than by another attempt.
+    """
+
     PREPARED = 'prepared'
     RETRYABLE_FAILURE = 'retryable_failure'
     TERMINAL_FAILURE = 'terminal_failure'
+    UNKNOWN_OUTCOME = 'unknown_outcome'
     ACCEPTED = 'accepted'
 
 
@@ -312,6 +321,11 @@ class ClaimantExternalServiceStatus(str, Enum):
     ASSIGNED = 'assigned'
     RETRYABLE_FAILURE = 'retryable_failure'
     TERMINAL_FAILURE = 'terminal_failure'
+    # An attempt that may already have reached the assessor. It is neither a failure
+    # the claimant may retry nor a success, and leaving it unprojected is not the
+    # neutral choice: with no routing on the claim the action falls back to
+    # `READY_TO_REQUEST`, which invites the claimant to send the request again.
+    AWAITING_RECONCILIATION = 'awaiting_reconciliation'
 
 
 class SupportNeed(str, Enum):
@@ -637,9 +651,12 @@ class AssessorRoutingOperation(ContractModel):
         if self.status in {
             AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
             AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
         }:
             if self.failure_code is None or self.result is not None:
-                raise ValueError('Failed assessor operation requires only a failure code.')
+                raise ValueError(
+                    'An assessor operation that returned no routing requires only a failure code.'
+                )
             return self
         if self.result is not None or self.failure_code is not None:
             raise ValueError('Prepared assessor operation cannot contain an outcome.')
