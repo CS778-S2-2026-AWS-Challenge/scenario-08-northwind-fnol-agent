@@ -1639,6 +1639,15 @@ key is the same operation, not a second one, and a claimant who reloads the page
 A retry that changed the request is refused, because the operation holds the first attempt's
 request fingerprint and it is compared before anything else.
 
+Runtime reserves the prepared request before contacting the assessor, and the reservation is an
+atomic persistence operation rather than a check. Two concurrent requests on one claim therefore
+reach the assessor once: the caller that does not win the reservation returns
+`409 INVALID_STATE_TRANSITION` with `details[].reason` `dispatch_in_progress` before any provider
+call, and creates no second task, request, or operation. The reservation is released when the
+attempt settles with a known outcome, so a failure that never reached the assessor can be retried
+on the same identity; it is kept when the outcome is not established, so such a request never
+becomes sendable again without reconciliation.
+
 An attempt the adapter reports as having reached the assessor before it failed is not a failure
 the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
 from the failure code: the same `timeout` can describe an attempt that never left and one whose

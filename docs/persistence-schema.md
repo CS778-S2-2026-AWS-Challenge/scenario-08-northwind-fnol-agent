@@ -525,6 +525,16 @@ Evidence record or protected object.
   writes none of those records. An unchanged replay reads the settled records and does not repeat
   the status check. `unknown_outcome` cannot become `retryable_failure`; a confirmed non-submission
   requires a separate durable reconciliation record before it can permit another attempt.
+- One prepared `erq_` request carries a dispatch reservation. Runtime must hold it before any
+  provider call, and the reservation is taken by an atomic compare-and-set on the stored request
+  rather than by a check made before the write, so exactly one of two concurrent callers may
+  dispatch and the other fails before the provider is reached. It preserves the existing task,
+  request, and operation identity; no second task or operation is created to resolve a race, and
+  there is no uniqueness rule over `(claim_id, service_identity, requested_action)`. An attempt
+  that settles with a known outcome releases the reservation, so a failure that definitely never
+  reached the provider may be retried on the same identity. An attempt whose outcome is not
+  established keeps it, which is why a reserved request can never fall back to a sendable
+  `prepared` state; establishing that outcome is reconciliation's work.
 - An external response cannot mutate Claim State until provenance, request linkage,
   schema, current revision, field conflicts, and required authority are validated.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
