@@ -8,6 +8,14 @@ const FAILURE_WORDING = {
   malformed: 'The assessment service returned an unusable response. Your claim is saved; Northwind must review the integration response.',
 }
 
+// An attempt that may already have reached the assessor is not one of AT-10's four
+// failure outcomes: it is the same `timeout` code with a delivery that scenario does
+// not describe. The wording is proposed on Discussion #758 and is deliberately the
+// only sentence here that does not come from AT-10; it says what is known, what is
+// unchanged, and what the claimant should not do.
+const RECONCILIATION_WORDING =
+  'The assessment request may already have reached the assessor, but we did not get a confirmation. Your claim is saved and unchanged. Northwind is checking with the assessor before anything is sent again, so please do not resend it.'
+
 export default function ExternalServiceAction({
   action,
   consentChecked,
@@ -23,6 +31,7 @@ export default function ExternalServiceAction({
   const routing = action.routing
   const succeeded = action.status === 'assigned' || action.status === 'queued'
   const retryableFailure = action.status === 'retryable_failure'
+  const awaitingReconciliation = action.status === 'awaiting_reconciliation'
   const recordedFailure = !error && (retryableFailure || action.status === 'terminal_failure')
 
   return (
@@ -65,6 +74,12 @@ export default function ExternalServiceAction({
           <strong>Assessment request not sent</strong>
           <p>{FAILURE_WORDING[action.failure_code] ?? 'The assessment request did not complete. Your claim is saved, and no assessor has been assigned.'}</p>
           {!retryableFailure && <p>Northwind needs to review this before another request.</p>}
+        </div>
+      )}
+      {awaitingReconciliation && !error && (
+        <div className="service-result is-error" role="status">
+          <strong>Assessment request outcome not confirmed</strong>
+          <p>{RECONCILIATION_WORDING}</p>
         </div>
       )}
       {succeeded && routing && (

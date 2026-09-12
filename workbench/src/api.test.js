@@ -14,6 +14,104 @@ function jsonResponse(status, payload) {
 }
 
 
+describe('Workbench API failures', () => {
+  beforeEach(() => {
+    clearStoredSession()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
+  })
+
+  it('preserves the backend recovery fields on an API error', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(409, {
+      error: {
+        code: 'REVISION_CONFLICT',
+        message: 'The Claim revision changed.',
+        details: [{ field: 'If-Match' }],
+        request_id: 'req_conflict_1',
+        retryable: false,
+        current_revision: 9,
+      },
+    }))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      workbenchApi.claim('staff-token', 'clm_1'),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'REVISION_CONFLICT',
+      requestId: 'req_conflict_1',
+      retryable: false,
+      currentRevision: 9,
+    })
+  })
+
+  it('reuses a generic mutation key only for an identical unknown-result retry', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection lost'))
+      .mockResolvedValueOnce(jsonResponse(200, { accepted: true }))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const payload = { reason: 'Need another reviewer' }
+
+    await expect(
+      workbenchApi.requestCowork(
+        'staff-token',
+        'clm_generic',
+        4,
+        payload,
+      ),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+      retryable: true,
+    })
+
+    await workbenchApi.requestCowork(
+      'staff-token',
+      'clm_generic',
+      4,
+      payload,
+    )
+
+    expect(
+      fetchMock.mock.calls[0][1].headers['Idempotency-Key'],
+    ).toBe(
+      fetchMock.mock.calls[1][1].headers['Idempotency-Key'],
+    )
+  })
+
+  it('uses a new generic mutation key when the payload changes', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('connection lost'))
+      .mockResolvedValueOnce(jsonResponse(200, { accepted: true }))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      workbenchApi.requestCowork(
+        'staff-token',
+        'clm_generic_payload',
+        4,
+        { reason: 'First request' },
+      ),
+    ).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+
+    await workbenchApi.requestCowork(
+      'staff-token',
+      'clm_generic_payload',
+      4,
+      { reason: 'Revised request' },
+    )
+
+    expect(
+      fetchMock.mock.calls[0][1].headers['Idempotency-Key'],
+    ).not.toBe(
+      fetchMock.mock.calls[1][1].headers['Idempotency-Key'],
+    )
+  })
+})
+
 describe('workbenchApi Claim session resolution', () => {
   beforeEach(() => {
     clearStoredSession()
@@ -92,15 +190,25 @@ describe('workbenchApi staff message retries', () => {
       workbenchApi.sendMessage('staff-token', 'clm_retry', operation, 4),
     ).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
 
-    await workbenchApi.sendMessage('staff-token', 'clm_retry', operation, 4)
+    // The page may already have refreshed to revision 5 after the
+    // ambiguous first response. The logical retry must still replay the
+    // original request identity, including its original revision.
+    await workbenchApi.sendMessage('staff-token', 'clm_retry', operation, 5)
 
     const firstKey = fetchMock.mock.calls[0][1].headers['Idempotency-Key']
     const retryKey = fetchMock.mock.calls[1][1].headers['Idempotency-Key']
+
     expect(retryKey).toBe(firstKey)
+    expect(fetchMock.mock.calls[0][1].headers['If-Match']).toBe('4')
+    expect(fetchMock.mock.calls[1][1].headers['If-Match']).toBe('4')
 
     await workbenchApi.sendMessage('staff-token', 'clm_retry', operation, 5)
-    const nextOperationKey = fetchMock.mock.calls[2][1].headers['Idempotency-Key']
+
+    const nextOperationKey =
+      fetchMock.mock.calls[2][1].headers['Idempotency-Key']
+
     expect(nextOperationKey).not.toBe(firstKey)
+    expect(fetchMock.mock.calls[2][1].headers['If-Match']).toBe('5')
   })
 
   it('does not let a different displayed session bypass an unknown delivery outcome', async () => {

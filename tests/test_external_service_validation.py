@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from backend.adapters.claims_service import (
     AssessorFixtureFailure,
+    AssessorResultOutcome,
+    AssessorResultRequest,
     AssessorRoutingOutcome,
     MockAssessorServiceAdapter,
 )
@@ -116,6 +118,27 @@ class NeverCalledAssessorAdapter:
     ) -> AssessorRoutingOutcome:
         del command, request_fingerprint
         raise AssertionError('The assessor adapter must not be called without claimant consent.')
+
+    def receive_result(
+        self,
+        command: AssessorResultRequest,
+        request_fingerprint: str,
+    ) -> AssessorResultOutcome:
+        """Reject result receipt on a double that must never be invoked.
+
+        Args:
+            command: Provider-neutral result lookup that must remain unused.
+            request_fingerprint: Idempotency identity that must remain unused.
+
+        Returns:
+            This method never returns.
+
+        Raises:
+            AssertionError: Always, because this adapter must not be called.
+        """
+
+        del command, request_fingerprint
+        raise AssertionError('The assessor adapter must not receive a result on this path.')
 
 
 def test_declined_consent_preserves_the_claim_and_never_calls_the_adapter() -> None:
@@ -525,13 +548,20 @@ def test_a_failure_code_without_claimant_wording_does_not_break_the_claimant_rea
     assert action['can_request'] is True
 
 
-def test_a_task_awaiting_reconciliation_is_not_shown_as_a_failure() -> None:
+def test_a_task_awaiting_reconciliation_is_not_offered_as_a_fresh_request() -> None:
     """The claimant projection follows the continuation, not the operation status.
 
     A timeout that reached the provider is an unresolved outcome, not a failure the
     claimant may retry: the provider may still act on it. `continuation_for_failed_task`
-    settles that as `awaiting_reconciliation`, which has no approved claimant wording,
-    so nothing is projected and the ordinary safe action stands.
+    settles that as `awaiting_reconciliation`.
+
+    This test previously asserted that nothing was projected and "the ordinary safe
+    action stands", on the reasoning that the state had no approved claimant wording.
+    Reading the result rather than the intent shows that leaving it out is not neutral:
+    a failed attempt writes nothing to the claim, so the projection fell back to
+    `ready_to_request` with `can_request` true and invited the claimant to send again a
+    request that may already be with the assessor. Silence was the one answer this
+    state could not afford, so the state is now named and the action withdrawn.
     """
 
     repository = FixtureRepository()
@@ -562,8 +592,9 @@ def test_a_task_awaiting_reconciliation_is_not_shown_as_a_failure() -> None:
 
     assert claimant.status_code == 200
     action = claimant.json()['external_service_action']
-    assert action['status'] == 'ready_to_request'
-    assert action['failure_code'] is None
+    assert action['status'] == 'awaiting_reconciliation'
+    assert action['failure_code'] == 'timeout'
+    assert action['can_request'] is False
 
 
 def _routed(

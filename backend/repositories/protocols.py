@@ -17,6 +17,7 @@ from backend.domain.models import (
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    FollowUpRecord,
     HandoffRecord,
     MessageRecord,
     RuntimeTraceRecord,
@@ -64,6 +65,7 @@ class IdempotencyRecord:
     decision_id: str | None = None
     runtime_trace_id: str | None = None
     handoff_id: str | None = None
+    follow_up_id: str | None = None
     action_registry_version: str | None = None
     action_code: str | None = None
     target_ref: str | None = None
@@ -158,8 +160,36 @@ class ClaimRepository(Protocol):
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        """Atomically persist a resumed session, claim revision, and retry metadata."""
+        """Atomically replace/activate a session and resolve recovery work when supplied."""
+        raise NotImplementedError
+
+    def get_follow_up(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> FollowUpRecord | None:
+        raise NotImplementedError
+
+    def list_follow_ups(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[FollowUpRecord]:
+        raise NotImplementedError
+
+    def save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        """Atomically pause a session, clear its active pointer, and create follow-up work."""
         raise NotImplementedError
 
     def get_active_session(self, claim_id: str, customer_id: str) -> SessionRecord | None:
@@ -266,7 +296,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         Args:
             claim: Resulting authoritative Claim State.
             expected_revision: Revision that must still be current.
-            idempotency: Retry metadata for the accepted mutation.
+            idempotency: Retry metadata scoped to the authenticated claimant or staff actor.
             audit_events: Immutable audit facts produced by the same mutation.
             branch_evaluation: Optional applied Dynamic Form evaluation for the resulting revision.
 

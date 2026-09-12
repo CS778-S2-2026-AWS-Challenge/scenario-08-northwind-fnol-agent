@@ -5,7 +5,7 @@ import { canSubmitProjectedAction, findProjectedAction } from '../projected-acti
 import { ProjectedActionState } from './ProjectedAction.jsx'
 import ResourceBoundary from './ResourceBoundary.jsx'
 
-export default function Conversation({ detail, resource, draft, onDraft, onSend, onRefresh = reloadWorkbench }) {
+export default function Conversation({ detail, resource, draft, onDraft, onSend, onRetry }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const messageSessionId = resource?.items?.find(
@@ -37,12 +37,7 @@ export default function Conversation({ detail, resource, draft, onDraft, onSend,
       await onSend({ message: draft.trim(), sessionId: displayedSessionId })
       onDraft('')
     } catch (nextError) {
-      if (nextError.code === 'REVISION_CONFLICT') {
-        setSendError('This Claim changed after the conversation loaded. Reloading the current Claim before another send is allowed.')
-        onRefresh()
-      } else {
-        setSendError(nextError.message)
-      }
+      setSendError(nextError.message)
     } finally {
       setSending(false)
     }
@@ -55,7 +50,7 @@ export default function Conversation({ detail, resource, draft, onDraft, onSend,
       : 'A claimant-message action is not executable'
 
   return (
-    <ResourceBoundary resource={resource}>
+    <ResourceBoundary resource={resource} onRetry={onRetry}>
       <section className="conversation-view">
         <header className="content-header"><div><p className="eyebrow">Shared Claim context</p><h2>Claimant conversation</h2></div><span>{resource?.items?.length || 0} messages</span></header>
         <div className="message-ledger">{(resource?.items || []).map((message) => <article className={`message message--${message.actor}`} key={message.message_id}><header><strong>{words(message.actor)}</strong><time>{formatDateTime(message.created_at)}</time></header><p>{message.content?.text || words(message.content?.type)}</p></article>)}</div>
@@ -63,8 +58,4 @@ export default function Conversation({ detail, resource, draft, onDraft, onSend,
       </section>
     </ResourceBoundary>
   )
-}
-
-function reloadWorkbench() {
-  window.location.reload()
 }

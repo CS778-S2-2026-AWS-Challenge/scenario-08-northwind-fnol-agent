@@ -18,6 +18,7 @@ from backend.domain.models import (
     CreateTransferRequest,
     DecideCollaborationRequest,
     HandoffMutationResponse,
+    ReopenClaimRequest,
     RequeueClaimRequest,
     ResolveHandoffRequest,
     SignalDecisionRequest,
@@ -65,6 +66,7 @@ from backend.services.staff_actions import (
     send_staff_message,
     update_staff_action,
 )
+from backend.services.terminal_claims import reopen_claim
 from backend.services.workbench import (
     get_workbench_claim_filter_metadata,
     list_workbench_claims,
@@ -184,6 +186,25 @@ def read_workbench_claim(
     principal: Principal = Depends(require_staff),
 ) -> WorkbenchClaimDetail:
     return get_review_connected_workbench_detail(repository_for(request), principal, claim_id)
+
+
+@router.post('/{claim_id}/reopen', response_model=WorkbenchClaimDetail)
+def reopen_workbench_claim(
+    claim_id: str,
+    payload: ReopenClaimRequest,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+) -> WorkbenchClaimDetail:
+    return reopen_claim(
+        repository_for(request),
+        principal,
+        claim_id,
+        payload,
+        idempotency_key,
+        if_match,
+    )
 
 
 @router.get('/{claim_id}/fields', response_model=WorkbenchFieldsResponse)

@@ -141,8 +141,15 @@ def test_form_resolution_initial_equivalent_refinement_and_conflict() -> None:
 
 def test_confirmation_and_contents_history_preserve_current_assertion() -> None:
     field = _field('Monday', FormStatus.PROPOSED)
-    confirmed = confirm_form_field(field, timestamp=NOW, updated_by=ACTOR)
+    field_confirmation_ref = 'claim:clm-vp:revision:3:field:incident.occurred_at'
+    confirmed = confirm_form_field(
+        field,
+        timestamp=NOW,
+        updated_by=ACTOR,
+        source_ref=field_confirmation_ref,
+    )
     assert confirmed.status is FormStatus.CONFIRMED
+    assert confirmed.source_refs[-1] == field_confirmation_ref
     item = resolve_contents_item_change(
         existing=None,
         proposal=_item('Laptop'),
@@ -165,7 +172,14 @@ def test_confirmation_and_contents_history_preserve_current_assertion() -> None:
         updated_by=ACTOR,
     )
     assert same.assertions[-1].relation is AssertionRelation.EQUIVALENT
-    same = confirm_contents_item(same, timestamp=NOW, updated_by=ACTOR)
+    contents_confirmation_ref = 'claim:clm-vp:revision:3:field:contents.items'
+    same = confirm_contents_item(
+        same,
+        timestamp=NOW,
+        updated_by=ACTOR,
+        source_ref=contents_confirmation_ref,
+    )
+    assert same.source_refs[-1] == contents_confirmation_ref
     conflict = resolve_contents_item_change(
         existing=same,
         proposal=_item('Phone'),

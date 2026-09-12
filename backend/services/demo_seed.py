@@ -3,6 +3,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from backend.adapters.evidence_storage import (
+    EvidenceContentConflict,
+    EvidenceStorage,
+    EvidenceStorageUnavailable,
+    EvidenceUploadTooLarge,
+)
 from backend.core.errors import ApiError
 from backend.domain.evidence import evidence_state_for, evidence_summary_for
 from backend.domain.identity import CustomerAccountRecord
@@ -31,7 +37,7 @@ from backend.repositories.scenario_loader import (
     seed_scenario,
 )
 from backend.repositories.staff_identity import StaffIdentityRepository
-from backend.services.demo_materials import associate_materials
+from backend.services.demo_materials import associate_materials, material_content
 from backend.services.support import now_utc, request_fingerprint, require_idempotency_key
 
 SCENARIO_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'scenarios'
@@ -152,14 +158,86 @@ def _validation_presence(
     )
 
 
+def _store_material_content(
+    scenarios: tuple[ScenarioFixture, ...],
+    storage: EvidenceStorage,
+) -> tuple[ScenarioFixture, ...]:
+    """Place each produced material's bytes in evidence storage and record where they are.
+
+    Association attaches the produced materials as Evidence, but their bytes stayed in the
+    repository. The Workbench content route reads only what evidence storage holds, so every
+    material with a file answered `404`. The bytes go through `store_generated_content`, the
+    server-side path a received assessor report already uses, so the key is real under the
+    fixture adapter and the S3-compatible adapter alike. This runs before the graph is built,
+    so a storage key is only ever written onto a record that commits with the graph.
+
+    Args:
+        scenarios: Validation scenarios after material association.
+        storage: The configured evidence storage adapter.
+
+    Returns:
+        The scenarios, with each produced material's `storage_key` and `upload_checksum`.
+
+    Raises:
+        ApiError: Evidence storage is unavailable (`503`, retryable, nothing seeded), or a
+            produced material cannot be stored as it is.
+    """
+
+    stored_scenarios: list[ScenarioFixture] = []
+    for scenario in scenarios:
+        evidence: list[EvidenceRecord] = []
+        for record in scenario.evidence:
+            content = material_content(record)
+            if content is None or record.media_type is None:
+                evidence.append(record)
+                continue
+            try:
+                stored = storage.store_generated_content(
+                    claim_id=record.claim_id,
+                    evidence_id=record.evidence_id,
+                    content=content,
+                    media_type=record.media_type,
+                )
+            except EvidenceStorageUnavailable as error:
+                raise ApiError(
+                    status_code=503,
+                    code='DEPENDENCY_UNAVAILABLE',
+                    message=(
+                        'Evidence storage is temporarily unavailable. '
+                        'No validation data was seeded.'
+                    ),
+                    retryable=True,
+                ) from error
+            except (EvidenceContentConflict, EvidenceUploadTooLarge) as error:
+                raise ApiError(
+                    status_code=500,
+                    code='INTERNAL_ERROR',
+                    message='A demonstration material could not be stored.',
+                ) from error
+            provenance = {
+                **record.provenance,
+                'storage_key': stored.storage_key,
+                'upload_checksum': stored.checksum,
+            }
+            evidence.append(record.model_copy(update={'provenance': provenance}))
+        stored_scenarios.append(scenario.model_copy(update={'evidence': evidence}))
+    return tuple(stored_scenarios)
+
+
 def seed_validation_scenarios(
     repository: PersistenceRepository,
     identity_repository: IdentityRepository,
     staff_identity_repository: StaffIdentityRepository,
     staff_id: str,
     idempotency_key: str | None,
+    *,
+    evidence_storage: EvidenceStorage | None = None,
 ) -> DemoSeedResponse:
-    """Seed the three validation paths through the shared persistence contract."""
+    """Seed the three validation paths through the shared persistence contract.
+
+    When an evidence storage adapter is supplied, the produced materials' bytes are stored
+    with it, so each material can be opened through the Workbench content route.
+    """
     key = require_idempotency_key(idempotency_key)
     fingerprint = request_fingerprint({'route': VALIDATION_SEED_ROUTE, 'version': 1})
     staff_account = staff_identity_repository.get_account(staff_id)
@@ -200,6 +278,8 @@ def seed_validation_scenarios(
     # the scenario's evidence wholesale and assigns the claim its seeded identity, so
     # associating first would attach material to a claim id that no longer exists.
     scenarios = associate_materials(scenarios).scenarios
+    if evidence_storage is not None:
+        scenarios = _store_material_content(scenarios, evidence_storage)
     presence, expected_presence_revision = _validation_presence(repository, staff_id)
     response = DemoSeedResponse(
         status='seeded',

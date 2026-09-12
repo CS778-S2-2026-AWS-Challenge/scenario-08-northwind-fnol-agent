@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
 from pymongo import MongoClient
@@ -42,6 +42,8 @@ from backend.domain.models import (
     ClaimCoworkerRecord,
     CustomerUpdateRecord,
     EvidenceRecord,
+    FollowUpRecord,
+    FollowUpStatus,
     HandoffRecord,
     MessageRecord,
     RuntimeTraceRecord,
@@ -212,6 +214,21 @@ class MongoDBRepository:
             partialFilterExpression={
                 'record_type': 'message',
                 'client_message_id': {'$type': 'string'},
+            },
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('source_session_id', 1)],
+            unique=True,
+            name='follow_up_source_session_unique',
+            partialFilterExpression={'record_type': 'follow_up'},
+        )
+        self._collection.create_index(
+            [('record_type', 1), ('claim_id', 1), ('purpose', 1)],
+            unique=True,
+            name='follow_up_claim_purpose_open_unique',
+            partialFilterExpression={
+                'record_type': 'follow_up',
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
             },
         )
         self._collection.create_index(
@@ -831,7 +848,6 @@ class MongoDBRepository:
         """
         if (
             claim.revision != expected_revision + 1
-            or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != (claim.active_session_id or '')
         ):
@@ -896,6 +912,38 @@ class MongoDBRepository:
             session,
             customer_id=session.customer_id,
             claim_id=session.claim_id,
+        )
+
+    def get_follow_up(
+        self,
+        claim_id: str,
+        follow_up_id: str,
+        customer_id: str,
+    ) -> FollowUpRecord | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        record = self._get(
+            'follow_up',
+            follow_up_id,
+            FollowUpRecord,
+            customer_id=customer_id,
+        )
+        if record is None or record.claim_id != claim_id:
+            return None
+        return record
+
+    def list_follow_ups(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[FollowUpRecord]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+        return self._list(
+            'follow_up',
+            FollowUpRecord,
+            {'claim_id': claim_id, 'customer_id': customer_id},
+            'created_at',
         )
 
     def _reject_session_identity_conflict(
@@ -1198,9 +1246,13 @@ class MongoDBRepository:
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
+        # `UNKNOWN_OUTCOME` is an outcome the operation may take on, not a settled one:
+        # it is written when an attempt may already have reached the provider, and
+        # reconciliation is what moves it afterwards.
         allowed_statuses = {
             AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
             AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
             AssessorRoutingOperationStatus.ACCEPTED,
         }
         if operation.status not in allowed_statuses:
@@ -2679,7 +2731,7 @@ class MongoDBRepository:
         )
         return result.matched_count
 
-    def _raise_revision_conflict(self, claim_id: str, *, mongo_session: Any) -> None:
+    def _raise_revision_conflict(self, claim_id: str, *, mongo_session: Any) -> NoReturn:
         current = self._collection.find_one(
             {'_id': self._record_id('claim', claim_id), 'record_type': 'claim'},
             projection={'revision': 1},
@@ -2735,6 +2787,127 @@ class MongoDBRepository:
             ):
                 raise IdempotencyConflict(record.key) from None
 
+    def save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+    ) -> None:
+        self._atomic(
+            lambda mongo_session: self._save_incomplete_checkpoint(
+                claim,
+                expected_revision,
+                session,
+                follow_up,
+                idempotency,
+                mongo_session,
+            )
+        )
+
+    def _save_incomplete_checkpoint(
+        self,
+        claim: WorkingClaim,
+        expected_revision: int,
+        session: SessionRecord,
+        follow_up: FollowUpRecord,
+        idempotency: IdempotencyRecord,
+        mongo_session: Any,
+    ) -> None:
+        stored_claim = self._get(
+            'claim',
+            claim.claim_id,
+            WorkingClaim,
+            customer_id=claim.customer_id,
+            session=mongo_session,
+        )
+        if stored_claim is None:
+            raise KeyError(claim.claim_id)
+        if stored_claim.revision != expected_revision:
+            raise RevisionConflict(stored_claim.revision)
+
+        stored_session = self._get(
+            'session',
+            session.session_id,
+            SessionRecord,
+            customer_id=claim.customer_id,
+            session=mongo_session,
+        )
+
+        valid = (
+            claim.revision == expected_revision + 1
+            and stored_claim.active_session_id == session.session_id
+            and claim.active_session_id is None
+            and stored_session is not None
+            and stored_session.claim_id == claim.claim_id
+            and stored_session.customer_id == claim.customer_id
+            and stored_session.status is SessionStatus.ACTIVE
+            and session.claim_id == claim.claim_id
+            and session.customer_id == claim.customer_id
+            and session.status is SessionStatus.PAUSED
+            and session.context_revision == expected_revision
+            and session.recovery_context is not None
+            and follow_up.claim_id == claim.claim_id
+            and follow_up.source_session_id == session.session_id
+            and follow_up.status in {FollowUpStatus.PENDING, FollowUpStatus.BLOCKED}
+            and follow_up.attempt_count == 0
+            and idempotency.actor_id == claim.customer_id
+            and idempotency.claim_id == claim.claim_id
+            and idempotency.session_id == session.session_id
+            and idempotency.follow_up_id == follow_up.follow_up_id
+        )
+        if not valid:
+            raise KeyError(claim.claim_id)
+
+        self._reject_existing_idempotency(
+            idempotency,
+            mongo_session=mongo_session,
+        )
+
+        existing_follow_up = self._collection.find_one(
+            {
+                'record_type': 'follow_up',
+                'claim_id': claim.claim_id,
+                'purpose': follow_up.purpose,
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+            session=mongo_session,
+        )
+        if existing_follow_up is not None:
+            raise IdempotencyConflict(follow_up.purpose)
+
+        if (
+            self._replace_claim_revision(
+                claim,
+                expected_revision,
+                mongo_session=mongo_session,
+            )
+            == 0
+        ):
+            self._raise_revision_conflict(
+                claim.claim_id,
+                mongo_session=mongo_session,
+            )
+
+        self._put(
+            'session',
+            session.session_id,
+            session,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+            session=mongo_session,
+        )
+        self._put(
+            'follow_up',
+            follow_up.follow_up_id,
+            follow_up,
+            customer_id=claim.customer_id,
+            claim_id=claim.claim_id,
+            session=mongo_session,
+        )
+        self._save_idempotency(idempotency, mongo_session)
+
     def save_session_mutation(
         self,
         claim: WorkingClaim,
@@ -2742,8 +2915,16 @@ class MongoDBRepository:
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        resolved_follow_up: FollowUpRecord | None = None,
+        replaced_active_session: SessionRecord | None = None,
     ) -> None:
-        self._validate_session_mutation(claim, expected_revision, session, idempotency)
+        self._validate_session_mutation(
+            claim,
+            expected_revision,
+            session,
+            idempotency,
+            replaced_active_session,
+        )
         self._validate_branch_evaluation(claim, branch_evaluation)
         self._atomic(
             lambda mongo_session: self._save_session_mutation(
@@ -2752,6 +2933,8 @@ class MongoDBRepository:
                 session,
                 idempotency,
                 branch_evaluation,
+                resolved_follow_up,
+                replaced_active_session,
                 mongo_session,
             )
         )
@@ -2762,6 +2945,7 @@ class MongoDBRepository:
         expected_revision: int,
         session: SessionRecord,
         idempotency: IdempotencyRecord,
+        replaced_active_session: SessionRecord | None,
     ) -> None:
         if (
             claim.revision != expected_revision + 1
@@ -2773,6 +2957,15 @@ class MongoDBRepository:
             or idempotency.actor_id != claim.customer_id
             or idempotency.claim_id != claim.claim_id
             or idempotency.session_id != session.session_id
+            or (
+                replaced_active_session is not None
+                and (
+                    replaced_active_session.claim_id != claim.claim_id
+                    or replaced_active_session.customer_id != claim.customer_id
+                    or replaced_active_session.status is not SessionStatus.CLOSED
+                    or replaced_active_session.closed_at is None
+                )
+            )
         ):
             raise KeyError(claim.claim_id)
 
@@ -2783,14 +2976,104 @@ class MongoDBRepository:
         session: SessionRecord,
         idempotency: IdempotencyRecord,
         branch_evaluation: BranchEvaluationRecord | None,
+        resolved_follow_up: FollowUpRecord | None,
+        replaced_active_session: SessionRecord | None,
         mongo_session: Any,
     ) -> None:
-        if (
-            self.get_active_session(claim.claim_id, claim.customer_id, mongo_session=mongo_session)
-            is not None
-        ):
-            raise IdempotencyConflict(session.session_id)
-        self._reject_session_identity_conflict(session, mongo_session=mongo_session)
+        stored_claim_document = self._collection.find_one(
+            {
+                '_id': self._record_id('claim', claim.claim_id),
+                'record_type': 'claim',
+                'customer_id': claim.customer_id,
+                'revision': expected_revision,
+            },
+            projection={'revision': 1, 'active_session_id': 1},
+            session=mongo_session,
+        )
+        if stored_claim_document is None:
+            self._raise_revision_conflict(claim.claim_id, mongo_session=mongo_session)
+
+        self._reject_session_identity_conflict(
+            session,
+            mongo_session=mongo_session,
+        )
+
+        stored_active_session_id = stored_claim_document.get('active_session_id')
+        active_session_documents = list(
+            self._collection.find(
+                {
+                    'record_type': 'session',
+                    'claim_id': claim.claim_id,
+                    'customer_id': claim.customer_id,
+                    'status': SessionStatus.ACTIVE.value,
+                },
+                projection={'session_id': 1},
+                session=mongo_session,
+            )
+        )
+        active_session_ids = {str(document['session_id']) for document in active_session_documents}
+
+        if replaced_active_session is None:
+            if stored_active_session_id is not None or active_session_ids:
+                raise KeyError(claim.claim_id)
+        else:
+            if (
+                stored_active_session_id != replaced_active_session.session_id
+                or active_session_ids != {replaced_active_session.session_id}
+            ):
+                raise KeyError(claim.claim_id)
+            stored_replaced_session = self._get(
+                'session',
+                replaced_active_session.session_id,
+                SessionRecord,
+                customer_id=claim.customer_id,
+                session=mongo_session,
+            )
+            if (
+                stored_replaced_session is None
+                or stored_replaced_session.claim_id != claim.claim_id
+                or stored_replaced_session.status is not SessionStatus.ACTIVE
+            ):
+                raise KeyError(claim.claim_id)
+            expected_replaced_session = stored_replaced_session.model_copy(
+                update={
+                    'status': SessionStatus.CLOSED,
+                    'closed_at': replaced_active_session.closed_at,
+                }
+            )
+            if replaced_active_session != expected_replaced_session:
+                raise KeyError(claim.claim_id)
+
+        open_follow_up_document = self._collection.find_one(
+            {
+                'record_type': 'follow_up',
+                'claim_id': claim.claim_id,
+                'purpose': 'resume_incomplete_claim',
+                'status': {'$in': [FollowUpStatus.PENDING.value, FollowUpStatus.BLOCKED.value]},
+            },
+            session=mongo_session,
+        )
+        open_follow_up = self._model_from_document(open_follow_up_document, FollowUpRecord)
+        if open_follow_up is not None and resolved_follow_up is None:
+            raise KeyError(claim.claim_id)
+        if resolved_follow_up is not None:
+            if (
+                open_follow_up is None
+                or open_follow_up.follow_up_id != resolved_follow_up.follow_up_id
+                or resolved_follow_up.status is not FollowUpStatus.RESOLVED
+                or resolved_follow_up.outcome != 'claimant_resumed'
+                or resolved_follow_up.updated_at < open_follow_up.updated_at
+            ):
+                raise KeyError(claim.claim_id)
+            expected_follow_up = open_follow_up.model_copy(
+                update={
+                    'status': FollowUpStatus.RESOLVED,
+                    'outcome': resolved_follow_up.outcome,
+                    'updated_at': resolved_follow_up.updated_at,
+                }
+            )
+            if resolved_follow_up != expected_follow_up:
+                raise KeyError(claim.claim_id)
         if branch_evaluation is not None:
             self._reject_branch_evaluation_identity_conflict(
                 branch_evaluation,
@@ -2819,6 +3102,15 @@ class MongoDBRepository:
                 session=mongo_session,
             )
             raise RevisionConflict(int(current['revision']) if current else 0)
+        if replaced_active_session is not None:
+            self._put(
+                'session',
+                replaced_active_session.session_id,
+                replaced_active_session,
+                customer_id=replaced_active_session.customer_id,
+                claim_id=replaced_active_session.claim_id,
+                session=mongo_session,
+            )
         self._put(
             'session',
             session.session_id,
@@ -2827,6 +3119,15 @@ class MongoDBRepository:
             claim_id=session.claim_id,
             session=mongo_session,
         )
+        if resolved_follow_up is not None:
+            self._put(
+                'follow_up',
+                resolved_follow_up.follow_up_id,
+                resolved_follow_up,
+                customer_id=claim.customer_id,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
         if branch_evaluation is not None:
             self._put(
                 'branch_evaluation',

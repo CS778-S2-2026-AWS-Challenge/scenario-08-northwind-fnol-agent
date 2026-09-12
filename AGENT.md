@@ -86,6 +86,20 @@ explicit so they are not lost when an agent follows only the entry point:
   committed only when it comes from an explicit design task, has a documented long-term purpose,
   uses the formal contract, and provides repeatable acceptance or regression value.
 
+## Test writing and CI scope
+
+Before adding a test, identify the new business behaviour it proves. Equivalent inputs belong in
+one boundary table or a focused parameterized test; do not create numbered near-duplicates. Keep
+one parameterized function to 8-10 cases unless the PR explains the distinct business contract for
+each case. Unit tests mock databases, queues, and external services by default; a test that uses
+real I/O must be explicitly marked `@pytest.mark.integration` and kept out of the fast PR path.
+
+Preserve explicit coverage for permission boundaries, claimant visibility, idempotency, revision
+conflicts, append-only audit events, and external-service authorization. When test volume grows
+far beyond the changed production code, review the cases for duplicated behaviour before adding
+more. Ordinary PR CI is impact-scoped; changes to shared core files or unmapped backend paths
+fall back to the full suite. A newer commit for the same PR supersedes older CI runs.
+
 The former governance documents (`docs/repo_rule.md`, `docs/development-conventions.md`) are
 archived under [docs/archive/governance/](docs/archive/governance/) and are historical
 reference only. Where an archived document disagrees with the skill, the skill prevails

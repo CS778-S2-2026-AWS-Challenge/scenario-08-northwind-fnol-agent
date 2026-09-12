@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -115,16 +115,16 @@ describe('Conversation', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('refreshes authoritative Claim context after a stale revision without clearing the draft', async () => {
+  it('keeps the draft after a stale revision while page-level recovery owns projection refresh', async () => {
     const user = userEvent.setup()
     const onDraft = vi.fn()
-    const onRefresh = vi.fn()
     const onSend = vi.fn().mockRejectedValue(
       new ApiError('The Claim changed after this page was loaded.', {
         status: 409,
         code: 'REVISION_CONFLICT',
       }),
     )
+
     renderConversation({
       detail: {
         ...detail,
@@ -138,14 +138,17 @@ describe('Conversation', () => {
       draft: 'Preserve this draft',
       onDraft,
       onSend,
-      onRefresh,
     })
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The Claim changed after this page was loaded.',
+    )
     expect(onDraft).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Preserve this draft')
+    expect(screen.getByLabelText('Reply to claimant')).toHaveValue(
+      'Preserve this draft',
+    )
   })
 
   it('keeps the draft available after an ambiguous send failure', async () => {
@@ -167,7 +170,6 @@ describe('Conversation', () => {
       draft: 'Retry this safely',
       onDraft,
       onSend,
-      onRefresh: vi.fn(),
     })
 
     await user.click(screen.getByRole('button', { name: 'Send message' }))

@@ -46,6 +46,7 @@ from backend.repositories.scenario_loader import ScenarioFixture
 
 MATERIALS_DIRECTORY = Path(__file__).resolve().parents[1] / 'demo_data' / 'materials'
 MANIFEST_PATH = MATERIALS_DIRECTORY / 'materials.json'
+DEMO_MATERIAL_SCHEME = 'demo-material://'
 
 RECORD_HELD_AS = 'record'
 INCIDENT_EVIDENCE_CLASS = 'Incident evidence'
@@ -442,7 +443,7 @@ def evidence_record_for(
 
     original_filename, media_type, size_bytes = _file_facts(material)
     provenance: dict[str, Any] = {
-        'demo_material_ref': f'demo-material://{material_path}',
+        'demo_material_ref': f'{DEMO_MATERIAL_SCHEME}{material_path}',
         'origin': 'simulated',
     }
 
@@ -571,3 +572,39 @@ def _with_evidence(
     payload['claim']['evidence_summary'] = evidence_summary_for(records).model_dump(mode='json')
     payload['claim']['claim_state']['evidence'] = evidence_state_for(records).value
     return ScenarioFixture.model_validate(payload)
+
+
+def material_content(record: EvidenceRecord) -> bytes | None:
+    """Return the committed bytes that a produced demonstration material refers to.
+
+    `associate_materials` names each produced file through `provenance['demo_material_ref']`.
+    Evidence that is not a produced material, and a material held as a record with no bytes,
+    has nothing to read and returns `None`.
+
+    Args:
+        record: An Evidence record, possibly one created by `associate_materials`.
+
+    Returns:
+        The produced file's bytes, or `None` when the record names no produced file.
+
+    Raises:
+        MaterialAssociationError: The reference is not a demonstration-material reference,
+            points outside the materials directory, names a missing file, or names a file that
+            no longer has the size the record declares.
+    """
+
+    reference = record.provenance.get('demo_material_ref')
+    if not isinstance(reference, str) or record.media_type is None:
+        return None
+    if not reference.startswith(DEMO_MATERIAL_SCHEME):
+        raise MaterialAssociationError(f'{reference}: not a demonstration-material reference')
+    root = MATERIALS_DIRECTORY.resolve()
+    target = (root / reference.removeprefix(DEMO_MATERIAL_SCHEME)).resolve()
+    if root not in target.parents:
+        raise MaterialAssociationError(f'{reference}: outside the materials directory')
+    if not target.is_file():
+        raise MaterialAssociationError(f'{reference}: the produced file is missing')
+    content = target.read_bytes()
+    if record.size_bytes is not None and len(content) != record.size_bytes:
+        raise MaterialAssociationError(f'{reference}: the file no longer has its recorded size')
+    return content

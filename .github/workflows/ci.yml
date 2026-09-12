@@ -14,6 +14,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend-impact:
+    name: Select frontend impact
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      customer: ${{ steps.impact.outputs.customer }}
+      workbench: ${{ steps.impact.outputs.workbench }}
+      admin: ${{ steps.impact.outputs.admin }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect changed frontend packages
+        id: impact
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          else
+            base="${{ github.event.before }}"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base=$(git rev-parse HEAD^)
+            fi
+          fi
+          changed=$(git diff --name-only "$base" "$GITHUB_SHA")
+          has_shared=false
+          if printf '%s\n' "$changed" | grep -qE '^frontend/shared/'; then has_shared=true; fi
+          for package in customer workbench admin; do
+            value=false
+            if [ "$has_shared" = true ] || printf '%s\n' "$changed" | grep -qE "^${package}/"; then value=true; fi
+            echo "$package=$value" >> "$GITHUB_OUTPUT"
+          done
+
   backend-quality:
     name: Backend quality
     # Set repository variable NORTHWIND_CI_RUNNER to northwind-ci after the
@@ -100,6 +134,87 @@ jobs:
       - name: Check AuditEvent contract snapshot drift
         if: steps.impact.outputs.audit == 'true'
         run: python scripts/export_audit_contract.py --check
+
+  customer-quality:
+    name: Customer quality
+    needs: frontend-impact
+    if: needs.frontend-impact.outputs.customer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: customer
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: customer/package-lock.json
+      - name: Install customer dependencies
+        run: npm ci
+      - name: Lint customer
+        run: npm run lint
+      - name: Test customer
+        run: npm test
+      - name: Build customer
+        run: npm run build
+
+  workbench-quality:
+    name: Workbench quality
+    needs: frontend-impact
+    if: needs.frontend-impact.outputs.workbench == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workbench/package-lock.json
+      - name: Install workbench dependencies
+        run: npm ci
+      - name: Lint workbench
+        run: npm run lint
+      - name: Test workbench
+        run: npm test
+      - name: Build workbench
+        run: npm run build
+
+  admin-quality:
+    name: Admin quality
+    needs: frontend-impact
+    if: needs.frontend-impact.outputs.admin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - name: Install admin dependencies
+        run: npm ci
+      - name: Lint admin
+        run: npm run lint
+      - name: Test admin
+        run: npm test
+      - name: Build admin
+        run: npm run build
 
   docs-quality:
     name: Docs quality

@@ -1,5 +1,8 @@
 version: 2.1
 
+# CircleCI redundant-workflow cancellation is a project setting/API capability;
+# this config keeps jobs impact-scoped and does not claim to enable that setting.
+
 jobs:
   backend-quality:
     docker:
@@ -93,6 +96,156 @@ jobs:
             else
               echo "AuditEvent contract unaffected; check skipped."
             fi
+
+  customer-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Select customer impact
+          command: |
+            git fetch origin main
+            if [ "${CIRCLE_BRANCH:-}" = "main" ] || git diff --name-only origin/main...HEAD | grep -qE '^(customer/|frontend/shared/)'; then
+              echo "export FRONTEND_QUALITY_MODE=run" >> "$BASH_ENV"
+            else
+              echo "export FRONTEND_QUALITY_MODE=skip" >> "$BASH_ENV"
+            fi
+      - restore_cache:
+          keys:
+            - v1-customer-node-{{ arch }}-{{ checksum "customer/package-lock.json" }}
+      - run:
+          name: Install customer dependencies
+          working_directory: customer
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then
+              echo "Customer unchanged; frontend quality gate skipped."
+              exit 0
+            fi
+            npm ci
+      - save_cache:
+          key: v1-customer-node-{{ arch }}-{{ checksum "customer/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint customer
+          working_directory: customer
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run lint
+      - run:
+          name: Test customer
+          working_directory: customer
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm test
+      - run:
+          name: Build customer
+          working_directory: customer
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run build
+
+  workbench-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Select workbench impact
+          command: |
+            git fetch origin main
+            if [ "${CIRCLE_BRANCH:-}" = "main" ] || git diff --name-only origin/main...HEAD | grep -qE '^(workbench/|frontend/shared/)'; then
+              echo "export FRONTEND_QUALITY_MODE=run" >> "$BASH_ENV"
+            else
+              echo "export FRONTEND_QUALITY_MODE=skip" >> "$BASH_ENV"
+            fi
+      - restore_cache:
+          keys:
+            - v1-workbench-node-{{ arch }}-{{ checksum "workbench/package-lock.json" }}
+      - run:
+          name: Install workbench dependencies
+          working_directory: workbench
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then
+              echo "Workbench unchanged; frontend quality gate skipped."
+              exit 0
+            fi
+            npm ci
+      - save_cache:
+          key: v1-workbench-node-{{ arch }}-{{ checksum "workbench/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint workbench
+          working_directory: workbench
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run lint
+      - run:
+          name: Test workbench
+          working_directory: workbench
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm test
+      - run:
+          name: Build workbench
+          working_directory: workbench
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run build
+
+  admin-quality:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Select admin impact
+          command: |
+            git fetch origin main
+            if [ "${CIRCLE_BRANCH:-}" = "main" ] || git diff --name-only origin/main...HEAD | grep -qE '^(admin/|frontend/shared/)'; then
+              echo "export FRONTEND_QUALITY_MODE=run" >> "$BASH_ENV"
+            else
+              echo "export FRONTEND_QUALITY_MODE=skip" >> "$BASH_ENV"
+            fi
+      - restore_cache:
+          keys:
+            - v1-admin-node-{{ arch }}-{{ checksum "admin/package-lock.json" }}
+      - run:
+          name: Install admin dependencies
+          working_directory: admin
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then
+              echo "Admin unchanged; frontend quality gate skipped."
+              exit 0
+            fi
+            npm ci
+      - save_cache:
+          key: v1-admin-node-{{ arch }}-{{ checksum "admin/package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Lint admin
+          working_directory: admin
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run lint
+      - run:
+          name: Test admin
+          working_directory: admin
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm test
+      - run:
+          name: Build admin
+          working_directory: admin
+          command: |
+            if [ "$FRONTEND_QUALITY_MODE" = "skip" ]; then exit 0; fi
+            npm run build
 
   github-automation-quality:
     docker:
@@ -190,3 +343,6 @@ workflows:
       - github-automation-quality
       - pr-policy
       - docs-quality
+      - customer-quality
+      - workbench-quality
+      - admin-quality

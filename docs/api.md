@@ -687,11 +687,17 @@ Session lifecycle transitions are server-controlled.
 
 A session MAY move from `active` to `paused` after claimant inactivity or when the current interaction is interrupted.
 
-When a claimant resumes an existing working claim, the server starts a new interaction session using the current claim state and bounded resume context. A previously paused session MAY be closed when the new session is created.
+`POST /api/v1/claims/{claim_id}/sessions/{session_id}/pause` is the explicit P17.1 interruption boundary. It requires the current Claim revision through `If-Match` plus an `Idempotency-Key`, atomically marks the current session `paused`, aligns that Session's recovery snapshot to the accepted Claim revision, clears the Claim's active-session pointer, stores bounded recovery context, and creates exactly one open Claim-scoped recovery Follow-up for the `resume_incomplete_claim` purpose. The accepted Claim revision is part of the idempotency fingerprint, so reusing the same key with a different `If-Match` value returns `409 IDEMPOTENCY_CONFLICT`. It does not create a second Claim State, send a follow-up, make an abandonment decision, or apply a retention transition.
+
+The recovery Follow-up persists purpose, source references, responsible party, channel, due time, status, attempt count, and a contact-permission condition. An authenticated claimant may receive a `pending` in-app recovery Follow-up; that record does not authorise email, SMS, or phone contact. An anonymous browser claimant has no durable authorised contact channel in P17.1, so the record is persisted as `blocked` with `contact_permission=not_authorised`, no channel, and no due time. P17.2 owns any later scheduling, delivery, attempt, or escalation policy.
+
+After that checkpoint, claimant Claim detail and Claim list projections may include `incomplete_context` containing the interruption time, last meaningful activity, bounded resume point, and the claimant-safe open Follow-up state. Pause is accepted only when the authoritative Claim is not `created` and `customer_next_step.can_resume=true`; terminal or explicitly non-resumable Claims return `409 INVALID_STATE_TRANSITION`. Claimant and Workbench projections use the same incomplete predicate: an eligible resumable non-terminal Claim, no authoritative active Session, a relevant paused recovery checkpoint, and an open recovery Follow-up. This applies to every resumable non-terminal workflow state, not only `collecting`. The persisted checkpoint also records the exact durable source reference for the latest qualifying claimant message or accepted claimant business action.
+
+When a claimant resumes an existing working claim, the server starts a new interaction session using the current Claim State and bounded resume context and atomically marks the open recovery Follow-up `resolved`. A later interruption of that resumed Session may create the next recovery Follow-up for the same purpose because only one open Claim+purpose record is allowed at a time.
 
 Only one active claimant session per claim is permitted.
 
-Messages MUST NOT be accepted for a closed session.
+Messages MUST NOT be accepted for a closed or paused session.
 
 ### Message
 
@@ -1129,6 +1135,7 @@ Events contain safe audit metadata and references. Large message bodies, files, 
 | `GET` | `/claims` | List the authenticated claimant's reports |
 | `GET` | `/claims/{claim_id}` | Read the claimant-visible claim projection |
 | `POST` | `/claims/{claim_id}/sessions` | Start or resume a session |
+| `POST` | `/claims/{claim_id}/sessions/{session_id}/pause` | Persist an interruption checkpoint and initial follow-up task; requires `If-Match` and `Idempotency-Key` |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}` | Read resumable session state |
 | `POST` | `/claims/{claim_id}/sessions/{session_id}/messages` | Submit a message and execute one agent turn |
 | `GET` | `/claims/{claim_id}/sessions/{session_id}/messages` | Read paginated claimant-visible messages |
@@ -1621,19 +1628,45 @@ assessor reference was returned and `queued` when only a queue accepted the requ
 
 Timeout and unavailable responses use `503 DEPENDENCY_UNAVAILABLE` with `retryable: true`.
 Access-denied and malformed responses use `502 DEPENDENCY_FAILED` with `retryable: false`. All
-four leave the consented Working Claim revision unchanged, do not report assignment, and retain
-the same operation identity for an unchanged permitted retry. Automatic retry counts remain
-unapproved; the claimant client offers only an explicit retry for retryable failures.
+four leave the consented Working Claim revision unchanged and do not report assignment.
+Automatic retry counts remain unapproved; the claimant client offers only an explicit retry for
+retryable failures.
+
+A permitted retry continues the same operation, task, and request record. The operation identity
+is derived from the claim, the active claimant permission, and the requested action, so it does
+not depend on the client presenting the original `Idempotency-Key`: a retry that presents a new
+key is the same operation, not a second one, and a claimant who reloads the page can still retry.
+A retry that changed the request is refused, because the operation holds the first attempt's
+request fingerprint and it is compared before anything else.
+
+An attempt the adapter reports as having reached the assessor before it failed is not a failure
+the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
+from the failure code: the same `timeout` can describe an attempt that never left and one whose
+acknowledgement was lost. A submitted timeout, or any partial response, records the task and its
+routing operation as `unknown_outcome`, and the response is `409 INVALID_STATE_TRANSITION` with
+`retryable: false` and `details[].reason` `unknown_outcome`. While that task stands, every further
+request on the claim is refused the same way before any operation is prepared and before the
+assessor is contacted, whatever idempotency key it carries; no second task, operation, or request
+is created. The refusal is lifted by establishing what happened to the original request, not by
+repeating it.
+
+A replay of an accepted request succeeds only when its operational task ended accepted and the owed
+assessment material resolves to that task. Where an interrupted attempt left that state incomplete in a
+way the replay can finish — the task still prepared, or the owed material or its link missing — the
+replay completes it before responding. Where the task is missing or recorded as failed, the replay
+returns `409 IDEMPOTENCY_CONFLICT` with `retryable: false`, saves nothing to the claim, and does not
+report assignment.
 
 After a failed attempt the claimant state does not return to `ready_to_request`.
 `external_service_action.status` becomes `retryable_failure` for a timeout or unavailable
-response and `terminal_failure` for an access-denied or malformed one, and `failure_code`
-carries the provider-neutral reason. `can_request` stays true only for a retryable failure,
-because a terminal failure requires Northwind to review the request before another attempt.
+response that did not reach the assessor, `terminal_failure` for an access-denied or malformed
+one, and `awaiting_reconciliation` for an attempt that may already have reached the assessor, and
+`failure_code` carries the provider-neutral reason. `can_request` stays true only for a retryable
+failure, because a terminal failure requires Northwind to review the request before another
+attempt, and an unresolved outcome must be established before one is sent.
 The state is derived from the recorded external task rather than stored on the claim: a failed
 attempt leaves every claim field unchanged, so the claimant still sees what happened on a
-later read without the failure having altered the claim. An unresolved outcome has no approved
-claimant wording and is deliberately not projected.
+later read without the failure having altered the claim.
 
 The authorised decision and prepared operation identity are persisted together before the
 provider call. The service also persists one operational `tsk_` task and its `erq_` request,
@@ -1646,10 +1679,12 @@ record rather than replacing either with a new identity or timestamp. If provide
 idempotency response fails, the same request restores the authoritative assigned or queued state;
 the claimant client also reloads that state before presenting a failure message.
 If provider acceptance is durable but a concurrent Claim mutation wins the following
-compare-and-set, the first request returns the bounded revision conflict. Only the identical
-claimant request with the original idempotency key, revision, consent, authority, and operation
-identity may reconcile that accepted result without another provider call. An unrelated stale
-request remains a revision or idempotency conflict.
+compare-and-set, the first request returns the bounded revision conflict. The same claimant's
+request for the same claim, permission, and action then reconciles that accepted result without
+another provider call, whichever idempotency key it presents, because that is the operation
+identity. A request that is genuinely a different one remains a revision or idempotency conflict:
+a changed request is refused against the operation's recorded fingerprint, and a request under a
+different permission or action is a different operation.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 
@@ -1952,7 +1987,7 @@ Supported filters:
 |---|---|
 | `limit` | Page size from 1 to 100; defaults to 25 |
 | `cursor` | Opaque cursor returned by the preceding page |
-| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
+| `view` | `all`, `processing`, `waiting_user`, `waiting_material`, `waiting_third_party`, `completed`, `abandoned`, `closed`, `urgent`, `human_requests`, `incomplete_claims`, `ready_to_progress`, `awaiting_evidence`, `professional_review`, `ready_to_create`, `created_routed` |
 | `workflow_state` | Canonical workflow state |
 | `priority` | `routine`, `standard`, `high`, `urgent`, `immediate` |
 | `assignee_id` | Opaque staff ID or `unassigned` |
@@ -1967,7 +2002,8 @@ and summary, current requested outcome, and projected tag codes and labels. Clai
 is not searchable until an authorised staff-safe identity projection populates it. Search does not
 inspect unprojected Claim fields or change the backend rank order.
 
-Each item includes claim ID, safe display reference, state dimensions, priority, queue, route,
+Each item includes claim ID, safe display reference, state dimensions, terminal disposition,
+priority, queue, route,
 next responsibility, evidence state and counts, open handoff summary, assignee, integration status,
 service timing, and update time. It is a projection of shared claim state, not a separately
 editable board record.
@@ -1980,20 +2016,33 @@ summaries; lifecycle and workflow state; ownership and priority projections; `wo
 integration status; tags; and creation and update times. It is a projection of shared Claim state,
 not a separately editable board record.
 
-`work_summary.queue_key` is exactly one of the four active lifecycle queues for every listable
-non-terminal Claim:
+`work_summary.queue_key` is exactly one of seven lifecycle-placement views for every listable
+Claim. The server applies terminal precedence before active placement:
 
-| Active queue | Authoritative mapping |
+| Queue | Authoritative mapping |
 |---|---|
-| `processing` | `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, `creating`, or `created` lifecycle |
+| `completed` | `terminal_disposition.value=completed` |
+| `abandoned` | `terminal_disposition.value=abandoned` |
+| `closed` | `terminal_disposition.value=closed` |
+| `processing` | Non-terminal `draft_active`, `staff_support`, `professional_review`, `ready_to_create`, or `creating` lifecycle |
 | `waiting_user` | `waiting_customer` without claimant material required for the current action |
 | `waiting_material` | `waiting_customer` with claimant Evidence missing information that is `required_now` |
 | `waiting_third_party` | `waiting_external`; this takes precedence over other waiting reasons |
 
 Active handoffs and professional review therefore remain in `processing`. Operational views are
 independent, overlapping projections: the same Claim may appear in `processing` and, for example,
-`human_requests` or `professional_review`. `all` is the union of the four active queues. Terminal
-queue mappings are outside this contract.
+`human_requests` or `professional_review`; a completed Claim may also match `created_routed`.
+`all` is the union of the four active queues and excludes all three terminal queues.
+
+`terminal_disposition` is the P17-owned authoritative record embedded in `WorkingClaim`. It is
+either null or contains `value`, registered `reason_code`, one or more immutable `source_refs`,
+typed `recorded_by`, `recorded_at`, and `recorded_revision`. It is not a second lifecycle enum and
+does not rewrite the retained `claim_state`. A successful external Claim creation records
+`completed` with reason `CLAIM_CREATED` and references both the authorising decision and created
+external Claim in the same Claim revision. `abandoned` and `closed` are never inferred from
+`withdrawn`, `expired`, free text, action history, or a missing session. A `created` lifecycle
+without its authoritative terminal record, or a terminal record that contradicts the external
+Claim result, returns `503 PROJECTION_UNAVAILABLE` rather than falling through to `processing`.
 
 `view_counts.items` contains one entry for every server-published view in metadata order. Counts
 are computed from the same authorised Claim set after applying `workflow_state`, `priority`,
@@ -2045,8 +2094,9 @@ extension.
 
 `urgent` contains Claims whose projected priority is `urgent` or `immediate`. `human_requests`
 contains Claims with an active handoff whose support need is `human_requested`.
-`incomplete_claims` contains Claims in the existing collecting/incomplete queue. It does not
-represent or infer a triage status.
+`incomplete_claims` contains resumable non-terminal Claims with no authoritative active Session,
+a relevant durable paused recovery checkpoint, and an open recovery Follow-up. It is an operational
+overlay rather than an active lifecycle queue and does not infer a triage status.
 Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `high`, `standard`,
 `routine`) and then by due time/creation time. The client does not recalculate this order.
 
@@ -2055,7 +2105,7 @@ Queue results are ordered by the backend priority rank (`immediate`, `urgent`, `
 Returns the backend-owned queue filter contract for authenticated staff. The response contains
 `views`, `workflow_states`, `priorities`, and all published, filterable `tags`, plus
 `tag_registry_version`. Every option contains `value` and `label`; each view also contains its
-`overview`, `active`, or `operational` group, and tag options contain `category`. Array order is the
+`overview`, `active`, `terminal`, or `operational` group, and tag options contain `category`. Array order is the
 server-owned display order. The Workbench uses these values to validate route state, group and
 render controls, and associate authoritative `view_counts` instead of maintaining a second enum or
 deriving options or totals from loaded Claim pages.
@@ -2076,6 +2126,7 @@ large resources are loaded from the dedicated sub-resources below:
   "claimant": {"customer_id": "customer-1042"},
   "incident": {"family": "motor", "summary": "Rear-end collision; vehicle remains drivable."},
   "lifecycle_state": "staff_support",
+  "terminal_disposition": null,
   "workflow_state": "professional_review",
   "ownership": {"state": "assigned", "current_staff_access": "primary"},
   "priority_projection": {"level": "high", "rank": 120, "due_at": null, "is_overdue": false},
@@ -2153,6 +2204,13 @@ projected action input set. Reusing an `Idempotency-Key` replays the original re
 key cannot create a second pending cowork request for the same target or a second pending transfer
 to the same target; these attempts return `409 OWNERSHIP_CONFLICT` without changing the Claim
 revision or creating another request.
+For an `abandoned` or `closed` terminal Claim, the primary owner receives `claim.reopen` as
+`confirmation_required` only when the retained workflow is resumable and no created external Claim
+exists. Other staff may receive the same exact action as `blocked`; a `completed` Claim never
+publishes a reopen action. Terminal Claims publish no ordinary active-work mutations. The reopen
+action targets the Claim, requires the projected `reason` textarea, carries the prior terminal
+sources, and declares `terminal_disposition.clear`, `claim.revision.advance`, and `audit.append`
+as its expected effects.
 `work_summary.primary_action_code`
 and `primary_action_target_ref` identify the backend-selected primary action; either may be null
 when no primary action is currently authorised. The pair always identifies the exact same
@@ -2160,6 +2218,33 @@ non-blocked `allowed_actions` entry. Clients display a Staff next action only wh
 exactly resolve to a non-blocked entry; they do not fall back to another action or infer one from
 tags, queues, text, role, ownership, or field counts. `customer_next_step` remains a separate
 claimant-safe projection.
+
+### `POST /api/v1/workbench/claims/{claim_id}/reopen`
+
+Executes only the exact non-blocked `claim.reopen` action from the current terminal Claim detail.
+The route requires staff authentication, `Idempotency-Key`, and `If-Match`. Unknown request fields
+are rejected; the body is:
+
+```json
+{
+  "reason": "The claimant supplied the information needed to continue."
+}
+```
+
+The authenticated staff member must be the primary owner. Only `abandoned` and `closed` are
+reopenable; `completed`, a created external Claim, a non-resumable retained workflow, a missing
+target, and an absent or blocked exact action fail explicitly. On success, the server clears only
+`terminal_disposition`, preserves the retained `claim_state` and `active_session_id`, advances the
+Claim revision exactly once, and atomically stores the staff-scoped idempotency result plus one
+internal `action.completed` audit event containing the prior terminal source references, actor,
+permission, reason, and resulting revision. The response is the updated
+`WorkbenchClaimDetail`; its server-derived `work_summary.queue_key` is the destination queue.
+
+The idempotency fingerprint includes both the request body and expected revision. Replaying the
+same operation returns the first response. Reusing the key with a changed reason or `If-Match`
+returns `409 IDEMPOTENCY_CONFLICT`; an unseen key with a stale revision returns
+`409 REVISION_CONFLICT`. An absent/blocked action returns `403 ACCESS_DENIED`, and a missing Claim
+returns `404 RESOURCE_NOT_FOUND` through the existing staff-safe boundary.
 
 ### `GET /api/v1/workbench/claims/{claim_id}/external-requests`
 
@@ -2410,9 +2495,15 @@ The request has no body and requires an `Idempotency-Key`. The first accepted re
 three graphs, presence lease, and retry response atomically. Repeating the same key replays the
 original response without creating records. A different key is rejected with
 `409 DEMO_SEED_REQUIRES_EMPTY_QUEUE` when any Claim already exists. Persistence failure leaves no
-partial Claim graph. The synthetic Evidence records are explicitly `unofficial` with
-`file_status=not_available`; the endpoint never fabricates an object-storage key, checksum, or
-file.
+partial Claim graph. The synthetic cross-role reference is explicitly `unofficial` with
+`file_status=not_available`, and the endpoint never invents an object-storage key, checksum, or
+file for it. The produced demonstration materials (`backend/demo_data/materials/`) are attached
+to the Claim of their family as Evidence carrying their catalogued condition. Each material that
+has a file is stored through the evidence storage adapter's `store_generated_content` before the
+graph is persisted, and its record carries the returned `storage_key` and `upload_checksum`, so
+the Workbench evidence content route serves the committed bytes. If evidence storage is
+unavailable, the request returns `503 DEPENDENCY_UNAVAILABLE` with `retryable: true` and persists
+nothing.
 
 Response `200`:
 
@@ -3069,6 +3160,55 @@ Provider acceptance is recorded before the Claim State compare-and-set. If a con
 mutation wins that compare-and-set, an unchanged retry reconciles the recorded result against
 the latest claim revision without creating a second provider task.
 
+### `POST /internal/v1/claims/{claim_id}/external-tasks/{task_id}/result`
+
+Receives the bounded result for one accepted assessor task through the configured assessor
+adapter. The route requires integration-service authentication, an `Idempotency-Key` header, and
+an `If-Match` header naming the current Working Claim revision; it accepts no request body. The task
+must belong to the named Claim, use `P3-ASSESSOR`, have an accepted provider acknowledgement, and
+match the assigned assessor record on the current Working Claim. An identical replay returns the
+stored result even though the first receipt advanced the Claim revision.
+
+Response `201`, or `200` when the task result already exists:
+
+```json
+{
+  "result_id": "res_01J4YERESULT",
+  "task_id": "tsk_01J4YETASK",
+  "claim_id": "clm_01J4Y7Q2AW",
+  "source": {
+    "system": "controlled_assessment_fixture",
+    "reference": "fixture-assessment/2d711642b726",
+    "retrieved_at": "2026-08-11T05:00:00Z"
+  },
+  "summary": "The controlled assessment fixture returned a simulation-only vehicle damage report for Northwind review.",
+  "verification": "review_required",
+  "verified_at": "2026-08-11T05:00:01Z",
+  "verified_against_revision": 5,
+  "evidence_ids": ["evd_01J4YETASK"],
+  "received_at": "2026-08-11T05:00:01Z"
+}
+```
+
+The controlled fixture produces a JSON report marked `simulation_only`. Runtime stores its bytes
+through the active Evidence storage profile, completes the task's existing `assessment_report`
+Evidence record, links the Evidence to the immutable task, and verifies the result against that
+link and the resulting Claim revision. The source timestamp records when the adapter says the
+report was produced. `received_at` records when Northwind bound the report to Evidence, and
+`verified_at` records the later verification operation.
+
+The provider acknowledgement on the task remains separate from the returned result. Receipt does
+not alter Claim facts, workflow state, coverage, repair authority, or the claimant-visible assessor
+status. A controlled result is `review_required` until a separate authorised staff path promotes
+any supported fact. Workbench reads can show the result summary, provenance, verification state,
+checked revision, and Evidence lifecycle without exposing storage keys or raw provider payloads.
+
+An unknown Claim or task returns `404`. A missing or stale Claim revision, a task that is not the
+matching accepted assignment, an Evidence-origin conflict, or a changed replay returns `409`.
+Malformed or incorrectly labelled adapter output returns non-retryable `502`. A temporary Evidence
+storage outage returns retryable `503`; an unchanged retry resumes without creating a second
+result, Evidence record, or Claim revision.
+
 ## Reason Codes
 
 Reason codes are stable machine-readable identifiers. The initial registry includes:
@@ -3082,6 +3222,7 @@ Reason codes are stable machine-readable identifiers. The initial registry inclu
 | Safety | `INJURY_REPORTED`, `CONTINUING_DANGER`, `IMMEDIATE_SAFETY_RISK` |
 | Review | `COMPLEX_EVENT_REVIEW`, `CONFLICT_REQUIRES_REVIEW`, `HISTORY_INCONSISTENCY_REVIEW`, `SOURCE_RECORD_NOT_COMPARABLE` |
 | Workflow | `NEXT_ACTION_READY`, `CLAIM_CREATION_AUTHORISED`, `CLAIM_CREATED`, `ASSESSOR_RULE_AUTHORISED`, `HANDOFF_ACCEPTED` |
+| Terminal disposition | `CLAIM_CREATED`, `ABANDONMENT_POLICY_APPLIED`, `AUTHORISED_CLOSURE` |
 | Integration | `POLICY_SERVICE_UNAVAILABLE`, `HISTORY_SERVICE_UNAVAILABLE`, `CLAIMS_SERVICE_UNAVAILABLE`, `EVIDENCE_PROCESSING_FAILED` |
 
 New codes require documentation and contract tests. Free-text explanations may accompany a code but MUST NOT replace it.
@@ -3138,6 +3279,7 @@ All errors use one envelope:
 | `UPLOAD_TOO_LARGE` | `413` | File exceeds configured size |
 | `RATE_LIMITED` | `429` | Caller exceeded a limit |
 | `DEPENDENCY_UNAVAILABLE` | `503` | Required service is unavailable |
+| `PROJECTION_UNAVAILABLE` | `503` | Authoritative Claim facts conflict or cannot be placed in a published Workbench projection |
 | `DEPENDENCY_FAILED` | `502` | Required service returned an invalid or failed result |
 | `INTERNAL_ERROR` | `500` | Unexpected server failure |
 

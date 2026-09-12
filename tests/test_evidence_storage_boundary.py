@@ -9,9 +9,11 @@ from starlette.requests import Request
 
 from backend.adapters.evidence_storage import (
     MAX_UPLOAD_SIZE_BYTES,
+    EvidenceContentConflict,
     EvidenceStorageUnavailable,
     EvidenceUploadNotFound,
     EvidenceUploadSizeMismatch,
+    EvidenceUploadTooLarge,
     MockEvidenceStorage,
 )
 from backend.api.evidence import _read_bounded_upload
@@ -74,6 +76,64 @@ def test_fixture_upload_rejects_mismatched_bytes_and_completion_metadata() -> No
         )
         is None
     )
+
+
+def test_fixture_generated_content_is_immutable_and_readable() -> None:
+    storage = MockEvidenceStorage()
+    content = b'{"simulation_only":true}'
+
+    stored = storage.store_generated_content(
+        claim_id='clm_generated',
+        evidence_id='evd_generated',
+        content=content,
+        media_type='application/json',
+    )
+    replay = storage.store_generated_content(
+        claim_id='clm_generated',
+        evidence_id='evd_generated',
+        content=content,
+        media_type='application/json',
+    )
+
+    assert replay == stored
+    assert (
+        storage.read_upload(
+            claim_id='clm_generated',
+            evidence_id='evd_generated',
+            storage_key=stored.storage_key,
+        )
+        == content
+    )
+    with pytest.raises(EvidenceContentConflict):
+        storage.store_generated_content(
+            claim_id='clm_generated',
+            evidence_id='evd_generated',
+            content=b'{"simulation_only":false}',
+            media_type='application/json',
+        )
+
+
+@pytest.mark.parametrize(
+    ('content', 'error_type'),
+    [
+        (b'', EvidenceContentConflict),
+        (b'xx', EvidenceUploadTooLarge),
+    ],
+)
+def test_fixture_generated_content_rejects_invalid_or_oversized_payloads(
+    content: bytes,
+    error_type: type[Exception],
+) -> None:
+    storage = MockEvidenceStorage()
+    storage.max_size_bytes = 1
+
+    with pytest.raises(error_type):
+        storage.store_generated_content(
+            claim_id='clm_generated_invalid',
+            evidence_id='evd_generated_invalid',
+            content=content,
+            media_type='application/json',
+        )
 
 
 def test_fixture_upload_target_expires_and_checksum_is_verified(

@@ -1,5 +1,6 @@
 import { ChevronDown, Filter, Inbox, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { failureReason, failureReference } from '../failure.js'
 import { formatDateTime, words } from '../format.js'
 import { TagList } from './TagList.jsx'
 
@@ -8,15 +9,17 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
   const [filtersOpen, setFiltersOpen] = useState(hasSecondaryFilters)
   const searchInput = useRef(null)
   const searchTimer = useRef(null)
-  const hasActiveFilters = view !== 'all' || hasSecondaryFilters || search || additionalFiltersActive
+  const hasResultFilters = hasSecondaryFilters || search || additionalFiltersActive
+  const hasActiveFilters = view !== 'all' || hasResultFilters
   const countByView = new Map(
     viewCounts?.status === 'available'
       ? viewCounts.items.map((item) => [item.view, item.count])
       : [],
   )
   const selectedCount = countByView.get(view)
-  const allCount = countByView.get('all')
-  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && allCount === 0
+  const noPublishedClaims = viewCounts?.status === 'available'
+    && viewCounts.items.every((item) => item.count === 0)
+  const trulyEmpty = !loading && !error && !hasActiveFilters && claims.length === 0 && noPublishedClaims
   const countLabel = selectedCount === undefined
     ? 'Total unavailable'
     : `${selectedCount} total${error ? ' · stale' : loading ? ' · updating' : ''}`
@@ -102,13 +105,20 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
       </>}
       <div className="queue-list" aria-live="polite" aria-busy={loading}>
         {loading && <p className="queue-state" role="status">{claims.length ? 'Updating current work...' : 'Loading current work...'}</p>}
+        {!loading && !error && viewCounts?.status === 'unavailable' && (
+          <div className="queue-limitation" role="status">
+            <span><strong>Queue totals unavailable.</strong> {viewCounts.limitation || 'The current rows are usable, but the service could not calculate totals.'}</span>
+            <button className="button button--quiet" type="button" onClick={onRetry}>Refresh totals</button>
+          </div>
+        )}
         {!loading && error && (
           <div className="queue-state" role="alert">
             <strong>Claim queue unavailable</strong>
             <p>{claims.length
               ? 'The latest queue query could not be loaded. The Claims below are from the last successful load.'
               : 'Current work could not be loaded because the queue service did not return a usable projection.'}</p>
-            <p>{error}</p>
+            <p>{failureReason(error)}</p>
+            {failureReference(error) && <small>{failureReference(error)}</small>}
             <button className="button button--quiet" type="button" onClick={onRetry}>Retry</button>
           </div>
         )}
@@ -117,15 +127,15 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
             <Inbox size={20} aria-hidden="true" />
             <p>{trulyEmpty
               ? 'No claims currently need active work.'
-              : hasActiveFilters
+              : hasResultFilters
                 ? 'No claims match the current filters.'
                 : 'No claims are currently in this queue.'}</p>
-            {hasActiveFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
+            {hasResultFilters && <button className="button button--quiet" type="button" onClick={clearFilters}>Clear filters</button>}
           </div>
         )}
         {claims.map((claim) => (
           <button
-            className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}`}
+            className={`queue-item${selectedId === claim.claim_id ? ' is-selected' : ''}${error ? ' is-stale' : ''}`}
             type="button"
             key={claim.claim_id}
             onClick={() => onOpen(claim)}
@@ -137,7 +147,9 @@ export default function QueuePanel({ claims, loading, error, onRetry, selectedId
               </span>
             </span>
             <span className="queue-item__incident">
-              {words(claim.incident?.family)} · Status: {words(claim.workflow_state)}
+              {words(claim.incident?.family)} · {claim.terminal_disposition
+                ? `Terminal: ${words(claim.terminal_disposition.value)} · Retained status: ${words(claim.workflow_state)}`
+                : `Status: ${words(claim.workflow_state)}`}
             </span>
             <span className="queue-item__summary">
               {claim.work_summary?.current_work_item?.requested_outcome || claim.incident?.summary}

@@ -453,6 +453,217 @@ def test_vp_family_journey_confirms_registered_facts_and_creates_claim(
         assert claimant_view['contents_items'][0]['description'] == 'Laptop computer'
 
 
+def test_default_home_journey_creates_without_an_unapproved_external_service(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    message_text = (
+        'A pipe leaked at my Auckland home this morning. The kitchen and hallway are '
+        'damaged, the leak is stopped, and the house is safe to live in. Nobody was injured.'
+    )
+    created = create_claim(
+        client,
+        auth_headers,
+        key='home-default-runtime',
+        incident_type='home',
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='home-default-runtime-message',
+        client_message_id='home-default-runtime-message',
+        text=message_text,
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    proposed_fields = [
+        change['field_code']
+        for change in turn_body['form_changes']
+        if change['field']['status'] == 'proposed'
+    ]
+    confirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'home-default-runtime-confirm',
+            'If-Match': str(turn_body['claim_revision']),
+        },
+        json={'field_codes': proposed_fields},
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_body = confirmed.json()
+    remaining_values = {
+        'incident.injury_or_danger': False,
+        'incident.location': '10 Example Street, Auckland',
+        'property.address': '10 Example Street, Auckland',
+        'property.affected_areas': ['kitchen', 'hallway'],
+        'property.ongoing_risk': 'none',
+        'property.habitable': True,
+    }
+    assert set(confirmed_body['dynamic_form']['requirements']['missing_required_now']) == set(
+        remaining_values
+    )
+    completed = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(confirmed_body['revision'])},
+        json={
+            'updates': [
+                {'field_code': field_code, 'value': value, 'status': 'confirmed'}
+                for field_code, value in remaining_values.items()
+            ]
+        },
+    )
+
+    assert completed.status_code == 200, completed.text
+    completed_body = completed.json()
+    assert completed_body['dynamic_form']['requirements']['ready'] is True
+    creation = client.post(
+        f'/api/v1/claims/{claim_id}/creation',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'home-default-runtime-create',
+            'If-Match': str(completed_body['revision']),
+        },
+    )
+
+    assert creation.status_code == 201, creation.text
+    assert creation.json()['external_claim']['route'] == 'standard_home_intake'
+    assert creation.json()['external_service_action'] is None
+    claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
+    assert claimant_view['workflow_state'] == 'created'
+    assert claimant_view['external_service_action'] is None
+    assert repository.list_external_tasks_internal(claim_id) == []
+    assert repository.list_external_task_requests_internal(claim_id) == []
+
+
+def test_default_contents_journey_preserves_the_report_without_inventing_a_provider(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: FixtureRepository,
+) -> None:
+    first_message = 'My laptop was damaged at home in Auckland this morning. Nobody was injured.'
+    second_message = 'The damaged item is my laptop.'
+    created = create_claim(
+        client,
+        auth_headers,
+        key='contents-default-runtime',
+        incident_type='contents',
+    ).json()
+    claim_id = created['claim']['claim_id']
+    session_id = created['session']['session_id']
+
+    turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        key='contents-default-runtime-message',
+        client_message_id='contents-default-runtime-message',
+        text=first_message,
+    )
+
+    assert turn.status_code == 200, turn.text
+    turn_body = turn.json()
+    assert turn_body['contents_item_changes'] == []
+    proposed_fields = [
+        change['field_code']
+        for change in turn_body['form_changes']
+        if change['field']['status'] == 'proposed'
+    ]
+    confirmed = client.post(
+        f'/api/v1/claims/{claim_id}/form/confirmations',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'contents-default-runtime-confirm',
+            'If-Match': str(turn_body['claim_revision']),
+        },
+        json={'field_codes': proposed_fields},
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_body = confirmed.json()
+    assert confirmed_body['dynamic_form']['requirements']['missing_required_now'] == [
+        'incident.injury_or_danger',
+        'contents.items',
+    ]
+    completed_form = client.patch(
+        f'/api/v1/claims/{claim_id}/form',
+        headers={**auth_headers, 'If-Match': str(confirmed_body['revision'])},
+        json={
+            'updates': [
+                {
+                    'field_code': 'incident.injury_or_danger',
+                    'value': False,
+                    'status': 'confirmed',
+                }
+            ]
+        },
+    )
+
+    assert completed_form.status_code == 200, completed_form.text
+    completed_body = completed_form.json()
+    assert completed_body['dynamic_form']['requirements']['missing_required_now'] == [
+        'contents.items'
+    ]
+    missing_item_turn = submit_message(
+        client,
+        auth_headers,
+        claim_id,
+        session_id,
+        revision=completed_body['revision'],
+        key='contents-default-runtime-item',
+        client_message_id='contents-default-runtime-item',
+        text=second_message,
+    )
+
+    assert missing_item_turn.status_code == 200, missing_item_turn.text
+    missing_item_body = missing_item_turn.json()
+    assert missing_item_body['decision']['action'] == 'ASK'
+    assert missing_item_body['decision']['customer_next_step']['required_items'] == [
+        'contents.items'
+    ]
+    assert missing_item_body['contents_item_changes'] == []
+    creation = client.post(
+        f'/api/v1/claims/{claim_id}/creation',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'contents-default-runtime-create',
+            'If-Match': str(missing_item_body['claim_revision']),
+        },
+    )
+
+    assert creation.status_code == 409
+    assert [detail['field'] for detail in creation.json()['error']['details']] == ['contents.items']
+    claimant_view = client.get(f'/api/v1/claims/{claim_id}', headers=auth_headers).json()
+    assert claimant_view['workflow_state'] == 'collecting'
+    assert claimant_view['dynamic_form']['requirements']['missing_required_now'] == [
+        'contents.items'
+    ]
+    assert claimant_view['external_service_action'] is None
+    stored_claim = repository.get_claim(claim_id, 'cus_demo')
+    assert stored_claim is not None
+    assert stored_claim.contents_items == []
+    session = repository.get_session(claim_id, session_id, 'cus_demo')
+    assert session is not None
+    assert session.status is SessionStatus.ACTIVE
+    claimant_messages = [
+        message.content['text']
+        for message in repository.list_messages(claim_id, session_id, 'cus_demo')
+        if message.actor.value == 'claimant'
+    ]
+    assert claimant_messages == [first_message, second_message]
+    assert repository.list_external_tasks_internal(claim_id) == []
+    assert repository.list_external_task_requests_internal(claim_id) == []
+
+
 def test_question_accounting_and_provenance_survive_a_new_session(
     app: FastAPI,
     client: TestClient,
@@ -1971,9 +2182,8 @@ def test_resume_creates_new_session_with_saved_context(
     first_session = repository.get_session(claim_id, first_session_id, 'cus_demo')
     assert first_session is not None
 
-    paused_session = first_session.model_copy(
+    prepared_session = first_session.model_copy(
         update={
-            'status': SessionStatus.PAUSED,
             'summary': 'The claimant confirmed a synthetic rear-end incident.',
             'unresolved_questions': ['confirm:vehicle.drivable'],
             'pending_items': ['police_report'],
@@ -1982,7 +2192,25 @@ def test_resume_creates_new_session_with_saved_context(
             ],
         }
     )
-    repository.save_session(paused_session)
+    repository.save_session(prepared_session)
+
+    pause = client.post(
+        f'/api/v1/claims/{claim_id}/sessions/{first_session_id}/pause',
+        headers={
+            **auth_headers,
+            'Idempotency-Key': 'resume-context-pause',
+            'If-Match': f'"{created["claim"]["revision"]}"',
+        },
+    )
+    assert pause.status_code == 200
+
+    paused_session = repository.get_session(
+        claim_id,
+        first_session_id,
+        'cus_demo',
+    )
+    assert paused_session is not None
+    assert paused_session.status is SessionStatus.PAUSED
 
     response = client.post(
         f'/api/v1/claims/{claim_id}/sessions',

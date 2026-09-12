@@ -1100,6 +1100,91 @@ def test_client_message_id_conflict_is_prechecked_before_mutation(
     )
 
 
+def test_session_mutation_atomically_replaces_existing_active_session(
+    repository: MongoDBRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim = _claim()
+    original_session = _session(claim)
+    repository.create_claim(claim, original_session)
+
+    replacement_time = datetime(2026, 8, 21, 0, 5, tzinfo=UTC)
+
+    replacement_session = original_session.model_copy(
+        update={
+            'session_id': 'ses_mongo_atomic_replacement',
+            'context_revision': claim.revision,
+            'started_at': replacement_time,
+            'last_active_at': replacement_time,
+        }
+    )
+    closed_original = original_session.model_copy(
+        update={
+            'status': SessionStatus.CLOSED,
+            'closed_at': replacement_time,
+        }
+    )
+    updated_claim = claim.model_copy(
+        update={
+            'active_session_id': replacement_session.session_id,
+            'revision': claim.revision + 1,
+            'updated_at': replacement_time,
+        }
+    )
+
+    idempotency = IdempotencyRecord(
+        actor_id=claim.customer_id,
+        route=f'/api/v1/claims/{claim.claim_id}/sessions',
+        key='mongo-atomic-session-replacement',
+        request_fingerprint='mongo-atomic-session-replacement',
+        claim_id=claim.claim_id,
+        session_id=replacement_session.session_id,
+    )
+
+    monkeypatch.setattr(
+        repository,
+        '_atomic',
+        lambda operation: operation(None),
+    )
+
+    repository.save_session_mutation(
+        updated_claim,
+        expected_revision=claim.revision,
+        session=replacement_session,
+        idempotency=idempotency,
+        replaced_active_session=closed_original,
+    )
+
+    stored_claim = repository.get_claim(
+        claim.claim_id,
+        claim.customer_id,
+    )
+    stored_original = repository.get_session(
+        claim.claim_id,
+        original_session.session_id,
+        claim.customer_id,
+    )
+    stored_replacement = repository.get_session(
+        claim.claim_id,
+        replacement_session.session_id,
+        claim.customer_id,
+    )
+
+    assert stored_claim == updated_claim
+    assert stored_original == closed_original
+    assert stored_original.status is SessionStatus.CLOSED
+    assert stored_replacement == replacement_session
+    assert stored_replacement.status is SessionStatus.ACTIVE
+    assert (
+        repository.find_idempotency(
+            idempotency.actor_id,
+            idempotency.route,
+            idempotency.key,
+        )
+        == idempotency
+    )
+
+
 def test_session_mutation_checks_identity_inside_mutation_boundary(
     repository: MongoDBRepository,
     monkeypatch: pytest.MonkeyPatch,

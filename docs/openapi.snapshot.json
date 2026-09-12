@@ -2055,6 +2055,16 @@
             ],
             "title": "Incident Type"
           },
+          "incomplete_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantIncompleteContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -2174,6 +2184,49 @@
         "title": "ClaimState",
         "type": "object"
       },
+      "ClaimTerminalDisposition": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/TerminalDispositionReasonCode"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "$ref": "#/components/schemas/ActorReference"
+          },
+          "recorded_revision": {
+            "minimum": 1.0,
+            "title": "Recorded Revision",
+            "type": "integer"
+          },
+          "source_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "value": {
+            "$ref": "#/components/schemas/TerminalDispositionValue"
+          }
+        },
+        "required": [
+          "value",
+          "reason_code",
+          "source_refs",
+          "recorded_by",
+          "recorded_at",
+          "recorded_revision"
+        ],
+        "title": "ClaimTerminalDisposition",
+        "type": "object"
+      },
       "ClaimantClaim": {
         "additionalProperties": false,
         "properties": {
@@ -2256,6 +2309,16 @@
               }
             ],
             "title": "Incident Type"
+          },
+          "incomplete_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimantIncompleteContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "title": "Revision",
@@ -2633,7 +2696,8 @@
           "queued",
           "assigned",
           "retryable_failure",
-          "terminal_failure"
+          "terminal_failure",
+          "awaiting_reconciliation"
         ],
         "title": "ClaimantExternalServiceStatus",
         "type": "string"
@@ -2670,6 +2734,48 @@
           "created_at"
         ],
         "title": "ClaimantHandoff",
+        "type": "object"
+      },
+      "ClaimantIncompleteContext": {
+        "additionalProperties": false,
+        "properties": {
+          "follow_up_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Due At"
+          },
+          "follow_up_status": {
+            "$ref": "#/components/schemas/FollowUpStatus"
+          },
+          "interrupted_at": {
+            "format": "date-time",
+            "title": "Interrupted At",
+            "type": "string"
+          },
+          "last_meaningful_activity_at": {
+            "format": "date-time",
+            "title": "Last Meaningful Activity At",
+            "type": "string"
+          },
+          "resume_point": {
+            "title": "Resume Point",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interrupted_at",
+          "last_meaningful_activity_at",
+          "resume_point",
+          "follow_up_status"
+        ],
+        "title": "ClaimantIncompleteContext",
         "type": "object"
       },
       "ClaimantMessage": {
@@ -5568,6 +5674,90 @@
         "title": "ExternalTaskRequest",
         "type": "object"
       },
+      "ExternalTaskResult": {
+        "additionalProperties": false,
+        "description": "What a third-party returned for one task, and how far it has been checked.\n\nA result is separate from the material it may have produced. A task can\nreturn an answer and no material at all, such as a provider reporting no\nrecord found, and it can return material whose consistency with the claim is\nstill unknown. Collapsing the two would make an absent answer and an\nunverified one indistinguishable.\n\nVerification starts at `UNVERIFIED` and a checked result must say when it was\nchecked, so an unchecked result cannot be presented as a checked one.",
+        "properties": {
+          "claim_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "result_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Result Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/RetrievalSource"
+          },
+          "summary": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Task Id",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/ExternalTaskResultVerification",
+            "default": "unverified"
+          },
+          "verified_against_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Against Revision"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "result_id",
+          "task_id",
+          "claim_id",
+          "source",
+          "summary",
+          "received_at"
+        ],
+        "title": "ExternalTaskResult",
+        "type": "object"
+      },
       "ExternalTaskResultVerification": {
         "description": "How far a provider result has been checked against the claim.\n\nThere is deliberately no value meaning \"this is now a confirmed claim fact\".\nA provider answer is evidence about the claim, never the claim's own record\nof what is true, and `docs/agent-behaviour-catalogue.md` keeps material facts\nproposed until the claim's own confirmation path accepts them. Promotion to a\nconfirmed fact is a claim-level decision made elsewhere, so this enum cannot\nexpress it and no caller can shortcut to it.",
         "enum": [
@@ -5719,6 +5909,15 @@
           "system_owned"
         ],
         "title": "FieldSelectionState",
+        "type": "string"
+      },
+      "FollowUpStatus": {
+        "enum": [
+          "pending",
+          "blocked",
+          "resolved"
+        ],
+        "title": "FollowUpStatus",
         "type": "string"
       },
       "FormChange": {
@@ -7858,6 +8057,23 @@
         "title": "PageInfo",
         "type": "object"
       },
+      "PauseSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "$ref": "#/components/schemas/ClaimantClaim"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ClaimantSession"
+          }
+        },
+        "required": [
+          "claim",
+          "session"
+        ],
+        "title": "PauseSessionResponse",
+        "type": "object"
+      },
       "PendingEvidenceReference": {
         "additionalProperties": false,
         "properties": {
@@ -8643,6 +8859,22 @@
           "scenario_results"
         ],
         "title": "ReleaseSetValidationRequest",
+        "type": "object"
+      },
+      "ReopenClaimRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReopenClaimRequest",
         "type": "object"
       },
       "RequestEvidenceUploadRequest": {
@@ -10380,6 +10612,24 @@
         "title": "TagVisibility",
         "type": "string"
       },
+      "TerminalDispositionReasonCode": {
+        "enum": [
+          "CLAIM_CREATED",
+          "ABANDONMENT_POLICY_APPLIED",
+          "AUTHORISED_CLOSURE"
+        ],
+        "title": "TerminalDispositionReasonCode",
+        "type": "string"
+      },
+      "TerminalDispositionValue": {
+        "enum": [
+          "completed",
+          "abandoned",
+          "closed"
+        ],
+        "title": "TerminalDispositionValue",
+        "type": "string"
+      },
       "TextMessageContent": {
         "additionalProperties": false,
         "properties": {
@@ -10780,16 +11030,6 @@
         "title": "WorkbenchActionResultDefaults",
         "type": "object"
       },
-      "WorkbenchActiveQueue": {
-        "enum": [
-          "processing",
-          "waiting_user",
-          "waiting_material",
-          "waiting_third_party"
-        ],
-        "title": "WorkbenchActiveQueue",
-        "type": "string"
-      },
       "WorkbenchActivityEvent": {
         "additionalProperties": false,
         "properties": {
@@ -11058,6 +11298,16 @@
             "title": "Tags",
             "type": "array"
           },
+          "terminal_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTerminalDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -11183,6 +11433,16 @@
             },
             "title": "Tags",
             "type": "array"
+          },
+          "terminal_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimTerminalDisposition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -12279,6 +12539,19 @@
         "title": "WorkbenchQueueFilterOption",
         "type": "object"
       },
+      "WorkbenchQueueKey": {
+        "enum": [
+          "processing",
+          "waiting_user",
+          "waiting_material",
+          "waiting_third_party",
+          "completed",
+          "abandoned",
+          "closed"
+        ],
+        "title": "WorkbenchQueueKey",
+        "type": "string"
+      },
       "WorkbenchQueueView": {
         "enum": [
           "all",
@@ -12286,6 +12559,9 @@
           "waiting_user",
           "waiting_material",
           "waiting_third_party",
+          "completed",
+          "abandoned",
+          "closed",
           "urgent",
           "human_requests",
           "incomplete_claims",
@@ -12302,6 +12578,7 @@
         "enum": [
           "overview",
           "active",
+          "terminal",
           "operational"
         ],
         "title": "WorkbenchQueueViewGroup",
@@ -13512,7 +13789,7 @@
             "title": "Primary Blocker"
           },
           "queue_key": {
-            "$ref": "#/components/schemas/WorkbenchActiveQueue"
+            "$ref": "#/components/schemas/WorkbenchQueueKey"
           },
           "risk_signals": {
             "items": {
@@ -16111,6 +16388,121 @@
         ]
       }
     },
+    "/api/v1/claims/{claim_id}/sessions/{session_id}/pause": {
+      "post": {
+        "operationId": "pause_claim_session_api_v1_claims__claim_id__sessions__session_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Northwind-Anonymous-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Northwind-Anonymous-Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Claim Session",
+        "tags": [
+          "claimant"
+        ]
+      }
+    },
     "/api/v1/claims/{claim_id}/support-requests": {
       "post": {
         "operationId": "request_support_api_v1_claims__claim_id__support_requests_post",
@@ -18277,6 +18669,106 @@
           }
         },
         "summary": "Create Staff Message",
+        "tags": [
+          "workbench"
+        ]
+      }
+    },
+    "/api/v1/workbench/claims/{claim_id}/reopen": {
+      "post": {
+        "operationId": "reopen_workbench_claim_api_v1_workbench_claims__claim_id__reopen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchClaimDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reopen Workbench Claim",
         "tags": [
           "workbench"
         ]
@@ -24622,6 +25114,106 @@
           }
         },
         "summary": "Read External Tasks Integration",
+        "tags": [
+          "internal-integrations"
+        ]
+      }
+    },
+    "/internal/v1/claims/{claim_id}/external-tasks/{task_id}/result": {
+      "post": {
+        "description": "Receive and verify the controlled result for one accepted assessor task.\n\nArgs:\n    claim_id: Working Claim that owns the external task.\n    task_id: Accepted task whose provider-neutral result is being received.\n    request: Authenticated HTTP request and configured Runtime dependencies.\n    response: HTTP response whose status distinguishes creation from replay.\n    idempotency_key: Required identity for replaying this result receipt safely.\n    if_match: Expected Working Claim revision before a first receipt.\n    principal: Verified integration-service principal that scopes idempotency.\n\nReturns:\n    Persisted result after authoritative verification against its Evidence and Claim.\n\nRaises:\n    ApiError: The task cannot receive a result, the returned provenance conflicts,\n        Evidence storage is unavailable, or persistence cannot complete safely.",
+        "operationId": "receive_assessor_result_integration_internal_v1_claims__claim_id__external_tasks__task_id__result_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalTaskResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Assessor Result Integration",
         "tags": [
           "internal-integrations"
         ]

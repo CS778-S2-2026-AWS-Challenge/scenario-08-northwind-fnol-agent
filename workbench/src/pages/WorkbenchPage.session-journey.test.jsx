@@ -400,46 +400,56 @@ describe('WorkbenchPage staff session browser/API journey', () => {
     serviceState = service.state
     vi.stubGlobal('fetch', service.fetchMock)
 
-    const originalConsoleError = console.error
-    vi.spyOn(console, 'error').mockImplementation((...args) => {
-      const diagnostic = args.map(String).join(' ')
-      if (!diagnostic.includes('Not implemented: navigation')) originalConsoleError(...args)
-    })
-
     const firstPage = renderJourney('ses_26')
     const user = userEvent.setup()
     const sendButton = await screen.findByRole('button', { name: 'Send message' })
     await waitFor(() => expect(sendButton).toBeEnabled())
 
-    await user.click(sendButton)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Reloading the current Claim')
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
-    expect(service.state.postRequests).toHaveLength(1)
-    expect(service.state.postRequests[0].revision).toBe('7')
-    expect(service.state.messagesBySession.ses_26).toHaveLength(0)
-    expect(service.state.messagesBySession.ses_27).toHaveLength(0)
-
-    const readsBeforeReload = {
+    const readsBeforeConflict = {
       claim: service.state.claimReads,
       sessions: service.state.sessionReads.length,
       messages: service.state.messageReads.length,
     }
 
-    firstPage.unmount()
-    const reloadedOldSession = renderJourney('ses_26')
+    await user.click(sendButton)
 
-    expect(await screen.findByText(/saved session is read-only/i)).toBeVisible()
-    expect(screen.getByLabelText('Reply to claimant')).toHaveValue('Journey staff reply')
-    expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
-    expect(service.state.claimReads).toBeGreaterThan(readsBeforeReload.claim)
-    expect(service.state.sessionReads.length).toBeGreaterThan(readsBeforeReload.sessions)
-    expect(service.state.messageReads.length).toBeGreaterThan(readsBeforeReload.messages)
+    const staleAlert = await screen.findByRole('alert')
+    expect(staleAlert).toHaveTextContent(
+      'latest server projection at revision 8 is now shown',
+    )
+
+    expect(screen.getByLabelText('Reply to claimant')).toHaveValue(
+      'Journey staff reply',
+    )
+    expect(service.state.postRequests).toHaveLength(1)
+    expect(service.state.postRequests[0].revision).toBe('7')
+    expect(service.state.messagesBySession.ses_26).toHaveLength(0)
+    expect(service.state.messagesBySession.ses_27).toHaveLength(0)
+
+    await waitFor(() => {
+      expect(screen.getByText(/saved session is read-only/i)).toBeVisible()
+      expect(screen.getByLabelText('Reply to claimant')).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    })
+
+    expect(service.state.claimReads).toBeGreaterThan(
+      readsBeforeConflict.claim,
+    )
+    expect(service.state.sessionReads.length).toBeGreaterThan(
+      readsBeforeConflict.sessions,
+    )
+    expect(service.state.messageReads.length).toBeGreaterThan(
+      readsBeforeConflict.messages,
+    )
     expect(service.state.postRequests).toHaveLength(1)
 
-    reloadedOldSession.unmount()
-    tabs.tabs[0] = { ...tabs.tabs[0], sessionId: 'ses_27' }
+    firstPage.unmount()
+
+    tabs.tabs[0] = {
+      ...tabs.tabs[0],
+      sessionId: 'ses_27',
+    }
+
     renderJourney('ses_27')
 
     const revalidatedButton = await screen.findByRole('button', { name: 'Send message' })

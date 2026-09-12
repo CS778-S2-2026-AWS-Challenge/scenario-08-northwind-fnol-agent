@@ -6,6 +6,7 @@ import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
 from backend.adapters.evidence_storage import (
+    EvidenceContentConflict,
     EvidenceStorageUnavailable,
     EvidenceUploadNotFound,
     EvidenceUploadTooLarge,
@@ -51,6 +52,7 @@ class FakeS3Client:
         self.get_object_error: Exception | None = None
         self.presign_error: Exception | None = None
         self.final_objects: dict[str, bytes] = {}
+        self.put_calls: list[dict[str, Any]] = []
         self.copy_calls: list[dict[str, Any]] = []
         self.delete_calls: list[dict[str, Any]] = []
 
@@ -83,6 +85,10 @@ class FakeS3Client:
     def copy_object(self, **kwargs: Any) -> None:
         self.copy_calls.append(kwargs)
         self.final_objects[str(kwargs['Key'])] = bytes(self.object_body)
+
+    def put_object(self, **kwargs: Any) -> None:
+        self.put_calls.append(kwargs)
+        self.final_objects[str(kwargs['Key'])] = bytes(kwargs['Body'])
 
     def delete_object(self, **kwargs: Any) -> None:
         self.delete_calls.append(kwargs)
@@ -237,6 +243,71 @@ def test_complete_upload_requires_matching_object_metadata() -> None:
     )
     assert retried == stored
     assert len(client.copy_calls) == 1
+
+
+def test_generated_content_is_written_to_a_final_claim_scoped_object() -> None:
+    client = FakeS3Client()
+    storage = MinioEvidenceStorage(config(), client=client)
+    content = b'synthetic assessment report'
+
+    stored = storage.store_generated_content(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        content=content,
+        media_type='image/jpeg',
+    )
+    replay = storage.store_generated_content(
+        claim_id='clm_001',
+        evidence_id='evd_001',
+        content=content,
+        media_type='image/jpeg',
+    )
+
+    assert replay == stored
+    assert stored.storage_key.startswith('claims/clm_001/evidence/evd_001/finalised/')
+    assert stored.checksum == checksum(content)
+    assert stored.source_id == 's3_compatible_generated_evidence'
+    assert len(client.put_calls) == 1
+    assert client.put_calls[0]['Metadata']['claim-id'] == 'clm_001'
+    assert (
+        storage.read_upload(
+            claim_id='clm_001',
+            evidence_id='evd_001',
+            storage_key=stored.storage_key,
+        )
+        == content
+    )
+    with pytest.raises(EvidenceContentConflict):
+        storage.store_generated_content(
+            claim_id='clm_001',
+            evidence_id='evd_001',
+            content=b'different synthetic report',
+            media_type='image/jpeg',
+        )
+    assert len(client.put_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ('content', 'error_type'),
+    [
+        (b'', EvidenceContentConflict),
+        (b'xx', EvidenceUploadTooLarge),
+    ],
+)
+def test_generated_object_rejects_invalid_or_oversized_payloads(
+    content: bytes,
+    error_type: type[Exception],
+) -> None:
+    storage = MinioEvidenceStorage(config(), client=FakeS3Client())
+    storage.max_size_bytes = 1
+
+    with pytest.raises(error_type):
+        storage.store_generated_content(
+            claim_id='clm_001',
+            evidence_id='evd_001',
+            content=content,
+            media_type='application/json',
+        )
 
 
 def test_reusing_original_put_target_cannot_replace_finalised_evidence() -> None:

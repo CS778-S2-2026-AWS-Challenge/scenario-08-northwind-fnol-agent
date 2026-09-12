@@ -126,7 +126,7 @@ def test_staff_action_is_audited_and_writes_customer_safe_shared_state(
         'complete-review',
     )
     assert audit_record is not None
-    assert audit_record.action_registry_version == '2026-09-04.2'
+    assert audit_record.action_registry_version == '2026-09-11.1'
     assert audit_record.action_code == 'work_item.update'
     assert audit_record.target_ref == action['action_id']
 

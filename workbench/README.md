@@ -62,6 +62,11 @@ It is available only in development and test and is not a deployment credential.
   explicit staff request.
 - Signal decisions and staff actions use the audited backend APIs. The client does not turn an
   Agent proposal or a risk signal into a business decision.
+- Completed, abandoned, and closed queues come from server-published filter metadata and remain
+  reachable when no active Claims exist. Terminal list/detail views retain their authoritative
+  disposition context. Only the exact current `claim.reopen` action can return an abandoned or
+  closed Claim to its server-projected active queue; the client reloads the Claim projection and
+  reports the returned queue and revision.
 - Staff Agent sessions are private to the authenticated staff identity and persist independently
   of Claim tabs. Every question explicitly attaches zero to five Claims; the client never infers
   scope from the current page. The Agent can use selected Claim context and authorised knowledge

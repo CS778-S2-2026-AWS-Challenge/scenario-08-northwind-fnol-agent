@@ -150,7 +150,6 @@ def test_staff_handoff_views_filter_and_order_open_requests_by_priority() -> Non
 @pytest.mark.parametrize(
     ('view', 'scenario_id'),
     [
-        ('incomplete_claims', 'AT-08-resume'),
         ('ready_to_progress', 'AT-01-clear-motor'),
         ('awaiting_evidence', 'AT-06-pending-evidence'),
         ('professional_review', 'AT-02-coverage-ambiguity'),
@@ -174,8 +173,8 @@ def test_staff_queue_views_use_authoritative_projected_work(
     assert [item['claim_id'] for item in response.json()['items']] == [claim_id]
 
 
-def test_incomplete_claims_view_and_metadata_describe_collecting_work() -> None:
-    repository, claim_id = _load('AT-08-resume')
+def test_incomplete_claims_view_requires_a_durable_recovery_checkpoint() -> None:
+    repository, _claim_id = _load('AT-08-resume')
     headers = {'Authorization': 'Bearer synthetic-staff'}
 
     with _staff_client(repository) as client:
@@ -191,9 +190,8 @@ def test_incomplete_claims_view_and_metadata_describe_collecting_work() -> None:
         'label': 'Incomplete claims',
         'group': 'operational',
     } in metadata.json()['views']
-    assert [item['claim_id'] for item in response.json()['items']] == [claim_id]
-    assert response.json()['items'][0]['workflow_state'] == 'collecting'
-    assert response.json()['items'][0]['work_summary']['queue_key'] == 'processing'
+    assert response.status_code == 200
+    assert response.json()['items'] == []
 
 
 def test_staff_queue_filters_by_status_priority_and_combined_state() -> None:
@@ -318,10 +316,14 @@ def test_staff_queue_searches_each_documented_projection_field() -> None:
 
     repository, claim_id = _load('AT-10-controlled-assessor')
     with _staff_client(repository) as client:
-        item = client.get('/api/v1/workbench/claims', headers=headers).json()['items'][0]
+        item = client.get(
+            '/api/v1/workbench/claims',
+            params={'view': 'completed'},
+            headers=headers,
+        ).json()['items'][0]
         response = client.get(
             '/api/v1/workbench/claims',
-            params={'search': item['display_reference'].lower()},
+            params={'view': 'completed', 'search': item['display_reference'].lower()},
             headers=headers,
         )
     assert item['display_reference'] != claim_id

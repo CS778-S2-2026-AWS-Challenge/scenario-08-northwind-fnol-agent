@@ -45,6 +45,17 @@
     },
     "external_claim_source_revision": 7,
     "external_claim_fingerprint": "fixture-at10-creation",
+    "terminal_disposition": {
+      "value": "completed",
+      "reason_code": "CLAIM_CREATED",
+      "source_refs": ["dec_fixture_at10_claim_creation", "ext_fixture_at10"],
+      "recorded_by": {
+        "actor_type": "system",
+        "actor_id": "claims_service_integration"
+      },
+      "recorded_at": "2026-08-13T02:12:00Z",
+      "recorded_revision": 7
+    },
     "assessor_routing": {
       "routing_status": "queued",
       "assessor_reference": null,

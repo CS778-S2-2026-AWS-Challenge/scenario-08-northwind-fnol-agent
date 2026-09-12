@@ -48,8 +48,10 @@ slice stores the task's claim, service/action, source class, operation and deliv
 failure/provider reference, timestamps, one immutable originating task per evidence item, and
 one `erq_` request per task. The request records its purpose, disclosed field names, independent
 Northwind-authority and claimant-consent references, authorised Claim revision, preparation
-time, first send time, and stable operation identity. It does not yet store the later attempt,
-provider-result, verification, or reconciliation records.
+time, first send time, and stable operation identity. The controlled assessor path also stores one
+returned result per task, its source and receipt time, linked Evidence identifiers, verification
+state, verification time, and checked Claim revision. Later provider attempts and reconciliation
+records remain target contracts.
 The current persistence implementation still stores the legacy Agent Decision shape and must not
 be represented as supporting those target records until migrations, repository methods, API
 projections, fixtures, and transaction tests change together.
@@ -63,7 +65,7 @@ projections, fixtures, and transaction tests change together.
 | Staff account | local/runtime staff identity, salted password hash, display name, roles, active state, revision, and update time | `staff_id` |
 | Staff auth session | `ias_` session identity, hash of an opaque staff token, authenticated staff reference, revision, creation, expiry, revocation, and update timestamps | `session_id`, linked to `staff_id`; token lookup uses `token_hash` |
 | Customer memory | source-linked explicit preference or expiring continuity hint, visibility, expiry, correction state | `customer_id`, `memory_id` |
-| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
+| Claim | Working Claim State, structured facts, independent attributes, lifecycle status, optional source-linked terminal disposition, workflow, next action, current staff assignee when allocated, responsibility, retention timestamps, revision | `claim_id`, linked to `customer_id` |
 | Work | independent question, evidence, confirmation, professional judgement, external request, and system WorkItems with owner, blocker, due time, sources, and completion evidence | `claim_id`, `work_item_id` |
 | Interaction | intent, sessions, messages, compact summaries, unresolved work, prior commitments | `session_id`, optionally linked to `claim_id` |
 | Staff Agent interaction | staff-owned persistent sessions, session-bound published model profile, explicitly scoped questions, source-aware answers, and editable non-executing drafts | `staff_id`, `session_id`, and `message_id`; Claim IDs are per-message scope only |
@@ -73,8 +75,8 @@ projections, fixtures, and transaction tests change together.
 | Review | internal signals, source references, professional decisions, staff actions | `claim_id` and work identity |
 | Handoff | transfer packet, priority, queue, owner, status, lifecycle timestamps | `claim_id` and `handoff_id` |
 | Follow-up | due time, responsible party, attempt count, channel, outcome, status | `claim_id` and `follow_up_id` |
-| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, idempotency result | integration identity, `claim_id`, or consent/operation identity |
-| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity; target capability/requirement versions, attempts, provider response, verification, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
+| Integration | published provider configuration references, adapter capability/health projection, external-service consent, claim-creation result, durable routing operation intent/outcome, routing result, external participant task, returned task result and verification, idempotency result | integration identity, `claim_id`, task, result, or consent/operation identity |
+| External request | implemented purpose, disclosed field names, consent and authority, preparation and first send identity, controlled assessor result and verification; target capability/requirement versions, attempts, and reconciliation | `claim_id`, `request_id`, linked to `task_id` |
 | Configuration | versioned Agent Policy, Registry snapshots, model profiles, knowledge, rule, integration, access, feature, and runtime-profile configuration | configuration type and version |
 | Branch evaluation | immutable branch/form calculation evidence, selected family, active branches, field selection states, and Claim revision precondition | `claim_id`, `evaluation_id` |
 | Audit | append-only claim, integration, configuration, account, and access events | event identity and subject |
@@ -182,6 +184,13 @@ the append-only audit collection through a bounded, filterable projection.
     without returning bearer values or token hashes.
 33. Resolve and revoke one active identity session by opaque `ias_` ID and expected revision; a
     session under another account is not exposed and a retry cannot reactivate it.
+34. Receive one accepted assessor task's returned report through the installed adapter, store its
+    bytes under the task-linked Evidence identity, recover an interrupted unchanged retry, and
+    verify the immutable result against the current Claim revision without promoting Claim facts.
+35. List authorised Claims by the server-projected completed, abandoned, or closed disposition
+    without scanning action history or inferring terminal state from a missing Session.
+36. Resolve and atomically reopen one eligible abandoned/closed Claim by staff actor, exact action,
+    target, expected revision, and idempotency key while preserving the active-session pointer.
 
 ## Development/Test Identity Invariants
 
@@ -240,6 +249,27 @@ the append-only audit collection through a bounded, filterable projection.
 - Provider acceptance is durable before the final Claim State compare-and-set. If another claim
   mutation advances the revision first, an unchanged retry reconciles the accepted result into a
   new claim revision without invoking or creating a second external task.
+- A controlled assessor result is fetched through the installed adapter only for an accepted,
+  assigned `P3-ASSESSOR` task. The task identity, Claim identity, provider acknowledgement, source
+  class, source timestamp, and explicit `simulation_only` label are validated before persistence.
+- Returned report bytes are stored through the active Evidence storage profile under an immutable,
+  claim-scoped final key. The Evidence record retains the storage key, checksum,
+  source system, source reference, source timestamp, and simulation-only label; the result retains
+  only provider-neutral provenance, summary, linked Evidence identities, and verification fields.
+- Result receipt completes the task's immutable `assessment_report` Evidence link and advances the
+  Working Claim revision only to bind the Evidence lifecycle. It does not change Claim facts,
+  workflow state, coverage, repair authority, or the claimant-visible external-service state. A
+  first receipt requires the current Working Claim revision; an identical replay resolves its
+  stored operation before applying that precondition again.
+- One deterministic result identity exists per task. An unchanged retry reuses the stored bytes,
+  Evidence, Claim binding, and checked result; conflicting content, origin, or task provenance is
+  rejected. The Evidence provenance retains a hash of the result-receipt idempotency scope, never
+  the raw `Idempotency-Key`, so a changed replay is rejected after process restart. A retry after
+  storage or Claim binding but before result persistence resumes without a second Claim revision.
+- A returned result begins unverified and is checked through the authoritative external-result
+  verification rule against its task, immutable Evidence link, Evidence ownership, and the current
+  Claim revision. The controlled fixture result becomes `review_required`; no result record can
+  directly promote provider content into Claim State.
 - If the Claim result is durable but the public route-idempotency response is not, an unchanged
   retry derives the same decision identity, verifies its authorised revision, restores the stored
   routing result, and then completes the missing idempotency response.
@@ -441,6 +471,17 @@ Evidence record or protected object.
 - Every Workbench handoff, signal, WorkItem, message, and ownership mutation first resolves the
   exact current projected action. Its idempotency record stores the registry version, action code,
   and target alongside the resulting response.
+- `WorkingClaim.terminal_disposition` is either null or one embedded authoritative record with
+  `value`, registered `reason_code`, non-empty immutable `source_refs`, typed `recorded_by`,
+  `recorded_at`, and `recorded_revision`. It does not replace `claim_state`. `completed` requires a
+  created external Claim result; `abandoned` and `closed` cannot coexist with one.
+- Successful external Claim creation writes the created result and `completed` disposition in the
+  same one-revision Claim mutation, referencing the authorising decision and external Claim.
+- Reopen clears only an eligible `abandoned`/`closed` disposition. The Fixture and MongoDB
+  `save_claim_mutation_with_audit` boundary accepts the authenticated operation actor (claimant or
+  staff), requires the same Claim and active-session pointer, and atomically stores the resulting
+  Claim, actor-scoped idempotency response, and claim-revision-linked audit fact. It does not grant
+  authority; the service must resolve `claim.reopen` and primary ownership before calling it.
 
 ## Agent Turn and Action Invariants
 
@@ -683,3 +724,93 @@ Candidate physical services and open provider decisions are recorded in
 `docs/data-architecture.md`. Availability, schema, identity, region, limits, retention,
 transactions, backup, recovery, and migration remain unconfirmed until verified for the
 selected profile.
+
+## P17.1 Incomplete Claim Checkpoint
+
+The explicit incomplete-Claim checkpoint is a provider-neutral atomic mutation. It does not add a
+second Claim State.
+
+For Claim revision `N`, the checkpoint persists together:
+
+- the same authoritative `WorkingClaim` at revision `N + 1`, with `active_session_id` cleared;
+- the previously active Session changed to `paused`, with its recovery snapshot aligned to revision
+  `N`;
+- bounded Session recovery context containing `interrupted_at`,
+  `last_meaningful_activity_at`, an exact
+  `last_meaningful_activity_source_ref`, and a plain-language
+  `resume_point`;
+- exactly one open Claim-scoped Follow-up for purpose `resume_incomplete_claim`; and
+- the idempotency record for the claimant, route, key, accepted revision, Claim, Session, and
+  Follow-up identity.
+
+Follow-up IDs use the `fup_` prefix. The minimum P17.1 record persists stable identity, Claim,
+source Session, purpose, source references, responsible party, channel, due time, status, attempt
+count, contact-permission condition, optional outcome, and timestamps. `pending` means P17.1 has
+an authorised current channel; `blocked` means contact is not authorised and therefore has no
+channel or schedule; `resolved` records that the claimant resumed. An authenticated in-app
+recovery record does not grant email, SMS, or phone authority. An anonymous browser interruption
+is persisted as `blocked` / `not_authorised` rather than as executable outbound work.
+
+The Fixture and MongoDB adapters enforce at most one open (`pending` or `blocked`) Follow-up for
+the same Claim and purpose. A stale revision, mismatched Claim/Session/customer, conflicting
+idempotency identity, invalid contact-authority condition, or second open Claim+purpose record
+fails before any bundle member becomes authoritative. The Fixture profile serializes material
+Claim mutations and repeats the authoritative revision and duplicate checks while that mutation
+lock is held. Two callers that both pass an optimistic read therefore cannot commit two recovery
+bundles. When a new claimant Session replaces an existing active Session, the stored active-session
+pointer is revision-checked and the prior Session closure is committed in the same activation
+mutation; a stale activation therefore cannot overwrite a pause checkpoint or its recovery context.
+
+`last_meaningful_activity_at` is selected from durable claimant-authored messages or accepted
+claimant business actions such as authoritative structured-form or contents updates and explicit
+consent. Reads, polling, streaming, and an arbitrary Session activity timestamp do not qualify.
+The paired `last_meaningful_activity_source_ref` identifies the exact durable source selected for
+the recovery checkpoint. Explicit form and contents confirmations append a revision-scoped
+confirmation source reference in the same Claim mutation that records their confirmation timestamp,
+so recovery chronology never pairs a later confirmation time with an earlier proposal source.
+
+A Claim is eligible for a recovery checkpoint only when its authoritative workflow is not
+`created` and `customer_next_step.can_resume=true`. Claimant and Workbench incomplete projections
+use that same rule together with the absence of an authoritative active Session and the presence
+of a relevant paused recovery checkpoint and open recovery Follow-up.
+
+Resume continues to create a new active interaction Session for the same Working Claim. The same
+atomic session-activation mutation marks the open recovery Follow-up `resolved`, so Workbench no
+longer exposes stale follow-up work after claimant recovery. The paused Session and recovery
+context remain historical continuity evidence and never supersede the latest Working Claim.
+
+P17.1 does not implement notification delivery, retry cadence, attempt processing, abandonment,
+escalation, purge, anonymisation, or retention transitions; those remain owned by later P17
+slices.
+
+## P17.2 Bounded Terminal Disposition and Reopen Slice
+
+This bounded slice adds the authoritative terminal fact required by Workbench without implementing
+the remaining follow-up policy, notification, automatic abandonment/expiry, retention, purge, or
+anonymisation work.
+
+`WorkingClaim.terminal_disposition` is optional and embedded in the Claim record so the existing
+Claim revision remains its only concurrency token. Its values are `completed`, `abandoned`, and
+`closed`. The registered reasons are `CLAIM_CREATED`, `ABANDONMENT_POLICY_APPLIED`, and
+`AUTHORISED_CLOSURE`; the latter two reserve the source-linked persistence vocabulary but do not
+authorise or implement a policy writer. Every record has at least one immutable source reference,
+a typed actor, a timezone-aware recording time, and the Claim revision at which it was recorded.
+
+Successful Claim creation writes `completed` in the same Claim compare-and-set as the external
+Claim result. Workbench reads the persisted record directly and never derives terminal placement
+from workflow text, session absence, or action history. `purged_or_anonymised` is not represented
+by this field and remains outside listable Workbench data.
+
+The `claim.reopen` mutation is staff-scoped and stores, in one Fixture lock or MongoDB transaction:
+
+- the same Claim at revision `N + 1` with only `terminal_disposition` cleared;
+- the unchanged authoritative `claim_state` and `active_session_id`;
+- an idempotency record keyed by authenticated staff actor, route, key, request-plus-revision
+  fingerprint, exact action registry version/code/target, and first response; and
+- an internal append-only `action.completed` audit event with the staff authentication source,
+  prior terminal sources, permission result, submitted reason, idempotency key, and resulting Claim
+  revision.
+
+Only a primary owner with an exact non-blocked action may call this boundary. `completed`, a created
+external Claim, or an underlying `created` workflow cannot be reopened. Failed authorization,
+validation, revision, idempotency, or ownership checks write none of the bundle.

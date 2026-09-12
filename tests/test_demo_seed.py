@@ -61,11 +61,19 @@ def test_seed_scenarios_populates_all_mvp_paths_and_created_routed_queue() -> No
         listing = client.get('/api/v1/workbench/claims', headers=STAFF_AUTH)
         assert listing.status_code == 200
         items = {item['claim_id']: item for item in listing.json()['items']}
-        assert set(body['claim_ids']) <= set(items)
+        active_claim_ids = set(body['claim_ids']) - {'clm_fixture_at10'}
+        assert active_claim_ids <= set(items)
+        assert 'clm_fixture_at10' not in items
         priorities = {
-            items[claim_id]['priority_projection']['level'] for claim_id in body['claim_ids']
+            items[claim_id]['priority_projection']['level'] for claim_id in active_claim_ids
         }
         assert priorities == {'urgent', 'high', 'standard'}
+
+        completed = client.get('/api/v1/workbench/claims?view=completed', headers=STAFF_AUTH)
+        assert [item['claim_id'] for item in completed.json()['items']] == ['clm_fixture_at10']
+        completed_item = completed.json()['items'][0]
+        assert completed_item['work_summary']['queue_key'] == 'completed'
+        assert completed_item['terminal_disposition']['reason_code'] == 'CLAIM_CREATED'
 
         review_detail = client.get('/api/v1/workbench/claims/clm_fixture_at02', headers=STAFF_AUTH)
         assert review_detail.status_code == 200
