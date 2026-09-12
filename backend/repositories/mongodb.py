@@ -1246,9 +1246,13 @@ class MongoDBRepository:
             if existing != operation:
                 raise IdempotencyConflict(operation.operation_id)
             return
+        # `UNKNOWN_OUTCOME` is an outcome the operation may take on, not a settled one:
+        # it is written when an attempt may already have reached the provider, and
+        # reconciliation is what moves it afterwards.
         allowed_statuses = {
             AssessorRoutingOperationStatus.RETRYABLE_FAILURE,
             AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+            AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
             AssessorRoutingOperationStatus.ACCEPTED,
         }
         if operation.status not in allowed_statuses:

@@ -55,7 +55,12 @@ from backend.repositories.protocols import (
 )
 from backend.services.branching import build_applied_branch_evaluation
 from backend.services.external_service_entry import ExternalServiceEntryDecision
-from backend.services.integrations import assessor_operation_id, route_assessor
+from backend.services.integrations import (
+    assessor_operation_id,
+    route_assessor,
+    unreconciled_assessor_task,
+    unreconciled_outcome_error,
+)
 from backend.services.support import (
     now_utc,
     parse_if_match,
@@ -134,13 +139,22 @@ _CLAIMANT_FAILURE_CODES = frozenset(code.value for code in AssessorRoutingFailur
 # `continuation_for_failed_task`, from the recovery the matrix settled. This maps
 # that answer onto the claimant vocabulary rather than deriving it a second time
 # from the operation status, which would be the same rule written twice and free
-# to drift. `AWAITING_RECONCILIATION` has no entry: an unresolved outcome has no
-# approved claimant wording and is deliberately not projected.
+# to drift.
+#
+# `AWAITING_RECONCILIATION` used to have no entry, on the ground that an unresolved
+# outcome had no approved claimant wording. Leaving it out is not the neutral choice
+# it reads as: a failed attempt writes nothing to the claim, so with no routing
+# recorded the projection falls back to `READY_TO_REQUEST` with `can_request` true,
+# and the claimant is invited to send again a request that may already be with the
+# assessor. Saying nothing is the one answer this state cannot afford.
 _CLAIMANT_CONTINUATION_STATUS = {
     ExternalTaskContinuation.RETRY_PERMITTED_BY_THE_FAILURE: (
         ClaimantExternalServiceStatus.RETRYABLE_FAILURE
     ),
     ExternalTaskContinuation.AWAITING_REVIEW: (ClaimantExternalServiceStatus.TERMINAL_FAILURE),
+    ExternalTaskContinuation.AWAITING_RECONCILIATION: (
+        ClaimantExternalServiceStatus.AWAITING_RECONCILIATION
+    ),
 }
 
 
@@ -156,10 +170,11 @@ def _latest_failed_assessor_task(
     must leave the claim exactly as it was. Deriving the state here honours both,
     the claim is untouched and the claimant is still told what happened.
 
-    An `unknown_outcome` task is deliberately not mapped, and neither is a failure
-    whose code has no approved claimant wording. AT-10 approves wording for four
-    codes only, and inventing a claimant meaning for the others is the kind of
-    claim this boundary exists to prevent.
+    A failure whose code has no approved claimant wording is still not mapped. AT-10
+    approves wording for four codes only, and inventing a claimant meaning for the
+    others is the kind of claim this boundary exists to prevent. An `unknown_outcome`
+    task carrying one of those four codes is now mapped, because the alternative is
+    not silence but a fallback to "ready to request".
 
     Args:
         repository: Persistence boundary for the claim.
@@ -554,6 +569,12 @@ def request_assessor_routing(
         return response, True
     action = claimant_assessor_action(repository, claim)
     consent = _active_assessor_consent(claim)
+    # An unresolved outcome also fails the `can_request` gate below, but it would fail
+    # it as a missing permission, which is both untrue and the wrong instruction. This
+    # is the reason rather than a second rule: it reads the claim's external tasks,
+    # which is the same source the gate inside `route_assessor` reads.
+    if unreconciled_assessor_task(repository, claim_id) is not None:
+        raise unreconciled_outcome_error()
     # `can_request` is the single answer to whether this claimant may send the
     # request now. It admits a retryable failure, which AT-10 permits to be retried
     # with the same unchanged operation, and refuses a terminal one, which that
