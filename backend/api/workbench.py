@@ -43,6 +43,7 @@ from backend.domain.workbench import (
     WorkbenchMessagesResponse,
     WorkbenchQueueView,
     WorkbenchRetrievalsResponse,
+    WorkbenchRuntimeWorkItemsResponse,
     WorkbenchSessionsResponse,
     WorkbenchSignalsResponse,
     WorkbenchWorkItemsResponse,
@@ -80,6 +81,7 @@ from backend.services.workbench import (
     list_workbench_handoffs,
     list_workbench_messages,
     list_workbench_retrievals,
+    list_workbench_runtime_work_items,
     list_workbench_sessions,
     list_workbench_signals,
     list_workbench_work_items,
@@ -315,6 +317,19 @@ def read_workbench_work_items(
     cursor: str | None = Query(default=None),
 ) -> WorkbenchWorkItemsResponse:
     return list_workbench_work_items(repository_for(request), principal, claim_id, limit, cursor)
+
+
+@router.get('/{claim_id}/runtime-work-items', response_model=WorkbenchRuntimeWorkItemsResponse)
+def read_workbench_runtime_work_items(
+    claim_id: str,
+    request: Request,
+    principal: Principal = Depends(require_staff),
+    limit: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+) -> WorkbenchRuntimeWorkItemsResponse:
+    return list_workbench_runtime_work_items(
+        repository_for(request), principal, claim_id, limit, cursor
+    )
 
 
 @router.get('/{claim_id}/customer-updates', response_model=WorkbenchCustomerUpdatesResponse)

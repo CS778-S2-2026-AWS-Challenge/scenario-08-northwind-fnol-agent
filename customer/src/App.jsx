@@ -23,7 +23,6 @@ import {
   uploadEvidenceContent,
   completeEvidenceUpload,
   resumeClaimSession,
-  startClaimSession,
   streamClaimUpdates,
   submitClaimMessage,
   setClaimantAccessToken,
@@ -74,20 +73,6 @@ const FIELD_SOURCE_LABELS = {
   staff: 'Provided by Northwind support',
 }
 
-const DYNAMIC_SELECTION_LABELS = {
-  required_now: 'Needed now',
-  candidate_now: 'Helpful now',
-  pending_later: 'Needed later',
-}
-
-const DYNAMIC_VALUE_LABELS = {
-  missing: 'Not provided yet',
-  proposed: 'Suggested from your report',
-  confirmed: 'Confirmed',
-  disputed: 'Needs correction',
-  pending_generation: 'Expected later',
-}
-
 function fieldLabel(fieldCode) {
   return FIELD_LABELS[fieldCode] || fieldCode.split('.').at(-1).replaceAll('_', ' ')
 }
@@ -100,15 +85,6 @@ function fieldStatusLabel(status) {
 
 function fieldSourceLabel(source) {
   return FIELD_SOURCE_LABELS[source] || 'Source recorded by Northwind'
-}
-
-function dynamicSelectionLabel(selectionState) {
-  return DYNAMIC_SELECTION_LABELS[selectionState] || 'Relevant to your claim'
-}
-
-function dynamicValueLabel(valueState, field) {
-  if (field && valueState === 'missing') return 'Not provided yet'
-  return DYNAMIC_VALUE_LABELS[valueState] || 'Recorded'
 }
 
 function fieldValueText(field) {
@@ -176,7 +152,7 @@ function App() {
   const [account, setAccount] = useState(null)
   const [authStatus, setAuthStatus] = useState('idle')
   const [authError, setAuthError] = useState('')
-  const [claimType, setClaimType] = useState('motor')
+  const [claimType, setClaimType] = useState('')
   const [draft, setDraft] = useState('')
   const [claim, setClaim] = useState(null)
   const [sessionId, setSessionId] = useState(null)
@@ -197,7 +173,7 @@ function App() {
   const [runtimeCapabilities, setRuntimeCapabilities] = useState({
     claim_types: ['motor', 'home', 'contents'],
     models: [],
-    default_model_profile_id: 'qwen-local',
+    default_model_profile_id: null,
   })
   const [selectedModel, setSelectedModel] = useState('')
   const [attachments, setAttachments] = useState([])
@@ -218,6 +194,7 @@ function App() {
   const pendingClaimCreation = useRef(null)
   const pendingExternalService = useRef(null)
   const latestRevision = useRef(0)
+  const latestRevisionClaimId = useRef(null)
   const latestEvidenceRevision = useRef(0)
   const latestEvidenceItems = useRef([])
   const evidenceHasLocalMutation = useRef(false)
@@ -324,12 +301,6 @@ function App() {
   )
   const inputLabel = INPUT_LABELS[nextStep?.status] || 'Add more information'
   const progress = useMemo(() => claimProgress(nextStep, dynamicForm), [nextStep, dynamicForm])
-  const visibleDynamicFields = useMemo(
-    () => (dynamicForm?.fields || []).filter(
-      (field) => !['inactive', 'system_owned'].includes(field.selection_state),
-    ),
-    [dynamicForm],
-  )
   const serviceConsentChecked = externalServiceInteraction.claimId === claim?.claim_id
     && externalServiceInteraction.consentChecked
   const serviceError = externalServiceInteraction.claimId === claim?.claim_id
@@ -424,10 +395,18 @@ function App() {
   }
 
   useEffect(() => {
-    if (claim?.revision) {
-      latestRevision.current = Math.max(latestRevision.current, claim.revision)
+    if (!claim?.claim_id) {
+      latestRevisionClaimId.current = null
+      latestRevision.current = 0
+      return
     }
-  }, [claim?.revision])
+    if (latestRevisionClaimId.current !== claim.claim_id) {
+      latestRevisionClaimId.current = claim.claim_id
+      latestRevision.current = Number(claim.revision || 0)
+      return
+    }
+    latestRevision.current = Math.max(latestRevision.current, Number(claim.revision || 0))
+  }, [claim?.claim_id, claim?.revision])
 
   useEffect(() => {
     if (!claim?.claim_id || !sessionId) return undefined
@@ -507,9 +486,9 @@ function App() {
         setRuntimeCapabilities(capabilities)
         setSelectedModel((current) => current || (
           capabilities.default_model_profile_id
-          || capabilities.models?.find((model) => model.id === 'qwen-local')?.id
+          || capabilities.models?.find((model) => model.availability !== 'unavailable')?.id
           || capabilities.models?.[0]?.id
-          || 'qwen-local'
+          || ''
         ))
       })
       .catch(() => {})
@@ -750,6 +729,7 @@ function App() {
         sessionId: activeSessionId,
         revision: activeClaim.revision,
         text,
+        modelProfileId: selectedModel,
         idempotencyKey: operation.turnKey,
         clientMessageId: operation.clientMessageId,
       })
@@ -771,19 +751,27 @@ function App() {
       setStatus('idle')
     } catch (requestError) {
       setPendingMessage(null)
-      const knownRejection = requestError instanceof ApiRequestError
-        && requestError.status >= 400
-        && requestError.status < 500
       if (messageWasSubmitted) {
+        const serverConfirmedFailure = requestError instanceof ApiRequestError
+          && Number.isInteger(requestError.status)
+        const retryGuidance = requestError instanceof ApiRequestError && requestError.retryable
+          ? 'Try again in a moment.'
+          : 'Review the message and try again.'
         setFailedMessage({
           text,
           sender: 'You',
-          message: knownRejection
-            ? 'We could not send that message. Please try again.'
-            : 'We could not confirm delivery. Please try again.',
+          message: serverConfirmedFailure
+            ? `${requestError.message} ${retryGuidance}`
+            : 'We could not confirm delivery because the connection ended before the service responded. Retry safely; the same request will not create a duplicate.',
         })
+        setError('')
+        if (requestError instanceof ApiRequestError && requestError.code === 'REVISION_CONFLICT') {
+          refreshAfterConflict().catch(() => {})
+        }
+        setStatus('error')
+      } else {
+        showError(requestError)
       }
-      showError(requestError)
     }
   }
 
@@ -805,25 +793,6 @@ function App() {
     setFailedMessage(null)
     setStatus('starting')
     try {
-      if (claim && hasConversationContent) {
-        const session = await startClaimSession({ claimId: claim.claim_id, intent: 'new', modelProfileId: selectedModel })
-        const refreshedClaim = await getClaim(claim.claim_id)
-        setClaim(refreshedClaim)
-        setForm(refreshedClaim.form)
-        setContentsItems(refreshedClaim.contents_items || [])
-        setDynamicForm(refreshedClaim.dynamic_form || null)
-        setNextStep(refreshedClaim.customer_next_step)
-        setSessionId(session.session_id)
-        if (session.model_profile_id) setSelectedModel(session.model_profile_id)
-        setMessages([])
-        setResumeContext(null)
-        setHandoff(null)
-        setWorkspaceView('chat')
-        setMobileView('chat')
-        setDraft('')
-        setStatus('idle')
-        return
-      }
       const created = await createClaim({ idempotencyKey: requestId('claim'), incidentType: claimType || null, modelProfileId: selectedModel })
       setClaim(created.claim)
       setSessionId(created.session.session_id)
@@ -836,6 +805,11 @@ function App() {
       setHandoff(null)
       setEvidenceItems([])
       setAttachments([])
+      if (account) {
+        listClaims()
+          .then((response) => setSavedReports(response.items.filter((item) => item.can_resume)))
+          .catch(() => {})
+      }
       setWorkspaceView('chat')
       setMobileView('chat')
       setDraft('')
@@ -1390,13 +1364,15 @@ function App() {
                   buttonLabel={status === 'starting' ? 'Starting claim...' : failedMessage ? 'Retry claim message' : 'Start claim'}
                   error={error}
                   placeholder="Tell us what happened…"
+                  showClaimTypeControl
+                  showModelControl
                   claimType={claimType}
                   setClaimType={setClaimType}
                   claimTypes={runtimeCapabilities.claim_types}
                   models={runtimeCapabilities.models}
-                   selectedModel={selectedModel}
-                   setSelectedModel={setSelectedModel}
-                   modelLocked={Boolean(sessionId)}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                  claimTypeLocked={Boolean(sessionId)}
                   attachments={attachments}
                   onFileSelected={handleFileSelected}
                 />
@@ -1472,6 +1448,20 @@ function App() {
                 <span className="intake-history-title">Current claim</span>
                 <span className="intake-history-meta">{claim.incident_type || 'New report'} · {claim.claim_id}</span>
               </button>
+              {(savedReports || [])
+                .filter((report) => report.claim_id !== claim.claim_id)
+                .map((report) => (
+                  <button
+                    className="intake-history-item"
+                    type="button"
+                    key={report.claim_id}
+                    onClick={() => resumeSavedReport(report.claim_id)}
+                    disabled={isBusy}
+                  >
+                    <span className="intake-history-title">{report.incident_type || 'Incident report'}</span>
+                    <span className="intake-history-meta">{report.customer_next_step.summary}</span>
+                  </button>
+                ))}
             </div>
             <div className="intake-history-bottom">
               <button className="intake-profile" type="button" onClick={() => {
@@ -1727,9 +1717,9 @@ function App() {
               setClaimType={setClaimType}
               claimTypes={runtimeCapabilities.claim_types}
               models={runtimeCapabilities.models}
-               selectedModel={selectedModel}
-               setSelectedModel={setSelectedModel}
-               modelLocked={Boolean(sessionId)}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+              claimTypeLocked={Boolean(sessionId)}
               attachments={attachments}
               onFileSelected={handleFileSelected}
             />
@@ -1759,72 +1749,6 @@ function App() {
               </div>
             </div>
             <div id="claim-details-body" hidden={!detailsOpen}>
-            {dynamicForm && (
-              <section className="dynamic-form-summary" aria-labelledby="dynamic-form-title" aria-live="polite">
-                <div className="dynamic-form-heading">
-                  <div>
-                    <p className="eyebrow">Current claim path</p>
-                    <h2 id="dynamic-form-title">
-                      {dynamicForm.selected_family
-                        ? `${dynamicForm.selected_family[0].toUpperCase()}${dynamicForm.selected_family.slice(1)} claim details`
-                        : 'Claim details'}
-                    </h2>
-                  </div>
-                  <span className="dynamic-form-revision">Updated with revision {dynamicForm.claim_revision}</span>
-                </div>
-                {dynamicForm.requirements?.next_required_item && (
-                  <p className="dynamic-form-reason">
-                    Next needed: {fieldLabel(dynamicForm.requirements.next_required_item)}
-                  </p>
-                )}
-                {(dynamicForm.requirements?.pending_later || []).length > 0 && (
-                  <p className="dynamic-form-reason">
-                    Needed later: {dynamicForm.requirements.pending_later.map(fieldLabel).join(', ')}
-                  </p>
-                )}
-                {visibleDynamicFields.length === 0 && contentsItems.length === 0 ? (
-                  <p className="dynamic-form-empty">No additional details are needed for the current step.</p>
-                ) : (
-                  <ul className="dynamic-form-fields">
-                    {visibleDynamicFields.map((item) => {
-                      const storedField = form[item.field_code]
-                      return (
-                        <li className="dynamic-form-field" key={item.field_code}>
-                          <div className="dynamic-form-field-heading">
-                            <span>{fieldLabel(item.field_code)}</span>
-                            <span className={`dynamic-selection dynamic-selection-${item.selection_state}`}>
-                              {dynamicSelectionLabel(item.selection_state)}
-                            </span>
-                          </div>
-                          <p className="dynamic-form-value">
-                            {storedField ? fieldValueText(storedField) : dynamicValueLabel(item.value_state)}
-                          </p>
-                          <p className="dynamic-form-meta">
-                            {dynamicValueLabel(item.value_state, storedField)}
-                            {storedField?.source ? ` · ${fieldSourceLabel(storedField.source)}` : ''}
-                          </p>
-                          <p className="dynamic-form-reason">{item.reason}</p>
-                        </li>
-                      )
-                    })}
-                    {contentsItems.map((item) => (
-                      <li className="dynamic-form-field" key={item.item_id}>
-                        <div className="dynamic-form-field-heading">
-                          <span>{item.description}</span>
-                          <span className={`dynamic-selection dynamic-selection-${item.status === 'confirmed' ? 'candidate_now' : 'required_now'}`}>
-                            {item.status === 'confirmed' ? 'Confirmed item' : 'Needs your review'}
-                          </span>
-                        </div>
-                        <p className="dynamic-form-value">
-                          {item.quantity} × {item.category} · {item.loss_type}
-                        </p>
-                        <p className="dynamic-form-meta">{fieldSourceLabel(item.source)}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            )}
             {Object.keys(form).length === 0 ? (
               <p className="empty-details">Details from your conversation will appear here.</p>
             ) : (

@@ -18,6 +18,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
     StaffAgentDraftSource,
     idempotency_source_matches,
+    staff_agent_execution_for,
     with_staff_agent_source,
 )
 from backend.services.staff_access import require_claim_collaborator
@@ -99,11 +100,15 @@ def _save_decision(
     source: StaffAgentDraftSource | None = None,
 ) -> None:
     try:
+        linked_idempotency = with_staff_agent_source(idempotency, source)
         repository.save_staff_mutation(
             claim,
             expected_revision,
-            with_staff_agent_source(idempotency, source),
+            linked_idempotency,
             signal_decision=decision,
+            staff_agent_execution=staff_agent_execution_for(
+                claim, expected_revision, linked_idempotency, source
+            ),
         )
     except RevisionConflict as conflict:
         raise ApiError(

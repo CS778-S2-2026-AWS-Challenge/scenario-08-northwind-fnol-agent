@@ -61,6 +61,26 @@ class StaffAgentMessage(ContractModel):
     created_at: datetime
 
 
+class StaffAgentExecutionRecord(ContractModel):
+    """Immutable evidence that one confirmed draft used a registered handler."""
+
+    execution_id: str = Field(min_length=1, max_length=160)
+    session_id: str = Field(min_length=1, max_length=120)
+    message_id: str = Field(min_length=1, max_length=120)
+    draft_id: str = Field(min_length=1, max_length=120)
+    staff_id: str = Field(min_length=1, max_length=120)
+    claim_id: str = Field(min_length=1, max_length=120)
+    action_code: str = Field(pattern=r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$')
+    target_ref: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=1)
+    resulting_revision: int = Field(ge=1)
+    confirmation: str = Field(default='staff_confirmed', pattern='^staff_confirmed$')
+    outcome: StaffAgentDraftExecutionOutcome
+    result: dict[str, Any]
+    source_refs: list[str] = Field(min_length=3, max_length=10)
+    created_at: datetime
+
+
 class CreateStaffAgentSessionRequest(ContractModel):
     title: str = Field(default='New Staff Agent session', min_length=1, max_length=200)
     model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
@@ -94,6 +114,7 @@ class StaffAgentDraftExecutionResponse(ContractModel):
     target_ref: str
     outcome: StaffAgentDraftExecutionOutcome
     result: dict[str, Any]
+    runtime_execution: StaffAgentExecutionRecord
 
 
 class StaffAgentSessionsResponse(ContractModel):

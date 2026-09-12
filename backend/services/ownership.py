@@ -26,6 +26,7 @@ from backend.repositories.protocols import (
     RevisionConflict,
     StaffAgentDraftSource,
     idempotency_source_matches,
+    staff_agent_execution_for,
     with_staff_agent_source,
 )
 from backend.services.support import (
@@ -104,13 +105,17 @@ def _save(
     handoff: HandoffRecord | None = None,
 ) -> None:
     try:
+        linked_idempotency = with_staff_agent_source(idempotency, source)
         repository.save_ownership_mutation(
             claim,
             expected,
-            with_staff_agent_source(idempotency, source),
+            linked_idempotency,
             request,
             coworkers=coworkers,
             handoff=handoff,
+            staff_agent_execution=staff_agent_execution_for(
+                claim, expected, linked_idempotency, source
+            ),
         )
     except RevisionConflict as conflict:
         raise _error(

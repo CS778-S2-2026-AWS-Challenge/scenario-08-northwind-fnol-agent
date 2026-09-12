@@ -43,7 +43,16 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
-from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.runtime import (
+    RuntimeTurnRecords,
+    RuntimeWorkItemRecord,
+    validate_runtime_turn_links,
+)
+from backend.domain.staff_agent import (
+    StaffAgentExecutionRecord,
+    StaffAgentMessage,
+    StaffAgentSession,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -52,6 +61,8 @@ from backend.repositories.protocols import (
     PersistenceRepository,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_staff_agent_execution,
+    validate_staff_agent_execution_source,
     validate_validation_seed_session,
 )
 
@@ -68,8 +79,10 @@ class FixtureRepository(PersistenceRepository):
         self._follow_ups: dict[str, FollowUpRecord] = {}
         self._messages: dict[str, MessageRecord] = {}
         self._runtime_traces: dict[str, RuntimeTraceRecord] = {}
+        self._runtime_turns: dict[str, RuntimeTurnRecords] = {}
         self._staff_agent_sessions: dict[str, StaffAgentSession] = {}
         self._staff_agent_messages: dict[str, StaffAgentMessage] = {}
+        self._staff_agent_executions: dict[str, StaffAgentExecutionRecord] = {}
         self._decisions: dict[str, AgentDecisionRecord] = {}
         self._branch_evaluations: dict[str, BranchEvaluationRecord] = {}
         self._assessor_routing_operations: dict[str, AssessorRoutingOperation] = {}
@@ -116,6 +129,7 @@ class FixtureRepository(PersistenceRepository):
             'runtime_traces': len(self._runtime_traces),
             'staff_agent_sessions': len(self._staff_agent_sessions),
             'staff_agent_messages': len(self._staff_agent_messages),
+            'staff_agent_executions': len(self._staff_agent_executions),
             'agent_decisions': len(self._decisions),
             'branch_evaluations': len(self._branch_evaluations),
             'assessor_routing_operations': len(self._assessor_routing_operations),
@@ -143,6 +157,7 @@ class FixtureRepository(PersistenceRepository):
         self._runtime_traces.clear()
         self._staff_agent_sessions.clear()
         self._staff_agent_messages.clear()
+        self._staff_agent_executions.clear()
         self._decisions.clear()
         self._branch_evaluations.clear()
         self._assessor_routing_operations.clear()
@@ -877,6 +892,25 @@ class FixtureRepository(PersistenceRepository):
             ]
         )
 
+    def get_staff_agent_execution(
+        self, execution_id: str, staff_id: str
+    ) -> StaffAgentExecutionRecord | None:
+        execution = self._staff_agent_executions.get(execution_id)
+        if execution is None or execution.staff_id != staff_id:
+            return None
+        return deepcopy(execution)
+
+    def _validate_staff_agent_execution_source(
+        self, execution: StaffAgentExecutionRecord | None
+    ) -> None:
+        if execution is None:
+            return
+        validate_staff_agent_execution_source(
+            execution,
+            self._staff_agent_sessions.get(execution.session_id),
+            self._staff_agent_messages.get(execution.message_id),
+        )
+
     def find_staff_agent_message_by_client_id(
         self, session_id: str, staff_id: str, client_message_id: str
     ) -> StaffAgentMessage | None:
@@ -1336,6 +1370,8 @@ class FixtureRepository(PersistenceRepository):
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
+        runtime_records: RuntimeTurnRecords | None = None,
     ) -> None:
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         stored_session = self._sessions.get(session.session_id)
@@ -1352,6 +1388,7 @@ class FixtureRepository(PersistenceRepository):
             existing_decision,
             existing_handoff,
             existing_evidence,
+            self._runtime_traces.get(runtime_trace.trace_id) if runtime_trace is not None else None,
         )
         child_ownership_matches = all(
             existing is None or existing.claim_id == claim.claim_id
@@ -1393,6 +1430,14 @@ class FixtureRepository(PersistenceRepository):
             and decision.handoff_id == (handoff.handoff_id if handoff is not None else None)
             and (evidence is None or evidence.claim_id == claim.claim_id)
             and (
+                runtime_trace is None
+                or (
+                    runtime_trace.claim_id == claim.claim_id
+                    and runtime_trace.session_id == session.session_id
+                    and runtime_trace.trigger_message_id == claimant_message.message_id
+                )
+            )
+            and (
                 branch_evaluation is None
                 or (
                     branch_evaluation.claim_id == claim.claim_id
@@ -1403,6 +1448,19 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        if runtime_records is not None:
+            try:
+                validate_runtime_turn_links(
+                    runtime_records,
+                    claim_id=claim.claim_id,
+                    session_id=session.session_id,
+                    trigger_message_id=claimant_message.message_id,
+                    agent_message_id=agent_message.message_id,
+                    expected_revision=expected_revision,
+                    resulting_revision=claim.revision,
+                )
+            except ValueError as error:
+                raise KeyError(claim.claim_id) from error
         existing_branch_evaluation = (
             self._branch_evaluations.get(branch_evaluation.evaluation_id)
             if branch_evaluation is not None
@@ -1418,6 +1476,12 @@ class FixtureRepository(PersistenceRepository):
                     (
                         branch_evaluation.evaluation_id if branch_evaluation is not None else '',
                         existing_branch_evaluation,
+                    ),
+                    (
+                        runtime_trace.trace_id if runtime_trace is not None else '',
+                        self._runtime_traces.get(runtime_trace.trace_id)
+                        if runtime_trace is not None
+                        else None,
                     ),
                 )
                 if existing is not None
@@ -1458,6 +1522,13 @@ class FixtureRepository(PersistenceRepository):
             if branch_evaluation.evaluation_id in self._branch_evaluations:
                 raise IdempotencyConflict(branch_evaluation.evaluation_id)
             self._branch_evaluations[branch_evaluation.evaluation_id] = deepcopy(branch_evaluation)
+        if runtime_trace is not None:
+            self._runtime_traces[runtime_trace.trace_id] = deepcopy(runtime_trace)
+        if runtime_records is not None:
+            existing_runtime = self._runtime_turns.get(runtime_records.turn_plan.turn_id)
+            if existing_runtime is not None and existing_runtime != runtime_records:
+                raise IdempotencyConflict(runtime_records.turn_plan.turn_id)
+            self._runtime_turns[runtime_records.turn_plan.turn_id] = deepcopy(runtime_records)
         self._idempotency[lookup] = idempotency
 
     def save_runtime_turn(
@@ -1553,6 +1624,37 @@ class FixtureRepository(PersistenceRepository):
         if trace is None or trace.claim_id != claim_id:
             return None
         return deepcopy(trace)
+
+    def get_runtime_turn_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTurnRecords | None:
+        if self.get_claim(claim_id, customer_id) is None:
+            return None
+        matches = [
+            record
+            for record in self._runtime_turns.values()
+            if record.turn_plan.claim_id == claim_id
+            and record.turn_plan.trigger_message_id == trigger_message_id
+        ]
+        return deepcopy(matches[-1]) if matches else None
+
+    def list_runtime_work_items(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[RuntimeWorkItemRecord]:
+        if self.get_claim(claim_id, customer_id) is None:
+            return []
+        items = [
+            item
+            for turn in self._runtime_turns.values()
+            for item in turn.work_items
+            if item.claim_id == claim_id
+        ]
+        return deepcopy(sorted(items, key=lambda item: (item.updated_at, item.work_item_id)))
 
     def find_runtime_trace_for_trigger(
         self,
@@ -2044,7 +2146,15 @@ class FixtureRepository(PersistenceRepository):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
+        try:
+            validate_staff_agent_execution(
+                staff_agent_execution, claim, expected_revision, idempotency
+            )
+            self._validate_staff_agent_execution_source(staff_agent_execution)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         self._validate_claim_mutation(claim, expected_revision)
         coworker_records = coworkers or []
         if (
@@ -2063,6 +2173,11 @@ class FixtureRepository(PersistenceRepository):
         existing_request = self._collaboration_requests.get(collaboration_request.request_id)
         if existing_request is not None and existing_request.claim_id != claim.claim_id:
             raise IdempotencyConflict(collaboration_request.request_id)
+        if (
+            staff_agent_execution is not None
+            and staff_agent_execution.execution_id in self._staff_agent_executions
+        ):
+            raise IdempotencyConflict(staff_agent_execution.execution_id)
         self._claims[claim.claim_id] = deepcopy(claim)
         self._collaboration_requests[collaboration_request.request_id] = deepcopy(
             collaboration_request
@@ -2071,6 +2186,10 @@ class FixtureRepository(PersistenceRepository):
             self._claim_coworkers[coworker.coworker_id] = deepcopy(coworker)
         if handoff is not None:
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
+        if staff_agent_execution is not None:
+            self._staff_agent_executions[staff_agent_execution.execution_id] = deepcopy(
+                staff_agent_execution
+            )
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_staff_mutation(
@@ -2086,7 +2205,15 @@ class FixtureRepository(PersistenceRepository):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
+        try:
+            validate_staff_agent_execution(
+                staff_agent_execution, claim, expected_revision, idempotency
+            )
+            self._validate_staff_agent_execution_source(staff_agent_execution)
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         stored_claim = self._validate_claim_mutation(claim, expected_revision)
         if required_staff_id is not None:
             presence = self._staff_presence.get(required_staff_id)
@@ -2165,6 +2292,11 @@ class FixtureRepository(PersistenceRepository):
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        if (
+            staff_agent_execution is not None
+            and staff_agent_execution.execution_id in self._staff_agent_executions
+        ):
+            raise IdempotencyConflict(staff_agent_execution.execution_id)
         if required_staff_id is not None and required_staff_revision is not None:
             assert presence is not None
             self._staff_presence[required_staff_id] = deepcopy(
@@ -2187,6 +2319,10 @@ class FixtureRepository(PersistenceRepository):
             self._handoffs[handoff.handoff_id] = deepcopy(handoff)
         if message is not None:
             self._messages[message.message_id] = deepcopy(message)
+        if staff_agent_execution is not None:
+            self._staff_agent_executions[staff_agent_execution.execution_id] = deepcopy(
+                staff_agent_execution
+            )
         self._idempotency[lookup] = deepcopy(idempotency)
 
     def save_handoff(self, handoff: HandoffRecord, customer_id: str) -> None:

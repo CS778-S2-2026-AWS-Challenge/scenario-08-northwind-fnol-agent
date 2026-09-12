@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.core.auth import Principal, require_claimant
 from backend.core.config import AgentRuntimeProfile
 from backend.domain.configuration import ModelRuntimeConfiguration
-from backend.services.model_profiles import model_catalog
+from backend.services.model_profiles import default_model_profile_id, model_catalog
 
 
 class ModelCapability(BaseModel):
@@ -15,6 +15,7 @@ class ModelCapability(BaseModel):
     protocol: str = Field(min_length=1)
     structured_output: bool
     tools: bool
+    availability: str = Field(default='available', pattern=r'^(available|unavailable)$')
 
 
 class RuntimeCapabilitiesResponse(BaseModel):
@@ -35,8 +36,10 @@ def capabilities(
 ) -> RuntimeCapabilitiesResponse:
     settings = request.app.state.settings
     models: list[ModelCapability] = []
+    catalog = []
     if settings.agent_runtime_profile is AgentRuntimeProfile.MODEL_GATEWAY:
-        for record in model_catalog(request):
+        catalog = model_catalog(request)
+        for record in catalog:
             configuration = ModelRuntimeConfiguration.model_validate(record.values)
             models.append(
                 ModelCapability(
@@ -45,14 +48,15 @@ def capabilities(
                     protocol=configuration.protocol,
                     structured_output=configuration.structured_output,
                     tools=configuration.tools,
+                    availability=(
+                        'available'
+                        if configuration.evaluation_status == 'configured'
+                        else 'unavailable'
+                    ),
                 )
             )
     return RuntimeCapabilitiesResponse(
         claim_types=['motor', 'home', 'contents'],
         models=models,
-        default_model_profile_id=(
-            'qwen-local'
-            if any(model.id == 'qwen-local' for model in models)
-            else (models[0].id if models else None)
-        ),
+        default_model_profile_id=default_model_profile_id(request, catalog) if models else None,
     )

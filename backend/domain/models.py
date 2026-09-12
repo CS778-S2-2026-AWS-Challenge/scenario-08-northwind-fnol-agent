@@ -906,7 +906,7 @@ class RuntimeInvocationTrace(ContractModel):
 
 
 class RuntimeTraceRecord(ContractModel):
-    """Internal trace for the first namespaced, read-only Runtime turn."""
+    """Provider trace retained alongside the applied Runtime turn records."""
 
     trace_id: str
     claim_id: str
@@ -917,6 +917,7 @@ class RuntimeTraceRecord(ContractModel):
     tool_call_id: str
     tool_name: Literal['claim.read']
     tool_arguments: dict[str, Any] = Field(default_factory=dict)
+    tool_output: dict[str, Any] = Field(default_factory=dict)
     tool_result_status: Literal['succeeded', 'unavailable', 'failed']
     action_code: str
     runtime_action_code: str
@@ -1626,6 +1627,9 @@ class CreateMessageRequest(ContractModel):
     client_message_id: str = Field(min_length=1, max_length=200)
     content: TextMessageContent | None = None
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+    # ChatGPT-style model selection: the selected published profile applies to
+    # this turn only and is persisted with the session/Runtime provenance.
+    model_profile_id: str | None = Field(default=None, min_length=1, max_length=100)
 
     @model_validator(mode='after')
     def require_content_or_evidence(self) -> 'CreateMessageRequest':

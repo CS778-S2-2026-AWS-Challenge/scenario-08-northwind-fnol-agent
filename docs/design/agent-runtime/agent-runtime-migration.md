@@ -23,8 +23,12 @@ enum.
 The compatibility records may add source-preserving fact assertions, resolution and precision
 state, question accounting, and internal discrepancy candidates without creating another action
 enum or another Claim truth. These additions remain governed by the current revision-checked
-message transaction. They do not satisfy the removal gate for target `TurnPlan`,
-`ExecutionPlan`, `ActionEnvelope`, or `TurnResult` records.
+message transaction. The applied claimant model path now persists target `TurnPlan`,
+`AgentProposal`, `ExecutionPlan`, `ActionEnvelope`, `ToolResult`, `TurnResult`, and claimant-
+question `WorkItem` records in the same transaction. Confirmed Staff Agent drafts now persist an
+immutable execution record in the same transaction as the existing Workbench handler result. The
+compatibility response remains until the remaining staff/admin projections and external action
+handlers meet the removal gate.
 
 ## Target Mapping
 
@@ -39,8 +43,11 @@ message transaction. They do not satisfy the removal gate for target `TurnPlan`,
 | `URGENT_HANDOFF` | `human.create_handoff` plus `runtime.interrupt_urgent` | Urgent handling interrupts ordinary intake without adding diagnosis or emergency authority. |
 | `CREATE_CLAIM` | `claim.prepare_creation`, then `claim.create`, plus `runtime.continue` or `runtime.wait_for_external` | External creation remains revision-checked, idempotent, authorised, and provider-neutral. |
 
-The mapping is a compatibility aid. It must not be used to claim that the target schemas
-or namespaced actions are already implemented. The mapping preserves semantic dimensions:
+The mapping is a compatibility aid. It must not be used to claim that every target action is
+implemented. The applied claimant Runtime implements conversation answers, source-aware fact
+mutation, and deterministic handoff through existing handlers; claim creation and external
+participant actions remain explicit unavailable boundaries until their real handlers are wired.
+The mapping preserves semantic dimensions:
 conversation labels do not create business side effects, runtime labels do not grant tool
 authority, and material actions remain separate validated proposals.
 

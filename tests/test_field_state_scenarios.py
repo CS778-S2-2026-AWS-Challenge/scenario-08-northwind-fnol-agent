@@ -120,8 +120,12 @@ def test_each_family_is_projected_through_claimant_and_workbench_apis(scenario_i
     workbench_body = workbench.json()
     assert claimant_body['incident_type'] == scenario.expected['family']
     assert workbench_body['incident']['family'] == scenario.expected['family']
+    claimant_hidden = set(scenario.expected['claimant_hidden_fields'])
     for field_code, stored in scenario.claim.form.items():
-        assert claimant_body['form'][field_code]['status'] == stored.status.value
+        if field_code in claimant_hidden:
+            assert field_code not in claimant_body['form']
+        else:
+            assert claimant_body['form'][field_code]['status'] == stored.status.value
     staff_fields = {item['code']: item['field'] for item in workbench_fields.json()['items']}
     assert set(staff_fields) == set(scenario.claim.form)
     for field_code, stored in scenario.claim.form.items():

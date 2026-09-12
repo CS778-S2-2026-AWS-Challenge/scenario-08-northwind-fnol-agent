@@ -105,14 +105,120 @@ describe('claimant intake projection', () => {
     api.hasClaimantAccessToken.mockReturnValue(false)
     api.getRuntimeCapabilities.mockResolvedValue({
       claim_types: ['motor', 'home', 'contents'],
-      models: [{ id: 'gpt54-mini', label: 'GPT-5.4 mini' }],
-      default_model_profile_id: 'gpt54-mini',
+      models: [
+        { id: 'qwen-local', label: 'qwen3.8-27b', availability: 'available' },
+        { id: 'nowcoding-gpt54mini', label: 'gpt-5.4-mini', availability: 'available' },
+      ],
+      default_model_profile_id: 'qwen-local',
     })
     api.getClaimEvidence.mockResolvedValue({ items: [], revision: 1 })
     api.createClaim.mockResolvedValue({
       claim: initialClaim,
-      session: { session_id: 'ses_ui_vp', model_profile_id: 'gpt54-mini' },
+      session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
     })
+  })
+
+  it('shows the backend default model before creating a session', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const model = await screen.findByRole('button', { name: 'Model' })
+    expect(model).toBeEnabled()
+    expect(model).toHaveTextContent('qwen3.8-27b')
+    const claimType = screen.getByRole('button', { name: 'Claim type (optional)' })
+    expect(claimType).toHaveTextContent('Let Agent identify')
+
+    await user.click(model)
+    expect(screen.getByRole('listbox', { name: 'Model' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /gpt-5\.4-mini.*nowcoding-gpt54mini/ }))
+    expect(model).toHaveTextContent('gpt-5.4-mini')
+
+    await waitFor(() => expect(model).toHaveFocus())
+    await user.keyboard('{ArrowDown}')
+    const selectedGpt = screen.getByRole('option', {
+      name: /gpt-5\.4-mini.*nowcoding-gpt54mini/,
+    })
+    await waitFor(() => expect(selectedGpt).toHaveFocus())
+    await user.keyboard('{Home}{Enter}')
+    expect(model).toHaveTextContent('qwen3.8-27b')
+    expect(screen.queryByRole('listbox', { name: 'Model' })).not.toBeInTheDocument()
+  })
+
+  it('shows one server-confirmed delivery failure with retry guidance', async () => {
+    const user = userEvent.setup()
+    api.submitClaimMessage.mockRejectedValue(Object.assign(
+      new api.ApiRequestError('The model service is temporarily unavailable. The claim is unchanged.'),
+      { code: 'DEPENDENCY_UNAVAILABLE', status: 503, retryable: true },
+    ))
+
+    render(<App />)
+    const input = screen.getByPlaceholderText('Tell us what happened…')
+    await user.type(input, 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+
+    expect(api.createClaim).toHaveBeenCalledWith(expect.objectContaining({ incidentType: null }))
+
+    const failure = await screen.findByText(
+      'The model service is temporarily unavailable. The claim is unchanged. Try again in a moment.',
+    )
+    expect(failure).toBeInTheDocument()
+    expect(screen.queryByText('We could not confirm delivery. Please try again.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry message' })).toBeInTheDocument()
+  })
+
+  it('opens a new claim conversation without clearing the previous claim', async () => {
+    const user = userEvent.setup()
+    api.hasClaimantAccessToken.mockReturnValue(true)
+    api.getAuthenticatedAccount.mockResolvedValue({
+      profile: { display_name: 'Test claimant', email: 'test@example.test', phone: '' },
+      preferences: { email: true, sms: false },
+    })
+    api.submitClaimMessage.mockResolvedValue({
+      claimant_message: claimantMessage,
+      agent_message: agentMessage,
+      form_changes: [],
+      contents_item_changes: [],
+      dynamic_form: null,
+      claim_revision: 2,
+      decision: { customer_next_step: initialClaim.customer_next_step },
+    })
+    api.createClaim
+      .mockResolvedValueOnce({
+        claim: initialClaim,
+        session: { session_id: 'ses_ui_vp', model_profile_id: 'qwen-local' },
+      })
+      .mockResolvedValueOnce({
+        claim: { ...initialClaim, claim_id: 'clm_ui_second' },
+        session: { session_id: 'ses_ui_second', model_profile_id: 'qwen-local' },
+      })
+    api.listClaims.mockResolvedValue({
+      items: [
+        {
+          claim_id: 'clm_ui_vp',
+          incident_type: 'home',
+          customer_next_step: initialClaim.customer_next_step,
+          can_resume: true,
+        },
+      ],
+    })
+
+    render(<App />)
+    const input = screen.getByPlaceholderText('Tell us what happened…')
+    await user.type(input, 'A pipe burst in the kitchen.')
+    await user.click(screen.getByRole('button', { name: 'Start claim' }))
+    await screen.findByText('Thanks. I need the incident time next.')
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+
+    expect(api.createClaim).toHaveBeenCalledTimes(2)
+    expect(api.startClaimSession).not.toHaveBeenCalled()
+    expect(screen.getByText('clm_ui_second')).toBeInTheDocument()
+    expect(screen.getByText('Conversation history')).toBeInTheDocument()
+    await waitFor(() => expect(api.streamClaimUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      claimId: 'clm_ui_second',
+      sessionId: 'ses_ui_second',
+      afterRevision: 1,
+    })))
   })
 
   it('renders backend dynamic requirements and re-renders a corrected field', async () => {
@@ -159,7 +265,7 @@ describe('claimant intake projection', () => {
 
     await waitFor(() => expect(screen.getAllByText('When it happened').length).toBeGreaterThan(0))
     expect(screen.getByText('1 of 2 needed now')).toBeInTheDocument()
-    expect(screen.getByText('Needed later: Affected property')).toBeInTheDocument()
+    expect(screen.queryByText('Needed later: Affected property')).not.toBeInTheDocument()
     expect(screen.getAllByText('8pm').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))

@@ -21,7 +21,9 @@ from backend.domain.model_gateway import (
 from backend.domain.staff_agent import (
     ExecuteStaffAgentDraftRequest,
     StaffAgentDraft,
+    StaffAgentDraftExecutionOutcome,
     StaffAgentDraftKind,
+    StaffAgentExecutionRecord,
     StaffAgentMessage,
     StaffAgentMessageRole,
     StaffAgentModelOutput,
@@ -180,7 +182,10 @@ def test_staff_agent_capabilities_exposes_published_model_catalog() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body['default_model_profile_id'] == 'qwen-local'
-    assert [item['id'] for item in body['models']] == ['qwen-local']
+    assert [item['id'] for item in body['models']] == [
+        'qwen-local',
+        'nowcoding-gpt54mini',
+    ]
 
 
 def test_staff_agent_capabilities_is_empty_for_controlled_runtime() -> None:
@@ -527,6 +532,17 @@ def test_staff_agent_draft_requires_confirmation_and_executes_registered_action_
         assert executed.json()['action_code'] == 'human.accept_handoff'
         assert executed.json()['outcome'] == 'executed'
         assert executed.json()['result']['handoff']['status'] == 'accepted'
+        runtime_execution = executed.json()['runtime_execution']
+        assert runtime_execution['execution_id'] == f'sax_{draft["draft_id"]}'
+        assert runtime_execution['confirmation'] == 'staff_confirmed'
+        assert runtime_execution['action_code'] == 'human.accept_handoff'
+        assert runtime_execution['expected_revision'] == 2
+        assert runtime_execution['resulting_revision'] == 3
+        assert runtime_execution['result'] == executed.json()['result']
+        assert (
+            repository.get_staff_agent_execution(runtime_execution['execution_id'], 'stf_other')
+            is None
+        )
         workbench_claim = client.get(
             f'/api/v1/workbench/claims/{claim_id}',
             headers=STAFF_HEADERS,
@@ -944,6 +960,26 @@ def test_staff_agent_dispatches_each_registered_action_with_durable_source(
         )
     ]
     repository.get_claim_internal.return_value = SimpleNamespace(active_session_id='target_test')
+    repository.get_staff_agent_execution.return_value = StaffAgentExecutionRecord(
+        execution_id='sax_sdr_test',
+        session_id='sas_test',
+        message_id='sam_test',
+        draft_id='sdr_test',
+        staff_id='stf_demo',
+        claim_id='clm_test',
+        action_code=action_code,
+        target_ref='target_test',
+        expected_revision=1,
+        resulting_revision=2,
+        outcome=StaffAgentDraftExecutionOutcome.EXECUTED,
+        result={'answer': 'Executed.', 'drafts': []},
+        source_refs=[
+            'staff-agent-session:sas_test',
+            'staff-agent-message:sam_test',
+            'staff-agent-draft:sdr_test',
+        ],
+        created_at=timestamp,
+    )
 
     response = staff_agent_service.execute_staff_agent_draft(
         repository,

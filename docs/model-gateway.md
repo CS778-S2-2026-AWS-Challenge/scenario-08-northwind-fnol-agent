@@ -25,15 +25,16 @@ normalise:
 For the target model-backed claimant path, `GatewayAgent` performs a bounded two-stage
 turn: it advertises the read-only `claim.read` tool, validates and executes that tool against
 the authenticated `WorkingClaim`, then sends the assistant tool call and typed tool result back
-to the same model for a namespaced final response. A model response never executes a tool,
-writes Claim State, creates a claim, or authorises a handoff by itself.
+to the same model for a namespaced final response. The model never executes a tool, writes Claim
+State, creates a claim, or authorises a handoff by itself; the Runtime performs those checks.
 
-The final target subset is `conversation.answer` plus `runtime.continue`. The Runtime persists
-the claimant and agent messages, a bounded `RuntimeTraceRecord`, Session activity, and the
-idempotency response atomically. `claim.read` is observational: Claim revision and form state
-remain unchanged, and no legacy `AgentDecisionRecord` is created. The trace retains both provider
-invocations, tool call identity and arguments, result status, selected model profile, and final
-namespaced codes.
+The applied claimant Runtime persists the claimant and agent messages, the Claim revision and
+validated form changes, the compatibility decision projection, a bounded `RuntimeTraceRecord`,
+the TurnPlan/AgentProposal/ExecutionPlan/ActionEnvelope/ToolResult/TurnResult/WorkItem family,
+Session activity, and the idempotency response atomically. `claim.read` is observational, but it
+is followed by the validated Claim mutation path rather than a read-only turn. A model may
+request `human.create_handoff` only when deterministic support rules authorise it; the existing
+handoff builder remains the side-effect handler.
 
 Every adapter maps provider termination data to `complete`, `incomplete`, `refused`, or
 `unknown`. `GatewayAgent` accepts a proposal only from a `complete` response. Truncated,
@@ -88,6 +89,13 @@ path still permits structured `required_tools` proposals for the bounded context
 published by Branch Evaluation and Runtime policy; it validates arguments, executes at most one
 context lookup, and permits one typed re-plan. The target model-backed path uses the provider
 tool-call side channel for `claim.read` and never mixes it with the legacy eight-action response.
+The first request names `claim.read` as the required tool; compatible adapters force that exact
+tool choice and disable parallel tool calls rather than relying on prompt compliance. The
+continuation is then constrained to the currently wired `conversation.answer` and
+`runtime.continue` literal action codes. The continuation may also request
+`human.create_handoff` when the deterministic support boundary authorises it. Claim creation
+and external participant actions remain separate handlers and are never reported as complete
+merely because a model requested them.
 
 The default `controlled` profile continues to use `ControlledAgent`. The
 `model_gateway` profile is enabled only through explicit startup configuration. A
@@ -154,12 +162,14 @@ Both published claimant profiles use this adapter contract:
 
 | Profile | Model | Role | Required capabilities |
 | --- | --- | --- | --- |
-| `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | primary/default | structured output and tools |
+| `qwen-local` | `qwen3.8-27b` at `http://100.71.25.5:8080/v1` | deployment default through `MODEL_PROFILE_ID` | structured output and tools |
 | `nowcoding-gpt54mini` | `gpt-5.4-mini` through the existing nowcoding endpoint | selectable | structured output and tools |
 
 The credential reference is stored as a secret environment-variable name only. The selected
-profile is bound to the Session at creation/resume; message requests do not accept a model
-override and never silently switch profiles.
+profile is the default for a Session, but each message may explicitly select another published
+profile in the same conversation. The Runtime persists the actual profile used for every turn and
+updates the Session's latest selection; it never silently switches providers or falls back to a
+different profile.
 
 The Workbench Staff Agent uses the same published profile catalog under its separate
 `staff_assistant` purpose and `staff_internal_fnol` privacy class. Its selected profile is
@@ -252,8 +262,9 @@ idempotency records unchanged.
 - Only `claim.read` is currently wired into the target tool loop. Other registered tools and
   namespaced actions remain unavailable until their handlers, authority checks, and persistence
   contracts are implemented.
-- Runtime trace persistence is implemented for the fixture and Mongo repositories; a complete
-  `TurnPlan`/`ExecutionPlan`/`TurnResult` record family and admin trace projection remain open.
+- Runtime trace and the claimant `TurnPlan`/`AgentProposal`/`ExecutionPlan`/`ActionEnvelope`/
+  `ToolResult`/`TurnResult` record family are implemented for Fixture and MongoDB repositories.
+  Admin trace projection and broader external action records remain open.
 - The compatibility gateway still normalises provider tool calls into structured
   `AgentProposal.required_tools`; those context operations are bounded by Runtime policy and a
   single re-plan.
@@ -266,8 +277,9 @@ idempotency records unchanged.
 
 ## Target Runtime Relationship
 
-The implemented Gateway is the first provider-neutral transport and validation layer. It
-does not yet implement the complete target Agent Runtime contract:
+The implemented Gateway remains the provider-neutral transport and validation layer, while the
+claimant Runtime now applies the core target turn contract. The following boundaries are still
+deliberately explicit:
 
 - the current `ModelRequest` binds purpose, privacy class, prompt version, capability requirements,
   messages, response schema, and tool declarations; the target request also binds actor, Claim
@@ -276,9 +288,9 @@ does not yet implement the complete target Agent Runtime contract:
 - the current `ModelResponse` normalises transport output; the target Runtime additionally
   distinguishes model proposal, validated `ExecutionPlan`, actual tool and state results,
   and final `TurnResult`;
-- the target claimant path now produces the minimal namespaced pair
-  `conversation.answer`/`runtime.continue`; the broader action model still needs complete
-  conversation moves, Claim commands, human actions, and external coordination;
+- the claimant path persists the target turn record family and supports
+  `conversation.answer`/`runtime.continue` plus deterministic `human.create_handoff`; broader
+  Claim creation and external coordination still need their real action handlers;
 - the current configuration declares endpoint capabilities; the target Model Profile
   Registry also governs allowed purposes, privacy terms, evaluation evidence, lifecycle,
   and qualified fallback groups; and

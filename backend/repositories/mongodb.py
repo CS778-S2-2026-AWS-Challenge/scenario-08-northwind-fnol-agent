@@ -61,7 +61,22 @@ from backend.domain.retrieval import (
     RetrievalRecord,
     ReviewSignalRecord,
 )
-from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.runtime import (
+    ActionEnvelopeRecord,
+    AgentProposalRecord,
+    ExecutionPlanRecord,
+    RuntimeTurnRecords,
+    RuntimeWorkItemRecord,
+    ToolResultRecord,
+    TurnPlanRecord,
+    TurnResultRecord,
+    validate_runtime_turn_links,
+)
+from backend.domain.staff_agent import (
+    StaffAgentExecutionRecord,
+    StaffAgentMessage,
+    StaffAgentSession,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 from backend.repositories.protocols import (
     DemoSeedConflict,
@@ -69,6 +84,8 @@ from backend.repositories.protocols import (
     IdempotencyRecord,
     RevisionConflict,
     ValidationSeedGraph,
+    validate_staff_agent_execution,
+    validate_staff_agent_execution_source,
     validate_validation_seed_session,
 )
 
@@ -172,9 +189,27 @@ def probe_mongodb_connectivity(config: MongoDBConnectionConfig) -> str:
 
 
 IMMUTABLE_CHILD_RECORD_KINDS = frozenset(
-    {'message', 'agent_decision', 'branch_evaluation', 'runtime_trace'}
+    {
+        'message',
+        'agent_decision',
+        'branch_evaluation',
+        'runtime_trace',
+        'turn_plan',
+        'agent_proposal',
+        'action_envelope',
+        'execution_plan',
+        'tool_result',
+        'turn_result',
+        'runtime_work_item',
+        'staff_agent_execution',
+    }
 )
-"""Child records whose identity may never be rebound or rewritten once persisted."""
+"""Child records whose identity may never be rebound or rewritten once persisted.
+
+Runtime records are execution evidence, not mutable Claim projections.  Treating
+them as immutable prevents a retry or a later turn from rewriting the plan that
+was actually authorised and executed.
+"""
 
 
 class MongoDBRepository:
@@ -2258,7 +2293,14 @@ class MongoDBRepository:
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
+        try:
+            validate_staff_agent_execution(
+                staff_agent_execution, claim, expected_revision, idempotency
+            )
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         coworker_records = coworkers or []
         if (
             claim.revision != expected_revision + 1
@@ -2275,6 +2317,10 @@ class MongoDBRepository:
             records.append(('claim_coworker', coworker.coworker_id, coworker))
         if handoff is not None:
             records.append(('handoff', handoff.handoff_id, handoff))
+        if staff_agent_execution is not None:
+            records.append(
+                ('staff_agent_execution', staff_agent_execution.execution_id, staff_agent_execution)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
@@ -2298,7 +2344,14 @@ class MongoDBRepository:
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
+        try:
+            validate_staff_agent_execution(
+                staff_agent_execution, claim, expected_revision, idempotency
+            )
+        except ValueError as error:
+            raise KeyError(claim.claim_id) from error
         supplied = (staff_action, customer_update, signal_decision, handoff, message)
         if (
             claim.revision != expected_revision + 1
@@ -2326,6 +2379,10 @@ class MongoDBRepository:
             records.append(('handoff', handoff.handoff_id, handoff))
         if message is not None:
             records.append(('message', message.message_id, message))
+        if staff_agent_execution is not None:
+            records.append(
+                ('staff_agent_execution', staff_agent_execution.execution_id, staff_agent_execution)
+            )
         self._atomic(
             lambda mongo_session: self._save_child_mutation(
                 claim,
@@ -2385,6 +2442,8 @@ class MongoDBRepository:
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
+        runtime_records: RuntimeTurnRecords | None = None,
     ) -> None:
         records_match = (
             claim.revision == expected_revision + 1
@@ -2423,6 +2482,19 @@ class MongoDBRepository:
         )
         if not records_match:
             raise KeyError(claim.claim_id)
+        if runtime_records is not None:
+            try:
+                validate_runtime_turn_links(
+                    runtime_records,
+                    claim_id=claim.claim_id,
+                    session_id=session.session_id,
+                    trigger_message_id=claimant_message.message_id,
+                    agent_message_id=agent_message.message_id,
+                    expected_revision=expected_revision,
+                    resulting_revision=claim.revision,
+                )
+            except ValueError as error:
+                raise KeyError(claim.claim_id) from error
         self._atomic(
             lambda mongo_session: self._save_agent_turn_records(
                 claim,
@@ -2435,6 +2507,8 @@ class MongoDBRepository:
                 handoff,
                 evidence,
                 branch_evaluation,
+                runtime_trace,
+                runtime_records,
                 mongo_session,
             )
         )
@@ -2601,6 +2675,107 @@ class MongoDBRepository:
         )
         return self._model_from_document(document, RuntimeTraceRecord)
 
+    def get_runtime_turn_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTurnRecords | None:
+        if not self._claim_owned(claim_id, customer_id):
+            return None
+        plan_doc = self._collection.find_one(
+            {
+                'record_type': 'turn_plan',
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+                'trigger_message_id': trigger_message_id,
+            },
+            sort=[('created_at', -1), ('_id', -1)],
+        )
+        plan = self._model_from_document(plan_doc, TurnPlanRecord)
+        if plan is None:
+            return None
+        proposal_doc = self._collection.find_one(
+            {
+                'record_type': 'agent_proposal',
+                'turn_id': plan.turn_id,
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            }
+        )
+        proposal = self._model_from_document(proposal_doc, AgentProposalRecord)
+        execution = self._collection.find_one(
+            {'record_type': 'execution_plan', 'turn_id': plan.turn_id, 'customer_id': customer_id}
+        )
+        execution_plan = self._model_from_document(execution, ExecutionPlanRecord)
+        result_doc = self._collection.find_one(
+            {'record_type': 'turn_result', 'turn_id': plan.turn_id, 'customer_id': customer_id}
+        )
+        result = self._model_from_document(result_doc, TurnResultRecord)
+        if proposal is None or execution_plan is None or result is None:
+            return None
+        envelope_docs = self._collection.find(
+            {'record_type': 'action_envelope', 'turn_id': plan.turn_id, 'customer_id': customer_id}
+        )
+        tool_docs = self._collection.find(
+            {'record_type': 'tool_result', 'turn_id': plan.turn_id, 'customer_id': customer_id}
+        )
+        work_docs = self._collection.find(
+            {
+                'record_type': 'runtime_work_item',
+                'turn_id': plan.turn_id,
+                'customer_id': customer_id,
+            }
+        )
+        return RuntimeTurnRecords(
+            turn_plan=plan,
+            proposal=proposal,
+            execution_plan=execution_plan,
+            action_envelopes=[
+                item
+                for item in (
+                    self._model_from_document(doc, ActionEnvelopeRecord) for doc in envelope_docs
+                )
+                if item is not None
+            ],
+            tool_results=[
+                item
+                for item in (self._model_from_document(doc, ToolResultRecord) for doc in tool_docs)
+                if item is not None
+            ],
+            result=result,
+            work_items=[
+                item
+                for item in (
+                    self._model_from_document(doc, RuntimeWorkItemRecord) for doc in work_docs
+                )
+                if item is not None
+            ],
+        )
+
+    def list_runtime_work_items(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[RuntimeWorkItemRecord]:
+        if not self._claim_owned(claim_id, customer_id):
+            return []
+        documents = self._collection.find(
+            {
+                'record_type': 'runtime_work_item',
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            },
+            sort=[('updated_at', 1), ('_id', 1)],
+        )
+        return [
+            item
+            for item in (
+                self._model_from_document(document, RuntimeWorkItemRecord) for document in documents
+            )
+            if item is not None
+        ]
+
     def _save_agent_turn_records(
         self,
         claim: WorkingClaim,
@@ -2613,6 +2788,8 @@ class MongoDBRepository:
         handoff: HandoffRecord | None,
         evidence: EvidenceRecord | None,
         branch_evaluation: BranchEvaluationRecord | None,
+        runtime_trace: RuntimeTraceRecord | None,
+        runtime_records: RuntimeTurnRecords | None,
         mongo_session: Any,
     ) -> None:
         if claimant_message.client_message_id is not None:
@@ -2638,6 +2815,37 @@ class MongoDBRepository:
         if branch_evaluation is not None:
             records.append(
                 ('branch_evaluation', branch_evaluation.evaluation_id, branch_evaluation)
+            )
+        if runtime_trace is not None:
+            records.append(('runtime_trace', runtime_trace.trace_id, runtime_trace))
+        if runtime_records is not None:
+            records.extend(
+                [
+                    ('turn_plan', runtime_records.turn_plan.turn_id, runtime_records.turn_plan),
+                    (
+                        'agent_proposal',
+                        runtime_records.proposal.proposal_id,
+                        runtime_records.proposal,
+                    ),
+                    (
+                        'execution_plan',
+                        runtime_records.execution_plan.execution_plan_id,
+                        runtime_records.execution_plan,
+                    ),
+                    *[
+                        ('action_envelope', item.envelope_id, item)
+                        for item in runtime_records.action_envelopes
+                    ],
+                    *[
+                        ('tool_result', item.result_id, item)
+                        for item in runtime_records.tool_results
+                    ],
+                    ('turn_result', runtime_records.result.result_id, runtime_records.result),
+                    *[
+                        ('runtime_work_item', item.work_item_id, item)
+                        for item in runtime_records.work_items
+                    ],
+                ]
             )
         self._save_child_mutation(
             claim,
@@ -2774,6 +2982,29 @@ class MongoDBRepository:
             ):
                 raise KeyError(claim.claim_id)
         for kind, identifier, record in records:
+            if kind == 'staff_agent_execution':
+                if not isinstance(record, StaffAgentExecutionRecord):
+                    raise KeyError(claim.claim_id)
+                try:
+                    validate_staff_agent_execution_source(
+                        record,
+                        self._get(
+                            'staff_agent_session',
+                            record.session_id,
+                            StaffAgentSession,
+                            customer_id=record.staff_id,
+                            session=mongo_session,
+                        ),
+                        self._get(
+                            'staff_agent_message',
+                            record.message_id,
+                            StaffAgentMessage,
+                            customer_id=record.staff_id,
+                            session=mongo_session,
+                        ),
+                    )
+                except ValueError as error:
+                    raise KeyError(claim.claim_id) from error
             if kind == 'message':
                 if not isinstance(record, MessageRecord):
                     raise KeyError(claim.claim_id)
@@ -3380,6 +3611,18 @@ class MongoDBRepository:
             {'customer_id': staff_id, 'session_id': session_id},
             'created_at',
         )
+
+    def get_staff_agent_execution(
+        self, execution_id: str, staff_id: str
+    ) -> StaffAgentExecutionRecord | None:
+        execution = self._get(
+            'staff_agent_execution',
+            execution_id,
+            StaffAgentExecutionRecord,
+        )
+        if execution is None or execution.staff_id != staff_id:
+            return None
+        return execution
 
     def find_staff_agent_message_by_client_id(
         self, session_id: str, staff_id: str, client_message_id: str

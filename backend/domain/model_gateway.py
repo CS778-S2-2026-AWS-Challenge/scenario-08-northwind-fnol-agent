@@ -113,6 +113,7 @@ class ModelRequest(ModelContract):
     messages: list[ModelMessage]
     response_schema: dict[str, object] | None = None
     tools: list[ModelTool] = Field(default_factory=list)
+    required_tool_name: str | None = Field(default=None, min_length=1, max_length=100)
     purpose: str = Field(default=CLAIMANT_AGENT_PURPOSE, min_length=1, max_length=100)
     prompt_version: str = Field(default='current', min_length=1, max_length=100)
     privacy_class: str = Field(
@@ -210,6 +211,8 @@ class ModelTurnContext(ModelContract):
     evidence_reference_count: int = Field(ge=0)
     professional_review_required: bool = False
     provenance_messages: list[ModelProvenanceMessage] = Field(default_factory=list)
+    conversation_history: list[ModelProvenanceMessage] = Field(default_factory=list)
+    field_value_contracts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     branch: ModelBranchContext | None = None
     knowledge_status: Literal[
         'not_requested', 'evidence_found', 'no_evidence', 'timeout', 'unavailable'
@@ -274,20 +277,27 @@ class ModelAgentProposal(ModelContract):
 
 
 class ModelRuntimeProposal(ModelContract):
-    """Small target-runtime proposal used by the first real tool loop.
+    """Strict target-runtime proposal returned after the staged tool call.
 
-    The compatibility ``ModelAgentProposal`` remains readable for existing fixture
-    callers, but model-backed Runtime turns use namespaced action codes here. Runtime
-    validates the codes and never treats the legacy eight-action enum as authority.
+    The model may propose claimant-visible conversation content and registered fact
+    candidates. Runtime remains responsible for resolution, authority, revision,
+    persistence, and every side effect.
     """
 
-    action_code: str = Field(pattern=r'^[a-z]+\.[a-z][a-z0-9_]*$')
-    runtime_action_code: str = Field(pattern=r'^runtime\.[a-z][a-z0-9_]*$')
+    action_code: Literal['conversation.answer', 'human.create_handoff']
+    runtime_action_code: Literal[
+        'runtime.continue',
+        'runtime.wait_for_user',
+        'runtime.pause_for_review',
+    ]
     reason_codes: list[str] = Field(min_length=1)
     customer_reason: str = Field(min_length=1, max_length=1000)
     customer_response: str = Field(min_length=1, max_length=5000)
     customer_next_step: CustomerNextStep
+    form_changes: list[ModelProposedFormChange] = Field(default_factory=list)
+    contents_item_changes: list[ModelProposedContentsItem] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
+    handoff_priority: str | None = None
 
 
 class ModelGatewayErrorCode(str, Enum):

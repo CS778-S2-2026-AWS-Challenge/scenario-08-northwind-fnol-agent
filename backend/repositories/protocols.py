@@ -28,7 +28,13 @@ from backend.domain.models import (
     WorkingClaim,
 )
 from backend.domain.retrieval import RetrievalRecord, ReviewSignalRecord
-from backend.domain.staff_agent import StaffAgentMessage, StaffAgentSession
+from backend.domain.runtime import RuntimeTurnRecords, RuntimeWorkItemRecord
+from backend.domain.staff_agent import (
+    StaffAgentExecutionRecord,
+    StaffAgentMessage,
+    StaffAgentMessageRole,
+    StaffAgentSession,
+)
 from backend.domain.staff_identity import StaffPresenceRecord
 
 
@@ -81,6 +87,7 @@ class IdempotencyRecord:
     staff_agent_session_id: str | None = None
     staff_agent_message_id: str | None = None
     staff_agent_draft_id: str | None = None
+    staff_agent_execution_id: str | None = None
     response_payload: dict[str, Any] | None = None
 
 
@@ -97,6 +104,7 @@ def with_staff_agent_source(
         staff_agent_session_id=source.session_id,
         staff_agent_message_id=source.message_id,
         staff_agent_draft_id=source.draft_id,
+        staff_agent_execution_id=f'sax_{source.draft_id}',
     )
 
 
@@ -136,6 +144,115 @@ def validate_validation_seed_session(claim: WorkingClaim, session: SessionRecord
         or session.context_revision != claim.revision
     ):
         raise ValueError(f'Validation seed active session does not match claim {claim.claim_id}.')
+
+
+def staff_agent_execution_for(
+    claim: WorkingClaim,
+    expected_revision: int,
+    idempotency: IdempotencyRecord,
+    source: StaffAgentDraftSource | None,
+) -> StaffAgentExecutionRecord | None:
+    """Build immutable execution evidence from an authorised staff mutation."""
+
+    if source is None:
+        return None
+    if (
+        idempotency.action_code is None
+        or idempotency.target_ref is None
+        or idempotency.response_payload is None
+    ):
+        raise ValueError('Staff Agent execution requires a registered action result.')
+    return StaffAgentExecutionRecord(
+        execution_id=f'sax_{source.draft_id}',
+        session_id=source.session_id,
+        message_id=source.message_id,
+        draft_id=source.draft_id,
+        staff_id=idempotency.actor_id,
+        claim_id=claim.claim_id,
+        action_code=idempotency.action_code,
+        target_ref=idempotency.target_ref,
+        expected_revision=expected_revision,
+        resulting_revision=claim.revision,
+        outcome='executed',
+        result=idempotency.response_payload,
+        source_refs=[
+            f'staff-agent-session:{source.session_id}',
+            f'staff-agent-message:{source.message_id}',
+            f'staff-agent-draft:{source.draft_id}',
+            f'claim:{claim.claim_id}:revision:{claim.revision}',
+        ],
+        created_at=claim.updated_at,
+    )
+
+
+def validate_staff_agent_execution(
+    execution: StaffAgentExecutionRecord | None,
+    claim: WorkingClaim,
+    expected_revision: int,
+    idempotency: IdempotencyRecord,
+) -> None:
+    """Require execution evidence to describe exactly the persisted mutation."""
+
+    if execution is None:
+        if idempotency.staff_agent_execution_id is not None:
+            raise ValueError('Staff Agent provenance requires execution evidence.')
+        return
+    if (
+        idempotency.staff_agent_execution_id != execution.execution_id
+        or idempotency.staff_agent_session_id != execution.session_id
+        or idempotency.staff_agent_message_id != execution.message_id
+        or idempotency.staff_agent_draft_id != execution.draft_id
+        or idempotency.actor_id != execution.staff_id
+        or idempotency.claim_id != execution.claim_id
+        or idempotency.action_code != execution.action_code
+        or idempotency.target_ref != execution.target_ref
+        or idempotency.response_payload != execution.result
+        or claim.claim_id != execution.claim_id
+        or expected_revision != execution.expected_revision
+        or claim.revision != execution.resulting_revision
+    ):
+        raise ValueError('Staff Agent execution evidence does not match the mutation.')
+
+
+def validate_staff_agent_execution_source(
+    execution: StaffAgentExecutionRecord | None,
+    session: StaffAgentSession | None,
+    message: StaffAgentMessage | None,
+) -> None:
+    """Require execution evidence to resolve to its immutable assistant draft."""
+
+    if execution is None:
+        return
+    if (
+        session is None
+        or message is None
+        or execution.execution_id != f'sax_{execution.draft_id}'
+        or session.session_id != execution.session_id
+        or session.staff_id != execution.staff_id
+        or message.message_id != execution.message_id
+        or message.session_id != session.session_id
+        or message.staff_id != session.staff_id
+        or message.role is not StaffAgentMessageRole.ASSISTANT
+        or execution.claim_id not in message.claim_ids
+    ):
+        raise ValueError('Staff Agent execution source does not match its owned assistant message.')
+    matching_drafts = [draft for draft in message.drafts if draft.draft_id == execution.draft_id]
+    if len(matching_drafts) != 1:
+        raise ValueError('Staff Agent execution source does not identify one saved draft.')
+    draft = matching_drafts[0]
+    if (
+        draft.claim_id != execution.claim_id
+        or draft.action_code != execution.action_code
+        or draft.target_ref != execution.target_ref
+    ):
+        raise ValueError('Staff Agent execution source does not match its saved draft contract.')
+    required_refs = {
+        f'staff-agent-session:{execution.session_id}',
+        f'staff-agent-message:{execution.message_id}',
+        f'staff-agent-draft:{execution.draft_id}',
+    }
+    if not required_refs.issubset(execution.source_refs):
+        raise ValueError('Staff Agent execution evidence is missing source references.')
 
 
 class ClaimRepository(Protocol):
@@ -366,6 +483,11 @@ class PersistenceRepository(ClaimRepository, Protocol):
     def list_staff_agent_messages(self, session_id: str, staff_id: str) -> list[StaffAgentMessage]:
         raise NotImplementedError
 
+    def get_staff_agent_execution(
+        self, execution_id: str, staff_id: str
+    ) -> StaffAgentExecutionRecord | None:
+        raise NotImplementedError
+
     def find_staff_agent_message_by_client_id(
         self, session_id: str, staff_id: str, client_message_id: str
     ) -> StaffAgentMessage | None:
@@ -547,8 +669,26 @@ class PersistenceRepository(ClaimRepository, Protocol):
         handoff: HandoffRecord | None = None,
         evidence: EvidenceRecord | None = None,
         branch_evaluation: BranchEvaluationRecord | None = None,
+        runtime_trace: RuntimeTraceRecord | None = None,
+        runtime_records: RuntimeTurnRecords | None = None,
     ) -> None:
-        """Atomically persist one validated Agent turn."""
+        """Atomically persist one validated Agent turn and optional Runtime trace."""
+        raise NotImplementedError
+
+    def get_runtime_turn_for_trigger(
+        self,
+        claim_id: str,
+        trigger_message_id: str,
+        customer_id: str,
+    ) -> RuntimeTurnRecords | None:
+        raise NotImplementedError
+
+    def list_runtime_work_items(
+        self,
+        claim_id: str,
+        customer_id: str,
+    ) -> list[RuntimeWorkItemRecord]:
+        """Return immutable Runtime WorkItem records for one authorised Claim."""
         raise NotImplementedError
 
     def save_runtime_turn(
@@ -826,6 +966,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         collaboration_request: ClaimCollaborationRequest,
         coworkers: list[ClaimCoworkerRecord] | None = None,
         handoff: HandoffRecord | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         """Atomically persist an ownership transition and its collaboration record."""
         raise NotImplementedError
@@ -843,6 +984,7 @@ class PersistenceRepository(ClaimRepository, Protocol):
         message: MessageRecord | None = None,
         required_staff_id: str | None = None,
         required_staff_revision: int | None = None,
+        staff_agent_execution: StaffAgentExecutionRecord | None = None,
     ) -> None:
         """Atomically persist an authorised staff write-back and shared claim revision."""
         raise NotImplementedError

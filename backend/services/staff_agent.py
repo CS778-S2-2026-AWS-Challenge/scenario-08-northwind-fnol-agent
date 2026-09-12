@@ -70,6 +70,7 @@ from backend.services.ownership import (
 )
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.review_writeback import decide_review_signal
+from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.staff_actions import (
     accept_handoff,
     create_staff_action,
@@ -803,4 +804,19 @@ def execute_staff_agent_draft(
         target_ref=target_ref,
         outcome=StaffAgentDraftExecutionOutcome.EXECUTED,
         result=result.model_dump(mode='json'),
+        runtime_execution=(
+            repository.get_staff_agent_execution(f'sax_{draft_id}', principal.subject)
+            or _missing_staff_execution()
+        ),
+    )
+
+
+def _missing_staff_execution() -> object:
+    """Fail closed when a business action lacks its atomic Runtime evidence."""
+
+    raise ApiError(
+        status_code=500,
+        code='INTERNAL_ERROR',
+        message='The business action completed without restorable Runtime evidence.',
+        retryable=True,
     )

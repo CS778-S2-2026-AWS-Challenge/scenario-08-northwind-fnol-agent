@@ -197,6 +197,14 @@ class OpenAICompatibleModelGateway:
                 }
                 for tool in request.tools
             ]
+        if request.required_tool_name is not None:
+            if request.required_tool_name not in {tool.name for tool in request.tools}:
+                raise ModelGatewayError(ModelGatewayErrorCode.CONFIGURATION)
+            payload['tool_choice'] = {
+                'type': 'function',
+                'function': {'name': request.required_tool_name},
+            }
+            payload['parallel_tool_calls'] = False
         return payload
 
     @classmethod

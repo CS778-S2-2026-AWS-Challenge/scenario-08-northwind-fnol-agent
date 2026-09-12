@@ -43,10 +43,17 @@ alone. The response contains the authoritative handler result and `outcome: exec
 the handler succeeds.
 
 For a confirmed draft, the Workbench idempotency record also stores the originating Staff Agent
-`session_id`, assistant `message_id`, and stable `draft_id` in the same atomic mutation. This is
-the durable proposal-to-action link used for audit and later investigation. A retry is accepted
-only when the same source identifiers and request fingerprint are supplied; the same idempotency
-key cannot make a different draft or a non-Agent entry point appear to have executed.
+`session_id`, assistant `message_id`, stable `draft_id`, and immutable execution ID in the same
+atomic mutation. That mutation also writes the execution record with the registered action,
+expected and resulting Claim revisions, and authoritative handler result. The repository accepts
+it only when the source resolves to an assistant message in the acting staff member's session and
+that message contains the matching Claim-scoped draft. A retry is accepted only when the same
+source identifiers and request fingerprint are supplied; the same draft cannot execute again
+under another key, and a non-Agent entry point cannot acquire its attribution.
+
+The endpoint returns the persisted record as `runtime_execution`. It first reads the record back
+through the staff-scoped repository boundary; missing readback fails closed and cannot produce a
+synthetic success response.
 
 The endpoint reports the underlying bounded outcome for confirmation missing, malformed payload,
 unknown action, denied access, stale revision, idempotency conflict, unavailable dependency, or
@@ -58,9 +65,12 @@ handler has committed the corresponding result.
 - Existing Claimant API coverage proves motor, home, and contents intake, correction, confirmation,
   Dynamic Form requirements, and claim creation.
 - Staff Agent tests prove stable draft identity, explicit confirmation, registered handoff action
-  execution, idempotent replay with durable source identifiers, no Claim mutation before confirmation,
-  informational-draft rejection, unknown-action rejection, stale-revision rejection, assigned-staff
-  permission denial, dependency-unavailable handling, and the post-execution Workbench projection.
+  execution, idempotent replay with durable source identifiers and execution readback, no Claim
+  mutation before confirmation, informational-draft rejection, unknown-action rejection,
+  stale-revision rejection, assigned-staff permission denial, dependency-unavailable handling, and
+  the post-execution Workbench projection.
+- MongoDB contract tests prove owned assistant-draft linkage, role-safe readback, rejection without
+  the source message, and immutable single execution for one draft.
 - The OpenAPI snapshot and API catalogue describe the execution route and the role boundary.
 
 The backend and claimant API suites provide contract and integration evidence for the three VP
