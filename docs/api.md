@@ -1668,6 +1668,15 @@ The state is derived from the recorded external task rather than stored on the c
 attempt leaves every claim field unchanged, so the claimant still sees what happened on a
 later read without the failure having altered the claim.
 
+`customer_next_step` is corrected against that state for the two cases in which the action is
+withdrawn. It is a stored field written when permission is recorded, and a failed attempt changes
+no claim field, so on its own it keeps saying that Northwind can now send the request. Where
+`external_service_action.status` is `terminal_failure` or `awaiting_reconciliation`, the projected
+next step instead reports that Northwind is reviewing or checking the request, with
+`responsible_party` `claims_professional` and no required items. A `retryable_failure` keeps the
+stored next step, which agrees with `can_request`. The correction is derived for the read; the
+stored field is not rewritten, so a failed attempt still changes nothing on the claim.
+
 The authorised decision and prepared operation identity are persisted together before the
 provider call. The service also persists one operational `tsk_` task and its `erq_` request,
 including the selected stakeholder, readable purpose, disclosed field names, separate Northwind
@@ -2142,6 +2151,19 @@ large resources are loaded from the dedicated sub-resources below:
   "updated_at": "2026-08-10T03:50:00Z"
 }
 ```
+
+`work_summary.missing_information` carries one `external_service` item per recorded external task.
+A terminal external failure is classified `required_now` with `claims_professional` responsibility
+and the blocked requested action, so it becomes `work_summary.primary_blocker`: the contract
+requires Northwind to review such a request before another attempt, and waiting on the external
+party is not what happens next. Every other external state stays `follow_up` owned by the external
+party. No second item is created for the same task.
+
+`integration_summary.waiting_external_services`, and the `external_wait_count` derived from it,
+exclude a task whose provider result has been received. A result is separate from task status, so
+the task remains `accepted`; counting it as waiting would tell staff the claim is waiting on the
+external party while the same claim's external-request lifecycle reports that the result requires
+their review.
 
 `section_summaries` reports availability, counts, and attention totals. Complete records are loaded
 only when staff opens a section:
