@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
@@ -1273,6 +1273,7 @@ class MongoDBRepository:
         expected_revision: int,
         task: ExternalTaskRecord,
         operation: AssessorRoutingOperation,
+        request: ExternalTaskRequest,
         evidence: EvidenceRecord,
         link: ExternalTaskEvidenceLink,
         branch_evaluation: BranchEvaluationRecord,
@@ -1285,6 +1286,7 @@ class MongoDBRepository:
             expected_revision: Claim revision that must still be current.
             task: External task advanced from unknown to accepted.
             operation: Assessor operation advanced from unknown to accepted.
+            request: Request record carrying the send this settlement establishes.
             evidence: Pending assessment material owed by the task.
             link: Immutable relationship between the task and material.
             branch_evaluation: Applied branch projection for the new Claim revision.
@@ -1344,7 +1346,11 @@ class MongoDBRepository:
                 'created_at',
             )
             if (
-                current_operation.status is not AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+                current_operation.status
+                not in {
+                    AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
+                    AssessorRoutingOperationStatus.PREPARED,
+                }
                 or operation.status is not AssessorRoutingOperationStatus.ACCEPTED
                 or operation.updated_at <= current_operation.updated_at
                 or any(
@@ -1391,6 +1397,14 @@ class MongoDBRepository:
                 'assessor_routing_operation',
                 operation.operation_id,
                 operation,
+                claim_id=claim.claim_id,
+                session=mongo_session,
+            )
+            self._put(
+                'external_task_request',
+                request.task_id,
+                request,
+                customer_id=customer_id,
                 claim_id=claim.claim_id,
                 session=mongo_session,
             )
@@ -1595,6 +1609,104 @@ class MongoDBRepository:
             if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
                 raise IdempotencyConflict(task.task_id)
 
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+        operation_id: str,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to dispatch one prepared request.
+
+        The filter carries `dispatch_reserved_at: None`, so the reservation is taken by
+        the update itself rather than by a decision made after a read. A second caller
+        matches nothing and is told it did not win.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+            operation_id: Operation this attempt dispatches under, recorded with the
+                reservation so an interrupted attempt still names its own identity.
+
+        Returns:
+            The reserved request, or None when another attempt already holds it.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        record_id = self._dispatch_record_id(claim_id, request_id, customer_id)
+        updated = self._collection.find_one_and_update(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': claim_id,
+                'dispatch_reserved_at': None,
+            },
+            {
+                '$set': {
+                    'dispatch_reserved_at': reserved_at.isoformat(),
+                    'operation_id': operation_id,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if updated is None:
+            return None
+        return self._model_from_document(updated, ExternalTaskRequest)
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Release a reservation whose attempt established that nothing was sent.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        record_id = self._dispatch_record_id(claim_id, request_id, customer_id)
+        self._collection.update_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': claim_id,
+            },
+            {'$set': {'dispatch_reserved_at': None}},
+        )
+
+    def _dispatch_record_id(self, claim_id: str, request_id: str, customer_id: str) -> str:
+        """Resolve the stored request document id, refusing an unknown or foreign one."""
+
+        if self.get_claim(claim_id, customer_id) is None:
+            raise KeyError(claim_id)
+        stored = self._collection.find_one(
+            {
+                'record_type': 'external_task_request',
+                'request_id': request_id,
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            }
+        )
+        if stored is None:
+            raise KeyError(request_id)
+        return str(stored['_id'])
+
     def save_external_task_request(
         self,
         request: ExternalTaskRequest,
@@ -1701,14 +1813,20 @@ class MongoDBRepository:
         changed_identity = any(
             getattr(existing, name) != getattr(request, name) for name in immutable_identity
         )
+        # The reservation records the operation identity before the send, so a first
+        # send now advances a record that may already carry it. What must not change is
+        # which operation it names.
         first_send = (
             existing.sent_at is None
-            and existing.operation_id is None
             and request.sent_at is not None
             and request.operation_id is not None
+            and existing.operation_id in {None, request.operation_id}
         )
         if changed_identity or not first_send:
             raise IdempotencyConflict(request.request_id)
+        # The conditional write still refuses to rewrite a send, but the operation
+        # identity may already be present: the dispatch reservation records it before
+        # the send, so filtering on a null one would refuse every reserved request.
         result = self._collection.replace_one(
             {
                 '_id': record_id,
@@ -1716,7 +1834,7 @@ class MongoDBRepository:
                 'customer_id': customer_id,
                 'claim_id': request.claim_id,
                 'sent_at': None,
-                'operation_id': None,
+                'operation_id': {'$in': [None, request.operation_id]},
             },
             document,
         )

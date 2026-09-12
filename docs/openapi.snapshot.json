@@ -5579,7 +5579,7 @@
       },
       "ExternalTaskRequest": {
         "additionalProperties": false,
-        "description": "What one external task will disclose, to whom, under what authority, and why.\n\nThe five properties the card requires are each their own field rather than a\nfree-form payload: the stakeholder, the claim, the fields actually disclosed,\nthe authorisation, and the purpose a claimant can read. A request that cannot\nsay all five is not preparable.\n\nPreparation and sending are separate states. An unsent request holds no\noperation identity, because the identity is what makes a retry the same\nrequest rather than a second one.",
+        "description": "What one external task will disclose, to whom, under what authority, and why.\n\nThe five properties the card requires are each their own field rather than a\nfree-form payload: the stakeholder, the claim, the fields actually disclosed,\nthe authorisation, and the purpose a claimant can read. A request that cannot\nsay all five is not preparable.\n\nPreparation, reserving the dispatch, and sending are three states. A merely\nprepared request holds no operation identity, because the identity is what makes\na retry the same request rather than a second one. The identity appears when the\ndispatch is reserved, so a reservation says which operation holds it and an\nattempt interrupted between reserving and sending still names itself; the send\ntime appears only when the request was actually sent.",
         "properties": {
           "authorisation": {
             "$ref": "#/components/schemas/ExternalTaskAuthorisation"
@@ -5598,6 +5598,18 @@
             "minItems": 1,
             "title": "Disclosed Fields",
             "type": "array"
+          },
+          "dispatch_reserved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Reserved At"
           },
           "operation_id": {
             "anyOf": [
