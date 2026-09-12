@@ -26,6 +26,7 @@ from backend.domain.external_services import (
     ExternalTaskRecord,
 )
 from backend.domain.models import (
+    EvidenceSource,
     IntegrationSource,
     ResponsibleParty,
     RouteAssessorRequest,
@@ -925,3 +926,103 @@ def test_a_claim_whose_result_arrived_is_no_longer_waiting_on_the_assessor() -> 
     assert after['external_wait_count'] == 0
     assert lifecycle['result_verification_state'] == 'review_required'
     assert lifecycle['pending_owner'] == 'claims_professional'
+
+
+def _receive_assessment(
+    client: TestClient,
+    repository: FixtureRepository,
+    claim_id: str,
+    *,
+    key: str,
+) -> Any:
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    return client.post(
+        f'/internal/v1/claims/{claim_id}/external-tasks/{task.task_id}/result',
+        headers={
+            **INTEGRATION_AUTH,
+            'Idempotency-Key': f'{key}-receive',
+            'If-Match': str(claim.revision),
+        },
+    )
+
+
+def test_the_claimant_learns_that_the_assessment_came_back() -> None:
+    """A claim whose assessor has answered is not still waiting on the assessor.
+
+    The next step was written when the request was accepted and never revisited, so it
+    kept promising a review by an external party, with an expected-by time the provider
+    had already met.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter()
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='result-seen')
+        consent_revision = _grant_consent(client, claim_id, revision, key='result-seen')
+        assert _attempt(client, claim_id, consent_revision, key='result-seen').status_code == 201
+        before = _claimant_view(client, claim_id)
+        received = _receive_assessment(client, repository, claim_id, key='result-seen')
+        after = _claimant_view(client, claim_id)
+
+    assert received.status_code == 201, received.text
+    # Before the answer the stored next step is correct and is left alone.
+    assert before['customer_next_step']['responsible_party'] == 'external_party'
+    assert before['customer_next_step']['expected_by'] is not None
+
+    next_step = after['customer_next_step']
+    assert next_step['status'] == 'assessor_result_under_review'
+    assert 'sent their assessment back' in next_step['summary']
+    assert next_step['responsible_party'] == 'claims_professional'
+    # The expectation the provider has already met is not carried forward.
+    assert next_step['expected_by'] is None
+    # The routing itself is unchanged: the assessor is still the assigned one.
+    assert after['external_service_action']['status'] == 'assigned'
+
+
+def test_the_claimant_is_not_shown_the_assessment_itself() -> None:
+    """The report is simulation-only and has been compared to nothing.
+
+    `verify_external_task_result` never returns `CONSISTENT`, so a received report is
+    `review_required` by construction. Saying it arrived is honest; showing it, or its
+    material, would present an unchecked provider answer as part of the claim.
+    """
+
+    repository = FixtureRepository()
+    adapter = MockAssessorServiceAdapter()
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key='result-private')
+        consent_revision = _grant_consent(client, claim_id, revision, key='result-private')
+        _attempt(client, claim_id, consent_revision, key='result-private')
+        assert (
+            _receive_assessment(client, repository, claim_id, key='result-private').status_code
+            == 201
+        )
+        claimant = _claimant_view(client, claim_id)
+        evidence = client.get(f'/api/v1/claims/{claim_id}/evidence', headers=AUTH).json()
+
+    stored = repository.list_evidence(claim_id, 'cus_demo')
+    assert [record.kind for record in stored] == ['assessment_report']
+    assert stored[0].source is EvidenceSource.EXTERNAL_SYSTEM
+    assert evidence['items'] == []
+    assert claimant['evidence_summary']['received'] == 0
+    assert 'result' not in claimant['external_service_action']
+
+
+def test_a_failed_attempt_keeps_its_own_correction() -> None:
+    """A claim with no answer has nothing to report as having come back."""
+
+    repository = FixtureRepository()
+    client, claim_id = _failed_attempt(
+        repository, AssessorFixtureFailure.ACCESS_DENIED, key='no-result'
+    )
+    with client:
+        claimant = _claimant_view(client, claim_id)
+
+    assert claimant['customer_next_step']['status'] == 'assessor_request_under_review'
+    assert 'Northwind must review' in claimant['customer_next_step']['summary']

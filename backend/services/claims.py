@@ -249,7 +249,7 @@ def _claimant_claim(repository: PersistenceRepository, claim: WorkingClaim) -> C
         external_claim=claim.external_claim,
         external_service_action=external_service_action,
         dynamic_form=claimant_dynamic_form_projection(repository, claim),
-        customer_next_step=claimant_next_step(claim, external_service_action),
+        customer_next_step=claimant_next_step(repository, claim, external_service_action),
         incomplete_context=_claimant_incomplete_context(repository, claim),
         handoff=handoff,
         created_at=claim.created_at,

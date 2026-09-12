@@ -291,31 +291,83 @@ _WITHDRAWN_ACTION_NEXT_STEPS = {
     ),
 }
 
+# The two states in which an answer can already have arrived. A request that failed or
+# is unresolved has no answer to report, and its own correction is above.
+_ANSWERABLE_STATUSES = frozenset(
+    {
+        ClaimantExternalServiceStatus.ASSIGNED,
+        ClaimantExternalServiceStatus.QUEUED,
+    }
+)
+
+
+# What the claimant is told once the assessor has answered. The claim is no longer
+# waiting on the external party, and saying that it is leaves a journey that reports an
+# expected-by time the provider has already met. The report itself is not shown:
+# `verify_external_task_result` never returns `CONSISTENT`, so nothing here has compared
+# it to the claim, and the P3 catalogue records any synthetic assessor report as
+# simulation-only. What is true, and all that is said, is that it arrived and that
+# Northwind is reviewing it.
+_RESULT_RECEIVED_NEXT_STEP = (
+    'assessor_result_under_review',
+    'The assessor has sent their assessment back. Northwind is reviewing it before '
+    'anything changes on your claim.',
+)
+
+
+def _assessment_has_come_back(
+    repository: PersistenceRepository,
+    claim: WorkingClaim,
+) -> bool:
+    """Say whether a result has been recorded for this claim's assessor task.
+
+    Read from the recorded results rather than from task status, because the merged P3
+    catalogue keeps a provider result separate from task status: an answered task stays
+    `accepted`, which is why task status alone could not tell the claimant anything had
+    arrived.
+    """
+
+    assessor_tasks = {
+        task.task_id
+        for task in repository.list_external_tasks_internal(claim.claim_id)
+        if task.service_identity == ASSESSOR_SERVICE_IDENTITY
+    }
+    return any(
+        result.task_id in assessor_tasks
+        for result in repository.list_external_task_results_internal(claim.claim_id)
+    )
+
 
 def claimant_next_step(
+    repository: PersistenceRepository,
     claim: WorkingClaim,
     action: ClaimantExternalServiceAction | None,
 ) -> CustomerNextStep:
-    """Say what the claimant does next, without contradicting the action beside it.
+    """Say what the claimant does next, without contradicting the record beside it.
 
-    A retryable failure is left alone: the stored next step already says Northwind can
-    send the request, and `can_request` agrees. Only the states that withdraw the action
-    are corrected, and the correction is derived here rather than written to the claim,
-    so AT-10's empty `claim_state_effects.failure_may_change` still holds.
+    Three cases are corrected, and each is corrected because the stored next step says
+    something the claim's own records contradict. A retryable failure is left alone: the
+    stored next step already says Northwind can send the request, and `can_request`
+    agrees. Every correction is derived here rather than written, so AT-10's empty
+    `claim_state_effects.failure_may_change` still holds.
 
     Args:
+        repository: Persistence boundary used to read the recorded external results.
         claim: Working Claim whose stored next step is being projected.
         action: The claimant external-service action derived for the same read.
 
     Returns:
-        The stored next step, or the derived one for a withdrawn action.
+        The stored next step, or the derived one where the claim's records say otherwise.
     """
 
     if action is None:
         return claim.customer_next_step
     replacement = _WITHDRAWN_ACTION_NEXT_STEPS.get(action.status)
     if replacement is None:
-        return claim.customer_next_step
+        if action.status in _ANSWERABLE_STATUSES and _assessment_has_come_back(repository, claim):
+            replacement = _RESULT_RECEIVED_NEXT_STEP
+        else:
+            return claim.customer_next_step
     status, summary = replacement
     return claim.customer_next_step.model_copy(
         update={
@@ -339,7 +391,7 @@ def _response(
         claim_id=claim.claim_id,
         revision=claim.revision,
         action=action,
-        customer_next_step=claimant_next_step(claim, action),
+        customer_next_step=claimant_next_step(repository, claim, action),
     )
 
 
