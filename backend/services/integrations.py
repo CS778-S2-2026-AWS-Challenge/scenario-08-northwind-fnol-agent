@@ -962,6 +962,32 @@ def unreconciled_assessor_task(
     )
 
 
+def _dispatch_in_progress_error() -> ApiError:
+    """Refuse a caller that did not win the right to send this request.
+
+    Two things reach this. One is a genuine race, where another caller holds the
+    reservation and will settle it in a moment. The other is a dispatch that was
+    reserved and never settled, which is the case `docs/claim-creation-boundary.md`
+    refuses to let fall back to a sendable state: nothing established that the provider
+    was not reached, so repeating the send could duplicate it. Neither is distinguishable
+    from the other here, and neither may dispatch, so both get the same answer.
+
+    Retryable, because the ordinary case clears within one attempt. What it does not
+    permit is a second call to the provider now.
+    """
+
+    return ApiError(
+        status_code=409,
+        code='INVALID_STATE_TRANSITION',
+        message=(
+            'Another attempt to send this assessment request is already in progress. '
+            'Its outcome must be established before the request is sent again.'
+        ),
+        details=[ErrorDetail(field='assessor_service', reason='dispatch_in_progress')],
+        retryable=True,
+    )
+
+
 def unreconciled_outcome_error() -> ApiError:
     """Refuse a request that could repeat an external action nobody has accounted for.
 
@@ -1702,6 +1728,20 @@ def route_assessor(
         entry_decision=entry_decision,
     )
 
+    # Nothing below may reach the provider without holding this. The reservation is a
+    # persistence compare-and-set rather than a check made here, because two callers
+    # racing on the same request would both pass a check and both dispatch. Whoever
+    # loses is refused before the adapter is called.
+    reserved = repository.reserve_external_dispatch(
+        claim.claim_id,
+        external_request.request_id,
+        claim.customer_id,
+        now_utc(),
+    )
+    if reserved is None:
+        raise _dispatch_in_progress_error()
+    external_request = reserved
+
     try:
         outcome = adapter.route_assessor(payload, fingerprint)
     except AdapterIdempotencyConflict as conflict:
@@ -1733,6 +1773,17 @@ def route_assessor(
             }
         )
         repository.save_assessor_routing_operation(failed_operation)
+        # An attempt that settled releases its hold: the task status now says what may
+        # happen next, and a retryable failure that the matrix permits to be retried
+        # must be able to take the reservation again. An unknown outcome keeps it,
+        # which is the point of holding it at all — nothing establishes that the
+        # provider was not reached, so nothing may send again until reconciliation.
+        if failed_task.status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+            repository.release_external_dispatch(
+                claim.claim_id,
+                external_request.request_id,
+                claim.customer_id,
+            )
         raise _assessor_failure_error(failure.code, task=failed_task) from failure
 
     _record_external_send(
