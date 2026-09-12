@@ -2072,3 +2072,101 @@ def test_mongodb_staff_presence_has_provider_neutral_revision_and_expiry_contrac
         repository.save_staff_presence(
             updated.model_copy(update={'revision': 3}), expected_revision=1
         )
+
+
+def test_mongodb_admits_one_dispatch_reserver_for_one_request(
+    repository: MongoDBRepository,
+) -> None:
+    """The winner and loser semantics hold on the MongoDB profile too.
+
+    The reservation is taken by a conditional update filtered on the unreserved state,
+    so a second caller matches no document and is told it did not win. A read followed
+    by a write would let both callers through, which is the race this exists to close.
+    """
+
+    timestamp = _claim().created_at
+    consent = ExternalServiceConsent(
+        consent_ref='consent_reservation_001',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        permitted_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        status=ExternalServiceConsentStatus.GRANTED,
+        granted_by=ActorReference(actor_type=ActorType.CLAIMANT, actor_id='cus_mongo_001'),
+        granted_at=timestamp,
+    )
+    claim = _claim().model_copy(
+        update={
+            'external_claim': ExternalClaimResult(
+                external_claim_id='ext_reservation_001',
+                claim_number='NW-RESERVATION',
+                creation_status=ClaimCreationStatus.CREATED,
+                route='motor',
+                next_step='assessor',
+                source=IntegrationSource.FIXTURE,
+                created_at=timestamp,
+            ),
+            'external_service_consents': [consent],
+        }
+    )
+    session = _session(claim)
+    repository.create_claim(claim, session)
+    decision = _decision(claim, session, _message(claim, session)).model_copy(
+        update={
+            'decision_id': 'dec_reservation_001',
+            'reason_codes': ['ASSESSOR_RULE_AUTHORISED'],
+        }
+    )
+    payload = RouteAssessorRequest(
+        claim_id=claim.claim_id,
+        external_claim_id='ext_reservation_001',
+        authorisation_ref=decision.decision_id,
+        claimant_consent_ref=consent.consent_ref,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        location=AssessorLocation(region='Auckland'),
+    )
+    adapter = MockAssessorServiceAdapter(
+        failure_sequence=(
+            ScriptedAssessorFailure(
+                code=AssessorRoutingFailureCode.TIMEOUT,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='fixture accepted the original request',
+            ),
+        )
+    )
+    entry = resolve_external_service_entry(
+        capability_status=RuntimeCapabilityStatus.USING_FIXTURE,
+        allow_test_fixture=True,
+    )
+    with pytest.raises(ApiError):
+        route_assessor(repository, adapter, entry, payload, authorisation_decision=decision)
+
+    request = repository.list_external_task_requests_internal(claim.claim_id)[0]
+    # A reservation cannot predate the preparation it belongs to.
+    taken_at = request.prepared_at
+    # The unresolved attempt kept its hold, so nothing else may send this request.
+    assert request.dispatch_reserved_at is not None
+    assert (
+        repository.reserve_external_dispatch(
+            claim.claim_id, request.request_id, claim.customer_id, taken_at
+        )
+        is None
+    )
+
+    repository.release_external_dispatch(claim.claim_id, request.request_id, claim.customer_id)
+    won = repository.reserve_external_dispatch(
+        claim.claim_id, request.request_id, claim.customer_id, taken_at
+    )
+    lost = repository.reserve_external_dispatch(
+        claim.claim_id, request.request_id, claim.customer_id, taken_at
+    )
+    assert won is not None
+    assert lost is None
+
+    with pytest.raises(KeyError):
+        repository.reserve_external_dispatch(
+            claim.claim_id, 'erq_missing', claim.customer_id, taken_at
+        )
+    with pytest.raises(KeyError):
+        repository.reserve_external_dispatch(
+            'clm_missing', request.request_id, claim.customer_id, taken_at
+        )

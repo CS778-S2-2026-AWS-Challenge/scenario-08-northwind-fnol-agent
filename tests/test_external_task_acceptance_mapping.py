@@ -10,11 +10,13 @@ evidence.
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
@@ -29,9 +31,14 @@ from backend.app import create_app
 from backend.core.config import IdentityMode, Settings
 from backend.core.errors import ApiError
 from backend.domain.external_services import (
+    ASSESSOR_CONSENT_FIELDS,
+    ASSESSOR_REQUESTED_ACTION,
+    ASSESSOR_SERVICE_IDENTITY,
+    ExternalTaskAuthorisation,
     ExternalTaskDelivery,
     ExternalTaskOperationStatus,
     ExternalTaskRecord,
+    ExternalTaskRequest,
 )
 from backend.domain.models import (
     AssessorRoutingOperationStatus,
@@ -1225,3 +1232,217 @@ def test_only_an_unresolved_task_can_be_reconciled() -> None:
     assert settled_claim is not None
     assert settled_claim.revision == claim.revision
     assert settled_claim.assessor_routing is None
+
+
+class ReentrantAssessorAdapter(CountingAssessorAdapter):
+    """Issues a second request from inside the first one's provider call.
+
+    This is the deterministic form of the race reported on #759: the second request
+    arrives after the first has prepared its records and taken its reservation, and
+    before the first has recorded any outcome. Threads would reproduce the same window
+    less reliably and would not say which caller lost.
+    """
+
+    def __init__(self, *, failure_sequence: tuple[ScriptedAssessorFailure, ...]) -> None:
+        super().__init__(failure_sequence=failure_sequence)
+        self.client: TestClient | None = None
+        self.claim_id: str | None = None
+        self.revision: int | None = None
+        self.second: Any | None = None
+
+    def route_assessor(
+        self,
+        command: RouteAssessorRequest,
+        request_fingerprint: str,
+    ) -> AssessorRoutingOutcome:
+        if self.calls == 0 and self.client is not None:
+            self.calls += 1
+            self.second = self.client.post(
+                f'/api/v1/claims/{self.claim_id}/assessor-routing',
+                headers={
+                    **AUTH,
+                    'Idempotency-Key': 'race-second',
+                    'If-Match': str(self.revision),
+                },
+            )
+            self.calls -= 1
+        return super().route_assessor(command, request_fingerprint)
+
+
+def test_two_concurrent_requests_reach_the_assessor_once() -> None:
+    """The second caller is refused before the provider is called, not after.
+
+    On `main` before this change both callers crossed the dispatch boundary and the
+    fixture was invoked twice. The reservation is taken by a persistence compare-and-set,
+    so exactly one caller may proceed and the loser fails without an adapter call.
+    """
+
+    repository = FixtureRepository()
+    adapter = ReentrantAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'race-reservation'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        adapter.client = client
+        adapter.claim_id = claim_id
+        adapter.revision = consent_revision
+        first = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+
+    second = adapter.second
+    assert second is not None
+    assert second.status_code == 409
+    error = second.json()['error']
+    assert error['code'] == 'INVALID_STATE_TRANSITION'
+    assert 'already in progress' in error['message']
+    assert [detail['reason'] for detail in error['details']] == ['dispatch_in_progress']
+
+    # Exactly one invocation, and one of each persisted record.
+    assert adapter.calls == 1
+    assert first.status_code == 409
+    tasks = repository.list_external_tasks_internal(claim_id)
+    requests = repository.list_external_task_requests_internal(claim_id)
+    assert len(tasks) == 1
+    assert len(requests) == 1
+    assert _operation_statuses(repository, claim_id) == [
+        AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    ]
+
+
+def test_an_unsubmitted_failure_frees_the_request_for_a_later_attempt() -> None:
+    """A reservation is a right to send now, not a record of having sent.
+
+    The recovery matrix permits an unchanged retry of a failure that never reached the
+    provider, so the reservation must be released when the attempt settles. Keeping it
+    would strand the retry the contract allows.
+    """
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(
+        failure_sequence=(ScriptedAssessorFailure(code=AssessorFixtureFailure.TIMEOUT),)
+    )
+    key = 'reservation-released'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        failed = _route(client, claim_id, key=f'{key}-first', revision=consent_revision)
+        released = repository.list_external_task_requests_internal(claim_id)[0]
+        retried = _route(client, claim_id, key=f'{key}-second', revision=consent_revision)
+
+    assert failed.status_code == 503
+    assert released.dispatch_reserved_at is None
+    assert retried.status_code == 201, retried.text
+    assert adapter.calls == 2
+    assert len(repository.list_external_task_requests_internal(claim_id)) == 1
+    assert len(repository.list_external_tasks_internal(claim_id)) == 1
+
+
+def test_an_unresolved_outcome_keeps_the_request_reserved() -> None:
+    """What was never established does not become sendable again.
+
+    An unknown outcome holds its reservation, so even the refusal that reads the task
+    is not the only thing standing between the claim and a second provider call.
+    """
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(failure_sequence=(SENT_THEN_LOST,))
+    key = 'reservation-held'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        assert (
+            _route(client, claim_id, key=f'{key}-route', revision=consent_revision).status_code
+            == 409
+        )
+        held = repository.list_external_task_requests_internal(claim_id)[0]
+
+    assert held.dispatch_reserved_at is not None
+    task = repository.list_external_tasks_internal(claim_id)[0]
+    assert task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+    assert adapter.calls == 1
+
+
+def test_the_fixture_repository_admits_one_reserver_and_then_releases() -> None:
+    """The persistence contract itself, without the service around it."""
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(
+        failure_sequence=(ScriptedAssessorFailure(code=AssessorFixtureFailure.TIMEOUT),)
+    )
+    key = 'reservation-contract'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+
+    request = repository.list_external_task_requests_internal(claim_id)[0]
+    claim = repository.get_claim_internal(claim_id)
+    assert claim is not None
+    taken_at = request.prepared_at
+
+    first = repository.reserve_external_dispatch(
+        claim_id, request.request_id, claim.customer_id, taken_at
+    )
+    second = repository.reserve_external_dispatch(
+        claim_id, request.request_id, claim.customer_id, taken_at
+    )
+    assert first is not None and first.dispatch_reserved_at == taken_at
+    assert second is None
+
+    repository.release_external_dispatch(claim_id, request.request_id, claim.customer_id)
+    third = repository.reserve_external_dispatch(
+        claim_id, request.request_id, claim.customer_id, taken_at
+    )
+    assert third is not None
+
+    # Releasing what is not held is not an error; a settled attempt releases whether or
+    # not it was the holder.
+    repository.release_external_dispatch(claim_id, request.request_id, claim.customer_id)
+    repository.release_external_dispatch(claim_id, request.request_id, claim.customer_id)
+
+    with pytest.raises(KeyError):
+        repository.reserve_external_dispatch(claim_id, 'erq_missing', claim.customer_id, taken_at)
+    with pytest.raises(KeyError):
+        repository.reserve_external_dispatch(
+            'clm_missing', request.request_id, claim.customer_id, taken_at
+        )
+
+
+def test_a_reservation_cannot_predate_the_request_it_belongs_to() -> None:
+    """A hold taken before the request existed would describe nothing."""
+
+    prepared_at = datetime(2026, 9, 12, tzinfo=UTC)
+    request = ExternalTaskRequest(
+        request_id='erq_reservation_guard',
+        task_id='tsk_reservation_guard',
+        claim_id='clm_reservation_guard',
+        service_identity=ASSESSOR_SERVICE_IDENTITY,
+        requested_action=ASSESSOR_REQUESTED_ACTION,
+        purpose='Route the vehicle damage assessment request.',
+        disclosed_fields=sorted(ASSESSOR_CONSENT_FIELDS),
+        authorisation=ExternalTaskAuthorisation(
+            northwind_authority_ref='dec_reservation_guard',
+            claimant_consent_ref='cns_reservation_guard',
+            authorised_revision=1,
+        ),
+        prepared_at=prepared_at,
+    )
+
+    with pytest.raises(ValidationError, match='cannot be reserved before it was prepared'):
+        ExternalTaskRequest.model_validate(
+            {
+                **request.model_dump(),
+                'dispatch_reserved_at': prepared_at - timedelta(seconds=1),
+            }
+        )
