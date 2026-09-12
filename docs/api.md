@@ -1668,6 +1668,14 @@ The state is derived from the recorded external task rather than stored on the c
 attempt leaves every claim field unchanged, so the claimant still sees what happened on a
 later read without the failure having altered the claim.
 
+Once the assessor has returned a result, `customer_next_step` reports that it arrived and that
+Northwind is reviewing it, with `responsible_party` `claims_professional` and no `expected_by`: the
+claim is no longer waiting on the external party, and the time the request was expected by has
+already been met. The routing status is unchanged, because the assessor assignment still stands.
+The report itself is not projected to the claimant. It is `simulation_only` and its verification
+state is `review_required` by construction, so the claimant is told that an answer exists and is
+being checked, never what it says; the record stays internal to the staff Evidence surface.
+
 `customer_next_step` is corrected against that state for the two cases in which the action is
 withdrawn. It is a stored field written when permission is recorded, and a failed attempt changes
 no claim field, so on its own it keeps saying that Northwind can now send the request. Where
