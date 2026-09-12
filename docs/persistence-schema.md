@@ -517,6 +517,14 @@ Evidence record or protected object.
 - A timeout after possible submission records `unknown_outcome`. The same operation
   identity must be used to query status before retry; a new request cannot be created
   until non-submission is confirmed or an idempotent replay is proven safe.
+- Accepted reconciliation reads the existing `tsk_` task, its single sent `erq_` request, and the
+  matching assessor operation before contacting the status-check adapter. A confirmed provider
+  acknowledgement atomically advances that task and operation to `accepted`, records the pending
+  assessment Evidence and its immutable task link, and advances the Claim revision with the same
+  routing result. A stale revision, changed identity, malformed answer, or inconclusive check
+  writes none of those records. An unchanged replay reads the settled records and does not repeat
+  the status check. `unknown_outcome` cannot become `retryable_failure`; a confirmed non-submission
+  requires a separate durable reconciliation record before it can permit another attempt.
 - An external response cannot mutate Claim State until provenance, request linkage,
   schema, current revision, field conflicts, and required authority are validated.
 - An external task uses an opaque `tsk_` identifier and remains separate from Claim State. Its
