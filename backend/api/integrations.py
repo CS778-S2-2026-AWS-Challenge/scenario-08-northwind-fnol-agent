@@ -35,6 +35,7 @@ from backend.services.external_tasks import list_external_tasks
 from backend.services.integrations import (
     create_external_claim,
     receive_assessor_result,
+    reconcile_assessor_routing,
     route_assessor,
 )
 from backend.services.knowledge_search import search_knowledge
@@ -257,6 +258,55 @@ def receive_assessor_result_integration(
         principal.subject,
     )
     response.status_code = status.HTTP_200_OK if replayed else status.HTTP_201_CREATED
+    return result
+
+
+@router.post(
+    '/claims/{claim_id}/external-tasks/{task_id}/reconcile',
+    response_model=AssessorRoutingResult,
+)
+def reconcile_assessor_routing_integration(
+    claim_id: str,
+    task_id: str,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias='Idempotency-Key'),
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    _principal: Principal = Depends(require_integration_service),
+) -> AssessorRoutingResult:
+    """Reconcile one unresolved assessor task through its provider status path.
+
+    Args:
+        claim_id: Working Claim that owns the unresolved task.
+        task_id: Existing external task whose persisted identity is checked.
+        request: Authenticated HTTP request and configured Runtime dependencies.
+        idempotency_key: Required key for safely replaying the mutation.
+        if_match: Expected Working Claim revision before first settlement.
+        _principal: Verified integration-service principal supplied by FastAPI.
+
+    Returns:
+        The accepted provider-neutral routing result.
+
+    Raises:
+        ApiError: The task remains unknown, identity or revision conflicts, or the
+            status-check dependency cannot safely establish acceptance.
+    """
+
+    logger.info(
+        'assessor_routing.reconcile',
+        extra={
+            'request_id': str(getattr(request.state, 'request_id', 'unavailable')),
+            'claim_id': claim_id,
+            'task_id': task_id,
+        },
+    )
+    result, _replayed = reconcile_assessor_routing(
+        repository_for(request),
+        assessor_adapter_for(request),
+        claim_id,
+        task_id,
+        require_idempotency_key(idempotency_key),
+        parse_if_match(if_match),
+    )
     return result
 
 
