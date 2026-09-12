@@ -525,7 +525,25 @@ def request_assessor_routing(
     claim = repository.get_claim(claim_id, principal.subject)
     if claim is None:
         raise _not_found()
-    decision_seed = f'{claim_id}:{principal.subject}:{key}'.encode()
+    # The Northwind authority for this routing is one decision about one claim under one
+    # permission, so it is derived from those and not from the caller's idempotency key.
+    #
+    # Derived from the key, a retry that presented a new key minted a new decision, and
+    # with it a new operation identity, a new task, and a second provider call: three
+    # timeouts on one claim left three tasks and three operations. `docs/api.md` and
+    # #612 both require the opposite — a permitted retry keeps the original task,
+    # request fingerprint, and operation identity — and the claimant client already
+    # holds one key per claim for exactly that reason. Deriving it here makes the
+    # server enforce what the contract states rather than depend on the client for it.
+    #
+    # A retry that changed the request is still refused: the operation holds the first
+    # attempt's fingerprint, and `route_assessor` compares it before anything else.
+    active_consent = _active_assessor_consent(claim)
+    decision_seed = (
+        f'{claim_id}:{principal.subject}:'
+        f'{active_consent.consent_ref if active_consent is not None else key}:'
+        f'{ASSESSOR_REQUESTED_ACTION}'
+    ).encode()
     decision_id = f'dec_{sha256(decision_seed).hexdigest()[:20]}'
     if claim.revision != expected_revision:
         consent = _active_assessor_consent(claim)
