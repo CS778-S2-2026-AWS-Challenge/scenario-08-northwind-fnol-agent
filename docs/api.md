@@ -1632,11 +1632,12 @@ four leave the consented Working Claim revision unchanged and do not report assi
 Automatic retry counts remain unapproved; the claimant client offers only an explicit retry for
 retryable failures.
 
-The operation identity is derived from the `Idempotency-Key` the claimant request carries, so an
-unchanged retry that presents the same key continues the same operation, task, and request
-record, while a retry presenting a new key begins a new operation. Beginning a new one is safe
-only while the previous attempt is known not to have reached the assessor, which is what the next
-paragraph governs.
+A permitted retry continues the same operation, task, and request record. The operation identity
+is derived from the claim, the active claimant permission, and the requested action, so it does
+not depend on the client presenting the original `Idempotency-Key`: a retry that presents a new
+key is the same operation, not a second one, and a claimant who reloads the page can still retry.
+A retry that changed the request is refused, because the operation holds the first attempt's
+request fingerprint and it is compared before anything else.
 
 An attempt the adapter reports as having reached the assessor before it failed is not a failure
 the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
@@ -1678,10 +1679,12 @@ record rather than replacing either with a new identity or timestamp. If provide
 idempotency response fails, the same request restores the authoritative assigned or queued state;
 the claimant client also reloads that state before presenting a failure message.
 If provider acceptance is durable but a concurrent Claim mutation wins the following
-compare-and-set, the first request returns the bounded revision conflict. Only the identical
-claimant request with the original idempotency key, revision, consent, authority, and operation
-identity may reconcile that accepted result without another provider call. An unrelated stale
-request remains a revision or idempotency conflict.
+compare-and-set, the first request returns the bounded revision conflict. The same claimant's
+request for the same claim, permission, and action then reconciles that accepted result without
+another provider call, whichever idempotency key it presents, because that is the operation
+identity. A request that is genuinely a different one remains a revision or idempotency conflict:
+a changed request is refused against the operation's recorded fingerprint, and a request under a
+different permission or action is a different operation.
 
 ### `GET /api/v1/claims/{claim_id}/evidence`
 
