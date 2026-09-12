@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, NoReturn, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
@@ -1594,6 +1594,96 @@ class MongoDBRepository:
             )
             if not same_owner or self._model_from_document(current, ExternalTaskRecord) != task:
                 raise IdempotencyConflict(task.task_id)
+
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to dispatch one prepared request.
+
+        The filter carries `dispatch_reserved_at: None`, so the reservation is taken by
+        the update itself rather than by a decision made after a read. A second caller
+        matches nothing and is told it did not win.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+
+        Returns:
+            The reserved request, or None when another attempt already holds it.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        record_id = self._dispatch_record_id(claim_id, request_id, customer_id)
+        updated = self._collection.find_one_and_update(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': claim_id,
+                'dispatch_reserved_at': None,
+            },
+            {'$set': {'dispatch_reserved_at': reserved_at.isoformat()}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if updated is None:
+            return None
+        return self._model_from_document(updated, ExternalTaskRequest)
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Release a reservation whose attempt established that nothing was sent.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        record_id = self._dispatch_record_id(claim_id, request_id, customer_id)
+        self._collection.update_one(
+            {
+                '_id': record_id,
+                'record_type': 'external_task_request',
+                'customer_id': customer_id,
+                'claim_id': claim_id,
+            },
+            {'$set': {'dispatch_reserved_at': None}},
+        )
+
+    def _dispatch_record_id(self, claim_id: str, request_id: str, customer_id: str) -> str:
+        """Resolve the stored request document id, refusing an unknown or foreign one."""
+
+        if self.get_claim(claim_id, customer_id) is None:
+            raise KeyError(claim_id)
+        stored = self._collection.find_one(
+            {
+                'record_type': 'external_task_request',
+                'request_id': request_id,
+                'claim_id': claim_id,
+                'customer_id': customer_id,
+            }
+        )
+        if stored is None:
+            raise KeyError(request_id)
+        return str(stored['_id'])
 
     def save_external_task_request(
         self,

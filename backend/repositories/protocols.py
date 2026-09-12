@@ -585,6 +585,61 @@ class PersistenceRepository(ClaimRepository, Protocol):
         """
         raise NotImplementedError
 
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to send one prepared external request.
+
+        This is a compare-and-set, not a read followed by a write: two callers racing
+        on the same request must not both be told they may dispatch. Whoever loses gets
+        `None` and must fail before reaching the provider.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+
+        Returns:
+            The reserved request when this caller won, or `None` when another attempt
+            already holds the reservation.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        raise NotImplementedError
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Give up a reservation whose attempt established that nothing was sent.
+
+        Only a definitely unsubmitted attempt may release. A reservation left in place
+        says an attempt may have reached the provider, which is what keeps a crashed
+        dispatch from being repeated as though it had never happened.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        raise NotImplementedError
+
     def save_external_task_request(
         self,
         request: ExternalTaskRequest,

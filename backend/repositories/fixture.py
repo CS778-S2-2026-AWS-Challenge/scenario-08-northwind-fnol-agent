@@ -1666,6 +1666,80 @@ class FixtureRepository(PersistenceRepository):
                 raise IdempotencyConflict(task.task_id)
         self._external_tasks[task.task_id] = deepcopy(task)
 
+    def reserve_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+        reserved_at: datetime,
+    ) -> ExternalTaskRequest | None:
+        """Atomically claim the sole right to dispatch one prepared request.
+
+        The read and the write are inside the claim mutation lock together, because a
+        reservation that could be read by one caller and written by another is not a
+        reservation.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose dispatch is being reserved.
+            customer_id: Customer who owns the parent claim.
+            reserved_at: Moment the reservation is taken.
+
+        Returns:
+            The reserved request, or None when another attempt already holds it.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        with self._claim_mutation_lock:
+            request = self._held_request(claim_id, request_id, customer_id)
+            if request.dispatch_reserved_at is not None:
+                return None
+            reserved = request.model_copy(update={'dispatch_reserved_at': reserved_at})
+            self._external_task_requests[request_id] = deepcopy(reserved)
+            return reserved
+
+    def release_external_dispatch(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> None:
+        """Release a reservation whose attempt established that nothing was sent.
+
+        Args:
+            claim_id: Claim that owns the request.
+            request_id: Request whose reservation is being released.
+            customer_id: Customer who owns the parent claim.
+
+        Returns:
+            None.
+
+        Raises:
+            KeyError: The claim or request is missing or belongs to another customer.
+        """
+
+        with self._claim_mutation_lock:
+            request = self._held_request(claim_id, request_id, customer_id)
+            if request.dispatch_reserved_at is None:
+                return
+            released = request.model_copy(update={'dispatch_reserved_at': None})
+            self._external_task_requests[request_id] = deepcopy(released)
+
+    def _held_request(
+        self,
+        claim_id: str,
+        request_id: str,
+        customer_id: str,
+    ) -> ExternalTaskRequest:
+        if self.get_claim(claim_id, customer_id) is None:
+            raise KeyError(claim_id)
+        request = self._external_task_requests.get(request_id)
+        if request is None or request.claim_id != claim_id:
+            raise KeyError(request_id)
+        return request
+
     def save_external_task_request(
         self,
         request: ExternalTaskRequest,

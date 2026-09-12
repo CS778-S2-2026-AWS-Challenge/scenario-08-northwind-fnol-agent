@@ -531,6 +531,13 @@ class ExternalTaskRequest(ContractModel):
     prepared_at: datetime
     sent_at: datetime | None = None
     operation_id: str | None = Field(default=None, min_length=1, max_length=100)
+    # Held while one attempt has the right to reach the provider. It is not a record
+    # that the request was sent: it is the claim that nobody else may send it now. A
+    # held reservation over a still-`prepared` task therefore describes an attempt whose
+    # outcome was never learned, which is an unknown outcome rather than something to
+    # send again. It is released only when an attempt establishes that nothing reached
+    # the provider.
+    dispatch_reserved_at: datetime | None = None
 
     @model_validator(mode='after')
     def validate_request_state(self) -> 'ExternalTaskRequest':
@@ -547,6 +554,8 @@ class ExternalTaskRequest(ContractModel):
             )
         if self.sent_at is not None and self.sent_at < self.prepared_at:
             raise ValueError('An external request cannot be sent before it was prepared.')
+        if self.dispatch_reserved_at is not None and self.dispatch_reserved_at < self.prepared_at:
+            raise ValueError('An external request cannot be reserved before it was prepared.')
         return self
 
 
