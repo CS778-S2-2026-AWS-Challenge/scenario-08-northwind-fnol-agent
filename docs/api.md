@@ -1651,6 +1651,21 @@ key is the same operation, not a second one, and a claimant who reloads the page
 A retry that changed the request is refused, because the operation holds the first attempt's
 request fingerprint and it is compared before anything else.
 
+Runtime reserves the prepared request before contacting the assessor, and the reservation is an
+atomic persistence operation rather than a check. Two concurrent requests on one claim therefore
+reach the assessor once: the caller that does not win the reservation returns
+`409 INVALID_STATE_TRANSITION` with `details[].reason` `dispatch_in_progress` before any provider
+call, and creates no second task, request, or operation. The reservation is released when the
+attempt settles with a known outcome, acceptance included, so a settled request never claims a
+dispatch is still in progress; it is kept only when the outcome is not established, so such a
+request never becomes sendable again without reconciliation. A failure that never reached the
+assessor can therefore be retried on the same identity, and a routing answer this runtime cannot
+turn into an assignment — a `not_required` or `failed` routing status — is recorded as a terminal
+failure on the task and its operation rather than left holding the request: the provider answered,
+so the outcome is known even though it cannot be used, and Northwind reviews it. The reservation records the operation identity it
+dispatches under, so an attempt interrupted between reserving and sending still names itself and is
+reconcilable rather than stranded.
+
 An attempt the adapter reports as having reached the assessor before it failed is not a failure
 the claimant may retry. Whether a request was submitted is reported by the adapter, never inferred
 from the failure code: the same `timeout` can describe an attempt that never left and one whose
@@ -3264,6 +3279,14 @@ unavailable status dependency returns `503 DEPENDENCY_UNAVAILABLE`; a malformed,
 non-accepted status answer returns `502 DEPENDENCY_FAILED`. A missing task returns
 `404 RESOURCE_NOT_FOUND`; a stale first settlement returns `409 REVISION_CONFLICT`. None of these
 paths writes partial settlement state.
+
+Two states are reconcilable. One is a task recorded as `unknown_outcome`. The other is an attempt
+that reserved its dispatch and never settled, whose task and operation are still `prepared` and
+whose request holds the reservation with no send time: the provider may have been reached and
+nothing recorded what came of it. Both are refused a further routing request, so both are accepted
+here, checked through the same status path, and settled on the same task, request, and operation
+identity. Settling an interrupted attempt also records the send the status check has just
+established.
 
 This endpoint implements accepted settlement only. A provider statement that the original request
 was not submitted does not turn `unknown_outcome` into `retryable_failure` and cannot authorise a

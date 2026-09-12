@@ -962,6 +962,54 @@ def unreconciled_assessor_task(
     )
 
 
+def _release_dispatch(
+    repository: PersistenceRepository,
+    *,
+    claim: WorkingClaim,
+    request: ExternalTaskRequest,
+) -> None:
+    """Give up the hold once this attempt has a known outcome.
+
+    Every settled outcome releases, acceptance included: the hold says a dispatch is in
+    progress, and after an answer none is. What keeps a settled request from being sent
+    again is its own state — an accepted routing short-circuits the route, a terminal
+    failure withdraws the claimant action — not a lock left lying on it. Only an outcome
+    nobody established keeps the hold.
+    """
+
+    repository.release_external_dispatch(
+        claim.claim_id,
+        request.request_id,
+        claim.customer_id,
+    )
+
+
+def _dispatch_in_progress_error() -> ApiError:
+    """Refuse a caller that did not win the right to send this request.
+
+    Two things reach this. One is a genuine race, where another caller holds the
+    reservation and will settle it in a moment. The other is a dispatch that was
+    reserved and never settled, which is the case `docs/claim-creation-boundary.md`
+    refuses to let fall back to a sendable state: nothing established that the provider
+    was not reached, so repeating the send could duplicate it. Neither is distinguishable
+    from the other here, and neither may dispatch, so both get the same answer.
+
+    Retryable, because the ordinary case clears within one attempt. What it does not
+    permit is a second call to the provider now.
+    """
+
+    return ApiError(
+        status_code=409,
+        code='INVALID_STATE_TRANSITION',
+        message=(
+            'Another attempt to send this assessment request is already in progress. '
+            'Its outcome must be established before the request is sent again.'
+        ),
+        details=[ErrorDetail(field='assessor_service', reason='dispatch_in_progress')],
+        retryable=True,
+    )
+
+
 def unreconciled_outcome_error() -> ApiError:
     """Refuse a request that could repeat an external action nobody has accounted for.
 
@@ -1105,9 +1153,19 @@ def reconcile_assessor_routing(
     if len(requests) != 1:
         raise _idempotency_error()
     external_request = requests[0]
-    if external_request.operation_id is None or external_request.sent_at is None:
+    # A reserved request that was never recorded as sent is the interruption window:
+    # the attempt held the right to dispatch and nothing recorded what came of it. That
+    # is precisely what needs reconciling, so it is admitted here rather than refused;
+    # refusing it left the claim unable to route and unable to reconcile, which is the
+    # blocking finding on #766.
+    interrupted_dispatch = (
+        external_request.sent_at is None and external_request.dispatch_reserved_at is not None
+    )
+    if external_request.operation_id is None or not (
+        external_request.sent_at is not None or interrupted_dispatch
+    ):
         raise _authorisation_error(
-            'Assessor reconciliation requires the persisted sent request identity.'
+            'Assessor reconciliation requires the persisted sent or reserved request identity.'
         )
     operation = repository.get_assessor_routing_operation(external_request.operation_id)
     if operation is None:
@@ -1133,7 +1191,12 @@ def reconcile_assessor_routing(
     identity_is_valid = (
         request_matches_operation
         and task.service_identity == ASSESSOR_SERVICE_IDENTITY
-        and task.delivery is ExternalTaskDelivery.SUBMITTED
+        # An interrupted dispatch never recorded a delivery, which is the whole of its
+        # problem; a settled unknown outcome recorded one.
+        and (
+            task.delivery is ExternalTaskDelivery.SUBMITTED
+            or task.status is ExternalTaskOperationStatus.PREPARED
+        )
         and claim.external_claim is not None
         and claim.external_claim.external_claim_id == operation.external_claim_id
         and consent is not None
@@ -1172,11 +1235,21 @@ def reconcile_assessor_routing(
         ):
             return operation.result, True
         raise _idempotency_error()
-    if (
-        task.status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME
-        or operation.status is not AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
-        or claim.assessor_routing is not None
-    ):
+    # Two shapes are unresolved. One settled into `unknown_outcome` because the adapter
+    # reported a delivery it could not account for. The other never settled at all: its
+    # dispatch was reserved and the attempt did not return. Both mean the same thing —
+    # the provider may have been reached and nobody knows — and both are refused a
+    # further routing request, so both must be reconcilable.
+    settled_unknown = (
+        task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+        and operation.status is AssessorRoutingOperationStatus.UNKNOWN_OUTCOME
+    )
+    reserved_unsettled = (
+        interrupted_dispatch
+        and task.status is ExternalTaskOperationStatus.PREPARED
+        and operation.status is AssessorRoutingOperationStatus.PREPARED
+    )
+    if not (settled_unknown or reserved_unsettled) or claim.assessor_routing is not None:
         raise _authorisation_error(
             'Only a matching unresolved assessor task and operation can be reconciled.'
         )
@@ -1296,6 +1369,15 @@ def reconcile_assessor_routing(
         result=result,
     )
     awaited, link = _awaited_material_records(task=accepted_task, claim=updated_claim)
+    # An interrupted dispatch never recorded its send. The status check has just
+    # established that the provider did receive it, so the record says so now rather
+    # than leaving an accepted task whose request claims it was never sent.
+    settled_request = external_request.model_copy(
+        update={
+            'sent_at': external_request.sent_at or external_request.dispatch_reserved_at,
+            'dispatch_reserved_at': None,
+        }
+    )
     branch_evaluation = build_applied_branch_evaluation(
         updated_claim,
         repository=repository,
@@ -1307,6 +1389,7 @@ def reconcile_assessor_routing(
             expected_revision,
             accepted_task,
             accepted_operation,
+            settled_request,
             awaited,
             link,
             branch_evaluation,
@@ -1700,6 +1783,21 @@ def route_assessor(
         entry_decision=entry_decision,
     )
 
+    # Nothing below may reach the provider without holding this. The reservation is a
+    # persistence compare-and-set rather than a check made here, because two callers
+    # racing on the same request would both pass a check and both dispatch. Whoever
+    # loses is refused before the adapter is called.
+    reserved = repository.reserve_external_dispatch(
+        claim.claim_id,
+        external_request.request_id,
+        claim.customer_id,
+        now_utc(),
+        operation.operation_id,
+    )
+    if reserved is None:
+        raise _dispatch_in_progress_error()
+    external_request = reserved
+
     try:
         outcome = adapter.route_assessor(payload, fingerprint)
     except AdapterIdempotencyConflict as conflict:
@@ -1731,6 +1829,13 @@ def route_assessor(
             }
         )
         repository.save_assessor_routing_operation(failed_operation)
+        # An attempt that settled releases its hold: the task status now says what may
+        # happen next, and a retryable failure that the matrix permits to be retried
+        # must be able to take the reservation again. An unknown outcome keeps it,
+        # which is the point of holding it at all — nothing establishes that the
+        # provider was not reached, so nothing may send again until reconciliation.
+        if failed_task.status is not ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+            _release_dispatch(repository, claim=claim, request=external_request)
         raise _assessor_failure_error(failure.code, task=failed_task) from failure
 
     _record_external_send(
@@ -1744,6 +1849,33 @@ def route_assessor(
         AssessorRoutingStatus.ASSIGNED,
         AssessorRoutingStatus.QUEUED,
     }:
+        # The provider answered, and the answer is one this runtime cannot turn into an
+        # assignment. That is a known outcome, not an unknown one, so it is settled here
+        # rather than left holding a reservation nobody can lift. The recovery matrix
+        # settles an unusable response as a terminal failure, which puts the claim in
+        # front of a claims professional through the blocker #763 added instead of in
+        # front of the claimant as a retry.
+        refused_task = _record_external_failure(
+            repository,
+            task=task,
+            customer_id=claim.customer_id,
+            failure_code=ExternalTaskFailureCode.MALFORMED,
+            delivery=ExternalTaskDelivery.SUBMITTED,
+            delivery_evidence=(
+                f'{task.integration_source.value} routing answer: '
+                f'{outcome.result.routing_status.value}'
+            ),
+        )
+        repository.save_assessor_routing_operation(
+            operation.model_copy(
+                update={
+                    'status': _OPERATION_STATUS_BY_TASK_STATUS[refused_task.status],
+                    'failure_code': AssessorRoutingFailureCode.MALFORMED,
+                    'updated_at': now_utc(),
+                }
+            )
+        )
+        _release_dispatch(repository, claim=claim, request=external_request)
         raise ApiError(
             status_code=502,
             code='DEPENDENCY_FAILED',
@@ -1774,6 +1906,9 @@ def route_assessor(
         provider_reference=provider_reference,
     )
     _record_awaited_material(repository, task=accepted_task, claim=claim)
+    # Acceptance is a settled outcome too. Leaving the hold would leave the stored
+    # request claiming a dispatch is in progress after the answer arrived.
+    _release_dispatch(repository, claim=claim, request=external_request)
     return _save_assessor_result(
         repository,
         payload.claim_id,
