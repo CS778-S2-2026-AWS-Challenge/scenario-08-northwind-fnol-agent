@@ -3,7 +3,6 @@ from datetime import timedelta
 from backend.adapters.claims_service import (
     AdapterIdempotencyConflict,
     AssessorAdapterFailure,
-    AssessorFixtureFailure,
     AssessorResultRequest,
     AssessorServiceAdapter,
     ClaimsServiceAdapter,
@@ -99,6 +98,17 @@ _AWAITED_ASSESSMENT_KIND = 'assessment_report'
 _REPLAYABLE_TASK_STATUSES = frozenset(
     {ExternalTaskOperationStatus.PREPARED, ExternalTaskOperationStatus.ACCEPTED}
 )
+
+# The routing operation records the same outcome the task does. Only these three
+# reach the map: an attempt that raised from the adapter neither stayed prepared nor
+# was accepted.
+_OPERATION_STATUS_BY_TASK_STATUS = {
+    ExternalTaskOperationStatus.RETRYABLE_FAILURE: (
+        AssessorRoutingOperationStatus.RETRYABLE_FAILURE
+    ),
+    ExternalTaskOperationStatus.TERMINAL_FAILURE: AssessorRoutingOperationStatus.TERMINAL_FAILURE,
+    ExternalTaskOperationStatus.UNKNOWN_OUTCOME: AssessorRoutingOperationStatus.UNKNOWN_OUTCOME,
+}
 
 _ASSESSOR_REQUEST_PURPOSE = (
     'Route the vehicle damage assessment request using the confirmed incident region. '
@@ -813,7 +823,9 @@ def _record_external_failure(
     task: ExternalTaskRecord,
     customer_id: str,
     failure_code: ExternalTaskFailureCode,
-) -> None:
+    delivery: ExternalTaskDelivery,
+    delivery_evidence: str | None,
+) -> ExternalTaskRecord:
     """Record on the task what the attempt actually came to.
 
     Until this ran, a failed attempt left the task at `prepared`, which asserts
@@ -823,24 +835,38 @@ def _record_external_failure(
     and recovery vocabulary the task carries was never populated at runtime.
 
     The recovery matrix decides what the failure means; this records it. Delivery
-    is read from the task rather than assumed, because whether the request reached
-    the provider is what separates a retryable failure from an unknown outcome.
+    is what the adapter observed, not what the failure code suggests: whether the
+    request reached the provider is what separates a retryable failure from an
+    unknown outcome, and only the adapter is in a position to know it. #612 carries
+    that requirement from the #425 review in as many words — Runtime must not infer
+    submission from a generic timeout code.
+
+    A task that has already been recorded as submitted keeps that delivery and its
+    original evidence. `assert_task_transition_is_permitted` refuses both lowering
+    delivery and rewriting the evidence, and it is right to: what reached the
+    provider happened once, and a later attempt describes what happened next rather
+    than replacing the account of the first.
 
     Args:
         repository: Persistence boundary for the claim.
         task: External task state as it stands before the failure.
         customer_id: Customer who owns the parent claim.
         failure_code: Provider-neutral reason the attempt failed.
+        delivery: Whether the adapter observed this attempt reaching the provider.
+        delivery_evidence: What the adapter saw reach the provider, when it did.
 
     Returns:
-        None.
+        The task as recorded, carrying the status the recovery matrix settled.
 
     Raises:
         ApiError: The write conflicts with a concurrent change to the task.
     """
+    if task.delivery is ExternalTaskDelivery.SUBMITTED:
+        delivery = ExternalTaskDelivery.SUBMITTED
+        delivery_evidence = task.delivery_evidence
     classification = classify_external_task_failure(
         failure_code=failure_code,
-        delivery=task.delivery,
+        delivery=delivery,
     )
     updated_at = now_utc()
     # The same coarse-clock case the acceptance write handles: preparation and
@@ -850,6 +876,8 @@ def _record_external_failure(
     failed = task.model_copy(
         update={
             'status': classification.operation_status,
+            'delivery': delivery,
+            'delivery_evidence': delivery_evidence,
             'failure_code': failure_code,
             'updated_at': updated_at,
         }
@@ -859,9 +887,70 @@ def _record_external_failure(
         repository.save_external_task(failed, customer_id)
     except (IdempotencyConflict, KeyError) as conflict:
         raise _idempotency_error() from conflict
+    return failed
 
 
-def _assessor_failure_error(failure_code: AssessorRoutingFailureCode) -> ApiError:
+def unreconciled_assessor_task(
+    repository: PersistenceRepository,
+    claim_id: str,
+) -> ExternalTaskRecord | None:
+    """Find an assessor task on this claim whose outcome nobody has established yet.
+
+    Read from the claim's tasks rather than from one operation, because an unresolved
+    outcome constrains the claim, not the attempt that produced it. A second attempt
+    arrives under its own operation identity and would find nothing if it asked only
+    about itself.
+    """
+
+    return next(
+        (
+            task
+            for task in repository.list_external_tasks_internal(claim_id)
+            if task.service_identity == ASSESSOR_SERVICE_IDENTITY
+            and task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME
+        ),
+        None,
+    )
+
+
+def unreconciled_outcome_error() -> ApiError:
+    """Refuse a request that could repeat an external action nobody has accounted for.
+
+    `SPEC/08-acceptance-scenarios.md` MVP-AT-10 requires that the outcome "remains
+    `unknown_outcome`; status is checked with the existing identity before any retry,
+    and no duplicate external action is created". This is that refusal, and it is not
+    retryable: repeating the same call is exactly what it exists to prevent. What
+    unblocks it is reconciliation, not time.
+    """
+
+    return ApiError(
+        status_code=409,
+        code='INVALID_STATE_TRANSITION',
+        message=(
+            'The previous assessment request may already have reached the assessor. '
+            'Northwind must establish what happened to it before another request is sent.'
+        ),
+        details=[
+            ErrorDetail(
+                field='assessor_service',
+                reason=ExternalTaskOperationStatus.UNKNOWN_OUTCOME.value,
+            )
+        ],
+        retryable=False,
+    )
+
+
+def _assessor_failure_error(
+    failure_code: AssessorRoutingFailureCode,
+    *,
+    task: ExternalTaskRecord | None = None,
+) -> ApiError:
+    # An attempt that may have been submitted is reported as what it is, whatever
+    # its failure code says in isolation. Returning the retryable timeout message
+    # here would tell the claimant that the same request can safely be sent again,
+    # which is the one thing that is not true of an unresolved outcome.
+    if task is not None and task.status is ExternalTaskOperationStatus.UNKNOWN_OUTCOME:
+        return unreconciled_outcome_error()
     unavailable = failure_code in {
         AssessorRoutingFailureCode.TIMEOUT,
         AssessorRoutingFailureCode.UNAVAILABLE,
@@ -1161,6 +1250,15 @@ def route_assessor(
         assert operation.failure_code is not None
         raise _assessor_failure_error(operation.failure_code)
 
+    # Everything below this line can reach the provider, so the unresolved outcome is
+    # refused here rather than on the operation that produced it. The operation
+    # identity is derived from the caller's idempotency key, so a client that simply
+    # presents a new key would otherwise build a fresh authority, operation, and task
+    # and send the request a second time. What must not be repeated belongs to the
+    # claim's external task, which is where this reads it.
+    if unreconciled_assessor_task(repository, payload.claim_id) is not None:
+        raise unreconciled_outcome_error()
+
     consent = next(
         (
             record
@@ -1297,29 +1395,27 @@ def route_assessor(
             customer_id=claim.customer_id,
             operation_id=operation.operation_id,
         )
-        _record_external_failure(
+        failed_task = _record_external_failure(
             repository,
             task=task,
             customer_id=claim.customer_id,
             failure_code=ExternalTaskFailureCode(failure.code.value),
+            delivery=failure.delivery,
+            delivery_evidence=failure.delivery_evidence,
         )
-        unavailable = failure.code in {
-            AssessorFixtureFailure.TIMEOUT,
-            AssessorFixtureFailure.UNAVAILABLE,
-        }
+        # The operation takes the status the task was given rather than deciding a
+        # second time from the failure code. The two used to be settled by separate
+        # rules, which is how the same attempt could be an unknown outcome on the task
+        # and a retryable failure on the operation the moment delivery mattered.
         failed_operation = operation.model_copy(
             update={
-                'status': (
-                    AssessorRoutingOperationStatus.RETRYABLE_FAILURE
-                    if unavailable
-                    else AssessorRoutingOperationStatus.TERMINAL_FAILURE
-                ),
+                'status': _OPERATION_STATUS_BY_TASK_STATUS[failed_task.status],
                 'failure_code': failure.code,
                 'updated_at': now_utc(),
             }
         )
         repository.save_assessor_routing_operation(failed_operation)
-        raise _assessor_failure_error(failure.code) from failure
+        raise _assessor_failure_error(failure.code, task=failed_task) from failure
 
     _record_external_send(
         repository,

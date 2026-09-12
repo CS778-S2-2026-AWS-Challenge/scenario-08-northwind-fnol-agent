@@ -105,13 +105,18 @@ side effect whose completion is uncertain, so Runtime reconciles it before anoth
 The `recovery` value determines both operation status and retryability; implementations must
 reject combinations that disagree with this matrix.
 
-The current assessor runtime remains a compatibility model. It records `prepared`,
-`retryable_failure`, `terminal_failure`, and `accepted`, but it does not record delivery or
-represent `unknown_outcome`, `partial`, or `conflicting`. The provider-neutral model is therefore
-not a drop-in enum replacement. A later integration must supply trustworthy delivery evidence
-before classifying a timeout as `submitted`; until that migration updates the assessor runtime,
-API contract, persistence, and tests together, its documented timeout and unavailable behaviour
-remains unchanged.
+The assessor runtime now records delivery and represents `unknown_outcome`. The adapter boundary
+reports whether a failed attempt reached the provider, and the runtime records what it was told:
+delivery is never inferred from the failure code, because a timeout describes both an attempt that
+never left and one whose acknowledgement was lost. A submitted timeout is therefore recorded as
+`unknown_outcome` on both the external task and its routing operation, and a further request on
+the same claim is refused before any operation is prepared and before the provider is contacted,
+whatever idempotency key it carries. The pre-submission timeout keeps the behaviour this document
+already described: it is a retryable failure with the same operation identity.
+
+`partial` and `conflicting` still have no producer on this path. The assessor adapter reports the
+four failure classes named below, so those two remain represented in the provider-neutral model
+without being reachable through the controlled assessor.
 
 An explicitly configured fixture adapter may be used for controlled development. It is
 not a silent production fallback and its result remains labelled `fixture`.
@@ -123,7 +128,8 @@ typed result. Its assigned and queued outcomes include a simulation acknowledgem
 its unavailable, pre-submission timeout, rejected, malformed, and partial-result scenarios remain
 distinct. A partial simulated response is `unknown_outcome` and requires reconciliation before any
 retry. The adapter never reports `configured_service` and is not wired into the claimant runtime by
-this boundary; Issue #441 owns that end-to-end consumption.
+this boundary. Issue #441 was closed without wiring it; the delivery-aware boundary the claimant
+runtime now uses is the controlled fixture's, and Issue #612 owns that end-to-end consumption.
 
 ## Routing and External Participants
 
@@ -137,16 +143,18 @@ record's service identity, requested action, granted status, and minimum permitt
 before the adapter is called. The record must have been granted by the claimant linked to the
 Working Claim; authorised-representative consent remains unsupported until that identity and
 authority are modelled explicitly. The adapter supports deterministic assigned and queued
-successes plus timeout, unavailable, access-denied, and malformed failures. A failure preserves
-the current claim and never becomes an assignment. Timeout and unavailable are retryable with
-the same operation identity; access-denied and malformed responses require review before another
-attempt. Automatic retry counts remain unapproved.
+successes plus timeout, unavailable, access-denied, and malformed failures, each reported with the
+delivery the adapter observed. A failure preserves the current claim and never becomes an
+assignment. An unavailable response, and a timeout that did not reach the provider, are retryable
+with the same operation identity; access-denied and malformed responses require review before
+another attempt; a timeout that reached the provider requires reconciliation before another
+request is sent at all. Automatic retry counts remain unapproved.
 
 The service reserves an immutable operation identity and full request fingerprint before
-invocation. It records retryable failure, terminal failure, or provider acceptance separately
-from Claim State. A changed retry is rejected even before any success, and a provider-accepted
-result can be reconciled after a concurrent Claim revision advance without invoking a second
-external task.
+invocation. It records retryable failure, terminal failure, unresolved outcome, or provider
+acceptance separately from Claim State. A changed retry is rejected even before any success, and
+a provider-accepted result can be reconciled after a concurrent Claim revision advance without
+invoking a second external task.
 
 An accepted and assigned `P3-ASSESSOR` task can receive one later report through the installed
 assessor adapter. The controlled adapter returns deterministic JSON marked `simulation_only`;

@@ -411,7 +411,7 @@ def test_assessor_operation_model_requires_a_consistent_state_outcome() -> None:
     )
     assert accepted.result == accepted_result
 
-    with pytest.raises(ValidationError, match='Failed assessor operation'):
+    with pytest.raises(ValidationError, match='returned no routing requires only a failure'):
         AssessorRoutingOperation.model_validate(
             {
                 **prepared.model_dump(),
