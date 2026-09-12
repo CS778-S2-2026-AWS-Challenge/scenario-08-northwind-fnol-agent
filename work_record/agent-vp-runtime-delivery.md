@@ -1,7 +1,7 @@
 # Complete Agent VP Runtime Delivery
 
 Status: implementation record for the expanded PR targeting #573, #579, #606,
-#607, #608, #627, and #628. Issue #733 remains the product-level acceptance
+issues #607, #608, #627, and #628. Issue #733 remains the product-level acceptance
 target; this change delivers its Agent Runtime foundation but does not claim that
 the ten-scenario, live-provider, claims-adapter, metric, and Control Plane gates are
 complete.

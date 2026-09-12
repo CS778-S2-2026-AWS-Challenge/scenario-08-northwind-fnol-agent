@@ -218,9 +218,7 @@ class OpenAICompatibleModelGateway:
 
     @classmethod
     def _provider_tool_names(cls, request: ModelRequest) -> dict[str, str]:
-        domain_names = {
-            tool.name for tool in request.tools
-        } | {
+        domain_names = {tool.name for tool in request.tools} | {
             call.name for message in request.messages for call in message.tool_calls
         }
         if request.required_tool_name is not None:

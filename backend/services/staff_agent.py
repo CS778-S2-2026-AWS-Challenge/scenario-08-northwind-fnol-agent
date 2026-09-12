@@ -68,7 +68,6 @@ from backend.services.ownership import (
     decide_collaboration_request,
     requeue_claim,
 )
-from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.review_writeback import decide_review_signal
 from backend.services.runtime_configuration import RuntimeConfigurationResolutionError
 from backend.services.staff_actions import (
