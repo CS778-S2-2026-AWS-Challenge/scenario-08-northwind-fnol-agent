@@ -839,8 +839,17 @@ def test_claimant_retry_recovers_accepted_provider_result_after_claim_cas_confli
     assert operations[0].result is not None
     accepted_reference = operations[0].result.assessor_reference
     assert accepted_reference is not None
-    assert unrelated_retry.status_code == 409
-    assert unrelated_retry.json()['error']['code'] == 'REVISION_CONFLICT'
+    # This request presents a different idempotency key, which used to make it a
+    # different operation and therefore a stale unrelated one. The operation identity is
+    # now the claim, the permission, and the action, so it is the same operation
+    # presented again: it reconciles the accepted result rather than being refused, and
+    # it still reaches no provider. The rule it used to pin, that only the original key
+    # may reconcile, was a statement about the key, and the key is no longer what
+    # identifies the operation. A genuinely unrelated request is still refused: a changed
+    # payload conflicts on the operation's recorded fingerprint.
+    assert unrelated_retry.status_code == 200
+    assert unrelated_retry.json()['action']['status'] == 'assigned'
+    assert unrelated_retry.json()['action']['routing']['assessor_reference'] == accepted_reference
     assert recovered.status_code == 200
     assert recovered.json()['revision'] == consent['revision'] + 2
     assert recovered.json()['action']['status'] == 'assigned'

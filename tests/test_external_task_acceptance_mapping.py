@@ -457,3 +457,51 @@ def test_a_failure_cannot_misdescribe_what_reached_the_provider() -> None:
             delivery=ExternalTaskDelivery.NOT_SUBMITTED,
             delivery_evidence='nothing was sent',
         )
+
+
+def test_a_permitted_retry_keeps_the_original_operation_whatever_key_it_carries() -> None:
+    """#612: "Any permitted retry preserves the original task, request fingerprint, and
+    operation identity."
+
+    The operation identity used to be derived from the caller's idempotency key, so a
+    retry presenting a new key minted a new Northwind decision, a new operation, a new
+    task, and a second provider call. Three timeouts on one claim left three of each.
+    The claimant client happens to hold one key per claim, so the contract held only for
+    as long as the client cooperated and was lost on a page reload.
+    """
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(
+        failure_sequence=(ScriptedAssessorFailure(code=AssessorFixtureFailure.TIMEOUT),)
+    )
+    key = 'retry-identity'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        first = _route(client, claim_id, key=f'{key}-first', revision=consent_revision)
+        after_first = repository.list_external_tasks_internal(claim_id)
+        # A new key is what a claimant who reloaded the page presents.
+        second = _route(client, claim_id, key=f'{key}-second', revision=consent_revision)
+
+    assert first.status_code == 503
+    assert second.status_code == 201, second.text
+    assert adapter.calls == 2
+
+    tasks = repository.list_external_tasks_internal(claim_id)
+    assert len(after_first) == 1
+    assert len(tasks) == 1
+    assert tasks[0].task_id == after_first[0].task_id
+    assert tasks[0].status is ExternalTaskOperationStatus.ACCEPTED
+    requests = repository.list_external_task_requests_internal(claim_id)
+    assert len(requests) == 1
+    assert _operation_statuses(repository, claim_id) == [AssessorRoutingOperationStatus.ACCEPTED]
+    routing_decisions = [
+        decision
+        for decision in repository.list_agent_decisions(claim_id, 'cus_demo')
+        if 'ASSESSOR_RULE_AUTHORISED' in decision.reason_codes
+    ]
+    assert len(routing_decisions) == 1
+    assert routing_decisions[0].decision_id == requests[0].authorisation.northwind_authority_ref
