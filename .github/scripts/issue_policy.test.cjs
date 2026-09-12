@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fieldContent, validateDiscussionApproval, validateIssueBody } = require('./issue_policy.cjs');
+const { fieldContent, validateIssueBody } = require('./issue_policy.cjs');
 
 const validBody = `### Issue type
 Regression validation
@@ -110,41 +110,7 @@ test('extracts a field without HTML comments', () => {
   assert.equal(fieldContent('### Deliverable\n<!-- prompt -->\nAdd a test\n### Dependencies\nNone', 'Deliverable'), 'Add a test');
 });
 
-test('skips discussion approval for issues created by the maintainer', () => {
-  const result = validateDiscussionApproval({
-    body: validBody,
-    creator: 'Ysoseri1224',
-    maintainer: 'Ysoseri1224',
-  });
+test('does not require a Discussion approval field for contributor-created issues', () => {
+  const result = validateIssueBody({ body: validBody });
   assert.deepEqual(result.errors, []);
-});
-
-test('rejects a non-maintainer issue without a discussion approval link', () => {
-  const result = validateDiscussionApproval({
-    body: validBody,
-    creator: 'someone-else',
-    maintainer: 'Ysoseri1224',
-  });
-  assert.equal(result.errors.length, 1);
-  assert.ok(result.errors[0].includes('Discussion approval'));
-});
-
-test('accepts a non-maintainer issue with an approved discussion thread URL', () => {
-  const body = `${validBody}\n### Discussion approval\nhttps://github.com/CS778-S2-2026-AWS-Challenge/scenario-08-northwind-fnol-agent/discussions/12\n`;
-  const result = validateDiscussionApproval({
-    body,
-    creator: 'someone-else',
-    maintainer: 'Ysoseri1224',
-  });
-  assert.deepEqual(result.errors, []);
-});
-
-test('rejects a non-maintainer discussion approval field without a thread URL', () => {
-  const body = `${validBody}\n### Discussion approval\nNone - I prefer not to ask.\n`;
-  const result = validateDiscussionApproval({
-    body,
-    creator: 'someone-else',
-    maintainer: 'Ysoseri1224',
-  });
-  assert.equal(result.errors.length, 1);
 });
