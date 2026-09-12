@@ -1168,3 +1168,60 @@ def test_reconciliation_refuses_a_status_source_different_from_the_original() ->
     assert adapter.reconciliation_calls == 0
     assert repository.get_claim_internal(claim_id) == claim
     assert repository.list_external_tasks_internal(claim_id)[0] == task
+
+
+def test_only_an_unresolved_task_can_be_reconciled() -> None:
+    """A failure that never reached the assessor is retried, not reconciled.
+
+    Reconciliation exists for a request whose outcome nobody knows. An `unavailable`
+    answer is a known outcome even when the request reached the assessor: the recovery
+    matrix keeps it retryable with the same operation identity. Settling it from a status
+    check would replace a failure the provider reported with an acceptance it never gave.
+    """
+
+    repository = FixtureRepository()
+    adapter = CountingAssessorAdapter(
+        failure_sequence=(
+            ScriptedAssessorFailure(
+                code=AssessorFixtureFailure.UNAVAILABLE,
+                delivery=ExternalTaskDelivery.SUBMITTED,
+                delivery_evidence='fixture send acknowledged; service reported unavailable',
+            ),
+        )
+    )
+    key = 'reconcile-not-unresolved'
+
+    with TestClient(
+        create_app(DEVELOPER_SETTINGS, repository=repository, assessor_service_adapter=adapter)
+    ) as client:
+        claim_id, revision = _create_assessor_ready_claim(client, key=key)
+        consent_revision = _grant_consent(client, claim_id, revision, key=key)
+        failed = _route(client, claim_id, key=f'{key}-route', revision=consent_revision)
+        assert failed.status_code == 503
+        task = repository.list_external_tasks_internal(claim_id)[0]
+        assert task.status is ExternalTaskOperationStatus.RETRYABLE_FAILURE
+        assert task.delivery is ExternalTaskDelivery.SUBMITTED
+        claim = repository.get_claim_internal(claim_id)
+        assert claim is not None
+
+        refused = _reconcile(
+            client,
+            claim_id,
+            task.task_id,
+            key=f'{key}-check',
+            revision=claim.revision,
+        )
+
+    assert refused.status_code == 409
+    error = refused.json()['error']
+    assert error['code'] == 'INVALID_STATE_TRANSITION'
+    # Several refusals on this route share that code, so the message is asserted rather
+    # than the status alone.
+    assert 'unresolved assessor task' in error['message']
+    assert adapter.reconciliation_calls == 0
+    after = repository.list_external_tasks_internal(claim_id)[0]
+    assert after == task
+    settled_claim = repository.get_claim_internal(claim_id)
+    assert settled_claim is not None
+    assert settled_claim.revision == claim.revision
+    assert settled_claim.assessor_routing is None
